@@ -1,6 +1,6 @@
 import Foundation
 
-public enum StageInsertPosition: Sendable {
+public enum StageInsertPosition: Codable, Sendable {
     case above
     case below
 }
