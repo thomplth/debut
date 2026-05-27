@@ -1,5 +1,6 @@
 import Testing
 import AppKit
+import SwiftUI
 import Foundation
 @testable import DebutCore
 
@@ -14,23 +15,17 @@ struct ScreenshotTests {
         return dir
     }()
 
-    private func renderView(_ view: NSView, size: NSSize) -> NSImage? {
-        view.frame = NSRect(origin: .zero, size: size)
-        view.layoutSubtreeIfNeeded()
+    private func renderSwiftUI<V: View>(_ view: V, size: NSSize) -> NSImage? {
+        let hostingView = NSHostingView(rootView: view
+            .frame(width: size.width, height: size.height)
+            .background(Color(nsColor: NSColor(white: 0.1, alpha: 1.0)))
+        )
+        hostingView.frame = NSRect(origin: .zero, size: size)
+        hostingView.layoutSubtreeIfNeeded()
 
-        let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+        let rep = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds)
         guard let rep else { return nil }
-
-        // Fill with dark background
-        NSGraphicsContext.saveGraphicsState()
-        if let ctx = NSGraphicsContext(bitmapImageRep: rep) {
-            NSGraphicsContext.current = ctx
-            NSColor(white: 0.1, alpha: 1.0).setFill()
-            NSBezierPath.fill(NSRect(origin: .zero, size: size))
-        }
-        NSGraphicsContext.restoreGraphicsState()
-
-        view.cacheDisplay(in: view.bounds, to: rep)
+        hostingView.cacheDisplay(in: hostingView.bounds, to: rep)
 
         let img = NSImage(size: size)
         img.addRepresentation(rep)
@@ -42,16 +37,12 @@ struct ScreenshotTests {
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:])
-        else {
-            throw ScreenshotError.renderFailed
-        }
+        else { throw ScreenshotError.renderFailed }
         try png.write(to: url)
         NSLog("[ScreenshotTest] Saved: \(url.path)")
     }
 
     enum ScreenshotError: Error { case renderFailed }
-
-    // MARK: - Sample data
 
     private func makeSampleViewModel(stageCount: Int = 3, appsPerStage: [Int] = [3, 4, 2], activeIndex: Int = 1) -> OverlayViewModel {
         var sm = StageManager()
@@ -78,10 +69,7 @@ struct ScreenshotTests {
                 let count = appsPerStage[i % appsPerStage.count]
                 for j in 0..<count {
                     let app = apps[(i * 4 + j) % apps.count]
-                    sm.addWindow(
-                        StageWindow(windowID: windowCounter, appBundleID: app.0, appName: app.1, isShared: false),
-                        toStageID: defaultID
-                    )
+                    sm.addWindow(StageWindow(windowID: windowCounter, appBundleID: app.0, appName: app.1, isShared: false), toStageID: defaultID)
                     windowCounter += 1
                 }
             } else {
@@ -91,10 +79,7 @@ struct ScreenshotTests {
                 let count = appsPerStage[i % appsPerStage.count]
                 for j in 0..<count {
                     let app = apps[(i * 4 + j) % apps.count]
-                    sm.addWindow(
-                        StageWindow(windowID: windowCounter, appBundleID: app.0, appName: app.1, isShared: false),
-                        toStageID: stageID
-                    )
+                    sm.addWindow(StageWindow(windowID: windowCounter, appBundleID: app.0, appName: app.1, isShared: false), toStageID: stageID)
                     windowCounter += 1
                 }
             }
@@ -104,31 +89,22 @@ struct ScreenshotTests {
         return OverlayViewModel(stageManager: sm, activeStageIndex: activeIndex, selectedAppIndex: 0)
     }
 
-    // MARK: - Tests
-
     @Test("Single plate renders")
     func singlePlate() throws {
         let vm = makeSampleViewModel(stageCount: 1, appsPerStage: [4], activeIndex: 0)
-        let plate = vm.plates[0]
-        let plateView = PlateView(plate: plate, isSelected: true, selectedAppIndex: 0)
-        let size = NSSize(width: 600, height: PlateView.plateHeight)
-        guard let img = renderView(plateView, size: size) else {
-            throw ScreenshotError.renderFailed
-        }
+        let size = NSSize(width: 600, height: 160)
+        let view = OverlaySwiftUIView(viewModel: vm)
+        guard let img = renderSwiftUI(view, size: size) else { throw ScreenshotError.renderFailed }
         try saveImage(img, name: "01_single_plate")
-        #expect(plate.apps.count == 4)
+        #expect(vm.plates[0].apps.count == 4)
     }
 
     @Test("Three plates with active in middle")
     func threePlates() throws {
         let vm = makeSampleViewModel(stageCount: 3, appsPerStage: [3, 4, 2], activeIndex: 1)
-        let contentView = OverlayContentView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
-        contentView.update(viewModel: vm)
-
         let size = NSSize(width: 800, height: 500)
-        guard let img = renderView(contentView, size: size) else {
-            throw ScreenshotError.renderFailed
-        }
+        let view = OverlaySwiftUIView(viewModel: vm)
+        guard let img = renderSwiftUI(view, size: size) else { throw ScreenshotError.renderFailed }
         try saveImage(img, name: "02_three_plates")
         #expect(vm.plates.count == 3)
     }
@@ -136,13 +112,9 @@ struct ScreenshotTests {
     @Test("Five plates with overflow")
     func fivePlates() throws {
         let vm = makeSampleViewModel(stageCount: 5, appsPerStage: [3, 5, 2, 4, 3], activeIndex: 2)
-        let contentView = OverlayContentView(frame: NSRect(x: 0, y: 0, width: 900, height: 700))
-        contentView.update(viewModel: vm)
-
-        let size = NSSize(width: 900, height: 700)
-        guard let img = renderView(contentView, size: size) else {
-            throw ScreenshotError.renderFailed
-        }
+        let size = NSSize(width: 900, height: 800)
+        let view = OverlaySwiftUIView(viewModel: vm)
+        guard let img = renderSwiftUI(view, size: size) else { throw ScreenshotError.renderFailed }
         try saveImage(img, name: "03_five_plates")
         #expect(vm.plates.count == 5)
     }
@@ -150,13 +122,9 @@ struct ScreenshotTests {
     @Test("Empty stage plate")
     func emptyStage() throws {
         let vm = makeSampleViewModel(stageCount: 2, appsPerStage: [3, 0], activeIndex: 0)
-        let contentView = OverlayContentView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
-        contentView.update(viewModel: vm)
-
-        let size = NSSize(width: 800, height: 400)
-        guard let img = renderView(contentView, size: size) else {
-            throw ScreenshotError.renderFailed
-        }
+        let size = NSSize(width: 800, height: 350)
+        let view = OverlaySwiftUIView(viewModel: vm)
+        guard let img = renderSwiftUI(view, size: size) else { throw ScreenshotError.renderFailed }
         try saveImage(img, name: "04_empty_stage")
         #expect(vm.plates[1].apps.isEmpty)
     }
@@ -168,13 +136,9 @@ struct ScreenshotTests {
             activeStageIndex: 0,
             selectedAppIndex: 2
         )
-        let contentView = OverlayContentView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
-        contentView.update(viewModel: vm)
-
-        let size = NSSize(width: 800, height: 400)
-        guard let img = renderView(contentView, size: size) else {
-            throw ScreenshotError.renderFailed
-        }
+        let size = NSSize(width: 800, height: 350)
+        let view = OverlaySwiftUIView(viewModel: vm)
+        guard let img = renderSwiftUI(view, size: size) else { throw ScreenshotError.renderFailed }
         try saveImage(img, name: "05_selection_state")
         #expect(vm.selectedAppIndex == 2)
     }

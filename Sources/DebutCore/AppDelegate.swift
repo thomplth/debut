@@ -9,6 +9,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var statusItem: NSStatusItem?
     private var stateStore: StateStore?
     private var accessibilityTimer: Timer?
+    private var windowDiscovery: WindowDiscoveryService?
     private let diag = DiagnosticReporter.shared
 
     private var windowService: AccessibilityWindowService?
@@ -53,8 +54,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         guard let windowService, let keyboardService else { return }
         guard stageController == nil else { return }
 
-        let stageManager = pendingStageManager ?? StageManager()
+        var stageManager = pendingStageManager ?? StageManager()
         pendingStageManager = nil
+
+        let discovery = WindowDiscoveryService(windowService: windowService)
+        self.windowDiscovery = discovery
+
+        if stageManager.stages[0].windows.isEmpty {
+            discovery.populateDefaultStage(&stageManager)
+        }
 
         let controller = StageController(
             windowService: windowService,
@@ -64,9 +72,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         controller.delegate = self
         stageController = controller
 
+        discovery.startPolling(interval: 2.0) { [weak self] in
+            guard let self, var sm = self.stageController?.stageManager else { return }
+            discovery.syncWindows(&sm)
+            self.stageController?.stageManager = sm
+        }
+
         diag.report("controller_setup", details: [
             "eventTapStarted": "\(controller.keyboardServiceStarted)",
             "eventTapRunning": "\(keyboardService.isRunning)",
+            "windowsInDefaultStage": "\(stageManager.stages[0].windows.count)",
         ])
     }
 
