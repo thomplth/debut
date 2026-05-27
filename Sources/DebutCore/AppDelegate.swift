@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-public final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
+@MainActor
+public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stageController: StageController?
     private var overlayWindow: OverlayWindow?
     private var settingsWindow: NSWindow?
@@ -45,7 +46,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Send
         false
     }
 
-    public func applicationWillTerminate(_ notification: Notification) {
+    nonisolated public func applicationWillTerminate(_ notification: Notification) {
+        let stageController = MainActor.assumeIsolated { self.stageController }
+        let stateStore = MainActor.assumeIsolated { self.stateStore }
         guard let stageController, let stateStore else { return }
         try? stateStore.save(stageController.stageManager)
     }
