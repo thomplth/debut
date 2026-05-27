@@ -7,6 +7,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "Debut", targets: ["DebutApp"]),
+        .executable(name: "DebutE2E", targets: ["DebutE2E"]),
         .library(name: "DebutCore", targets: ["DebutCore"]),
     ],
     targets: [
@@ -24,6 +25,13 @@ let package = Package(
             name: "AXPrivate",
             path: "Sources/AXPrivate",
             publicHeadersPath: "include",
+            linkerSettings: [
+                .linkedFramework("ApplicationServices"),
+            ]
+        ),
+        .executableTarget(
+            name: "DebutE2E",
+            path: "Sources/DebutE2E",
             linkerSettings: [
                 .linkedFramework("ApplicationServices"),
             ]

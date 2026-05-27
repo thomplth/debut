@@ -1,16 +1,26 @@
 import Foundation
 
+public protocol StageControllerDelegate: AnyObject {
+    func stageControllerDidOpenOverlay(_ controller: StageController)
+    func stageControllerDidCloseOverlay(_ controller: StageController)
+    func stageControllerDidUpdateSelection(_ controller: StageController)
+    func stageControllerDidSwitchStage(_ controller: StageController)
+}
+
 public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public var stageManager: StageManager
     public let windowService: any WindowService
     public let keyboardService: any KeyboardService
+    public weak var delegate: StageControllerDelegate?
 
     public private(set) var isStageManagerVisible: Bool = false
     public var selectedStageIndex: Int = 0
     public var selectedAppIndex: Int = 0
+    public private(set) var keyboardServiceStarted: Bool = false
 
     private var preOverlayStageID: UUID?
     private var preOverlayAppIndex: Int = 0
+    private let diag = DiagnosticReporter.shared
 
     public init(
         windowService: any WindowService,
@@ -20,7 +30,22 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         self.windowService = windowService
         self.keyboardService = keyboardService
         self.stageManager = stageManager
-        _ = keyboardService.start(delegate: self)
+
+        let started = keyboardService.start(delegate: self)
+        self.keyboardServiceStarted = started
+        diag.report(started ? "event_tap_created" : "event_tap_failed")
+
+        diag.setStateProvider { [weak self] in
+            guard let self else { return ["error": "controller deallocated"] }
+            return [
+                "overlayVisible": "\(self.isStageManagerVisible)",
+                "stageCount": "\(self.stageManager.stages.count)",
+                "activeStageIndex": "\(self.selectedStageIndex)",
+                "selectedAppIndex": "\(self.selectedAppIndex)",
+                "eventTapRunning": "\(self.keyboardService.isRunning)",
+                "eventTapStarted": "\(self.keyboardServiceStarted)",
+            ]
+        }
     }
 
     // MARK: - Stage switching
@@ -51,11 +76,16 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         } else if let firstWindow = targetStage?.windows.first {
             _ = windowService.focusWindow(windowID: firstWindow.windowID)
         }
+
+        diag.report("stage_switched", details: ["targetStage": targetStage?.name ?? "unknown"])
+        delegate?.stageControllerDidSwitchStage(self)
     }
 
     // MARK: - KeyboardEventDelegate
 
     public func handleKeyEvent(_ event: DebutKeyEvent) {
+        diag.report("key_event", details: ["event": "\(event)"])
+
         switch event {
         case .cmdTabTap:
             handleCmdTabTap()
@@ -82,7 +112,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         case .deleteStage:
             deleteSelectedStage()
         case .renameStage:
-            break // handled by UI layer
+            break
         case .saveAsTemplate:
             saveSelectedStageAsTemplate()
         case .moveAppUp:
@@ -115,11 +145,20 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         selectedAppIndex = 0
         preOverlayStageID = stageManager.activeStageID
         preOverlayAppIndex = 0
+
+        diag.report("overlay_opened")
+        delegate?.stageControllerDidOpenOverlay(self)
     }
 
     private func commitSelection() {
         guard isStageManagerVisible else { return }
         isStageManagerVisible = false
+        diag.report("overlay_committed", details: [
+            "stageIndex": "\(selectedStageIndex)",
+            "appIndex": "\(selectedAppIndex)",
+        ])
+
+        delegate?.stageControllerDidCloseOverlay(self)
 
         guard stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let targetStage = stageManager.stages[selectedStageIndex]
@@ -136,6 +175,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         isStageManagerVisible = false
         selectedStageIndex = stageManager.stages.firstIndex(where: { $0.id == preOverlayStageID }) ?? 0
         selectedAppIndex = preOverlayAppIndex
+
+        diag.report("overlay_discarded")
+        delegate?.stageControllerDidCloseOverlay(self)
     }
 
     private func cycleApp(forward: Bool) {
@@ -149,6 +191,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         } else {
             selectedAppIndex = (selectedAppIndex - 1 + stage.windows.count) % stage.windows.count
         }
+        delegate?.stageControllerDidUpdateSelection(self)
     }
 
     private func cycleStage(forward: Bool) {
@@ -160,12 +203,14 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             selectedStageIndex = (selectedStageIndex - 1 + stageManager.stages.count) % stageManager.stages.count
         }
         selectedAppIndex = 0
+        delegate?.stageControllerDidUpdateSelection(self)
     }
 
     private func jumpToStage(index: Int) {
         guard isStageManagerVisible, stageManager.stages.indices.contains(index) else { return }
         selectedStageIndex = index
         selectedAppIndex = 0
+        delegate?.stageControllerDidUpdateSelection(self)
     }
 
     private func createStage(position: StageInsertPosition) {
@@ -179,6 +224,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             selectedStageIndex = newIndex
         }
         selectedAppIndex = 0
+        delegate?.stageControllerDidUpdateSelection(self)
     }
 
     private func deleteSelectedStage() {
@@ -188,6 +234,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         stageManager.deleteStage(id: targetID)
         selectedStageIndex = min(selectedStageIndex, stageManager.stages.count - 1)
         selectedAppIndex = 0
+        delegate?.stageControllerDidUpdateSelection(self)
     }
 
     private func saveSelectedStageAsTemplate() {
@@ -216,6 +263,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
         let targetStageID = stageManager.stages[targetStageIndex].id
         stageManager.moveWindow(windowID: window.windowID, fromStageID: stage.id, toStageID: targetStageID)
+        delegate?.stageControllerDidUpdateSelection(self)
     }
 
     private func swapStage(direction: SwapDirection) {
@@ -232,5 +280,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         default:
             break
         }
+        delegate?.stageControllerDidUpdateSelection(self)
     }
 }
