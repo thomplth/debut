@@ -8,7 +8,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var settingsWindow: NSWindow?
     private var statusItem: NSStatusItem?
     private var stateStore: StateStore?
+    private var accessibilityTimer: Timer?
     private let diag = DiagnosticReporter.shared
+
+    private var windowService: AccessibilityWindowService?
+    private var keyboardService: EventTapKeyboardService?
+    private var pendingStageManager: StageManager?
 
     public override init() {
         super.init()
@@ -19,11 +24,37 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         diag.report("app_launched")
 
         stateStore = StateStore()
-        let stageManager = (try? stateStore?.load()) ?? StageManager()
+        pendingStageManager = (try? stateStore?.load()) ?? StageManager()
         let settings = (try? stateStore?.loadSettings()) ?? AppSettings()
 
-        let windowService = AccessibilityWindowService()
-        let keyboardService = EventTapKeyboardService()
+        windowService = AccessibilityWindowService()
+        keyboardService = EventTapKeyboardService()
+
+        overlayWindow = OverlayWindow()
+        setupMenuBar()
+
+        if AXIsProcessTrusted() {
+            diag.report("accessibility_already_granted")
+            setupController()
+        } else {
+            diag.report("accessibility_not_granted_prompting")
+            promptForAccessibility()
+            startAccessibilityPolling()
+        }
+
+        if isFirstLaunch() {
+            showSettings(settings: settings)
+        }
+
+        diag.report("app_ready")
+    }
+
+    private func setupController() {
+        guard let windowService, let keyboardService else { return }
+        guard stageController == nil else { return }
+
+        let stageManager = pendingStageManager ?? StageManager()
+        pendingStageManager = nil
 
         let controller = StageController(
             windowService: windowService,
@@ -33,25 +64,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         controller.delegate = self
         stageController = controller
 
-        overlayWindow = OverlayWindow()
-
-        setupMenuBar()
-
-        let accessibilityOK = windowService.isAccessibilityEnabled()
-        diag.report("accessibility_check", details: [
-            "enabled": "\(accessibilityOK)",
+        diag.report("controller_setup", details: [
             "eventTapStarted": "\(controller.keyboardServiceStarted)",
+            "eventTapRunning": "\(keyboardService.isRunning)",
         ])
+    }
 
-        if !accessibilityOK {
-            showAccessibilityAlert()
+    private func startAccessibilityPolling() {
+        accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            if AXIsProcessTrusted() {
+                timer.invalidate()
+                Task { @MainActor in
+                    self?.diag.report("accessibility_granted_via_poll")
+                    self?.setupController()
+                }
+            }
         }
-
-        if isFirstLaunch() {
-            showSettings(settings: settings)
-        }
-
-        diag.report("app_ready")
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -85,9 +113,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
     }
 
-    nonisolated public func stageControllerDidSwitchStage(_ controller: StageController) {
-        // window hide/show already handled by StageController
-    }
+    nonisolated public func stageControllerDidSwitchStage(_ controller: StageController) {}
 
     private func showStageManagerOverlay() {
         guard let stageController, let overlayWindow else { return }
@@ -164,24 +190,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     // MARK: - Helpers
 
+    private nonisolated func promptForAccessibility() {
+        let opts = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(opts)
+    }
+
     private func isFirstLaunch() -> Bool {
         let key = "hasLaunchedBefore"
         if UserDefaults.standard.bool(forKey: key) { return false }
         UserDefaults.standard.set(true, forKey: key)
         return true
-    }
-
-    private func showAccessibilityAlert() {
-        let alert = NSAlert()
-        alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "Debut needs Accessibility access to manage windows and intercept keyboard shortcuts. Please grant access in System Settings > Privacy & Security > Accessibility."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Later")
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-            NSWorkspace.shared.open(url)
-        }
     }
 }

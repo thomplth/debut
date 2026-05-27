@@ -34,8 +34,14 @@ for size in 32 64 128 256 512 1024; do
 done
 iconutil -c icns "$ICON_DIR" -o "$RESOURCES/AppIcon.icns" 2>/dev/null && echo "Icon created." || echo "Icon creation skipped (using system default)."
 
-echo "Code signing (ad-hoc)..."
-codesign --force --deep --sign - --entitlements "$PROJECT_DIR/Resources/Debut.entitlements" "$APP_BUNDLE"
+SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Debut Dev" | head -1 | awk '{print $2}')
+if [ -n "$SIGN_IDENTITY" ]; then
+    echo "Code signing with 'Debut Dev' certificate ($SIGN_IDENTITY)..."
+    codesign --force --deep --sign "$SIGN_IDENTITY" --entitlements "$PROJECT_DIR/Resources/Debut.entitlements" "$APP_BUNDLE"
+else
+    echo "Code signing (ad-hoc — Accessibility permission will reset on each rebuild)..."
+    codesign --force --deep --sign - --entitlements "$PROJECT_DIR/Resources/Debut.entitlements" "$APP_BUNDLE"
+fi
 
 echo ""
 echo "Built: $APP_BUNDLE"
