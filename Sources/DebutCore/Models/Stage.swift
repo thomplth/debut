@@ -3,25 +3,31 @@ import Foundation
 public struct Stage: Codable, Identifiable, Equatable, Sendable {
     public let id: UUID
     public var name: String
-    public private(set) var windows: [StageWindow]
+    public private(set) var apps: [StageApp]
 
     public init(name: String) {
         self.id = UUID()
         self.name = name
-        self.windows = []
+        self.apps = []
     }
 
     public var appBundleIDs: Set<String> {
-        Set(windows.map(\.appBundleID))
+        Set(apps.map(\.bundleID))
     }
 
-    public mutating func addWindow(_ window: StageWindow) {
-        guard !windows.contains(where: { $0.windowID == window.windowID }) else { return }
-        windows.append(window)
+    public mutating func addApp(_ app: StageApp) {
+        guard !apps.contains(where: { $0.bundleID == app.bundleID }) else { return }
+        apps.append(app)
     }
 
-    public mutating func removeWindow(byID windowID: Int) {
-        windows.removeAll { $0.windowID == windowID }
+    public mutating func removeApp(bundleID: String) {
+        apps.removeAll { $0.bundleID == bundleID }
+    }
+
+    public mutating func bringAppToFront(bundleID: String) {
+        guard let index = apps.firstIndex(where: { $0.bundleID == bundleID }) else { return }
+        let app = apps.remove(at: index)
+        apps.insert(app, at: 0)
     }
 
     public static func == (lhs: Stage, rhs: Stage) -> Bool {

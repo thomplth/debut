@@ -1,13 +1,12 @@
 import Foundation
 
 public struct PlateAppData: Sendable {
-    public let windowID: Int
     public let bundleID: String
     public let name: String
     public let isShared: Bool
 }
 
-public struct PlateData: Sendable {
+public struct PlateData: Sendable, Identifiable {
     public let id: UUID
     public let name: String
     public let apps: [PlateAppData]
@@ -31,13 +30,8 @@ public struct OverlayViewModel: Sendable {
             PlateData(
                 id: stage.id,
                 name: stage.name,
-                apps: stage.windows.map { window in
-                    PlateAppData(
-                        windowID: window.windowID,
-                        bundleID: window.appBundleID,
-                        name: window.appName,
-                        isShared: window.isShared
-                    )
+                apps: stage.apps.map { app in
+                    PlateAppData(bundleID: app.bundleID, name: app.name, isShared: app.isShared)
                 },
                 isActive: index == activeStageIndex,
                 index: index
@@ -48,14 +42,9 @@ public struct OverlayViewModel: Sendable {
     public var selectedApp: PlateAppData? {
         guard stageManager.stages.indices.contains(activeStageIndex) else { return nil }
         let stage = stageManager.stages[activeStageIndex]
-        guard stage.windows.indices.contains(selectedAppIndex) else { return nil }
-        let window = stage.windows[selectedAppIndex]
-        return PlateAppData(
-            windowID: window.windowID,
-            bundleID: window.appBundleID,
-            name: window.appName,
-            isShared: window.isShared
-        )
+        guard stage.apps.indices.contains(selectedAppIndex) else { return nil }
+        let app = stage.apps[selectedAppIndex]
+        return PlateAppData(bundleID: app.bundleID, name: app.name, isShared: app.isShared)
     }
 
     public func isSelected(stageIndex: Int, appIndex: Int) -> Bool {

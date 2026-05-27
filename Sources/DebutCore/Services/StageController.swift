@@ -44,41 +44,49 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 "selectedAppIndex": "\(self.selectedAppIndex)",
                 "eventTapRunning": "\(self.keyboardService.isRunning)",
                 "eventTapStarted": "\(self.keyboardServiceStarted)",
+                "appsInActiveStage": "\(self.stageManager.activeStage.apps.count)",
             ]
         }
     }
 
     // MARK: - Stage switching
 
-    public func switchToStage(id targetID: UUID, focusWindowID: Int? = nil) {
+    public func switchToStage(id targetID: UUID, activateBundleID: String? = nil) {
         let previousID = stageManager.activeStageID
-        guard previousID != targetID || focusWindowID != nil else { return }
-
         let previousStage = stageManager.stages.first(where: { $0.id == previousID })
         let targetStage = stageManager.stages.first(where: { $0.id == targetID })
 
-        if let previousStage, previousID != targetID {
-            for window in previousStage.windows where !window.isShared {
-                _ = windowService.hideWindow(windowID: window.windowID)
+        if previousID != targetID {
+            if let previousStage {
+                for app in previousStage.apps where !app.isShared {
+                    _ = windowService.hideApp(bundleID: app.bundleID)
+                }
             }
-        }
-
-        if let targetStage {
-            for window in targetStage.windows where !window.isShared {
-                _ = windowService.showWindow(windowID: window.windowID)
+            if let targetStage {
+                for app in targetStage.apps where !app.isShared {
+                    _ = windowService.unhideApp(bundleID: app.bundleID)
+                }
             }
         }
 
         stageManager.activateStage(id: targetID)
 
-        if let focusWindowID {
-            _ = windowService.focusWindow(windowID: focusWindowID)
-        } else if let firstWindow = targetStage?.windows.first {
-            _ = windowService.focusWindow(windowID: firstWindow.windowID)
+        if let bundleID = activateBundleID {
+            _ = windowService.activateApp(bundleID: bundleID)
+            stageManager.bringAppToFront(bundleID: bundleID, inStageID: targetID)
+        } else if let firstApp = targetStage?.apps.first {
+            _ = windowService.activateApp(bundleID: firstApp.bundleID)
         }
 
         diag.report("stage_switched", details: ["targetStage": targetStage?.name ?? "unknown"])
         delegate?.stageControllerDidSwitchStage(self)
+    }
+
+    // MARK: - MRU update
+
+    public func recordAppActivation(bundleID: String) {
+        let stageID = stageManager.activeStageID
+        stageManager.bringAppToFront(bundleID: bundleID, inStageID: stageID)
     }
 
     // MARK: - KeyboardEventDelegate
@@ -130,11 +138,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func handleCmdTabTap() {
         let activeStage = stageManager.activeStage
-        let mru = stageManager.mruWindowIDs(forStageID: activeStage.id)
-        guard mru.count >= 2 else { return }
-        let targetWindowID = mru[1]
-        _ = windowService.focusWindow(windowID: targetWindowID)
-        stageManager.recordWindowFocus(windowID: targetWindowID, inStageID: activeStage.id)
+        guard activeStage.apps.count >= 2 else { return }
+        let targetApp = activeStage.apps[1]
+        _ = windowService.activateApp(bundleID: targetApp.bundleID)
+        stageManager.bringAppToFront(bundleID: targetApp.bundleID, inStageID: activeStage.id)
     }
 
     private func openOverlay() {
@@ -153,22 +160,23 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private func commitSelection() {
         guard isStageManagerVisible else { return }
         isStageManagerVisible = false
-        diag.report("overlay_committed", details: [
-            "stageIndex": "\(selectedStageIndex)",
-            "appIndex": "\(selectedAppIndex)",
-        ])
 
         delegate?.stageControllerDidCloseOverlay(self)
 
         guard stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let targetStage = stageManager.stages[selectedStageIndex]
 
-        var focusWindowID: Int?
-        if targetStage.windows.indices.contains(selectedAppIndex) {
-            focusWindowID = targetStage.windows[selectedAppIndex].windowID
+        var activateBundleID: String?
+        if targetStage.apps.indices.contains(selectedAppIndex) {
+            activateBundleID = targetStage.apps[selectedAppIndex].bundleID
         }
 
-        switchToStage(id: targetStage.id, focusWindowID: focusWindowID)
+        switchToStage(id: targetStage.id, activateBundleID: activateBundleID)
+
+        diag.report("overlay_committed", details: [
+            "stageIndex": "\(selectedStageIndex)",
+            "appIndex": "\(selectedAppIndex)",
+        ])
     }
 
     private func discardSelection() {
@@ -184,12 +192,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
-        guard !stage.windows.isEmpty else { return }
+        guard !stage.apps.isEmpty else { return }
 
         if forward {
-            selectedAppIndex = (selectedAppIndex + 1) % stage.windows.count
+            selectedAppIndex = (selectedAppIndex + 1) % stage.apps.count
         } else {
-            selectedAppIndex = (selectedAppIndex - 1 + stage.windows.count) % stage.windows.count
+            selectedAppIndex = (selectedAppIndex - 1 + stage.apps.count) % stage.apps.count
         }
         delegate?.stageControllerDidUpdateSelection(self)
     }
@@ -216,8 +224,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private func createStage(position: StageInsertPosition) {
         guard isStageManagerVisible else { return }
         let currentID = stageManager.stages.indices.contains(selectedStageIndex)
-            ? stageManager.stages[selectedStageIndex].id
-            : stageManager.activeStageID
+            ? stageManager.stages[selectedStageIndex].id : stageManager.activeStageID
         stageManager.activateStage(id: currentID)
         stageManager.createStage(position: position)
         if let newIndex = stageManager.stages.firstIndex(where: { $0.id == stageManager.activeStageID }) {
@@ -248,8 +255,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
-        guard stage.windows.indices.contains(selectedAppIndex) else { return }
-        let window = stage.windows[selectedAppIndex]
+        guard stage.apps.indices.contains(selectedAppIndex) else { return }
+        let app = stage.apps[selectedAppIndex]
 
         let targetStageIndex: Int
         switch direction {
@@ -262,7 +269,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         let targetStageID = stageManager.stages[targetStageIndex].id
-        stageManager.moveWindow(windowID: window.windowID, fromStageID: stage.id, toStageID: targetStageID)
+        stageManager.moveApp(bundleID: app.bundleID, fromStageID: stage.id, toStageID: targetStageID)
         delegate?.stageControllerDidUpdateSelection(self)
     }
 
@@ -273,12 +280,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         stageManager.swapStage(id: stageID, direction: direction)
 
         switch direction {
-        case .up where selectedStageIndex > 0:
-            selectedStageIndex -= 1
-        case .down where selectedStageIndex < stageManager.stages.count - 1:
-            selectedStageIndex += 1
-        default:
-            break
+        case .up where selectedStageIndex > 0: selectedStageIndex -= 1
+        case .down where selectedStageIndex < stageManager.stages.count - 1: selectedStageIndex += 1
+        default: break
         }
         delegate?.stageControllerDidUpdateSelection(self)
     }

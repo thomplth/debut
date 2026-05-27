@@ -57,7 +57,7 @@ struct PlateSwiftUIView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(plate.name)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(isSelected ? .white.opacity(0.9) : .white.opacity(0.5))
+                .foregroundStyle(isSelected ? .primary : .secondary)
                 .padding(.leading, PlateConstants.padding)
                 .padding(.top, 10)
 
@@ -65,7 +65,7 @@ struct PlateSwiftUIView: View {
                 if plate.apps.isEmpty {
                     Text("Empty")
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.2))
+                        .foregroundStyle(.secondary.opacity(0.5))
                         .frame(maxWidth: .infinity)
                 } else {
                     ForEach(Array(plate.apps.enumerated()), id: \.offset) { index, app in
@@ -81,7 +81,7 @@ struct PlateSwiftUIView: View {
         .modifier(LiquidGlassModifier(cornerRadius: 18))
         .overlay(
             isSelected
-                ? RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.3), lineWidth: 1.5)
+                ? RoundedRectangle(cornerRadius: 18).stroke(.primary.opacity(0.2), lineWidth: 1.5)
                 : nil
         )
     }
@@ -96,7 +96,7 @@ struct AppIconView: View {
             ZStack {
                 if isAppSelected {
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(.white.opacity(0.15))
+                        .fill(.primary.opacity(0.1))
                         .frame(width: PlateConstants.iconSize + 8, height: PlateConstants.iconSize + 8)
                 }
 
@@ -106,7 +106,7 @@ struct AppIconView: View {
 
             Text(app.name)
                 .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(isAppSelected ? 0.9 : 0.001))
+                .foregroundStyle(isAppSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.clear))
                 .lineLimit(1)
                 .frame(width: PlateConstants.iconSize + 10)
         }
