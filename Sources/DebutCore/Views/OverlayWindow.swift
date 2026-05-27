@@ -43,12 +43,14 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     }
 }
 
-final class OverlayContentView: NSView {
+public final class OverlayContentView: NSView {
     private let backdropView: NSVisualEffectView
     private let stackContainer: NSView
     private var plateViews: [PlateView] = []
+    private var stackHeightConstraint: NSLayoutConstraint?
+    private var stackCenterYConstraint: NSLayoutConstraint?
 
-    override init(frame: NSRect) {
+    public override init(frame: NSRect) {
         self.backdropView = NSVisualEffectView()
         self.stackContainer = NSView()
         super.init(frame: frame)
@@ -69,6 +71,9 @@ final class OverlayContentView: NSView {
         stackContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stackContainer)
 
+        let centerY = stackContainer.centerYAnchor.constraint(equalTo: centerYAnchor)
+        stackCenterYConstraint = centerY
+
         NSLayoutConstraint.activate([
             backdropView.leadingAnchor.constraint(equalTo: leadingAnchor),
             backdropView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -76,23 +81,28 @@ final class OverlayContentView: NSView {
             backdropView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             stackContainer.centerXAnchor.constraint(equalTo: centerXAnchor),
-            stackContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
-            stackContainer.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.85),
+            centerY,
         ])
     }
 
-    func update(viewModel: OverlayViewModel) {
+    public func update(viewModel: OverlayViewModel) {
         plateViews.forEach { $0.removeFromSuperview() }
         plateViews.removeAll()
+        stackHeightConstraint?.isActive = false
 
         let plates = viewModel.plates
         guard !plates.isEmpty else { return }
 
-        let spacing: CGFloat = 16
-        var yOffset: CGFloat = 0
-        var totalHeight: CGFloat = 0
+        let spacing: CGFloat = 12
 
-        for plate in plates.reversed() {
+        let maxWidth = plates.map { plate -> CGFloat in
+            let iconsWidth = CGFloat(plate.apps.count) * PlateView.iconSize
+                + CGFloat(max(0, plate.apps.count - 1)) * PlateView.iconSpacing
+            return max(iconsWidth + PlateView.padding * 2, PlateView.minPlateWidth)
+        }.max() ?? PlateView.minPlateWidth
+
+        var views: [PlateView] = []
+        for plate in plates {
             let plateView = PlateView(
                 plate: plate,
                 isSelected: plate.index == viewModel.activeStageIndex,
@@ -100,30 +110,42 @@ final class OverlayContentView: NSView {
             )
             plateView.translatesAutoresizingMaskIntoConstraints = false
             stackContainer.addSubview(plateView)
-            plateViews.append(plateView)
+            views.append(plateView)
 
             NSLayoutConstraint.activate([
                 plateView.centerXAnchor.constraint(equalTo: stackContainer.centerXAnchor),
-                plateView.bottomAnchor.constraint(equalTo: stackContainer.bottomAnchor, constant: -yOffset),
+                plateView.widthAnchor.constraint(equalToConstant: maxWidth),
                 plateView.heightAnchor.constraint(equalToConstant: PlateView.plateHeight),
             ])
-
-            yOffset += PlateView.plateHeight + spacing
-            totalHeight = yOffset - spacing
         }
 
-        stackContainer.constraints.filter { $0.firstAttribute == .height }.forEach { $0.isActive = false }
-        stackContainer.heightAnchor.constraint(equalToConstant: totalHeight).isActive = true
+        // Stack top to bottom (index 0 at top)
+        for (i, view) in views.enumerated() {
+            if i == 0 {
+                view.topAnchor.constraint(equalTo: stackContainer.topAnchor).isActive = true
+            } else {
+                view.topAnchor.constraint(equalTo: views[i - 1].bottomAnchor, constant: spacing).isActive = true
+            }
+        }
+        if let lastView = views.last {
+            lastView.bottomAnchor.constraint(equalTo: stackContainer.bottomAnchor).isActive = true
+        }
 
+        stackContainer.widthAnchor.constraint(equalToConstant: maxWidth).isActive = true
+
+        // Offset to center the active plate on screen
+        let totalHeight = CGFloat(plates.count) * PlateView.plateHeight + CGFloat(plates.count - 1) * spacing
         let activeIndex = viewModel.activeStageIndex
-        let activeCenterY = totalHeight / 2
-        let plateFullHeight = PlateView.plateHeight + spacing
-        let activePlateCenter = totalHeight - (CGFloat(activeIndex) * plateFullHeight + PlateView.plateHeight / 2)
-        let offset = activeCenterY - activePlateCenter
-        stackContainer.constraints.filter { $0.firstAttribute == .centerY }.forEach { $0.constant = offset }
+        let activePlateTop = CGFloat(activeIndex) * (PlateView.plateHeight + spacing)
+        let activePlateCenter = activePlateTop + PlateView.plateHeight / 2
+        let offset = totalHeight / 2 - activePlateCenter
+        stackCenterYConstraint?.constant = offset
+
+        plateViews = views
     }
 
     func animateIn() {
+        stackContainer.alphaValue = 0
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)

@@ -1,17 +1,17 @@
 import AppKit
 
-final class PlateView: NSView {
-    static let plateHeight: CGFloat = 100
-    static let iconSize: CGFloat = 64
-    static let iconSpacing: CGFloat = 16
-    static let labelHeight: CGFloat = 16
-    static let padding: CGFloat = 20
+public final class PlateView: NSView {
+    public static let plateHeight: CGFloat = 110
+    public static let iconSize: CGFloat = 56
+    public static let iconSpacing: CGFloat = 20
+    public static let padding: CGFloat = 24
+    public static let minPlateWidth: CGFloat = 300
 
     private let plate: PlateData
     private let isSelected: Bool
     private let selectedAppIndex: Int?
 
-    init(plate: PlateData, isSelected: Bool, selectedAppIndex: Int?) {
+    public init(plate: PlateData, isSelected: Bool, selectedAppIndex: Int?) {
         self.plate = plate
         self.isSelected = isSelected
         self.selectedAppIndex = selectedAppIndex
@@ -24,32 +24,53 @@ final class PlateView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    override public var intrinsicContentSize: NSSize {
+        let iconsWidth = CGFloat(max(plate.apps.count, 1)) * Self.iconSize
+            + CGFloat(max(0, plate.apps.count - 1)) * Self.iconSpacing
+        let width = max(iconsWidth + Self.padding * 2, Self.minPlateWidth)
+        return NSSize(width: width, height: Self.plateHeight)
+    }
+
     private func setupAppearance() {
         guard let layer else { return }
-        layer.cornerRadius = 16
-        layer.masksToBounds = true
+        layer.cornerRadius = 18
+        layer.masksToBounds = false
 
         if isSelected {
-            layer.backgroundColor = NSColor.white.withAlphaComponent(0.15).cgColor
-            layer.borderWidth = 2
-            layer.borderColor = NSColor.white.withAlphaComponent(0.3).cgColor
+            layer.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+            layer.borderWidth = 1.5
+            layer.borderColor = NSColor.white.withAlphaComponent(0.25).cgColor
         } else {
-            layer.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
-            layer.borderWidth = 0
+            layer.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+            layer.borderWidth = 0.5
+            layer.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
         }
     }
 
     private func layoutContent() {
         let nameLabel = NSTextField(labelWithString: plate.name)
-        nameLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        nameLabel.textColor = .white.withAlphaComponent(0.7)
+        nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        nameLabel.textColor = .white.withAlphaComponent(isSelected ? 0.9 : 0.5)
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(nameLabel)
 
         NSLayoutConstraint.activate([
             nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.padding),
-            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 12),
         ])
+
+        guard !plate.apps.isEmpty else {
+            let emptyLabel = NSTextField(labelWithString: "No apps")
+            emptyLabel.font = .systemFont(ofSize: 11)
+            emptyLabel.textColor = .white.withAlphaComponent(0.25)
+            emptyLabel.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(emptyLabel)
+            NSLayoutConstraint.activate([
+                emptyLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+                emptyLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 8),
+            ])
+            return
+        }
 
         let iconsContainer = NSView()
         iconsContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -79,15 +100,10 @@ final class PlateView: NSView {
             lastIcon.trailingAnchor.constraint(equalTo: iconsContainer.trailingAnchor).isActive = true
         }
 
-        let totalWidth = CGFloat(plate.apps.count) * Self.iconSize + CGFloat(max(0, plate.apps.count - 1)) * Self.iconSpacing
-
         NSLayoutConstraint.activate([
             iconsContainer.centerXAnchor.constraint(equalTo: centerXAnchor),
-            iconsContainer.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 6),
+            iconsContainer.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 8),
             iconsContainer.heightAnchor.constraint(equalToConstant: Self.iconSize),
-            iconsContainer.widthAnchor.constraint(equalToConstant: totalWidth),
-
-            widthAnchor.constraint(greaterThanOrEqualToConstant: totalWidth + Self.padding * 2),
         ])
     }
 
@@ -102,7 +118,23 @@ final class PlateView: NSView {
         if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID) {
             imageView.image = NSWorkspace.shared.icon(forFile: appURL.path)
         } else {
-            imageView.image = NSImage(systemSymbolName: "app.fill", accessibilityDescription: app.name)
+            let fallback = NSImage(size: NSSize(width: 64, height: 64))
+            fallback.lockFocus()
+            NSColor.white.withAlphaComponent(0.1).setFill()
+            let path = NSBezierPath(roundedRect: NSRect(x: 4, y: 4, width: 56, height: 56), xRadius: 12, yRadius: 12)
+            path.fill()
+            let label = app.name.prefix(2).uppercased()
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 20, weight: .semibold),
+                .foregroundColor: NSColor.white.withAlphaComponent(0.4),
+            ]
+            let size = (label as NSString).size(withAttributes: attrs)
+            (label as NSString).draw(
+                at: NSPoint(x: 32 - size.width / 2, y: 32 - size.height / 2),
+                withAttributes: attrs
+            )
+            fallback.unlockFocus()
+            imageView.image = fallback
         }
 
         container.addSubview(imageView)
@@ -117,16 +149,16 @@ final class PlateView: NSView {
         if isAppSelected {
             let indicator = NSView()
             indicator.wantsLayer = true
-            indicator.layer?.backgroundColor = NSColor.white.cgColor
+            indicator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.9).cgColor
             indicator.layer?.cornerRadius = 2
             indicator.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(indicator)
 
             NSLayoutConstraint.activate([
                 indicator.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-                indicator.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: 4),
-                indicator.widthAnchor.constraint(equalToConstant: 24),
-                indicator.heightAnchor.constraint(equalToConstant: 4),
+                indicator.topAnchor.constraint(equalTo: container.bottomAnchor, constant: 4),
+                indicator.widthAnchor.constraint(equalToConstant: 20),
+                indicator.heightAnchor.constraint(equalToConstant: 3),
             ])
         }
 
