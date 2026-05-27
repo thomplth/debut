@@ -17,7 +17,16 @@ let package = Package(
         ),
         .target(
             name: "DebutCore",
+            dependencies: ["AXPrivate"],
             path: "Sources/DebutCore"
+        ),
+        .target(
+            name: "AXPrivate",
+            path: "Sources/AXPrivate",
+            publicHeadersPath: "include",
+            linkerSettings: [
+                .linkedFramework("ApplicationServices"),
+            ]
         ),
         .testTarget(
             name: "DebutCoreTests",
