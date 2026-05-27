@@ -146,7 +146,12 @@ wait(0.8)
 let _ = takeScreenshot("01_overlay_open")
 
 test("Overlay is visible") {
-    return readState()["overlayVisible"] == "true"
+    for _ in 0..<20 {
+        if readState()["overlayVisible"] == "true" { return true }
+        wait(0.1)
+    }
+    info("  overlayVisible = \(readState()["overlayVisible"] ?? "nil")")
+    return false
 }
 
 // --- 3. Navigate: Tab to next app ---
@@ -158,6 +163,10 @@ wait(0.5)
 let _ = takeScreenshot("02_after_tab")
 
 test("Selection moved") {
+    for _ in 0..<10 {
+        if readState()["selectedAppIndex"] != "0" { return true }
+        wait(0.1)
+    }
     let idx = readState()["selectedAppIndex"] ?? "0"
     info("  selectedAppIndex = \(idx)")
     return idx != "0"

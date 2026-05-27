@@ -8,7 +8,8 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     private var runLoopSource: CFRunLoopSource?
     private var cmdHeld: Bool = false
     private var stageManagerActive: Bool = false
-    private var tabPressedDuringHold: Bool = false
+
+    public var isLocked: Bool = false
 
     public init() {}
 
@@ -57,6 +58,30 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
+        // When locked (rename mode), block Cmd release from dismissing
+        // Only allow Enter (commit) and Escape (cancel) through
+        if isLocked {
+            if type == .flagsChanged {
+                let cmdDown = flags.contains(.maskCommand)
+                if cmdHeld && !cmdDown {
+                    cmdHeld = false
+                }
+                cmdHeld = cmdDown
+                return nil
+            }
+            if type == .keyDown {
+                if keyCode == Int64(kVK_Return) {
+                    delegate?.handleKeyEvent(.renameCommit)
+                    return nil
+                }
+                if keyCode == Int64(kVK_Escape) {
+                    delegate?.handleKeyEvent(.renameCancel)
+                    return nil
+                }
+            }
+            return event
+        }
+
         if type == .flagsChanged {
             let cmdDown = flags.contains(.maskCommand)
             if cmdHeld && !cmdDown {
@@ -72,11 +97,10 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         }
 
         if type == .keyDown && flags.contains(.maskCommand) {
-            if keyCode == kVK_Tab {
+            if keyCode == Int64(kVK_Tab) {
                 if !stageManagerActive {
                     cmdHeld = true
                     stageManagerActive = true
-                    tabPressedDuringHold = false
                     delegate?.handleKeyEvent(.cmdTabHold)
                     return nil
                 }
@@ -91,34 +115,20 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         let option = flags.contains(.maskAlternate)
 
         let debutEvent: DebutKeyEvent? = switch Int(keyCode) {
-        case kVK_Tab where option && shift:
-            .previousStage
-        case kVK_Tab where option:
-            .nextStage
-        case kVK_Tab where shift:
-            .previousApp
-        case kVK_Tab:
-            .nextApp
-        case kVK_Escape:
-            .escape
-        case kVK_ANSI_N where shift:
-            .newStageAbove
-        case kVK_ANSI_N:
-            .newStageBelow
-        case kVK_Delete, kVK_ForwardDelete:
-            .deleteStage
-        case kVK_ANSI_R:
-            .renameStage
-        case kVK_Space:
-            .saveAsTemplate
-        case kVK_UpArrow where option:
-            .swapStageUp
-        case kVK_DownArrow where option:
-            .swapStageDown
-        case kVK_UpArrow:
-            .moveAppUp
-        case kVK_DownArrow:
-            .moveAppDown
+        case kVK_Tab where option && shift: .previousStage
+        case kVK_Tab where option: .nextStage
+        case kVK_Tab where shift: .previousApp
+        case kVK_Tab: .nextApp
+        case kVK_Escape: .escape
+        case kVK_ANSI_N where shift: .newStageAbove
+        case kVK_ANSI_N: .newStageBelow
+        case kVK_Delete, kVK_ForwardDelete: .deleteStage
+        case kVK_ANSI_R: .renameStage
+        case kVK_Space: .saveAsTemplate
+        case kVK_UpArrow where option: .swapStageUp
+        case kVK_DownArrow where option: .swapStageDown
+        case kVK_UpArrow: .moveAppUp
+        case kVK_DownArrow: .moveAppDown
         case kVK_ANSI_1: .jumpToStage(1)
         case kVK_ANSI_2: .jumpToStage(2)
         case kVK_ANSI_3: .jumpToStage(3)
@@ -128,8 +138,7 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         case kVK_ANSI_7: .jumpToStage(7)
         case kVK_ANSI_8: .jumpToStage(8)
         case kVK_ANSI_9: .jumpToStage(9)
-        default:
-            nil
+        default: nil
         }
 
         if let debutEvent {

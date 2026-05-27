@@ -1,11 +1,14 @@
 import SwiftUI
 
 public struct PlateConstants {
-    public static let plateHeight: CGFloat = 130
-    public static let iconSize: CGFloat = 72
-    public static let iconSpacing: CGFloat = 6
-    public static let padding: CGFloat = 16
-    public static let minPlateWidth: CGFloat = 200
+    public static let iconSize: CGFloat = 240
+    public static let iconSpacing: CGFloat = 12
+    public static let padding: CGFloat = 24
+    public static let minPlateWidth: CGFloat = 300
+    public static let topInset: CGFloat = 12
+    public static let iconTopPad: CGFloat = 8
+    public static let labelBottomPad: CGFloat = 24
+    public static var plateHeight: CGFloat { topInset + 16 + iconTopPad + iconSize + labelBottomPad }
 
     public static func plateWidth(forAppCount count: Int) -> CGFloat {
         let iconsWidth = CGFloat(max(count, 1)) * iconSize + CGFloat(max(0, count - 1)) * iconSpacing
@@ -15,9 +18,11 @@ public struct PlateConstants {
 
 public struct OverlaySwiftUIView: View {
     public let viewModel: OverlayViewModel
+    public let isRenaming: Bool
 
-    public init(viewModel: OverlayViewModel) {
+    public init(viewModel: OverlayViewModel, isRenaming: Bool = false) {
         self.viewModel = viewModel
+        self.isRenaming = isRenaming
     }
 
     public var body: some View {
@@ -26,7 +31,7 @@ public struct OverlaySwiftUIView: View {
         let plateWidth = PlateConstants.plateWidth(forAppCount: maxApps)
 
         GeometryReader { geo in
-            let spacing: CGFloat = 10
+            let spacing: CGFloat = 14
             let totalHeight = CGFloat(plates.count) * PlateConstants.plateHeight + CGFloat(max(0, plates.count - 1)) * spacing
             let activeTop = CGFloat(viewModel.activeStageIndex) * (PlateConstants.plateHeight + spacing)
             let activeCenter = activeTop + PlateConstants.plateHeight / 2
@@ -37,7 +42,8 @@ public struct OverlaySwiftUIView: View {
                     PlateSwiftUIView(
                         plate: plate,
                         isSelected: index == viewModel.activeStageIndex,
-                        selectedAppIndex: index == viewModel.activeStageIndex ? viewModel.selectedAppIndex : nil
+                        selectedAppIndex: index == viewModel.activeStageIndex ? viewModel.selectedAppIndex : nil,
+                        isRenaming: isRenaming && index == viewModel.activeStageIndex
                     )
                     .frame(width: plateWidth, height: PlateConstants.plateHeight)
                 }
@@ -52,19 +58,20 @@ struct PlateSwiftUIView: View {
     let plate: PlateData
     let isSelected: Bool
     let selectedAppIndex: Int?
+    let isRenaming: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
             Text(plate.name)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(isSelected ? .primary : .secondary)
                 .padding(.leading, PlateConstants.padding)
-                .padding(.top, 10)
+                .padding(.top, PlateConstants.topInset)
 
             HStack(spacing: PlateConstants.iconSpacing) {
                 if plate.apps.isEmpty {
                     Text("Empty")
-                        .font(.system(size: 11))
+                        .font(.system(size: 13))
                         .foregroundStyle(.secondary.opacity(0.5))
                         .frame(maxWidth: .infinity)
                 } else {
@@ -74,16 +81,12 @@ struct PlateSwiftUIView: View {
                 }
             }
             .padding(.horizontal, PlateConstants.padding)
+            .padding(.top, PlateConstants.iconTopPad)
 
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .modifier(LiquidGlassModifier(cornerRadius: 18))
-        .overlay(
-            isSelected
-                ? RoundedRectangle(cornerRadius: 18).stroke(.primary.opacity(0.2), lineWidth: 1.5)
-                : nil
-        )
+        .modifier(LiquidGlassModifier(cornerRadius: 22, isSelected: isSelected))
     }
 }
 
@@ -92,35 +95,50 @@ struct AppIconView: View {
     let isAppSelected: Bool
 
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 4) {
             ZStack {
                 if isAppSelected {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(.primary.opacity(0.1))
-                        .frame(width: PlateConstants.iconSize + 8, height: PlateConstants.iconSize + 8)
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(.primary.opacity(0.08))
+                        .frame(
+                            width: PlateConstants.iconSize + 12,
+                            height: PlateConstants.iconSize + 12
+                        )
                 }
-
                 AppIconImage(bundleID: app.bundleID, name: app.name)
                     .frame(width: PlateConstants.iconSize, height: PlateConstants.iconSize)
             }
 
             Text(app.name)
-                .font(.system(size: 10))
+                .font(.system(size: 12))
                 .foregroundStyle(isAppSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.clear))
                 .lineLimit(1)
-                .frame(width: PlateConstants.iconSize + 10)
+                .frame(width: PlateConstants.iconSize + 16)
         }
     }
 }
 
 struct LiquidGlassModifier: ViewModifier {
     let cornerRadius: CGFloat
+    let isSelected: Bool
 
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+            content
+                .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+                .overlay(
+                    isSelected
+                        ? RoundedRectangle(cornerRadius: cornerRadius).stroke(.primary.opacity(0.15), lineWidth: 1.5)
+                        : nil
+                )
         } else {
-            content.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+            content
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+                .overlay(
+                    isSelected
+                        ? RoundedRectangle(cornerRadius: cornerRadius).stroke(.primary.opacity(0.15), lineWidth: 1.5)
+                        : nil
+                )
         }
     }
 }
@@ -142,17 +160,19 @@ struct AppIconImage: NSViewRepresentable {
 
     private func resolveIcon() -> NSImage {
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            return NSWorkspace.shared.icon(forFile: url.path)
+            let icon = NSWorkspace.shared.icon(forFile: url.path)
+            icon.size = NSSize(width: PlateConstants.iconSize, height: PlateConstants.iconSize)
+            return icon
         }
         let size = PlateConstants.iconSize
         let img = NSImage(size: NSSize(width: size, height: size))
         img.lockFocus()
-        NSColor.white.withAlphaComponent(0.08).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 6, y: 6, width: size - 12, height: size - 12), xRadius: 14, yRadius: 14).fill()
+        NSColor.white.withAlphaComponent(0.06).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 8, y: 8, width: size - 16, height: size - 16), xRadius: 20, yRadius: 20).fill()
         let label = String(name.prefix(2)).uppercased()
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 20, weight: .semibold),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.35),
+            .font: NSFont.systemFont(ofSize: 40, weight: .semibold),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.3),
         ]
         let sz = (label as NSString).size(withAttributes: attrs)
         (label as NSString).draw(at: NSPoint(x: size / 2 - sz.width / 2, y: size / 2 - sz.height / 2), withAttributes: attrs)

@@ -24,6 +24,9 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case swapStageDown
 
     case escape
+
+    case renameCommit
+    case renameCancel
 }
 
 public protocol KeyboardEventDelegate: AnyObject, Sendable {

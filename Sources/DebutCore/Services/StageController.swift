@@ -5,6 +5,8 @@ public protocol StageControllerDelegate: AnyObject {
     func stageControllerDidCloseOverlay(_ controller: StageController)
     func stageControllerDidUpdateSelection(_ controller: StageController)
     func stageControllerDidSwitchStage(_ controller: StageController)
+    func stageControllerDidEnterRenameMode(_ controller: StageController)
+    func stageControllerDidExitRenameMode(_ controller: StageController)
 }
 
 public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
@@ -14,12 +16,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public weak var delegate: StageControllerDelegate?
 
     public private(set) var isStageManagerVisible: Bool = false
+    public private(set) var isRenaming: Bool = false
     public var selectedStageIndex: Int = 0
     public var selectedAppIndex: Int = 0
     public private(set) var keyboardServiceStarted: Bool = false
 
     private var preOverlayStageID: UUID?
-    private var preOverlayAppIndex: Int = 0
     private let diag = DiagnosticReporter.shared
 
     public init(
@@ -39,6 +41,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             guard let self else { return ["error": "controller deallocated"] }
             return [
                 "overlayVisible": "\(self.isStageManagerVisible)",
+                "isRenaming": "\(self.isRenaming)",
                 "stageCount": "\(self.stageManager.stages.count)",
                 "activeStageIndex": "\(self.selectedStageIndex)",
                 "selectedAppIndex": "\(self.selectedAppIndex)",
@@ -53,10 +56,11 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     public func switchToStage(id targetID: UUID, activateBundleID: String? = nil) {
         let previousID = stageManager.activeStageID
-        let previousStage = stageManager.stages.first(where: { $0.id == previousID })
-        let targetStage = stageManager.stages.first(where: { $0.id == targetID })
 
         if previousID != targetID {
+            let previousStage = stageManager.stages.first(where: { $0.id == previousID })
+            let targetStage = stageManager.stages.first(where: { $0.id == targetID })
+
             if let previousStage {
                 for app in previousStage.apps where !app.isShared {
                     _ = windowService.hideApp(bundleID: app.bundleID)
@@ -67,26 +71,48 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                     _ = windowService.unhideApp(bundleID: app.bundleID)
                 }
             }
-        }
 
-        stageManager.activateStage(id: targetID)
+            stageManager.activateStage(id: targetID)
+            diag.report("stage_switched", details: [
+                "from": previousStage?.name ?? "?",
+                "to": targetStage?.name ?? "?",
+                "appsInTarget": "\(targetStage?.apps.count ?? 0)",
+            ])
+        }
 
         if let bundleID = activateBundleID {
             _ = windowService.activateApp(bundleID: bundleID)
             stageManager.bringAppToFront(bundleID: bundleID, inStageID: targetID)
-        } else if let firstApp = targetStage?.apps.first {
+        } else if let firstApp = stageManager.stages.first(where: { $0.id == targetID })?.apps.first {
             _ = windowService.activateApp(bundleID: firstApp.bundleID)
         }
 
-        diag.report("stage_switched", details: ["targetStage": targetStage?.name ?? "unknown"])
         delegate?.stageControllerDidSwitchStage(self)
     }
 
-    // MARK: - MRU update
+    // MARK: - App ownership
+
+    public func stageOwningApp(bundleID: String) -> UUID? {
+        stageManager.stages.first(where: { $0.apps.contains(where: { $0.bundleID == bundleID }) })?.id
+    }
 
     public func recordAppActivation(bundleID: String) {
-        let stageID = stageManager.activeStageID
-        stageManager.bringAppToFront(bundleID: bundleID, inStageID: stageID)
+        guard let ownerStageID = stageOwningApp(bundleID: bundleID) else { return }
+
+        if ownerStageID == stageManager.activeStageID {
+            stageManager.bringAppToFront(bundleID: bundleID, inStageID: ownerStageID)
+        } else {
+            // App from another stage was activated externally — re-hide it to enforce isolation
+            _ = windowService.hideApp(bundleID: bundleID)
+            if let activeApp = stageManager.activeStage.apps.first {
+                _ = windowService.activateApp(bundleID: activeApp.bundleID)
+            }
+            diag.report("isolation_enforced", details: [
+                "app": bundleID,
+                "appStage": stageManager.stages.first(where: { $0.id == ownerStageID })?.name ?? "?",
+                "activeStage": stageManager.activeStage.name,
+            ])
+        }
     }
 
     // MARK: - KeyboardEventDelegate
@@ -120,7 +146,11 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         case .deleteStage:
             deleteSelectedStage()
         case .renameStage:
-            break
+            enterRenameMode()
+        case .renameCommit:
+            exitRenameMode(commit: true)
+        case .renameCancel:
+            exitRenameMode(commit: false)
         case .saveAsTemplate:
             saveSelectedStageAsTemplate()
         case .moveAppUp:
@@ -132,6 +162,27 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         case .swapStageDown:
             swapStage(direction: .down)
         }
+    }
+
+    // MARK: - Rename mode
+
+    private func enterRenameMode() {
+        guard isStageManagerVisible, !isRenaming else { return }
+        isRenaming = true
+        if let tapService = keyboardService as? EventTapKeyboardService {
+            tapService.isLocked = true
+        }
+        delegate?.stageControllerDidEnterRenameMode(self)
+    }
+
+    private func exitRenameMode(commit: Bool) {
+        guard isRenaming else { return }
+        isRenaming = false
+        if let tapService = keyboardService as? EventTapKeyboardService {
+            tapService.isLocked = false
+        }
+        delegate?.stageControllerDidExitRenameMode(self)
+        delegate?.stageControllerDidUpdateSelection(self)
     }
 
     // MARK: - Private
@@ -151,14 +202,13 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
         selectedAppIndex = 0
         preOverlayStageID = stageManager.activeStageID
-        preOverlayAppIndex = 0
 
         diag.report("overlay_opened")
         delegate?.stageControllerDidOpenOverlay(self)
     }
 
     private func commitSelection() {
-        guard isStageManagerVisible else { return }
+        guard isStageManagerVisible, !isRenaming else { return }
         isStageManagerVisible = false
 
         delegate?.stageControllerDidCloseOverlay(self)
@@ -176,20 +226,24 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         diag.report("overlay_committed", details: [
             "stageIndex": "\(selectedStageIndex)",
             "appIndex": "\(selectedAppIndex)",
+            "targetStage": targetStage.name,
         ])
     }
 
     private func discardSelection() {
+        guard isStageManagerVisible else { return }
+        if isRenaming {
+            exitRenameMode(commit: false)
+            return
+        }
         isStageManagerVisible = false
         selectedStageIndex = stageManager.stages.firstIndex(where: { $0.id == preOverlayStageID }) ?? 0
-        selectedAppIndex = preOverlayAppIndex
-
-        diag.report("overlay_discarded")
+        selectedAppIndex = 0
         delegate?.stageControllerDidCloseOverlay(self)
     }
 
     private func cycleApp(forward: Bool) {
-        guard isStageManagerVisible,
+        guard isStageManagerVisible, !isRenaming,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
         guard !stage.apps.isEmpty else { return }
@@ -203,7 +257,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func cycleStage(forward: Bool) {
-        guard isStageManagerVisible, !stageManager.stages.isEmpty else { return }
+        guard isStageManagerVisible, !isRenaming, !stageManager.stages.isEmpty else { return }
 
         if forward {
             selectedStageIndex = (selectedStageIndex + 1) % stageManager.stages.count
@@ -215,14 +269,15 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func jumpToStage(index: Int) {
-        guard isStageManagerVisible, stageManager.stages.indices.contains(index) else { return }
+        guard isStageManagerVisible, !isRenaming,
+              stageManager.stages.indices.contains(index) else { return }
         selectedStageIndex = index
         selectedAppIndex = 0
         delegate?.stageControllerDidUpdateSelection(self)
     }
 
     private func createStage(position: StageInsertPosition) {
-        guard isStageManagerVisible else { return }
+        guard isStageManagerVisible, !isRenaming else { return }
         let currentID = stageManager.stages.indices.contains(selectedStageIndex)
             ? stageManager.stages[selectedStageIndex].id : stageManager.activeStageID
         stageManager.activateStage(id: currentID)
@@ -235,7 +290,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func deleteSelectedStage() {
-        guard isStageManagerVisible,
+        guard isStageManagerVisible, !isRenaming,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let targetID = stageManager.stages[selectedStageIndex].id
         stageManager.deleteStage(id: targetID)
@@ -245,14 +300,14 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func saveSelectedStageAsTemplate() {
-        guard isStageManagerVisible,
+        guard isStageManagerVisible, !isRenaming,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
         stageManager.saveStageAsTemplate(stageID: stage.id, templateName: stage.name)
     }
 
     private func moveApp(direction: SwapDirection) {
-        guard isStageManagerVisible,
+        guard isStageManagerVisible, !isRenaming,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
         guard stage.apps.indices.contains(selectedAppIndex) else { return }
@@ -274,7 +329,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func swapStage(direction: SwapDirection) {
-        guard isStageManagerVisible,
+        guard isStageManagerVisible, !isRenaming,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stageID = stageManager.stages[selectedStageIndex].id
         stageManager.swapStage(id: stageID, direction: direction)
