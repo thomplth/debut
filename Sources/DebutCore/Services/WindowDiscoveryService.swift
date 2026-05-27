@@ -1,74 +1,73 @@
 import AppKit
 
-public final class WindowDiscoveryService: @unchecked Sendable {
+public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private let windowService: any WindowService
-    private var pollTimer: Timer?
+    public var onAppLaunched: ((StageApp) -> Void)?
+    public var onAppTerminated: ((String) -> Void)?
+    public var onAppActivated: ((String) -> Void)?
 
     public init(windowService: any WindowService) {
         self.windowService = windowService
+        super.init()
     }
 
-    public func discoverAllWindows() -> [StageWindow] {
-        let windows = windowService.listWindows()
-        return windows.map { info in
-            StageWindow(
-                windowID: info.windowID,
-                appBundleID: info.appBundleID,
-                appName: info.appName,
-                isShared: false
-            )
+    public func discoverRunningApps() -> [StageApp] {
+        windowService.listRunningApps().map { info in
+            StageApp(bundleID: info.bundleID, name: info.name, pid: info.pid)
         }
     }
 
     public func populateDefaultStage(_ stageManager: inout StageManager) {
-        let windows = discoverAllWindows()
+        let apps = discoverRunningApps()
         let stageID = stageManager.stages[0].id
 
-        for window in windows {
-            stageManager.addWindow(window, toStageID: stageID)
+        for app in apps {
+            stageManager.addApp(app, toStageID: stageID)
         }
 
-        DiagnosticReporter.shared.report("windows_discovered", details: [
-            "count": "\(windows.count)",
-            "apps": "\(Set(windows.map(\.appBundleID)).count)",
+        DiagnosticReporter.shared.report("apps_discovered", details: [
+            "count": "\(apps.count)",
         ])
     }
 
-    public func syncWindows(_ stageManager: inout StageManager) {
-        let currentWindows = windowService.listWindows()
-        let currentIDs = Set(currentWindows.map(\.windowID))
+    public func startObserving() {
+        let ws = NSWorkspace.shared
+        let nc = ws.notificationCenter
 
-        let knownIDs = Set(stageManager.stages.flatMap { $0.windows.map(\.windowID) })
-
-        // Add new windows to active stage
-        let activeStageID = stageManager.activeStageID
-        for info in currentWindows where !knownIDs.contains(info.windowID) {
-            let window = StageWindow(
-                windowID: info.windowID,
-                appBundleID: info.appBundleID,
-                appName: info.appName,
-                isShared: false
-            )
-            stageManager.addWindow(window, toStageID: activeStageID)
-        }
-
-        // Remove windows that no longer exist
-        for stage in stageManager.stages {
-            for window in stage.windows where !currentIDs.contains(window.windowID) {
-                stageManager.removeWindow(windowID: window.windowID, fromStageID: stage.id)
-            }
-        }
+        nc.addObserver(self, selector: #selector(appDidLaunch(_:)),
+                       name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        nc.addObserver(self, selector: #selector(appDidTerminate(_:)),
+                       name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+        nc.addObserver(self, selector: #selector(appDidActivate(_:)),
+                       name: NSWorkspace.didActivateApplicationNotification, object: nil)
     }
 
-    public func startPolling(interval: TimeInterval = 2.0, update: @escaping () -> Void) {
-        stopPolling()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-            update()
-        }
+    public func stopObserving() {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
-    public func stopPolling() {
-        pollTimer?.invalidate()
-        pollTimer = nil
+    @objc private func appDidLaunch(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let bundleID = app.bundleIdentifier,
+              app.activationPolicy == .regular
+        else { return }
+
+        let stageApp = StageApp(bundleID: bundleID, name: app.localizedName ?? bundleID, pid: app.processIdentifier)
+        onAppLaunched?(stageApp)
+    }
+
+    @objc private func appDidTerminate(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let bundleID = app.bundleIdentifier
+        else { return }
+        onAppTerminated?(bundleID)
+    }
+
+    @objc private func appDidActivate(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let bundleID = app.bundleIdentifier,
+              bundleID != "com.thomplth.Debut"
+        else { return }
+        onAppActivated?(bundleID)
     }
 }

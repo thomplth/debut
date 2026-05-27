@@ -60,7 +60,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let discovery = WindowDiscoveryService(windowService: windowService)
         self.windowDiscovery = discovery
 
-        if stageManager.stages[0].windows.isEmpty {
+        if stageManager.stages[0].apps.isEmpty {
             discovery.populateDefaultStage(&stageManager)
         }
 
@@ -72,16 +72,32 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         controller.delegate = self
         stageController = controller
 
-        discovery.startPolling(interval: 2.0) { [weak self] in
-            guard let self, var sm = self.stageController?.stageManager else { return }
-            discovery.syncWindows(&sm)
-            self.stageController?.stageManager = sm
+        discovery.onAppLaunched = { [weak self] app in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let activeID = self.stageController?.stageManager.activeStageID ?? self.stageController!.stageManager.stages[0].id
+                self.stageController?.stageManager.addApp(app, toStageID: activeID)
+            }
         }
+        discovery.onAppTerminated = { [weak self] bundleID in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                for stage in self.stageController?.stageManager.stages ?? [] {
+                    self.stageController?.stageManager.removeApp(bundleID: bundleID, fromStageID: stage.id)
+                }
+            }
+        }
+        discovery.onAppActivated = { [weak self] bundleID in
+            DispatchQueue.main.async {
+                self?.stageController?.recordAppActivation(bundleID: bundleID)
+            }
+        }
+        discovery.startObserving()
 
         diag.report("controller_setup", details: [
             "eventTapStarted": "\(controller.keyboardServiceStarted)",
             "eventTapRunning": "\(keyboardService.isRunning)",
-            "windowsInDefaultStage": "\(stageManager.stages[0].windows.count)",
+            "appsInDefaultStage": "\(stageManager.stages[0].apps.count)",
         ])
     }
 

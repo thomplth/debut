@@ -1,46 +1,30 @@
 import Foundation
 
 public final class MockWindowService: WindowService, @unchecked Sendable {
-    public var windows: [WindowInfo] = []
-    public var hiddenWindowIDs: Set<Int> = []
-    public var focusedWindowID: Int?
-    public var closedWindowIDs: Set<Int> = []
+    public var apps: [AppInfo] = []
+    public var hiddenBundleIDs: Set<String> = []
+    public var activatedBundleID: String?
     public var accessibilityEnabled: Bool = true
-    public var closeWillFail: Set<Int> = []
 
     public init() {}
 
-    public func listWindows() -> [WindowInfo] {
-        windows.filter { !closedWindowIDs.contains($0.windowID) }
-    }
+    public func listRunningApps() -> [AppInfo] { apps }
 
-    public func hideWindow(windowID: Int) -> Bool {
-        hiddenWindowIDs.insert(windowID)
+    public func hideApp(bundleID: String) -> Bool {
+        hiddenBundleIDs.insert(bundleID)
         return true
     }
 
-    public func showWindow(windowID: Int) -> Bool {
-        hiddenWindowIDs.remove(windowID)
+    public func unhideApp(bundleID: String) -> Bool {
+        hiddenBundleIDs.remove(bundleID)
         return true
     }
 
-    public func focusWindow(windowID: Int) -> Bool {
-        focusedWindowID = windowID
-        hiddenWindowIDs.remove(windowID)
+    public func activateApp(bundleID: String) -> Bool {
+        activatedBundleID = bundleID
+        hiddenBundleIDs.remove(bundleID)
         return true
     }
 
-    public func closeWindow(windowID: Int) -> Bool {
-        if closeWillFail.contains(windowID) { return false }
-        closedWindowIDs.insert(windowID)
-        return true
-    }
-
-    public func getWindowFrame(windowID: Int) -> CGRect? {
-        windows.first(where: { $0.windowID == windowID })?.frame
-    }
-
-    public func isAccessibilityEnabled() -> Bool {
-        accessibilityEnabled
-    }
+    public func isAccessibilityEnabled() -> Bool { accessibilityEnabled }
 }

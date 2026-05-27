@@ -2,7 +2,11 @@ import AppKit
 import Carbon.HIToolbox
 import Foundation
 
-// MARK: - Output helpers
+// MARK: - Output
+
+nonisolated(unsafe) var passCount = 0
+nonisolated(unsafe) var failCount = 0
+nonisolated(unsafe) var totalCount = 0
 
 func color(_ text: String, _ code: Int) -> String { "\u{001B}[\(code)m\(text)\u{001B}[0m" }
 func pass(_ msg: String) { print(color("  PASS", 32) + "  \(msg)") }
@@ -10,22 +14,13 @@ func fail(_ msg: String) { print(color("  FAIL", 31) + "  \(msg)") }
 func info(_ msg: String) { print(color("  INFO", 36) + "  \(msg)") }
 func header(_ msg: String) { print("\n" + color("=== \(msg) ===", 1)) }
 
-nonisolated(unsafe) var passCount = 0
-nonisolated(unsafe) var failCount = 0
-nonisolated(unsafe) var totalCount = 0
-
 func test(_ name: String, _ body: () -> Bool) {
     totalCount += 1
-    if body() {
-        passCount += 1
-        pass(name)
-    } else {
-        failCount += 1
-        fail(name)
-    }
+    if body() { passCount += 1; pass(name) }
+    else { failCount += 1; fail(name) }
 }
 
-// MARK: - Diagnostic file reader
+// MARK: - Diagnostic file
 
 let diagnosticFile: URL = {
     let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -33,38 +28,43 @@ let diagnosticFile: URL = {
     return dir.appendingPathComponent("diagnostic.json")
 }()
 
-func readDiagnostic() -> [String: Any]? {
-    guard let data = try? Data(contentsOf: diagnosticFile),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    else { return nil }
-    return json
-}
-
 func readState() -> [String: String] {
-    guard let diag = readDiagnostic(),
-          let state = diag["state"] as? [String: String]
+    guard let data = try? Data(contentsOf: diagnosticFile),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let state = json["state"] as? [String: String]
     else { return [:] }
     return state
 }
 
 func readEvents() -> [[String: String]] {
-    guard let diag = readDiagnostic(),
-          let events = diag["events"] as? [[String: String]]
+    guard let data = try? Data(contentsOf: diagnosticFile),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let events = json["events"] as? [[String: String]]
     else { return [] }
     return events
 }
 
-func waitForEvent(_ eventName: String, timeout: TimeInterval = 3) -> Bool {
-    let start = Date()
-    while Date().timeIntervalSince(start) < timeout {
-        let events = readEvents()
-        if events.contains(where: { $0["event"] == eventName }) { return true }
-        Thread.sleep(forTimeInterval: 0.1)
-    }
-    return false
+// MARK: - Screenshot
+
+let screenshotDir: URL = {
+    let dir = URL(fileURLWithPath: "/tmp/debut-e2e-screenshots")
+    try? FileManager.default.removeItem(at: dir)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+}()
+
+func takeScreenshot(_ name: String) -> String {
+    let path = screenshotDir.appendingPathComponent("\(name).png").path
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+    proc.arguments = ["-x", "-C", path]  // -x no sound, -C capture cursor
+    try? proc.run()
+    proc.waitUntilExit()
+    info("  Screenshot: \(path)")
+    return path
 }
 
-// MARK: - CGEvent posting
+// MARK: - Keyboard simulation
 
 func postKeyDown(keyCode: CGKeyCode, flags: CGEventFlags = []) {
     guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) else { return }
@@ -85,181 +85,144 @@ func postFlagsChanged(flags: CGEventFlags) {
     event.post(tap: .cgSessionEventTap)
 }
 
+func wait(_ seconds: Double) {
+    Thread.sleep(forTimeInterval: seconds)
+}
+
 // MARK: - Main
 
-header("Debut E2E Test Harness")
+header("Debut E2E — Screen Interaction Tests")
 
-// Check if app is running
-info("Checking if Debut is running...")
+// Ensure app is running
 let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.Debut")
 if running.isEmpty {
-    info("Debut not running. Launching...")
+    info("Launching Debut...")
     if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.thomplth.Debut") {
-        let config = NSWorkspace.OpenConfiguration()
-        config.activates = false
         let sem = DispatchSemaphore(value: 0)
-        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in sem.signal() }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in sem.signal() }
         sem.wait()
-        info("Waiting for app to initialize...")
-        Thread.sleep(forTimeInterval: 3)
+        wait(3)
     } else {
-        fail("Debut.app not found in /Applications")
-        exit(1)
+        fail("Debut.app not found"); exit(1)
     }
 } else {
-    info("Debut already running (PID \(running[0].processIdentifier))")
+    info("Debut running (PID \(running[0].processIdentifier))")
 }
+wait(1)
 
-// Wait for diagnostic file
-Thread.sleep(forTimeInterval: 1)
+// --- 1. Baseline ---
+header("1. Baseline")
+let _ = takeScreenshot("00_baseline")
 
-// --- Test 1: Diagnostic file ---
-header("1. App Communication (file-based IPC)")
-
-test("Diagnostic file exists") {
-    let exists = FileManager.default.fileExists(atPath: diagnosticFile.path)
-    if !exists {
-        info("  File not found at: \(diagnosticFile.path)")
-    }
-    return exists
-}
-
-test("Diagnostic file has valid state") {
+test("App is reachable via diagnostics") {
     let state = readState()
-    if state.isEmpty {
-        info("  State is empty. Raw file:")
-        if let data = try? Data(contentsOf: diagnosticFile), let str = String(data: data, encoding: .utf8) {
-            info("  \(String(str.prefix(500)))")
-        }
-        return false
-    }
     info("  State: \(state)")
     return state["stageCount"] != nil
 }
 
-// --- Test 2: Event tap ---
-header("2. Event Tap Status")
-
-test("Event tap was created successfully") {
-    let state = readState()
-    let started = state["eventTapStarted"] == "true"
-    if !started {
-        info("  eventTapStarted = \(state["eventTapStarted"] ?? "nil")")
-        info("  CGEvent.tapCreate() returned nil — Accessibility permission not granted")
-        info("")
-        info("  TO FIX: Open System Settings > Privacy & Security > Accessibility")
-        info("  Then enable 'Debut' in the list.")
-        info("  If Debut is not listed, drag /Applications/Debut.app into the list.")
-        info("  Then: pkill Debut && open /Applications/Debut.app")
-    }
-    return started
+test("Event tap is running") {
+    return readState()["eventTapRunning"] == "true"
 }
 
-test("Event tap is currently running") {
-    let state = readState()
-    let active = state["eventTapRunning"] == "true"
-    if !active {
-        info("  eventTapRunning = \(state["eventTapRunning"] ?? "nil")")
-        let events = readEvents()
-        let tapEvents = events.filter { ($0["event"] ?? "").contains("event_tap") }
-        if !tapEvents.isEmpty {
-            info("  Event tap log: \(tapEvents)")
-        }
-    }
-    return active
+test("Windows discovered") {
+    let count = Int(readState()["stageCount"] ?? "0") ?? 0
+    let events = readEvents()
+    let discovered = events.first(where: { $0["event"] == "apps_discovered" })
+    let windowCount = discovered?["count"] ?? "0"
+    info("  Stages: \(count), windows discovered: \(windowCount)")
+    return Int(windowCount) ?? 0 > 0
 }
 
-// --- Test 3: Accessibility permission (for this process) ---
-header("3. Accessibility (E2E test process)")
+// --- 2. Open overlay with Cmd+Tab ---
+header("2. Open Stage Manager overlay")
+info("Posting Cmd (flagsChanged)...")
+postFlagsChanged(flags: [.maskCommand])
+wait(0.1)
 
-test("This process can post CGEvents") {
-    let canPost = AXIsProcessTrusted()
-    if !canPost {
-        info("  This terminal/process is NOT trusted for Accessibility")
-        info("  CGEvent.post() will silently fail — keyboard simulation won't work")
-        info("  Grant Accessibility to your terminal app too")
-    }
-    return canPost
+info("Posting Cmd+Tab (keyDown)...")
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+wait(0.8)
+
+let _ = takeScreenshot("01_overlay_open")
+
+test("Overlay is visible") {
+    return readState()["overlayVisible"] == "true"
 }
 
-// --- Test 4: Synthetic keyboard events ---
-let eventTapOK = readState()["eventTapRunning"] == "true"
-let canPost = AXIsProcessTrusted()
+// --- 3. Navigate: Tab to next app ---
+header("3. Navigate apps with Tab")
+info("Pressing Tab (next app)...")
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+wait(0.5)
 
-if eventTapOK && canPost {
-    header("4. Synthetic Cmd+Tab via CGEvent")
+let _ = takeScreenshot("02_after_tab")
 
-    // Clear the diagnostic file's event log by noting the current count
-    let eventsBefore = readEvents().count
+test("Selection moved") {
+    let idx = readState()["selectedAppIndex"] ?? "0"
+    info("  selectedAppIndex = \(idx)")
+    return idx != "0"
+}
 
-    info("Posting Cmd keyDown (flagsChanged)...")
-    postFlagsChanged(flags: [.maskCommand])
-    Thread.sleep(forTimeInterval: 0.1)
+// --- 4. Navigate: Shift+Tab back ---
+header("4. Navigate back with Shift+Tab")
+info("Pressing Shift+Tab (previous app)...")
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand, .maskShift])
+wait(0.5)
 
-    info("Posting Tab keyDown with Cmd flag...")
-    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
-    Thread.sleep(forTimeInterval: 0.5)
+let _ = takeScreenshot("03_after_shift_tab")
 
-    test("App received key event and opened overlay") {
-        let state = readState()
-        let visible = state["overlayVisible"] == "true"
-        if !visible {
-            let events = readEvents()
-            let newEvents = Array(events.dropFirst(eventsBefore))
-            info("  overlayVisible = \(state["overlayVisible"] ?? "nil")")
-            info("  New events since test start: \(newEvents.map { $0["event"] ?? "?" })")
-        }
-        return visible
-    }
+test("Selection moved back") {
+    let idx = readState()["selectedAppIndex"] ?? "-1"
+    info("  selectedAppIndex = \(idx)")
+    return idx == "0"
+}
 
-    // Tab to cycle apps
-    info("Posting Tab (next app)...")
-    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
-    Thread.sleep(forTimeInterval: 0.3)
+// --- 5. Close with Escape ---
+header("5. Close overlay with Escape")
+info("Pressing Escape...")
+postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+wait(0.3)
+postFlagsChanged(flags: [])
+wait(0.5)
 
-    // Escape to discard
-    info("Posting Escape...")
-    postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
-    Thread.sleep(forTimeInterval: 0.3)
+let _ = takeScreenshot("04_after_escape")
 
-    // Release Cmd
-    info("Releasing Cmd...")
-    postFlagsChanged(flags: [])
-    Thread.sleep(forTimeInterval: 0.5)
+test("Overlay closed") {
+    return readState()["overlayVisible"] == "false"
+}
 
-    test("Overlay closed after Escape + Cmd release") {
-        let state = readState()
-        return state["overlayVisible"] == "false"
-    }
-} else {
-    header("4. Synthetic Cmd+Tab (SKIPPED)")
-    if !eventTapOK {
-        info("Skipped: Event tap not running (Accessibility not granted to Debut)")
-    }
-    if !canPost {
-        info("Skipped: This process can't post CGEvents (Accessibility not granted to terminal)")
-    }
+// --- 6. Full commit cycle ---
+header("6. Full Cmd+Tab → Tab → Release Cmd (commit)")
+info("Step 1: Cmd+Tab hold...")
+postFlagsChanged(flags: [.maskCommand])
+wait(0.1)
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+wait(0.5)
+
+let _ = takeScreenshot("05_commit_overlay_open")
+
+info("Step 2: Tab to next app...")
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+wait(0.3)
+
+let _ = takeScreenshot("06_commit_after_tab")
+
+info("Step 3: Release Cmd (commit selection)...")
+postFlagsChanged(flags: [])
+wait(0.8)
+
+let _ = takeScreenshot("07_after_commit")
+
+test("Overlay closed after commit") {
+    return readState()["overlayVisible"] == "false"
 }
 
 // --- Summary ---
 header("Results")
 print("")
 print("  \(passCount)/\(totalCount) passed, \(failCount) failed")
-
-if failCount > 0 {
-    print("")
-    info("Next steps:")
-    if !eventTapOK {
-        info("  1. Grant Accessibility to Debut.app:")
-        info("     System Settings > Privacy & Security > Accessibility > enable Debut")
-        info("  2. Restart Debut: pkill Debut && open /Applications/Debut.app")
-    }
-    if !canPost {
-        info("  3. Grant Accessibility to your terminal (for CGEvent.post to work):")
-        info("     System Settings > Privacy & Security > Accessibility > enable your terminal app")
-    }
-    info("  4. Re-run: TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault swift run DebutE2E")
-}
+print("")
+info("Screenshots saved to: \(screenshotDir.path)")
 print("")
 
 exit(Int32(failCount > 0 ? 1 : 0))

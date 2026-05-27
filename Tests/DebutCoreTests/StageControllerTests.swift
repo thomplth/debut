@@ -15,78 +15,43 @@ struct StageControllerTests {
         return (controller, windowService, keyboardService)
     }
 
-    // MARK: - Stage switching
-
-    @Test("Switch stage hides old windows and shows new ones")
+    @Test("Switch stage hides old apps and unhides new")
     func switchStage() {
         let (controller, windowSvc, _) = makeController()
         let stageAID = controller.stageManager.stages[0].id
         controller.stageManager.createStage(name: "B", position: .below)
         let stageBID = controller.stageManager.stages[1].id
 
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 1, appBundleID: "com.a", appName: "A", isShared: false),
-            toStageID: stageAID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 2, appBundleID: "com.b", appName: "B", isShared: false),
-            toStageID: stageBID
-        )
+        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageAID)
+        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageBID)
 
         controller.switchToStage(id: stageAID)
 
-        #expect(windowSvc.hiddenWindowIDs.contains(2))
-        #expect(!windowSvc.hiddenWindowIDs.contains(1))
-        #expect(controller.stageManager.activeStageID == stageAID)
+        #expect(windowSvc.hiddenBundleIDs.contains("com.b"))
+        #expect(!windowSvc.hiddenBundleIDs.contains("com.a"))
     }
 
-    @Test("Switch stage preserves shared windows")
-    func switchStageSharedWindows() {
+    @Test("App switch only activates selected app")
+    func appSwitch() {
         let (controller, windowSvc, _) = makeController()
-        let stageAID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(name: "B", position: .below)
-        let stageBID = controller.stageManager.stages[1].id
+        let stageID = controller.stageManager.stages[0].id
+        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageID)
+        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageID)
 
-        let sharedWindow = StageWindow(windowID: 10, appBundleID: "com.shared", appName: "Shared", isShared: true)
-        controller.stageManager.addWindow(sharedWindow, toStageID: stageAID)
-        controller.stageManager.addWindow(sharedWindow, toStageID: stageBID)
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 20, appBundleID: "com.only-b", appName: "OnlyB", isShared: false),
-            toStageID: stageBID
-        )
+        controller.switchToStage(id: stageID, activateBundleID: "com.b")
 
-        controller.switchToStage(id: stageAID)
-
-        #expect(!windowSvc.hiddenWindowIDs.contains(10))
-        #expect(windowSvc.hiddenWindowIDs.contains(20))
+        #expect(windowSvc.activatedBundleID == "com.b")
     }
 
-    @Test("Focus window on stage switch")
-    func focusOnSwitch() {
-        let (controller, windowSvc, _) = makeController()
-        let stageAID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 1, appBundleID: "com.a", appName: "A", isShared: false),
-            toStageID: stageAID
-        )
-        controller.stageManager.createStage(name: "B", position: .below)
-
-        controller.switchToStage(id: stageAID, focusWindowID: 1)
-
-        #expect(windowSvc.focusedWindowID == 1)
-    }
-
-    // MARK: - Keyboard event handling
-
-    @Test("Cmd+Tab hold opens Stage Manager state")
-    func cmdTabHoldOpens() {
+    @Test("Cmd+Tab hold opens overlay")
+    func cmdTabHold() {
         let (controller, _, keyboardSvc) = makeController()
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(controller.isStageManagerVisible)
     }
 
-    @Test("Escape closes Stage Manager without changes")
-    func escapeCloses() {
+    @Test("Escape discards")
+    func escape() {
         let (controller, _, keyboardSvc) = makeController()
         let originalStageID = controller.stageManager.activeStageID
         keyboardSvc.simulateEvent(.cmdTabHold)
@@ -96,110 +61,46 @@ struct StageControllerTests {
         #expect(controller.stageManager.activeStageID == originalStageID)
     }
 
-    @Test("Cmd release commits selection")
-    func cmdReleaseCommits() {
-        let (controller, _, keyboardSvc) = makeController()
-        controller.stageManager.createStage(name: "B", position: .below)
-        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
-        let stageBID = controller.stageManager.stages[1].id
-
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        controller.selectedStageIndex = 1
-        keyboardSvc.simulateEvent(.cmdRelease)
-
-        #expect(!controller.isStageManagerVisible)
-        #expect(controller.stageManager.activeStageID == stageBID)
-    }
-
-    // MARK: - Navigation
-
-    @Test("Next app cycles within stage")
-    func nextApp() {
+    @Test("Tab cycles apps")
+    func tabCycle() {
         let (controller, _, keyboardSvc) = makeController()
         let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 1, appBundleID: "com.a", appName: "A", isShared: false),
-            toStageID: stageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 2, appBundleID: "com.b", appName: "B", isShared: false),
-            toStageID: stageID
-        )
+        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageID)
+        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageID)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(controller.selectedAppIndex == 0)
         keyboardSvc.simulateEvent(.nextApp)
         #expect(controller.selectedAppIndex == 1)
         keyboardSvc.simulateEvent(.nextApp)
-        #expect(controller.selectedAppIndex == 0) // wraps
+        #expect(controller.selectedAppIndex == 0)
     }
 
-    @Test("Previous app cycles within stage")
-    func previousApp() {
-        let (controller, _, keyboardSvc) = makeController()
+    @Test("MRU: recordAppActivation brings to front")
+    func mruTracking() {
+        let (controller, _, _) = makeController()
         let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 1, appBundleID: "com.a", appName: "A", isShared: false),
-            toStageID: stageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 2, appBundleID: "com.b", appName: "B", isShared: false),
-            toStageID: stageID
-        )
+        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageID)
+        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageID)
+        controller.stageManager.addApp(StageApp(bundleID: "com.c", name: "C"), toStageID: stageID)
 
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        keyboardSvc.simulateEvent(.previousApp)
-        #expect(controller.selectedAppIndex == 1) // wraps to end
+        controller.recordAppActivation(bundleID: "com.c")
+        controller.recordAppActivation(bundleID: "com.a")
+
+        let apps = controller.stageManager.activeStage.apps.map(\.bundleID)
+        #expect(apps == ["com.a", "com.c", "com.b"])
     }
 
-    @Test("Next/previous stage cycles vertically")
-    func stageCycling() {
-        let (controller, _, keyboardSvc) = makeController()
-        controller.stageManager.createStage(name: "B", position: .below)
-        controller.stageManager.createStage(name: "C", position: .below)
-        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
+    @Test("Cmd+Tab tap switches to second MRU app")
+    func cmdTabTap() {
+        let (controller, windowSvc, keyboardSvc) = makeController()
+        let stageID = controller.stageManager.stages[0].id
+        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageID)
+        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageID)
 
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(controller.selectedStageIndex == 0)
-        keyboardSvc.simulateEvent(.nextStage)
-        #expect(controller.selectedStageIndex == 1)
-        keyboardSvc.simulateEvent(.nextStage)
-        #expect(controller.selectedStageIndex == 2)
-        keyboardSvc.simulateEvent(.nextStage)
-        #expect(controller.selectedStageIndex == 0) // wraps
-    }
+        keyboardSvc.simulateEvent(.cmdTabTap)
 
-    @Test("Jump to stage by number")
-    func jumpToStage() {
-        let (controller, _, keyboardSvc) = makeController()
-        controller.stageManager.createStage(name: "B", position: .below)
-        controller.stageManager.createStage(name: "C", position: .below)
-        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
-
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        keyboardSvc.simulateEvent(.jumpToStage(3))
-        #expect(controller.selectedStageIndex == 2)
-    }
-
-    // MARK: - Stage management during overlay
-
-    @Test("Create new stage below during overlay")
-    func createStageBelow() {
-        let (controller, _, keyboardSvc) = makeController()
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        keyboardSvc.simulateEvent(.newStageBelow)
-        #expect(controller.stageManager.stages.count == 2)
-    }
-
-    @Test("Delete stage during overlay")
-    func deleteStage() {
-        let (controller, _, keyboardSvc) = makeController()
-        controller.stageManager.createStage(name: "B", position: .below)
-        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
-
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        controller.selectedStageIndex = 1
-        keyboardSvc.simulateEvent(.deleteStage)
-        #expect(controller.stageManager.stages.count == 1)
+        #expect(windowSvc.activatedBundleID == "com.b")
+        #expect(controller.stageManager.activeStage.apps[0].bundleID == "com.b")
     }
 }

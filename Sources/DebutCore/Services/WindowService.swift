@@ -1,39 +1,23 @@
-import Foundation
-
-public struct WindowInfo: Sendable, Equatable {
-    public let windowID: Int
-    public let appBundleID: String
-    public let appName: String
-    public let title: String
-    public let frame: CGRect
-    public let isMinimized: Bool
-    public let ownerPID: pid_t
-
-    public init(
-        windowID: Int,
-        appBundleID: String,
-        appName: String,
-        title: String,
-        frame: CGRect,
-        isMinimized: Bool,
-        ownerPID: pid_t
-    ) {
-        self.windowID = windowID
-        self.appBundleID = appBundleID
-        self.appName = appName
-        self.title = title
-        self.frame = frame
-        self.isMinimized = isMinimized
-        self.ownerPID = ownerPID
-    }
-}
+import AppKit
 
 public protocol WindowService: Sendable {
-    func listWindows() -> [WindowInfo]
-    func hideWindow(windowID: Int) -> Bool
-    func showWindow(windowID: Int) -> Bool
-    func focusWindow(windowID: Int) -> Bool
-    func closeWindow(windowID: Int) -> Bool
-    func getWindowFrame(windowID: Int) -> CGRect?
+    func listRunningApps() -> [AppInfo]
+    func hideApp(bundleID: String) -> Bool
+    func unhideApp(bundleID: String) -> Bool
+    func activateApp(bundleID: String) -> Bool
     func isAccessibilityEnabled() -> Bool
+}
+
+public struct AppInfo: Sendable, Equatable {
+    public let bundleID: String
+    public let name: String
+    public let pid: pid_t
+    public let isHidden: Bool
+
+    public init(bundleID: String, name: String, pid: pid_t, isHidden: Bool) {
+        self.bundleID = bundleID
+        self.name = name
+        self.pid = pid
+        self.isHidden = isHidden
+    }
 }
