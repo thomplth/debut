@@ -2,12 +2,13 @@ import AppKit
 import SwiftUI
 
 @MainActor
-public final class AppDelegate: NSObject, NSApplicationDelegate {
+public final class AppDelegate: NSObject, NSApplicationDelegate, StageControllerDelegate {
     private var stageController: StageController?
     private var overlayWindow: OverlayWindow?
     private var settingsWindow: NSWindow?
     private var statusItem: NSStatusItem?
     private var stateStore: StateStore?
+    private let diag = DiagnosticReporter.shared
 
     public override init() {
         super.init()
@@ -15,6 +16,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        diag.report("app_launched")
 
         stateStore = StateStore()
         let stageManager = (try? stateStore?.load()) ?? StageManager()
@@ -23,23 +25,33 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let windowService = AccessibilityWindowService()
         let keyboardService = EventTapKeyboardService()
 
-        stageController = StageController(
+        let controller = StageController(
             windowService: windowService,
             keyboardService: keyboardService,
             stageManager: stageManager
         )
+        controller.delegate = self
+        stageController = controller
 
         overlayWindow = OverlayWindow()
 
         setupMenuBar()
 
-        if !windowService.isAccessibilityEnabled() {
+        let accessibilityOK = windowService.isAccessibilityEnabled()
+        diag.report("accessibility_check", details: [
+            "enabled": "\(accessibilityOK)",
+            "eventTapStarted": "\(controller.keyboardServiceStarted)",
+        ])
+
+        if !accessibilityOK {
             showAccessibilityAlert()
         }
 
         if isFirstLaunch() {
             showSettings(settings: settings)
         }
+
+        diag.report("app_ready")
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -51,6 +63,57 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let stateStore = MainActor.assumeIsolated { self.stateStore }
         guard let stageController, let stateStore else { return }
         try? stateStore.save(stageController.stageManager)
+    }
+
+    // MARK: - StageControllerDelegate
+
+    nonisolated public func stageControllerDidOpenOverlay(_ controller: StageController) {
+        DispatchQueue.main.async { [weak self] in
+            self?.showStageManagerOverlay()
+        }
+    }
+
+    nonisolated public func stageControllerDidCloseOverlay(_ controller: StageController) {
+        DispatchQueue.main.async { [weak self] in
+            self?.hideStageManagerOverlay()
+        }
+    }
+
+    nonisolated public func stageControllerDidUpdateSelection(_ controller: StageController) {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateOverlay()
+        }
+    }
+
+    nonisolated public func stageControllerDidSwitchStage(_ controller: StageController) {
+        // window hide/show already handled by StageController
+    }
+
+    private func showStageManagerOverlay() {
+        guard let stageController, let overlayWindow else { return }
+        let vm = OverlayViewModel(
+            stageManager: stageController.stageManager,
+            activeStageIndex: stageController.selectedStageIndex,
+            selectedAppIndex: stageController.selectedAppIndex
+        )
+        overlayWindow.update(viewModel: vm)
+        overlayWindow.showOverlay()
+        diag.report("overlay_shown")
+    }
+
+    private func hideStageManagerOverlay() {
+        overlayWindow?.hideOverlay()
+        diag.report("overlay_hidden")
+    }
+
+    private func updateOverlay() {
+        guard let stageController, let overlayWindow else { return }
+        let vm = OverlayViewModel(
+            stageManager: stageController.stageManager,
+            activeStageIndex: stageController.selectedStageIndex,
+            selectedAppIndex: stageController.selectedAppIndex
+        )
+        overlayWindow.update(viewModel: vm)
     }
 
     // MARK: - Menu Bar
