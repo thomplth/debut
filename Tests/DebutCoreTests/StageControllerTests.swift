@@ -61,19 +61,20 @@ struct StageControllerTests {
         #expect(controller.stageManager.activeStageID == originalStageID)
     }
 
-    @Test("Tab cycles apps")
+    @Test("Tab cycles apps, initial selection at index 1")
     func tabCycle() {
         let (controller, _, keyboardSvc) = makeController()
         let stageID = controller.stageManager.stages[0].id
         controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageID)
         controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageID)
+        controller.stageManager.addApp(StageApp(bundleID: "com.c", name: "C"), toStageID: stageID)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(controller.selectedAppIndex == 0)
+        #expect(controller.selectedAppIndex == 1) // starts at second app like native
         keyboardSvc.simulateEvent(.nextApp)
-        #expect(controller.selectedAppIndex == 1)
+        #expect(controller.selectedAppIndex == 2)
         keyboardSvc.simulateEvent(.nextApp)
-        #expect(controller.selectedAppIndex == 0)
+        #expect(controller.selectedAppIndex == 0) // wraps
     }
 
     @Test("MRU: recordAppActivation brings to front")
@@ -89,6 +90,31 @@ struct StageControllerTests {
 
         let apps = controller.stageManager.activeStage.apps.map(\.bundleID)
         #expect(apps == ["com.a", "com.c", "com.b"])
+    }
+
+    @Test("Cross-stage app activation adds as shared")
+    func crossStageSharing() {
+        let (controller, windowSvc, _) = makeController()
+        let stageAID = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(name: "B", position: .below)
+        let stageBID = controller.stageManager.stages[1].id
+
+        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageAID)
+        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageBID)
+
+        windowSvc.apps = [AppInfo(bundleID: "com.a", name: "A", pid: 100, isHidden: false)]
+
+        // Switch to stage B
+        controller.switchToStage(id: stageBID)
+
+        // Activate app from stage A while in stage B
+        controller.recordAppActivation(bundleID: "com.a")
+
+        // App should now be shared in both stages
+        let stageA = controller.stageManager.stages[0]
+        let stageB = controller.stageManager.stages[1]
+        #expect(stageA.apps.contains(where: { $0.bundleID == "com.a" }))
+        #expect(stageB.apps.contains(where: { $0.bundleID == "com.a" }))
     }
 
     @Test("Cmd+Tab tap switches to second MRU app")

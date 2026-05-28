@@ -97,21 +97,40 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     public func recordAppActivation(bundleID: String) {
-        guard let ownerStageID = stageOwningApp(bundleID: bundleID) else { return }
+        let activeStageID = stageManager.activeStageID
+        let ownerStageID = stageOwningApp(bundleID: bundleID)
 
-        if ownerStageID == stageManager.activeStageID {
-            stageManager.bringAppToFront(bundleID: bundleID, inStageID: ownerStageID)
-        } else {
-            // App from another stage was activated externally — re-hide it to enforce isolation
-            _ = windowService.hideApp(bundleID: bundleID)
-            if let activeApp = stageManager.activeStage.apps.first {
-                _ = windowService.activateApp(bundleID: activeApp.bundleID)
+        if ownerStageID == activeStageID {
+            stageManager.bringAppToFront(bundleID: bundleID, inStageID: activeStageID)
+        } else if ownerStageID != nil {
+            // App belongs to another stage — add as shared to active stage
+            if let existingApp = stageManager.stages
+                .first(where: { $0.id == ownerStageID })?
+                .apps.first(where: { $0.bundleID == bundleID })
+            {
+                var sharedApp = StageApp(bundleID: existingApp.bundleID, name: existingApp.name, isShared: true)
+                sharedApp = StageApp(bundleID: existingApp.bundleID, name: existingApp.name, isShared: true, pid: existingApp.pid)
+                stageManager.addApp(sharedApp, toStageID: activeStageID)
+                // Mark original as shared too
+                if let origIndex = stageManager.stages.firstIndex(where: { $0.id == ownerStageID }),
+                   let appIndex = stageManager.stages[origIndex].apps.firstIndex(where: { $0.bundleID == bundleID }) {
+                    stageManager.markAppShared(bundleID: bundleID, inStageID: ownerStageID!)
+                }
+                stageManager.bringAppToFront(bundleID: bundleID, inStageID: activeStageID)
             }
-            diag.report("isolation_enforced", details: [
+            diag.report("app_shared_across_stages", details: [
                 "app": bundleID,
-                "appStage": stageManager.stages.first(where: { $0.id == ownerStageID })?.name ?? "?",
+                "originStage": stageManager.stages.first(where: { $0.id == ownerStageID })?.name ?? "?",
                 "activeStage": stageManager.activeStage.name,
             ])
+        } else {
+            // App not in any stage — add to active stage (new launch not caught by notification)
+            let apps = windowService.listRunningApps()
+            if let info = apps.first(where: { $0.bundleID == bundleID }) {
+                let app = StageApp(bundleID: info.bundleID, name: info.name, pid: info.pid)
+                stageManager.addApp(app, toStageID: activeStageID)
+                stageManager.bringAppToFront(bundleID: bundleID, inStageID: activeStageID)
+            }
         }
     }
 
@@ -166,13 +185,33 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     // MARK: - Rename mode
 
+    private var renameObserver: Any?
+
     private func enterRenameMode() {
         guard isStageManagerVisible, !isRenaming else { return }
         isRenaming = true
         if let tapService = keyboardService as? EventTapKeyboardService {
             tapService.isLocked = true
         }
+
+        renameObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.thomplth.Debut.renameCommit"),
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let self, self.isRenaming else { return }
+            if let newName = notification.object as? String, !newName.isEmpty {
+                self.commitRename(newName: newName)
+            }
+        }
+
         delegate?.stageControllerDidEnterRenameMode(self)
+    }
+
+    private func commitRename(newName: String) {
+        guard isRenaming, stageManager.stages.indices.contains(selectedStageIndex) else { return }
+        let stageID = stageManager.stages[selectedStageIndex].id
+        stageManager.renameStage(id: stageID, to: newName)
+        exitRenameMode(commit: true)
     }
 
     private func exitRenameMode(commit: Bool) {
@@ -180,6 +219,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         isRenaming = false
         if let tapService = keyboardService as? EventTapKeyboardService {
             tapService.isLocked = false
+        }
+        if let observer = renameObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            renameObserver = nil
         }
         delegate?.stageControllerDidExitRenameMode(self)
         delegate?.stageControllerDidUpdateSelection(self)
@@ -200,7 +243,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         if let index = stageManager.stages.firstIndex(where: { $0.id == stageManager.activeStageID }) {
             selectedStageIndex = index
         }
-        selectedAppIndex = 0
+        let appCount = stageManager.activeStage.apps.count
+        selectedAppIndex = appCount >= 2 ? 1 : 0
         preOverlayStageID = stageManager.activeStageID
 
         diag.report("overlay_opened")

@@ -24,6 +24,11 @@ public struct Stage: Codable, Identifiable, Equatable, Sendable {
         apps.removeAll { $0.bundleID == bundleID }
     }
 
+    public mutating func markShared(bundleID: String) {
+        guard let index = apps.firstIndex(where: { $0.bundleID == bundleID }) else { return }
+        apps[index].isShared = true
+    }
+
     public mutating func bringAppToFront(bundleID: String) {
         guard let index = apps.firstIndex(where: { $0.bundleID == bundleID }) else { return }
         let app = apps.remove(at: index)

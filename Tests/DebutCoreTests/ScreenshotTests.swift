@@ -43,7 +43,7 @@ struct ScreenshotTests {
 
     private func makeSampleViewModel(stageCount: Int = 3, appsPerStage: [Int] = [3, 4, 2], activeIndex: Int = 1) -> OverlayViewModel {
         var sm = StageManager()
-        let stageNames = ["Email", "Coding", "Review", "Design", "Chat"]
+        let stageNames = ["Email", "Coding", "Review"]
         let apps = [
             ("com.apple.mail", "Mail"), ("com.apple.Safari", "Safari"),
             ("com.apple.Terminal", "Terminal"), ("com.microsoft.VSCode", "VS Code"),
@@ -74,26 +74,26 @@ struct ScreenshotTests {
             }
         }
         sm.activateStage(id: sm.stages[min(activeIndex, sm.stages.count - 1)].id)
-        return OverlayViewModel(stageManager: sm, activeStageIndex: activeIndex, selectedAppIndex: 0)
+        return OverlayViewModel(stageManager: sm, activeStageIndex: activeIndex, selectedAppIndex: 1)
     }
 
-    @Test("Three plates with active in middle")
+    @Test("Three plates render correctly")
     func threePlates() throws {
         let vm = makeSampleViewModel(stageCount: 3, appsPerStage: [3, 4, 2], activeIndex: 1)
-        guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: NSSize(width: 800, height: 500)) else {
+        guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: NSSize(width: 1200, height: 600)) else {
             throw ScreenshotError.renderFailed
         }
         try saveImage(img, name: "02_three_plates")
         #expect(vm.plates.count == 3)
     }
 
-    @Test("Selection on third app")
+    @Test("Selection on second app")
     func selectionState() throws {
         let vm = OverlayViewModel(
-            stageManager: makeSampleViewModel(stageCount: 2, appsPerStage: [4, 3], activeIndex: 0).stageManager,
+            stageManager: makeSampleViewModel(stageCount: 2, appsPerStage: [5, 3], activeIndex: 0).stageManager,
             activeStageIndex: 0, selectedAppIndex: 2
         )
-        guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: NSSize(width: 800, height: 350)) else {
+        guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: NSSize(width: 1200, height: 400)) else {
             throw ScreenshotError.renderFailed
         }
         try saveImage(img, name: "05_selection_state")
