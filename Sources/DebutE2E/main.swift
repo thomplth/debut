@@ -127,14 +127,14 @@ test("Event tap is running") {
 test("Windows discovered") {
     let count = Int(readState()["stageCount"] ?? "0") ?? 0
     let events = readEvents()
-    let discovered = events.first(where: { $0["event"] == "apps_discovered" })
+    let discovered = events.first(where: { $0["event"] == "windows_discovered" })
     let windowCount = discovered?["count"] ?? "0"
     info("  Stages: \(count), windows discovered: \(windowCount)")
     return Int(windowCount) ?? 0 > 0
 }
 
 // --- 2. Open overlay with Cmd+Tab ---
-header("2. Open Stage Manager overlay")
+header("2. Open Stage Manager overlay (window mode)")
 info("Posting Cmd (flagsChanged)...")
 postFlagsChanged(flags: [.maskCommand])
 wait(0.1)
@@ -154,9 +154,9 @@ test("Overlay is visible") {
     return false
 }
 
-// --- 3. Navigate: Tab to next app ---
-header("3. Navigate apps with Tab")
-info("Pressing Tab (next app)...")
+// --- 3. Navigate: Tab to next window ---
+header("3. Navigate windows with Tab")
+info("Pressing Tab (next window)...")
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
 wait(0.5)
 
@@ -164,31 +164,30 @@ let _ = takeScreenshot("02_after_tab")
 
 test("Selection moved") {
     for _ in 0..<10 {
-        if readState()["selectedAppIndex"] != "0" { return true }
+        if readState()["selectedWindowIndex"] != "0" { return true }
         wait(0.1)
     }
-    let idx = readState()["selectedAppIndex"] ?? "0"
-    info("  selectedAppIndex = \(idx)")
+    let idx = readState()["selectedWindowIndex"] ?? "0"
+    info("  selectedWindowIndex = \(idx)")
     return idx != "0"
 }
 
 // --- 4. Navigate: Shift+Tab back ---
 header("4. Navigate back with Shift+Tab")
-info("Pressing Shift+Tab (previous app)...")
+info("Pressing Shift+Tab (previous window)...")
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand, .maskShift])
 wait(0.5)
 
 let _ = takeScreenshot("03_after_shift_tab")
 
 test("Selection moved back") {
-    // Initial=1, Tab→2, Shift+Tab→back to 1
     for _ in 0..<10 {
-        if readState()["selectedAppIndex"] == "1" { return true }
+        if readState()["selectedWindowIndex"] == "1" { return true }
         wait(0.1)
     }
-    let idx = readState()["selectedAppIndex"] ?? "-1"
-    info("  selectedAppIndex = \(idx)")
-    return true // Shift+Tab navigated — exact index depends on app count
+    let idx = readState()["selectedWindowIndex"] ?? "-1"
+    info("  selectedWindowIndex = \(idx)")
+    return true // Shift+Tab navigated — exact index depends on window count
 }
 
 // --- 5. Close with Escape ---
@@ -215,7 +214,7 @@ wait(0.5)
 
 let _ = takeScreenshot("05_commit_overlay_open")
 
-info("Step 2: Tab to next app...")
+info("Step 2: Tab to next window...")
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
 wait(0.3)
 
@@ -228,6 +227,37 @@ wait(0.8)
 let _ = takeScreenshot("07_after_commit")
 
 test("Overlay closed after commit") {
+    return readState()["overlayVisible"] == "false"
+}
+
+// --- 7. Stage switch with Cmd+` ---
+header("7. Open Stage Manager overlay (stage mode) with Cmd+`")
+info("Posting Cmd (flagsChanged)...")
+postFlagsChanged(flags: [.maskCommand])
+wait(0.1)
+
+info("Posting Cmd+` (keyDown)...")
+postKeyDown(keyCode: CGKeyCode(kVK_ANSI_Grave), flags: [.maskCommand])
+wait(0.8)
+
+let _ = takeScreenshot("08_stage_overlay_open")
+
+test("Overlay is visible (stage mode)") {
+    for _ in 0..<20 {
+        if readState()["overlayVisible"] == "true" { return true }
+        wait(0.1)
+    }
+    info("  overlayVisible = \(readState()["overlayVisible"] ?? "nil")")
+    return false
+}
+
+info("Release Cmd (commit stage switch)...")
+postFlagsChanged(flags: [])
+wait(0.5)
+
+let _ = takeScreenshot("09_after_stage_switch")
+
+test("Overlay closed after stage commit") {
     return readState()["overlayVisible"] == "false"
 }
 

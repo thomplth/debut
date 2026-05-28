@@ -23,13 +23,16 @@ struct SettingsViewModelTests {
     @Test("Sections list")
     func sections() {
         let vm = SettingsViewModel()
-        #expect(vm.sections == [.templates, .app, .keyboardShortcuts, .about])
+        #expect(vm.sections == [.appearance, .templates, .excludedApps, .app, .keyboardShortcuts, .about])
     }
 
     @Test("Template from StageManager")
     func templateList() {
         var vm = SettingsViewModel()
-        vm.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: vm.stageManager.stages[0].id)
+        vm.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"),
+            toStageID: vm.stageManager.stages[0].id
+        )
         vm.stageManager.saveStageAsTemplate(stageID: vm.stageManager.stages[0].id, templateName: "T")
         #expect(vm.stageManager.templates.count == 1)
     }

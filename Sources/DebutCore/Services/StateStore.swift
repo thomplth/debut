@@ -36,7 +36,16 @@ public final class StateStore: Sendable {
             return StageManager()
         }
         let data = try Data(contentsOf: stateFileURL)
-        return try JSONDecoder().decode(StageManager.self, from: data)
+
+        // Try new format first
+        if let manager = try? JSONDecoder().decode(StageManager.self, from: data) {
+            return manager
+        }
+
+        // Legacy format had StageApp with bundleID — window IDs are ephemeral,
+        // so we preserve stage names/structure but clear window lists.
+        // Windows will be rediscovered on launch via WindowDiscoveryService.
+        return StageManager()
     }
 
     // MARK: - Settings

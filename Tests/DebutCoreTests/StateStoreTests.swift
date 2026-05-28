@@ -20,7 +20,7 @@ struct StateStoreTests {
         let store = StateStore(directory: dir)
         var sm = StageManager()
         sm.createStage(name: "Coding", position: .below)
-        sm.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: sm.stages[1].id)
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toStageID: sm.stages[1].id)
         sm.saveStageAsTemplate(stageID: sm.stages[1].id, templateName: "Dev")
 
         try store.save(sm)
@@ -28,7 +28,7 @@ struct StateStoreTests {
 
         #expect(loaded.stages.count == 2)
         #expect(loaded.stages[1].name == "Coding")
-        #expect(loaded.stages[1].apps.count == 1)
+        #expect(loaded.stages[1].windows.count == 1)
         #expect(loaded.templates.count == 1)
     }
 
