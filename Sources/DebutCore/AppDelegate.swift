@@ -246,9 +246,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             return
         }
 
+        let currentStageManager = stageController?.stageManager ?? StageManager()
         var vm = SettingsViewModel(
             settings: settings,
-            stageManager: stageController?.stageManager ?? StageManager()
+            stageManager: currentStageManager
         )
         vm.onSettingsChanged = { [weak self] newSettings in
             DispatchQueue.main.async {
@@ -269,6 +270,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             defer: false
         )
         window.title = "Debut Settings"
+        window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: view)
         window.center()
         window.makeKeyAndOrderFront(nil)
