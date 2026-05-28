@@ -10,6 +10,7 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     private var stageManagerActive: Bool = false
 
     public var isLocked: Bool = false
+    public var overlayVisible: Bool = false
 
     public init() {}
 
@@ -58,8 +59,9 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
-        // When locked (rename mode), block Cmd release from dismissing
-        // Only allow Enter (commit) and Escape (cancel) through
+        // When locked (rename mode), block all events from propagating.
+        // Pass Enter through to the text field so it can fire its action.
+        // Escape cancels rename via the delegate.
         if isLocked {
             if type == .flagsChanged {
                 let cmdDown = flags.contains(.maskCommand)
@@ -71,17 +73,17 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
             }
             if type == .keyDown {
                 if keyCode == Int64(kVK_Return) {
-                    delegate?.handleKeyEvent(.renameCommit)
-                    return nil
+                    return event // Let Enter reach the text field
                 }
                 if keyCode == Int64(kVK_Escape) {
                     delegate?.handleKeyEvent(.renameCancel)
                     return nil
                 }
             }
-            return event
+            return nil
         }
 
+        // Track Cmd key state
         if type == .flagsChanged {
             let cmdDown = flags.contains(.maskCommand)
             if cmdHeld && !cmdDown {
@@ -96,29 +98,55 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
             return event
         }
 
-        if type == .keyDown && flags.contains(.maskCommand) {
-            if keyCode == Int64(kVK_Tab) {
-                if !stageManagerActive {
-                    cmdHeld = true
-                    stageManagerActive = true
-                    delegate?.handleKeyEvent(.cmdTabHold)
-                    return nil
-                }
+        let shift = flags.contains(.maskShift)
+
+        // Cmd+Option+Tab — open/reopen overlay in stage mode, or cycle stages
+        if type == .keyDown && flags.contains(.maskCommand) && flags.contains(.maskAlternate) && keyCode == Int64(kVK_Tab) {
+            if !stageManagerActive {
+                cmdHeld = true
             }
+            stageManagerActive = true
+            delegate?.handleKeyEvent(shift ? .cmdOptionShiftTabHold : .cmdOptionTabHold)
+            return nil
         }
 
-        guard stageManagerActive && type == .keyDown else {
+        // Cmd+Tab (without Option) — open/reopen overlay in window mode, or cycle windows
+        if type == .keyDown && flags.contains(.maskCommand) && !flags.contains(.maskAlternate) && keyCode == Int64(kVK_Tab) {
+            if !stageManagerActive {
+                cmdHeld = true
+            }
+            stageManagerActive = true
+            delegate?.handleKeyEvent(shift ? .cmdShiftTabHold : .cmdTabHold)
+            return nil
+        }
+
+        guard stageManagerActive else {
             return event
         }
 
-        let shift = flags.contains(.maskShift)
+        // Session active but overlay closed (after Esc): only intercept Tab to reopen.
+        // Pass everything else (including `) through to the system.
+        if !overlayVisible {
+            if type == .keyDown && keyCode == Int64(kVK_Tab) {
+                // Tab/Shift+Tab/Option+Tab will reopen — already handled above
+            }
+            return event
+        }
+
+        // Overlay is visible — consume ALL keyboard events
+        guard type == .keyDown else {
+            return nil // Consume keyUp events too
+        }
+
         let option = flags.contains(.maskAlternate)
 
+        // Tab cycles windows, Option+Tab cycles stages, ` acts as Shift+Tab (previous window).
         let debutEvent: DebutKeyEvent? = switch Int(keyCode) {
         case kVK_Tab where option && shift: .previousStage
         case kVK_Tab where option: .nextStage
-        case kVK_Tab where shift: .previousApp
-        case kVK_Tab: .nextApp
+        case kVK_Tab where shift: .previousWindow
+        case kVK_Tab: .nextWindow
+        case kVK_ANSI_Grave: .previousWindow
         case kVK_Escape: .escape
         case kVK_ANSI_N where shift: .newStageAbove
         case kVK_ANSI_N: .newStageBelow
@@ -127,8 +155,8 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         case kVK_Space: .saveAsTemplate
         case kVK_UpArrow where option: .swapStageUp
         case kVK_DownArrow where option: .swapStageDown
-        case kVK_UpArrow: .moveAppUp
-        case kVK_DownArrow: .moveAppDown
+        case kVK_UpArrow: .moveWindowUp
+        case kVK_DownArrow: .moveWindowDown
         case kVK_ANSI_1: .jumpToStage(1)
         case kVK_ANSI_2: .jumpToStage(2)
         case kVK_ANSI_3: .jumpToStage(3)
@@ -143,10 +171,10 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
 
         if let debutEvent {
             delegate?.handleKeyEvent(debutEvent)
-            return nil
         }
 
-        return event
+        // Always consume — never let keyboard events leak to the active app
+        return nil
     }
 }
 

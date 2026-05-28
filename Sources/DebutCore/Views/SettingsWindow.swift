@@ -19,8 +19,12 @@ public struct SettingsView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 32) {
+                        appearanceSection
+                            .id(SettingsSection.appearance)
                         templatesSection
                             .id(SettingsSection.templates)
+                        excludedAppsSection
+                            .id(SettingsSection.excludedApps)
                         appSection
                             .id(SettingsSection.app)
                         keyboardShortcutsSection
@@ -39,9 +43,104 @@ public struct SettingsView: View {
             }
         }
         .frame(minWidth: 600, minHeight: 400)
+        .onChange(of: viewModel.settings.excludedBundleIDs) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.launchAtLogin) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.showInMenuBar) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.defaultStageName) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.confirmStageDeletion) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.animationsEnabled) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.glassStyle) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.plateCornerRadius) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.selectionOpacity) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.selectionBorderWidth) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.selectionBorderOpacity) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.inactivePlateScale) { _, _ in saveSettings() }
+    }
+
+    // MARK: - Helpers
+
+    private func saveSettings() {
+        viewModel.onSettingsChanged?(viewModel.settings)
     }
 
     // MARK: - Sections
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Appearance")
+                .font(.title2.bold())
+
+            HStack {
+                Text("Glass style")
+                Spacer()
+                Picker("", selection: $viewModel.settings.glassStyle) {
+                    Text("Clear").tag(GlassStyle.clear)
+                    Text("Regular").tag(GlassStyle.regular)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Corner radius")
+                    Spacer()
+                    Text("\(Int(viewModel.settings.plateCornerRadius))")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $viewModel.settings.plateCornerRadius, in: 0...40, step: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Inactive plate scale")
+                    Spacer()
+                    Text("\(viewModel.settings.inactivePlateScale, specifier: "%.2f")")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $viewModel.settings.inactivePlateScale, in: 0.4...1.0, step: 0.05)
+            }
+
+            Text("Selection")
+                .font(.headline)
+                .padding(.top, 8)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Fill opacity")
+                    Spacer()
+                    Text("\(viewModel.settings.selectionOpacity, specifier: "%.2f")")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $viewModel.settings.selectionOpacity, in: 0...0.5, step: 0.01)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Border width")
+                    Spacer()
+                    Text("\(viewModel.settings.selectionBorderWidth, specifier: "%.1f")")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $viewModel.settings.selectionBorderWidth, in: 0...4, step: 0.5)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Border opacity")
+                    Spacer()
+                    Text("\(viewModel.settings.selectionBorderOpacity, specifier: "%.2f")")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $viewModel.settings.selectionBorderOpacity, in: 0...0.5, step: 0.01)
+            }
+        }
+    }
 
     private var templatesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -76,6 +175,85 @@ public struct SettingsView: View {
                 }
             }
         }
+    }
+
+    @State private var selectedAppToExclude: String = ""
+
+    private var excludedAppsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Excluded Apps")
+                .font(.title2.bold())
+
+            Text("Excluded apps are invisible to the stage manager. They won't appear in any stage and won't trigger stage switches.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Picker("Add app", selection: $selectedAppToExclude) {
+                    Text("Select an app...").tag("")
+                    ForEach(runningAppNames, id: \.bundleID) { app in
+                        Text(app.name).tag(app.bundleID)
+                    }
+                }
+                .frame(maxWidth: 250)
+
+                Button("Add") {
+                    guard !selectedAppToExclude.isEmpty,
+                          !viewModel.settings.excludedBundleIDs.contains(selectedAppToExclude)
+                    else { return }
+                    viewModel.settings.excludedBundleIDs.append(selectedAppToExclude)
+                    selectedAppToExclude = ""
+                }
+                .disabled(selectedAppToExclude.isEmpty)
+            }
+
+            if !viewModel.settings.excludedBundleIDs.isEmpty {
+                ForEach(viewModel.settings.excludedBundleIDs, id: \.self) { bundleID in
+                    HStack {
+                        AppIconImage(bundleID: bundleID, name: bundleID, iconSize: 20)
+                            .frame(width: 20, height: 20)
+                        Text(appName(for: bundleID))
+                        Spacer()
+                        Text(bundleID)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button(role: .destructive) {
+                            viewModel.settings.excludedBundleIDs.removeAll { $0 == bundleID }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(8)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+    }
+
+    private struct RunningApp: Identifiable {
+        let bundleID: String
+        let name: String
+        var id: String { bundleID }
+    }
+
+    private var runningAppNames: [RunningApp] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.bundleIdentifier != "com.thomplth.Debut" }
+            .compactMap { app in
+                guard let bundleID = app.bundleIdentifier,
+                      !viewModel.settings.excludedBundleIDs.contains(bundleID)
+                else { return nil }
+                return RunningApp(bundleID: bundleID, name: app.localizedName ?? bundleID)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func appName(for bundleID: String) -> String {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return FileManager.default.displayName(atPath: url.path)
+        }
+        return bundleID.components(separatedBy: ".").last ?? bundleID
     }
 
     private var appSection: some View {
@@ -119,10 +297,11 @@ public struct SettingsView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            shortcutRow("Open Stage Manager", shortcut: "Cmd+Tab (hold)", configurable: false)
-            shortcutRow("Quick switch last app", shortcut: "Cmd+Tab (tap)", configurable: false)
-            shortcutRow("Next app", shortcut: "Tab", configurable: true)
-            shortcutRow("Previous app", shortcut: "Shift+Tab", configurable: true)
+            shortcutRow("Switch windows (hold)", shortcut: "Cmd+Tab", configurable: false)
+            shortcutRow("Quick switch last window", shortcut: "Cmd+Tab (tap)", configurable: false)
+            shortcutRow("Switch stages (hold)", shortcut: "Cmd+Opt+Tab", configurable: false)
+            shortcutRow("Next window", shortcut: "Tab", configurable: true)
+            shortcutRow("Previous window", shortcut: "Shift+Tab", configurable: true)
             shortcutRow("Next stage", shortcut: "Option+Tab", configurable: true)
             shortcutRow("Previous stage", shortcut: "Shift+Option+Tab", configurable: true)
             shortcutRow("Jump to stage 1–9", shortcut: "1–9", configurable: true)
@@ -131,7 +310,7 @@ public struct SettingsView: View {
             shortcutRow("Delete stage", shortcut: "Delete", configurable: true)
             shortcutRow("Rename stage", shortcut: "R", configurable: true)
             shortcutRow("Save as template", shortcut: "Space", configurable: true)
-            shortcutRow("Move app up/down", shortcut: "Arrow Up/Down", configurable: true)
+            shortcutRow("Move window up/down", shortcut: "Arrow Up/Down", configurable: true)
             shortcutRow("Swap stage up/down", shortcut: "Option+Arrow Up/Down", configurable: true)
             shortcutRow("Commit selection", shortcut: "Release Cmd", configurable: false)
             shortcutRow("Discard selection", shortcut: "Esc", configurable: false)
@@ -183,7 +362,9 @@ public struct SettingsView: View {
 
     private func sectionIcon(_ section: SettingsSection) -> String {
         switch section {
+        case .appearance: "paintbrush"
         case .templates: "rectangle.stack"
+        case .excludedApps: "eye.slash"
         case .app: "gearshape"
         case .keyboardShortcuts: "keyboard"
         case .about: "info.circle"

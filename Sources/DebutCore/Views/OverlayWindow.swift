@@ -55,6 +55,9 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         }, completionHandler: { [weak self] in
             DispatchQueue.main.async {
                 self?.orderOut(nil)
+                // Remove the hosting view to stop SwiftUI layout passes
+                self?.hostingView?.removeFromSuperview()
+                self?.hostingView = nil
             }
         })
     }

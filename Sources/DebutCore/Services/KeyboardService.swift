@@ -2,31 +2,34 @@ import Foundation
 import Carbon.HIToolbox
 
 public enum DebutKeyEvent: Equatable, Sendable {
-    case cmdTabTap
-    case cmdTabHold
-    case cmdRelease
+    case cmdTabTap              // Quick Cmd+Tab press — switch to last window
+    case cmdTabHold             // Cmd+Tab held — open overlay (window mode, select next)
+    case cmdShiftTabHold        // Cmd+Shift+Tab — open overlay (window mode, select last)
+    case cmdOptionTabHold       // Cmd+Option+Tab — open overlay (stage mode, select next)
+    case cmdOptionShiftTabHold  // Cmd+Shift+Option+Tab — open overlay (stage mode, select previous)
+    case cmdRelease             // Cmd key lifted while overlay open
 
-    case nextApp
-    case previousApp
-    case nextStage
-    case previousStage
-    case jumpToStage(Int)
+    case nextWindow             // Tab
+    case previousWindow         // Shift+Tab
+    case nextStage              // Option+Tab
+    case previousStage          // Shift+Option+Tab
+    case jumpToStage(Int)       // 1-9
 
-    case newStageBelow
-    case newStageAbove
-    case deleteStage
-    case renameStage
-    case saveAsTemplate
+    case newStageBelow          // N
+    case newStageAbove          // Shift+N
+    case deleteStage            // Delete/Forward Delete
+    case renameStage            // R
+    case saveAsTemplate         // Space
 
-    case moveAppUp
-    case moveAppDown
-    case swapStageUp
-    case swapStageDown
+    case moveWindowUp           // Up Arrow
+    case moveWindowDown         // Down Arrow
+    case swapStageUp            // Option+Up Arrow
+    case swapStageDown          // Option+Down Arrow
 
     case escape
 
-    case renameCommit
-    case renameCancel
+    case renameCommit           // Return (in rename mode)
+    case renameCancel           // Escape (in rename mode)
 }
 
 public protocol KeyboardEventDelegate: AnyObject, Sendable {

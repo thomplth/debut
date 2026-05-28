@@ -2,32 +2,34 @@ import Testing
 import Foundation
 @testable import DebutCore
 
-// MARK: - StageApp Tests
+// MARK: - StageWindow Tests
 
-@Suite("StageApp")
-struct StageAppTests {
-    @Test("Create app")
-    func createApp() {
-        let app = StageApp(bundleID: "com.apple.Safari", name: "Safari")
-        #expect(app.bundleID == "com.apple.Safari")
-        #expect(app.name == "Safari")
-        #expect(app.isShared == false)
+@Suite("StageWindow")
+struct StageWindowTests {
+    @Test("Create window")
+    func createWindow() {
+        let window = StageWindow(windowID: 101, ownerBundleID: "com.apple.Safari", ownerName: "Safari", windowTitle: "Google")
+        #expect(window.windowID == 101)
+        #expect(window.ownerBundleID == "com.apple.Safari")
+        #expect(window.windowTitle == "Google")
+        #expect(window.isShared == false)
     }
 
-    @Test("App is Codable")
-    func appCodable() throws {
-        let app = StageApp(bundleID: "com.apple.Safari", name: "Safari", isShared: true)
-        let data = try JSONEncoder().encode(app)
-        let decoded = try JSONDecoder().decode(StageApp.self, from: data)
-        #expect(decoded.bundleID == app.bundleID)
+    @Test("Window is Codable")
+    func windowCodable() throws {
+        let window = StageWindow(windowID: 101, ownerBundleID: "com.apple.Safari", ownerName: "Safari", windowTitle: "Google", isShared: true)
+        let data = try JSONEncoder().encode(window)
+        let decoded = try JSONDecoder().decode(StageWindow.self, from: data)
+        #expect(decoded.ownerBundleID == window.ownerBundleID)
+        #expect(decoded.windowID == 101)
         #expect(decoded.isShared == true)
     }
 
-    @Test("App equality by bundleID")
-    func appEquality() {
-        let a = StageApp(bundleID: "com.a", name: "A")
-        let b = StageApp(bundleID: "com.a", name: "A")
-        let c = StageApp(bundleID: "com.b", name: "B")
+    @Test("Window equality by windowID")
+    func windowEquality() {
+        let a = StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1")
+        let b = StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T2")
+        let c = StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T3")
         #expect(a == b)
         #expect(a != c)
     }
@@ -41,54 +43,65 @@ struct StageTests {
     func createStage() {
         let stage = Stage(name: "Coding")
         #expect(stage.name == "Coding")
-        #expect(stage.apps.isEmpty)
+        #expect(stage.windows.isEmpty)
     }
 
-    @Test("Add app to stage")
-    func addApp() {
+    @Test("Add window to stage")
+    func addWindow() {
         var stage = Stage(name: "Work")
-        stage.addApp(StageApp(bundleID: "com.a", name: "A"))
-        #expect(stage.apps.count == 1)
+        stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"))
+        #expect(stage.windows.count == 1)
     }
 
-    @Test("Remove app from stage")
-    func removeApp() {
+    @Test("Remove window from stage")
+    func removeWindow() {
         var stage = Stage(name: "Work")
-        stage.addApp(StageApp(bundleID: "com.a", name: "A"))
-        stage.addApp(StageApp(bundleID: "com.b", name: "B"))
-        stage.removeApp(bundleID: "com.a")
-        #expect(stage.apps.count == 1)
-        #expect(stage.apps[0].bundleID == "com.b")
+        stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"))
+        stage.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"))
+        stage.removeWindow(windowID: 101)
+        #expect(stage.windows.count == 1)
+        #expect(stage.windows[0].windowID == 202)
     }
 
-    @Test("Duplicate app not added")
+    @Test("Duplicate window not added")
     func noDuplicates() {
         var stage = Stage(name: "Work")
-        stage.addApp(StageApp(bundleID: "com.a", name: "A"))
-        stage.addApp(StageApp(bundleID: "com.a", name: "A"))
-        #expect(stage.apps.count == 1)
+        stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"))
+        stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"))
+        #expect(stage.windows.count == 1)
     }
 
-    @Test("Bring app to front (MRU)")
+    @Test("Bring window to front (MRU)")
     func bringToFront() {
         var stage = Stage(name: "Work")
-        stage.addApp(StageApp(bundleID: "com.a", name: "A"))
-        stage.addApp(StageApp(bundleID: "com.b", name: "B"))
-        stage.addApp(StageApp(bundleID: "com.c", name: "C"))
-        stage.bringAppToFront(bundleID: "com.c")
-        #expect(stage.apps[0].bundleID == "com.c")
-        #expect(stage.apps[1].bundleID == "com.a")
-        #expect(stage.apps[2].bundleID == "com.b")
+        stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"))
+        stage.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"))
+        stage.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"))
+        stage.bringWindowToFront(windowID: 303)
+        #expect(stage.windows[0].windowID == 303)
+        #expect(stage.windows[1].windowID == 101)
+        #expect(stage.windows[2].windowID == 202)
+    }
+
+    @Test("Remove all windows for bundle ID")
+    func removeAllForBundle() {
+        var stage = Stage(name: "Work")
+        stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"))
+        stage.addWindow(StageWindow(windowID: 102, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T2"))
+        stage.addWindow(StageWindow(windowID: 201, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T3"))
+        stage.removeAllWindows(forBundleID: "com.a")
+        #expect(stage.windows.count == 1)
+        #expect(stage.windows[0].ownerBundleID == "com.b")
     }
 
     @Test("Stage is Codable")
     func stageCodable() throws {
         var stage = Stage(name: "Coding")
-        stage.addApp(StageApp(bundleID: "com.a", name: "A"))
+        stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"))
         let data = try JSONEncoder().encode(stage)
         let decoded = try JSONDecoder().decode(Stage.self, from: data)
         #expect(decoded.name == "Coding")
-        #expect(decoded.apps.count == 1)
+        #expect(decoded.windows.count == 1)
         #expect(decoded.id == stage.id)
     }
 

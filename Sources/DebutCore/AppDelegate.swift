@@ -14,6 +14,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     private var windowService: AccessibilityWindowService?
     private var keyboardService: EventTapKeyboardService?
+    private var desktopSurface: DesktopSurfaceWindow?
+    private var currentSettings: AppSettings = AppSettings()
     private var pendingStageManager: StageManager?
 
     public override init() {
@@ -26,7 +28,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
         stateStore = StateStore()
         pendingStageManager = (try? stateStore?.load()) ?? StageManager()
-        let settings = (try? stateStore?.loadSettings()) ?? AppSettings()
+        currentSettings = (try? stateStore?.loadSettings()) ?? AppSettings()
 
         windowService = AccessibilityWindowService()
         keyboardService = EventTapKeyboardService()
@@ -44,7 +46,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
 
         if isFirstLaunch() {
-            showSettings(settings: settings)
+            showSettings(settings: currentSettings)
         }
 
         diag.report("app_ready")
@@ -60,9 +62,28 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let discovery = WindowDiscoveryService(windowService: windowService)
         self.windowDiscovery = discovery
 
-        if stageManager.stages[0].apps.isEmpty {
+        // Apply exclusion list
+        discovery.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
+
+        // Remove stale window IDs, remap live window IDs from snapshot
+        discovery.reconcileWindows(&stageManager)
+
+        // Remove excluded apps' windows from all stages
+        for bundleID in currentSettings.excludedBundleIDs {
+            stageManager.removeAllWindows(forBundleID: bundleID)
+        }
+
+        if stageManager.stages[0].windows.isEmpty {
             discovery.populateDefaultStage(&stageManager)
         }
+
+        // Always start on the first stage
+        stageManager.activateStage(id: stageManager.stages[0].id)
+
+        // Create desktop surface — sits between active and inactive stage windows
+        let surface = DesktopSurfaceWindow()
+        surface.orderFront(nil)
+        self.desktopSurface = surface
 
         let controller = StageController(
             windowService: windowService,
@@ -70,26 +91,36 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             stageManager: stageManager
         )
         controller.delegate = self
+        controller.desktopSurface = surface
         stageController = controller
 
-        discovery.onAppLaunched = { [weak self] app in
+        // Raise first stage windows above the desktop surface
+        controller.switchToStage(id: stageManager.stages[0].id)
+
+        discovery.onWindowDiscovered = { [weak self] window in
             DispatchQueue.main.async {
                 guard let self else { return }
                 let activeID = self.stageController?.stageManager.activeStageID ?? self.stageController!.stageManager.stages[0].id
-                self.stageController?.stageManager.addApp(app, toStageID: activeID)
+                self.stageController?.stageManager.addWindow(window, toStageID: activeID)
+            }
+        }
+        discovery.onWindowClosed = { [weak self] windowID in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                for stage in self.stageController?.stageManager.stages ?? [] {
+                    self.stageController?.stageManager.removeWindow(windowID: windowID, fromStageID: stage.id)
+                }
+            }
+        }
+        discovery.onWindowActivated = { [weak self] windowID in
+            DispatchQueue.main.async {
+                self?.stageController?.recordWindowActivation(windowID: windowID)
             }
         }
         discovery.onAppTerminated = { [weak self] bundleID in
             DispatchQueue.main.async {
                 guard let self else { return }
-                for stage in self.stageController?.stageManager.stages ?? [] {
-                    self.stageController?.stageManager.removeApp(bundleID: bundleID, fromStageID: stage.id)
-                }
-            }
-        }
-        discovery.onAppActivated = { [weak self] bundleID in
-            DispatchQueue.main.async {
-                self?.stageController?.recordAppActivation(bundleID: bundleID)
+                self.stageController?.stageManager.removeAllWindows(forBundleID: bundleID)
             }
         }
         discovery.startObserving()
@@ -97,7 +128,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         diag.report("controller_setup", details: [
             "eventTapStarted": "\(controller.keyboardServiceStarted)",
             "eventTapRunning": "\(keyboardService.isRunning)",
-            "appsInDefaultStage": "\(stageManager.stages[0].apps.count)",
+            "windowsInDefaultStage": "\(stageManager.stages[0].windows.count)",
         ])
     }
 
@@ -163,7 +194,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let vm = OverlayViewModel(
             stageManager: stageController.stageManager,
             activeStageIndex: stageController.selectedStageIndex,
-            selectedAppIndex: stageController.selectedAppIndex
+            selectedWindowIndex: stageController.selectedWindowIndex,
+            windowPreviews: stageController.windowPreviews,
+            appearance: currentSettings
         )
         overlayWindow.update(viewModel: vm, isRenaming: stageController.isRenaming)
         overlayWindow.showOverlay()
@@ -180,7 +213,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let vm = OverlayViewModel(
             stageManager: stageController.stageManager,
             activeStageIndex: stageController.selectedStageIndex,
-            selectedAppIndex: stageController.selectedAppIndex
+            selectedWindowIndex: stageController.selectedWindowIndex,
+            windowPreviews: stageController.windowPreviews,
+            appearance: currentSettings
         )
         overlayWindow.update(viewModel: vm, isRenaming: stageController.isRenaming)
     }
@@ -211,10 +246,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             return
         }
 
-        let vm = SettingsViewModel(
+        var vm = SettingsViewModel(
             settings: settings,
             stageManager: stageController?.stageManager ?? StageManager()
         )
+        vm.onSettingsChanged = { [weak self] newSettings in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.currentSettings = newSettings
+                try? self.stateStore?.saveSettings(newSettings)
+                self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
+                for bundleID in newSettings.excludedBundleIDs {
+                    self.stageController?.stageManager.removeAllWindows(forBundleID: bundleID)
+                }
+            }
+        }
         let view = SettingsView(viewModel: vm)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),

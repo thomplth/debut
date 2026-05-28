@@ -4,61 +4,69 @@ This document specifies how Debut manages the relationship between stages, windo
 
 ---
 
+## Window-Centric Model
+
+Debut tracks individual **windows** (by CGWindowID), not apps. Each stage contains a list of StageWindow entries. A single app (e.g., Safari) can have windows in different stages.
+
+- [x] Windows identified by CGWindowID (ephemeral) + ownerBundleID/windowTitle (stable for persistence)
+- [x] Window list sourced from AX API (kAXWindowsAttribute) cross-referenced with CGWindowList
+- [x] Real windows only — AX filters out shadows, toolbars, and other CG surfaces
+
+---
+
 ## App Switcher Isolation
 
-- [x] Cmd+Tab quick tap: switch to most recently used app within active stage only ✅ verified
-- [x] Cmd+Tab hold: open Stage Manager overlay ✅ verified
-- [ ] Cmd+` cycles windows of frontmost app, only windows in active stage — NOT IMPLEMENTED
-- [ ] Cmd+` excludes windows of the same app in other stages — NOT IMPLEMENTED
-- [x] Isolation guarantee: no keyboard-driven switching crosses stage boundaries ✅ verified
+- [x] Cmd+Tab quick tap: switch to most recently used window within active stage only
+- [x] Cmd+Tab hold: open Stage Manager overlay
+- [x] Cmd+` passes through to system (native window cycling within app)
+- [x] Isolation guarantee: no keyboard-driven switching crosses stage boundaries
 
 ---
 
-## App-to-Stage Assignment
+## Window-to-Stage Assignment
 
-Model is app-based (StageApp by bundleID), not window-based.
+- [x] Every tracked window belongs to exactly one stage (no sharing/duplication)
 
-- [x] Every running app belongs to at least one stage ✅ verified
+### New window created (Cmd+N, "code .", etc.)
 
-### New app launch
+- [x] New window assigned to active stage, even if same app has windows in other stages
+- [x] Detected via kAXFocusedWindowChangedNotification (new window gets focus)
 
-- [x] App not currently running → assigned to active stage ✅ verified (via NSWorkspace.didLaunchApplication)
+### Existing window activated from another stage (Dock, Spotlight)
 
-### App activated from another stage (Dock click, Spotlight, Cmd+H then show)
+- [x] Debut switches to the stage that owns that window
+- [x] No duplication — window stays in its original stage
 
-- [ ] App should be added to current stage as shared (appears in both stages) — **BUG: currently re-hidden by isolation enforcement. Fix: add to active stage instead of re-hiding**
+### Excluded apps
 
-### Shared apps
-
-- [x] Shared app appears in multiple stages' plates ✅ verified (model supports isShared)
-- [x] On stage switch, shared apps are NOT hidden — they remain on screen ✅ verified
-- [ ] Removing app from a stage via drag-and-drop reduces sharing — needs drag-and-drop
-- [x] Closing/quitting app removes it from all stages ✅ verified (via NSWorkspace.didTerminateApplication)
+- [x] Excluded apps' windows are invisible to the stage manager
+- [x] Configured in Settings with running app picker
+- [x] Exclusion list persisted in settings.json
+- [x] Changes take effect immediately (live update to discovery service)
 
 ---
 
-## Stage Switching
+## Stage Switching via Desktop Surface
 
-- [x] Hide all apps belonging exclusively to the previous stage ✅ verified
-- [x] Show all apps belonging to the newly active stage ✅ verified
-- [x] Shared apps remain visible (not hidden or shown) ✅ verified
-- [x] Focus moves to selected app in new stage (or most recently used if none selected) ✅ verified
-- [x] New active stage becomes reference for Cmd+Tab behavior ✅ verified
+Debut uses a full-screen "desktop surface" window (OLED black, NSWindow.level.normal) positioned between active and inactive stage windows in z-order.
 
-### Combined stage + app switch
-
-- [x] Stage switches first (hide/show apps) ✅ verified
-- [x] Then selected app in new stage receives focus ✅ verified
+- [x] On switch: surface ordered to front, then active stage windows raised above it via AX
+- [x] Inactive windows remain at their positions — occluded by the surface
+- [x] No minimize animation, no position manipulation
+- [x] Surface locked: canBecomeKey=false, canBecomeMain=false, mouseDown no-op, isMovable=false
+- [x] Focus moves to selected window in new stage
+- [x] New active stage becomes reference for Cmd+Tab behavior
 
 ---
 
 ## MRU (Most Recently Used) Ordering
 
-- [x] Apps in stage ordered by recency: index 0 = most recently focused ✅ verified
-- [x] NSWorkspace.didActivateApplication triggers MRU update (only for apps in active stage) ✅ verified
-- [x] Cmd+Tab tap switches to apps[1] (second most recent) ✅ verified
-- [x] Overlay shows apps in MRU order ✅ verified
-- [ ] **BUG: overlay opens with selectedAppIndex=0 (same app). Native behavior: initial selection = index 1. Fix: set selectedAppIndex = 1 on open**
+- [x] Windows in stage ordered by recency: index 0 = most recently focused
+- [x] AXObserver (kAXFocusedWindowChangedNotification) tracks within-app focus changes — event-driven, no polling
+- [x] NSWorkspace.didActivateApplicationNotification tracks cross-app activation
+- [x] Observer moves to frontmost app on activation — one observer active at a time
+- [x] Cmd+Tab tap switches to windows[1] (second most recent)
+- [x] Overlay opens with selectedWindowIndex=1 (second MRU)
 
 ---
 
@@ -68,52 +76,48 @@ Full persistence across app restarts and system reboots.
 
 ### What is persisted
 
-- [x] Stage list and order ✅ verified (JSON via StateStore)
-- [x] Stage names ✅ verified
-- [x] App-to-stage assignments ✅ verified
-- [ ] Window positions and sizes — NOT IMPLEMENTED (app-based model doesn't track windows)
-- [x] Shared app associations ✅ verified
-- [x] Templates ✅ verified
-- [x] Settings / preferences ✅ verified
+- [x] Stage list, order, and names
+- [x] Window-to-stage assignments (by bundleID + windowTitle)
+- [x] Templates (by app bundleIDs)
+- [x] Settings / preferences (including appearance and exclusion list)
+- [x] Active stage ID
 
 ### Restore behavior on launch
 
-- [x] Load saved stage state from disk ✅ verified
-- [ ] Running apps with matching bundleIDs: reassign to saved stages — PARTIAL (only populates empty default stage)
-- [ ] Not-yet-launched apps: mark as unavailable (dimmed icon) — NOT IMPLEMENTED
-- [ ] As unavailable apps launch later, auto-capture into correct stage — NOT IMPLEMENTED
+- [x] Load saved stage state from state.json
+- [x] Reconcile: match persisted windows to live windows by (bundleID, windowTitle)
+- [x] Update ephemeral CGWindowIDs and PIDs to current values
+- [x] Remove windows that no longer exist (app was quit between sessions)
+- [x] Add new live windows (not in snapshot) to first stage
+- [x] Excluded apps filtered during reconciliation
+- [x] Activate first stage on launch, raise its windows above surface
 
 ### Storage
 
-- [x] Save to `~/Library/Application Support/Debut/state.json` ✅ verified
-- [x] Write on app terminate ✅ verified
-- [ ] Write on every stage mutation — NOT IMPLEMENTED (only saves on quit)
-- [ ] Debounced writes for position updates — NOT APPLICABLE (no window positions)
+- [x] Save to `~/Library/Application Support/Debut/state.json`
+- [x] Write on app terminate
+- [ ] Write on every stage mutation (currently only on quit)
 
 ---
 
 ## Stage Deletion
 
-- [x] Step 1: apps overflow to adjacent stage ✅ verified
-  - [x] First stage → overflow to stage below ✅ verified
-  - [x] Any other position → overflow to stage above ✅ verified
-- [x] Step 3: active stage moves to stage that received overflow ✅ verified
-- [x] Step 4: if only stage deleted → create new empty default stage ✅ verified
+- [x] Windows overflow to adjacent stage (first stage -> below, otherwise -> above)
+- [x] Active stage moves to stage that received overflow
+- [x] If only stage deleted -> create new empty default stage
 
 ---
 
-## Stage Creation from Template
+## Fullscreen Apps
 
-- [ ] New stage created with template's name — NOT IMPLEMENTED (save works, apply doesn't)
-- [ ] Each app in template launched — NOT IMPLEMENTED
-- [ ] Already-running app → shared — NOT IMPLEMENTED
+- [x] Overlay not shown when frontmost app is in fullscreen (AXFullScreen check)
+- [x] Cmd+Tab passes through to system in fullscreen mode
 
 ---
 
 ## Edge Cases
 
-- [x] First launch: create single default stage with all running apps ✅ verified
-- [x] App quits: removed from all stages ✅ verified
-- [x] App launched outside Debut's awareness → assigned to active stage ✅ verified
-- [ ] Fullscreen apps: stage switching behavior — TBD
-- [ ] Minimized windows remain in stage (dimmed icon in plate) — NOT APPLICABLE (app-based model)
+- [x] First launch: create single default stage with all running windows
+- [x] App quits: all its windows removed from all stages
+- [x] Window created outside Debut's awareness -> added to active stage on focus
+- [x] System Cmd+` restored — Debut does not intercept backtick
