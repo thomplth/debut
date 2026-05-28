@@ -41,45 +41,45 @@ struct ScreenshotTests {
 
     enum ScreenshotError: Error { case renderFailed }
 
-    private func makeSampleViewModel(stageCount: Int = 3, appsPerStage: [Int] = [3, 4, 2], activeIndex: Int = 1) -> OverlayViewModel {
+    private func makeSampleViewModel(stageCount: Int = 3, windowsPerStage: [Int] = [3, 4, 2], activeIndex: Int = 1) -> OverlayViewModel {
         var sm = StageManager()
         let stageNames = ["Email", "Coding", "Review"]
-        let apps = [
-            ("com.apple.mail", "Mail"), ("com.apple.Safari", "Safari"),
-            ("com.apple.Terminal", "Terminal"), ("com.microsoft.VSCode", "VS Code"),
-            ("com.tinyspeck.slackmacgap", "Slack"), ("com.apple.finder", "Finder"),
-            ("com.apple.Notes", "Notes"), ("com.google.Chrome", "Chrome"),
-            ("com.apple.dt.Xcode", "Xcode"), ("com.apple.Preview", "Preview"),
+        let windowData: [(String, String, String)] = [
+            ("com.apple.mail", "Mail", "Inbox"), ("com.apple.Safari", "Safari", "Google"),
+            ("com.apple.Terminal", "Terminal", "~ zsh"), ("com.microsoft.VSCode", "VS Code", "main.swift"),
+            ("com.tinyspeck.slackmacgap", "Slack", "#general"), ("com.apple.finder", "Finder", "Downloads"),
+            ("com.apple.Notes", "Notes", "Meeting Notes"), ("com.google.Chrome", "Chrome", "GitHub"),
+            ("com.apple.dt.Xcode", "Xcode", "Debut.xcodeproj"), ("com.apple.Preview", "Preview", "screenshot.png"),
         ]
         let defaultID = sm.stages[0].id
-        var appCounter = 0
+        var windowCounter: CGWindowID = 100
 
         for i in 0..<stageCount {
             if i == 0 {
                 sm.renameStage(id: defaultID, to: stageNames[i % stageNames.count])
-                for _ in 0..<appsPerStage[i % appsPerStage.count] {
-                    let a = apps[appCounter % apps.count]
-                    sm.addApp(StageApp(bundleID: a.0, name: a.1), toStageID: defaultID)
-                    appCounter += 1
+                for _ in 0..<windowsPerStage[i % windowsPerStage.count] {
+                    let w = windowData[Int(windowCounter - 100) % windowData.count]
+                    sm.addWindow(StageWindow(windowID: windowCounter, ownerBundleID: w.0, ownerName: w.1, windowTitle: w.2), toStageID: defaultID)
+                    windowCounter += 1
                 }
             } else {
                 sm.activateStage(id: sm.stages[i - 1].id)
                 sm.createStage(name: stageNames[i % stageNames.count], position: .below)
                 let stageID = sm.stages[i].id
-                for _ in 0..<appsPerStage[i % appsPerStage.count] {
-                    let a = apps[appCounter % apps.count]
-                    sm.addApp(StageApp(bundleID: a.0, name: a.1), toStageID: stageID)
-                    appCounter += 1
+                for _ in 0..<windowsPerStage[i % windowsPerStage.count] {
+                    let w = windowData[Int(windowCounter - 100) % windowData.count]
+                    sm.addWindow(StageWindow(windowID: windowCounter, ownerBundleID: w.0, ownerName: w.1, windowTitle: w.2), toStageID: stageID)
+                    windowCounter += 1
                 }
             }
         }
         sm.activateStage(id: sm.stages[min(activeIndex, sm.stages.count - 1)].id)
-        return OverlayViewModel(stageManager: sm, activeStageIndex: activeIndex, selectedAppIndex: 1)
+        return OverlayViewModel(stageManager: sm, activeStageIndex: activeIndex, selectedWindowIndex: 1)
     }
 
     @Test("Three plates render correctly")
     func threePlates() throws {
-        let vm = makeSampleViewModel(stageCount: 3, appsPerStage: [3, 4, 2], activeIndex: 1)
+        let vm = makeSampleViewModel(stageCount: 3, windowsPerStage: [3, 4, 2], activeIndex: 1)
         guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: NSSize(width: 1200, height: 600)) else {
             throw ScreenshotError.renderFailed
         }
@@ -87,16 +87,16 @@ struct ScreenshotTests {
         #expect(vm.plates.count == 3)
     }
 
-    @Test("Selection on second app")
+    @Test("Selection on second window")
     func selectionState() throws {
         let vm = OverlayViewModel(
-            stageManager: makeSampleViewModel(stageCount: 2, appsPerStage: [5, 3], activeIndex: 0).stageManager,
-            activeStageIndex: 0, selectedAppIndex: 2
+            stageManager: makeSampleViewModel(stageCount: 2, windowsPerStage: [5, 3], activeIndex: 0).stageManager,
+            activeStageIndex: 0, selectedWindowIndex: 2
         )
         guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: NSSize(width: 1200, height: 400)) else {
             throw ScreenshotError.renderFailed
         }
         try saveImage(img, name: "05_selection_state")
-        #expect(vm.selectedAppIndex == 2)
+        #expect(vm.selectedWindowIndex == 2)
     }
 }

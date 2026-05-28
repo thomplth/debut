@@ -1,9 +1,20 @@
 import Testing
 import Foundation
+import CoreGraphics
 @testable import DebutCore
 
 @Suite("StageController")
 struct StageControllerTests {
+
+    private func makeTestImage() -> CGImage {
+        let data: UnsafeMutableRawPointer? = nil
+        let ctx = CGContext(
+            data: data, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        return ctx.makeImage()!
+    }
 
     private func makeController() -> (StageController, MockWindowService, MockKeyboardService) {
         let windowService = MockWindowService()
@@ -15,32 +26,32 @@ struct StageControllerTests {
         return (controller, windowService, keyboardService)
     }
 
-    @Test("Switch stage hides old apps and unhides new")
+    @Test("Switch stage raises target stage windows")
     func switchStage() {
         let (controller, windowSvc, _) = makeController()
         let stageAID = controller.stageManager.stages[0].id
         controller.stageManager.createStage(name: "B", position: .below)
         let stageBID = controller.stageManager.stages[1].id
 
-        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageAID)
-        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageBID)
+        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageAID)
+        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageBID)
 
         controller.switchToStage(id: stageAID)
 
-        #expect(windowSvc.hiddenBundleIDs.contains("com.b"))
-        #expect(!windowSvc.hiddenBundleIDs.contains("com.a"))
+        // Window 101 should have been raised (it's in the target stage)
+        #expect(windowSvc.raisedWindowIDs.contains(101))
     }
 
-    @Test("App switch only activates selected app")
-    func appSwitch() {
+    @Test("Window switch raises selected window")
+    func windowSwitch() {
         let (controller, windowSvc, _) = makeController()
         let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageID)
-        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
 
-        controller.switchToStage(id: stageID, activateBundleID: "com.b")
+        controller.switchToStage(id: stageID, raiseWindowID: 202)
 
-        #expect(windowSvc.activatedBundleID == "com.b")
+        #expect(windowSvc.raisedWindowID == 202)
     }
 
     @Test("Cmd+Tab hold opens overlay")
@@ -50,83 +61,140 @@ struct StageControllerTests {
         #expect(controller.isStageManagerVisible)
     }
 
+    @Test("Cmd+Option+Tab hold opens overlay in stage mode")
+    func cmdOptionTabHold() {
+        let (controller, _, keyboardSvc) = makeController()
+        controller.stageManager.createStage(name: "B", position: .below)
+        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
+        keyboardSvc.simulateEvent(.cmdOptionTabHold)
+        #expect(controller.isStageManagerVisible)
+        #expect(controller.selectedStageIndex == 1)
+    }
+
     @Test("Escape discards")
     func escape() {
         let (controller, _, keyboardSvc) = makeController()
         let originalStageID = controller.stageManager.activeStageID
         keyboardSvc.simulateEvent(.cmdTabHold)
-        keyboardSvc.simulateEvent(.nextStage)
         keyboardSvc.simulateEvent(.escape)
         #expect(!controller.isStageManagerVisible)
         #expect(controller.stageManager.activeStageID == originalStageID)
     }
 
-    @Test("Tab cycles apps, initial selection at index 1")
+    @Test("Tab cycles windows, initial selection at index 1")
     func tabCycle() {
         let (controller, _, keyboardSvc) = makeController()
         let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageID)
-        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageID)
-        controller.stageManager.addApp(StageApp(bundleID: "com.c", name: "C"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageID)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(controller.selectedAppIndex == 1) // starts at second app like native
-        keyboardSvc.simulateEvent(.nextApp)
-        #expect(controller.selectedAppIndex == 2)
-        keyboardSvc.simulateEvent(.nextApp)
-        #expect(controller.selectedAppIndex == 0) // wraps
+        #expect(controller.selectedWindowIndex == 1) // starts at second window like native
+        keyboardSvc.simulateEvent(.nextWindow)
+        #expect(controller.selectedWindowIndex == 2)
+        keyboardSvc.simulateEvent(.nextWindow)
+        #expect(controller.selectedWindowIndex == 0) // wraps
     }
 
-    @Test("MRU: recordAppActivation brings to front")
+    @Test("MRU: recordWindowActivation brings to front")
     func mruTracking() {
         let (controller, _, _) = makeController()
         let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageID)
-        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageID)
-        controller.stageManager.addApp(StageApp(bundleID: "com.c", name: "C"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageID)
 
-        controller.recordAppActivation(bundleID: "com.c")
-        controller.recordAppActivation(bundleID: "com.a")
+        controller.recordWindowActivation(windowID: 303)
+        controller.recordWindowActivation(windowID: 101)
 
-        let apps = controller.stageManager.activeStage.apps.map(\.bundleID)
-        #expect(apps == ["com.a", "com.c", "com.b"])
+        let windowIDs = controller.stageManager.activeStage.windows.map(\.windowID)
+        #expect(windowIDs == [101, 303, 202])
     }
 
-    @Test("Cross-stage app activation adds as shared")
-    func crossStageSharing() {
-        let (controller, windowSvc, _) = makeController()
+    @Test("Cross-stage window activation switches to owning stage")
+    func crossStageSwitches() {
+        let (controller, _, _) = makeController()
         let stageAID = controller.stageManager.stages[0].id
         controller.stageManager.createStage(name: "B", position: .below)
         let stageBID = controller.stageManager.stages[1].id
 
-        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageAID)
-        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageBID)
-
-        windowSvc.apps = [AppInfo(bundleID: "com.a", name: "A", pid: 100, isHidden: false)]
+        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageAID)
+        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageBID)
 
         // Switch to stage B
         controller.switchToStage(id: stageBID)
+        #expect(controller.stageManager.activeStageID == stageBID)
 
-        // Activate app from stage A while in stage B
-        controller.recordAppActivation(bundleID: "com.a")
+        // Activate window from stage A while in stage B — should switch back to A
+        controller.recordWindowActivation(windowID: 101)
+        #expect(controller.stageManager.activeStageID == stageAID)
 
-        // App should now be shared in both stages
-        let stageA = controller.stageManager.stages[0]
-        let stageB = controller.stageManager.stages[1]
-        #expect(stageA.apps.contains(where: { $0.bundleID == "com.a" }))
-        #expect(stageB.apps.contains(where: { $0.bundleID == "com.a" }))
+        // Window stays only in stage A (no duplication)
+        #expect(controller.stageManager.stages[0].windows.contains(where: { $0.windowID == 101 }))
+        #expect(!controller.stageManager.stages[1].windows.contains(where: { $0.windowID == 101 }))
     }
 
-    @Test("Cmd+Tab tap switches to second MRU app")
+    @Test("Cmd+Tab tap switches to second MRU window")
     func cmdTabTap() {
         let (controller, windowSvc, keyboardSvc) = makeController()
         let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageID)
-        controller.stageManager.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
 
         keyboardSvc.simulateEvent(.cmdTabTap)
 
-        #expect(windowSvc.activatedBundleID == "com.b")
-        #expect(controller.stageManager.activeStage.apps[0].bundleID == "com.b")
+        #expect(windowSvc.raisedWindowID == 202)
+        #expect(controller.stageManager.activeStage.windows[0].windowID == 202)
+    }
+
+    @Test("Window previews persist for hidden windows")
+    func previewPersistsWhenHidden() {
+        let (controller, windowSvc, keyboardSvc) = makeController()
+        let stageID = controller.stageManager.stages[0].id
+        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
+
+        // Create a 1x1 test image
+        let testImage = makeTestImage()
+
+        // First overlay open — both windows capturable
+        windowSvc.capturedImages = [101: testImage, 202: testImage]
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(controller.windowPreviews[101] != nil)
+        #expect(controller.windowPreviews[202] != nil)
+        keyboardSvc.simulateEvent(.escape)
+
+        // Second overlay open — window 202 is hidden (capture returns nil)
+        windowSvc.capturedImages = [101: testImage]  // 202 no longer capturable
+        keyboardSvc.simulateEvent(.cmdTabHold)
+
+        // Window 202 should still have its previous preview
+        #expect(controller.windowPreviews[101] != nil)
+        #expect(controller.windowPreviews[202] != nil, "Hidden window should keep last captured preview")
+        keyboardSvc.simulateEvent(.escape)
+    }
+
+    @Test("Stale window previews are cleaned up")
+    func previewCleanup() {
+        let (controller, windowSvc, keyboardSvc) = makeController()
+        let stageID = controller.stageManager.stages[0].id
+        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
+
+        let testImage = makeTestImage()
+        windowSvc.capturedImages = [101: testImage]
+
+        // Open overlay to populate previews
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(controller.windowPreviews[101] != nil)
+        keyboardSvc.simulateEvent(.escape)
+
+        // Remove window from stage
+        controller.stageManager.removeWindow(windowID: 101, fromStageID: stageID)
+
+        // Open overlay again — stale preview should be cleaned up
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(controller.windowPreviews[101] == nil, "Preview for removed window should be cleaned up")
+        keyboardSvc.simulateEvent(.escape)
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 public enum StageInsertPosition: Codable, Sendable {
     case above
@@ -25,7 +26,7 @@ public struct StageManager: Codable, Sendable {
     }
 
     public var activeStage: Stage {
-        stages.first(where: { $0.id == activeStageID })!
+        stages.first(where: { $0.id == activeStageID }) ?? stages[0]
     }
 
     public func stage(atIndex index: Int) -> Stage? {
@@ -69,8 +70,8 @@ public struct StageManager: Codable, Sendable {
         if index == 0 { overflowIndex = 1 }
         else { overflowIndex = index - 1 }
 
-        for app in deletedStage.apps {
-            stages[overflowIndex].addApp(app)
+        for window in deletedStage.windows {
+            stages[overflowIndex].addWindow(window)
         }
 
         stages.remove(at: index)
@@ -104,42 +105,57 @@ public struct StageManager: Codable, Sendable {
         activeStageID = id
     }
 
-    // MARK: - App management
+    // MARK: - Window management
 
-    public mutating func addApp(_ app: StageApp, toStageID stageID: UUID) {
+    public mutating func addWindow(_ window: StageWindow, toStageID stageID: UUID) {
         guard let index = stages.firstIndex(where: { $0.id == stageID }) else { return }
-        stages[index].addApp(app)
+        stages[index].addWindow(window)
     }
 
-    public mutating func removeApp(bundleID: String, fromStageID stageID: UUID) {
+    public mutating func removeWindow(windowID: CGWindowID, fromStageID stageID: UUID) {
         guard let index = stages.firstIndex(where: { $0.id == stageID }) else { return }
-        stages[index].removeApp(bundleID: bundleID)
+        stages[index].removeWindow(windowID: windowID)
     }
 
-    public mutating func moveApp(bundleID: String, fromStageID: UUID, toStageID: UUID) {
+    public mutating func removeAllWindows(forBundleID bundleID: String) {
+        for index in stages.indices {
+            stages[index].removeAllWindows(forBundleID: bundleID)
+        }
+    }
+
+    public mutating func moveWindow(windowID: CGWindowID, fromStageID: UUID, toStageID: UUID) {
         guard let fromIndex = stages.firstIndex(where: { $0.id == fromStageID }),
               let toIndex = stages.firstIndex(where: { $0.id == toStageID }),
-              let app = stages[fromIndex].apps.first(where: { $0.bundleID == bundleID })
+              let window = stages[fromIndex].windows.first(where: { $0.windowID == windowID })
         else { return }
-        stages[fromIndex].removeApp(bundleID: bundleID)
-        stages[toIndex].addApp(app)
+        stages[fromIndex].removeWindow(windowID: windowID)
+        stages[toIndex].addWindow(window)
     }
 
-    public mutating func bringAppToFront(bundleID: String, inStageID stageID: UUID) {
+    public mutating func bringWindowToFront(windowID: CGWindowID, inStageID stageID: UUID) {
         guard let index = stages.firstIndex(where: { $0.id == stageID }) else { return }
-        stages[index].bringAppToFront(bundleID: bundleID)
+        stages[index].bringWindowToFront(windowID: windowID)
     }
 
-    public mutating func markAppShared(bundleID: String, inStageID stageID: UUID) {
+    public mutating func markWindowShared(windowID: CGWindowID, inStageID stageID: UUID) {
         guard let stageIndex = stages.firstIndex(where: { $0.id == stageID }) else { return }
-        stages[stageIndex].markShared(bundleID: bundleID)
+        stages[stageIndex].markShared(windowID: windowID)
+    }
+
+    public mutating func updateWindowIDs(stageIndex: Int, windowIndex: Int, windowID: CGWindowID, ownerPID: pid_t?) {
+        guard stages.indices.contains(stageIndex) else { return }
+        stages[stageIndex].updateWindow(at: windowIndex, windowID: windowID, ownerPID: ownerPID)
+    }
+
+    public func stageContainingWindow(windowID: CGWindowID) -> UUID? {
+        stages.first(where: { $0.windows.contains(where: { $0.windowID == windowID }) })?.id
     }
 
     // MARK: - Templates
 
     public mutating func saveStageAsTemplate(stageID: UUID, templateName: String) {
         guard let stage = stages.first(where: { $0.id == stageID }) else { return }
-        let bundleIDs = Array(stage.appBundleIDs.sorted())
+        let bundleIDs = Array(Set(stage.windows.map(\.ownerBundleID)).sorted())
         let template = Template(name: templateName, appBundleIDs: bundleIDs)
         templates.append(template)
     }

@@ -30,10 +30,10 @@ struct KeyboardServiceTests {
         _ = svc.start(delegate: delegate)
 
         svc.simulateEvent(.cmdTabHold)
-        svc.simulateEvent(.nextApp)
+        svc.simulateEvent(.nextWindow)
         svc.simulateEvent(.cmdRelease)
 
-        #expect(delegate.receivedEvents == [.cmdTabHold, .nextApp, .cmdRelease])
+        #expect(delegate.receivedEvents == [.cmdTabHold, .nextWindow, .cmdRelease])
     }
 
     @Test("Stage navigation events")
@@ -42,14 +42,14 @@ struct KeyboardServiceTests {
         let delegate = TestKeyboardDelegate()
         _ = svc.start(delegate: delegate)
 
-        svc.simulateEvent(.cmdTabHold)
+        svc.simulateEvent(.cmdOptionTabHold)
         svc.simulateEvent(.nextStage)
         svc.simulateEvent(.previousStage)
         svc.simulateEvent(.jumpToStage(3))
         svc.simulateEvent(.cmdRelease)
 
         #expect(delegate.receivedEvents == [
-            .cmdTabHold, .nextStage, .previousStage, .jumpToStage(3), .cmdRelease
+            .cmdOptionTabHold, .nextStage, .previousStage, .jumpToStage(3), .cmdRelease
         ])
     }
 
@@ -81,12 +81,12 @@ struct KeyboardServiceTests {
         let delegate = TestKeyboardDelegate()
         _ = svc.start(delegate: delegate)
 
-        svc.simulateEvent(.moveAppUp)
-        svc.simulateEvent(.moveAppDown)
+        svc.simulateEvent(.moveWindowUp)
+        svc.simulateEvent(.moveWindowDown)
         svc.simulateEvent(.swapStageUp)
         svc.simulateEvent(.swapStageDown)
 
-        #expect(delegate.receivedEvents == [.moveAppUp, .moveAppDown, .swapStageUp, .swapStageDown])
+        #expect(delegate.receivedEvents == [.moveWindowUp, .moveWindowDown, .swapStageUp, .swapStageDown])
     }
 
     @Test("Escape event")
@@ -112,23 +112,35 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdTabTap])
     }
 
+    @Test("Cmd+Option+Tab event")
+    func cmdOptionTab() {
+        let svc = MockKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        _ = svc.start(delegate: delegate)
+
+        svc.simulateEvent(.cmdOptionTabHold)
+
+        #expect(delegate.receivedEvents == [.cmdOptionTabHold])
+    }
+
     @Test("Events recorded in mock")
     func eventsRecorded() {
         let svc = MockKeyboardService()
         let delegate = TestKeyboardDelegate()
         _ = svc.start(delegate: delegate)
 
-        svc.simulateEvent(.nextApp)
-        svc.simulateEvent(.previousApp)
+        svc.simulateEvent(.nextWindow)
+        svc.simulateEvent(.previousWindow)
 
-        #expect(svc.events == [.nextApp, .previousApp])
+        #expect(svc.events == [.nextWindow, .previousWindow])
     }
 
     @Test("All DebutKeyEvent variants are equatable")
     func eventEquality() {
         #expect(DebutKeyEvent.cmdTabTap == .cmdTabTap)
+        #expect(DebutKeyEvent.cmdOptionTabHold == .cmdOptionTabHold)
         #expect(DebutKeyEvent.jumpToStage(5) == .jumpToStage(5))
         #expect(DebutKeyEvent.jumpToStage(5) != .jumpToStage(3))
-        #expect(DebutKeyEvent.nextApp != .previousApp)
+        #expect(DebutKeyEvent.nextWindow != .previousWindow)
     }
 }

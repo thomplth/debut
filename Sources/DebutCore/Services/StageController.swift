@@ -1,4 +1,6 @@
-import Foundation
+import AppKit
+import ApplicationServices
+import CoreGraphics
 
 public protocol StageControllerDelegate: AnyObject {
     func stageControllerDidOpenOverlay(_ controller: StageController)
@@ -18,10 +20,17 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var isStageManagerVisible: Bool = false
     public private(set) var isRenaming: Bool = false
     public var selectedStageIndex: Int = 0
-    public var selectedAppIndex: Int = 0
+    public var selectedWindowIndex: Int = 0
     public private(set) var keyboardServiceStarted: Bool = false
 
+    /// Window previews captured when overlay opens
+    public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
+
+    /// Desktop surface window — sits between active and inactive stage windows
+    public var desktopSurface: DesktopSurfaceWindow?
+
     private var preOverlayStageID: UUID?
+    private var previousStageID: UUID?
     private let diag = DiagnosticReporter.shared
 
     public init(
@@ -44,92 +53,92 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 "isRenaming": "\(self.isRenaming)",
                 "stageCount": "\(self.stageManager.stages.count)",
                 "activeStageIndex": "\(self.selectedStageIndex)",
-                "selectedAppIndex": "\(self.selectedAppIndex)",
+                "selectedWindowIndex": "\(self.selectedWindowIndex)",
                 "eventTapRunning": "\(self.keyboardService.isRunning)",
                 "eventTapStarted": "\(self.keyboardServiceStarted)",
-                "appsInActiveStage": "\(self.stageManager.activeStage.apps.count)",
+                "windowsInActiveStage": "\(self.stageManager.activeStage.windows.count)",
             ]
         }
     }
 
     // MARK: - Stage switching
 
-    public func switchToStage(id targetID: UUID, activateBundleID: String? = nil) {
+    public func switchToStage(id targetID: UUID, raiseWindowID: CGWindowID? = nil) {
         let previousID = stageManager.activeStageID
 
         if previousID != targetID {
             let previousStage = stageManager.stages.first(where: { $0.id == previousID })
             let targetStage = stageManager.stages.first(where: { $0.id == targetID })
 
-            if let previousStage {
-                for app in previousStage.apps where !app.isShared {
-                    _ = windowService.hideApp(bundleID: app.bundleID)
-                }
-            }
+            self.previousStageID = previousID
+            stageManager.activateStage(id: targetID)
+
+            // 1. Bring desktop surface to front — covers all inactive windows
+            desktopSurface?.orderToFront()
+
+            // 2. Raise all windows in the target stage above the surface (no app activation yet)
             if let targetStage {
-                for app in targetStage.apps where !app.isShared {
-                    _ = windowService.unhideApp(bundleID: app.bundleID)
+                for window in targetStage.windows {
+                    _ = windowService.raiseWindow(windowID: window.windowID)
                 }
             }
 
-            stageManager.activateStage(id: targetID)
             diag.report("stage_switched", details: [
                 "from": previousStage?.name ?? "?",
                 "to": targetStage?.name ?? "?",
-                "appsInTarget": "\(targetStage?.apps.count ?? 0)",
+                "windowsInTarget": "\(targetStage?.windows.count ?? 0)",
             ])
         }
 
-        if let bundleID = activateBundleID {
-            _ = windowService.activateApp(bundleID: bundleID)
-            stageManager.bringAppToFront(bundleID: bundleID, inStageID: targetID)
-        } else if let firstApp = stageManager.stages.first(where: { $0.id == targetID })?.apps.first {
-            _ = windowService.activateApp(bundleID: firstApp.bundleID)
+        // Focus the selected window and activate its app (single activation, no flash)
+        let targetWindows = stageManager.stages.first(where: { $0.id == targetID })?.windows
+        let focusWindowID = raiseWindowID ?? targetWindows?.first?.windowID
+        if let focusWindowID {
+            _ = windowService.raiseWindow(windowID: focusWindowID)
+            stageManager.bringWindowToFront(windowID: focusWindowID, inStageID: targetID)
+            if let bundleID = targetWindows?.first(where: { $0.windowID == focusWindowID })?.ownerBundleID {
+                _ = windowService.activateApp(bundleID: bundleID)
+            }
         }
 
         delegate?.stageControllerDidSwitchStage(self)
     }
 
-    // MARK: - App ownership
+    // MARK: - Window ownership
 
-    public func stageOwningApp(bundleID: String) -> UUID? {
-        stageManager.stages.first(where: { $0.apps.contains(where: { $0.bundleID == bundleID }) })?.id
+    public func stageOwningWindow(windowID: CGWindowID) -> UUID? {
+        stageManager.stageContainingWindow(windowID: windowID)
     }
 
-    public func recordAppActivation(bundleID: String) {
+    public func recordWindowActivation(windowID: CGWindowID) {
         let activeStageID = stageManager.activeStageID
-        let ownerStageID = stageOwningApp(bundleID: bundleID)
+        let ownerStageID = stageOwningWindow(windowID: windowID)
 
         if ownerStageID == activeStageID {
-            stageManager.bringAppToFront(bundleID: bundleID, inStageID: activeStageID)
-        } else if ownerStageID != nil {
-            // App belongs to another stage — add as shared to active stage
-            if let existingApp = stageManager.stages
-                .first(where: { $0.id == ownerStageID })?
-                .apps.first(where: { $0.bundleID == bundleID })
-            {
-                var sharedApp = StageApp(bundleID: existingApp.bundleID, name: existingApp.name, isShared: true)
-                sharedApp = StageApp(bundleID: existingApp.bundleID, name: existingApp.name, isShared: true, pid: existingApp.pid)
-                stageManager.addApp(sharedApp, toStageID: activeStageID)
-                // Mark original as shared too
-                if let origIndex = stageManager.stages.firstIndex(where: { $0.id == ownerStageID }),
-                   let appIndex = stageManager.stages[origIndex].apps.firstIndex(where: { $0.bundleID == bundleID }) {
-                    stageManager.markAppShared(bundleID: bundleID, inStageID: ownerStageID!)
-                }
-                stageManager.bringAppToFront(bundleID: bundleID, inStageID: activeStageID)
-            }
-            diag.report("app_shared_across_stages", details: [
-                "app": bundleID,
-                "originStage": stageManager.stages.first(where: { $0.id == ownerStageID })?.name ?? "?",
-                "activeStage": stageManager.activeStage.name,
+            // Window is in the active stage — update MRU
+            stageManager.bringWindowToFront(windowID: windowID, inStageID: activeStageID)
+        } else if let ownerStageID {
+            // Window belongs to another stage — switch to that stage
+            diag.report("switching_to_window_stage", details: [
+                "windowID": "\(windowID)",
+                "targetStage": stageManager.stages.first(where: { $0.id == ownerStageID })?.name ?? "?",
             ])
+            switchToStage(id: ownerStageID, raiseWindowID: windowID)
         } else {
-            // App not in any stage — add to active stage (new launch not caught by notification)
-            let apps = windowService.listRunningApps()
-            if let info = apps.first(where: { $0.bundleID == bundleID }) {
-                let app = StageApp(bundleID: info.bundleID, name: info.name, pid: info.pid)
-                stageManager.addApp(app, toStageID: activeStageID)
-                stageManager.bringAppToFront(bundleID: bundleID, inStageID: activeStageID)
+            // Window not in any stage — new window, add to active stage.
+            // This handles "code ." creating a new VSCode window while
+            // other VSCode windows are in a different stage.
+            let windows = windowService.listWindows()
+            if let info = windows.first(where: { $0.windowID == windowID }) {
+                let window = StageWindow(
+                    windowID: info.windowID,
+                    ownerBundleID: info.ownerBundleID,
+                    ownerName: info.ownerName,
+                    windowTitle: info.title,
+                    ownerPID: info.ownerPID
+                )
+                stageManager.addWindow(window, toStageID: activeStageID)
+                stageManager.bringWindowToFront(windowID: windowID, inStageID: activeStageID)
             }
         }
     }
@@ -143,15 +152,37 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         case .cmdTabTap:
             handleCmdTabTap()
         case .cmdTabHold:
-            openOverlay()
+            if isStageManagerVisible {
+                cycleWindow(forward: true)
+            } else {
+                openOverlay(selectNextWindow: true)
+            }
+        case .cmdShiftTabHold:
+            if isStageManagerVisible {
+                cycleWindow(forward: false)
+            } else {
+                openOverlay(selectLastWindow: true)
+            }
+        case .cmdOptionTabHold:
+            if isStageManagerVisible {
+                cycleStage(forward: true)
+            } else {
+                openOverlay(selectNextStage: true)
+            }
+        case .cmdOptionShiftTabHold:
+            if isStageManagerVisible {
+                cycleStage(forward: false)
+            } else {
+                openOverlay(selectPreviousStage: true)
+            }
         case .cmdRelease:
             commitSelection()
         case .escape:
-            discardSelection()
-        case .nextApp:
-            cycleApp(forward: true)
-        case .previousApp:
-            cycleApp(forward: false)
+            discardOverlay()
+        case .nextWindow:
+            cycleWindow(forward: true)
+        case .previousWindow:
+            cycleWindow(forward: false)
         case .nextStage:
             cycleStage(forward: true)
         case .previousStage:
@@ -167,15 +198,15 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         case .renameStage:
             enterRenameMode()
         case .renameCommit:
-            exitRenameMode(commit: true)
+            break // Rename commit handled via distributed notification from text field
         case .renameCancel:
             exitRenameMode(commit: false)
         case .saveAsTemplate:
             saveSelectedStageAsTemplate()
-        case .moveAppUp:
-            moveApp(direction: .up)
-        case .moveAppDown:
-            moveApp(direction: .down)
+        case .moveWindowUp:
+            moveWindow(direction: .up)
+        case .moveWindowDown:
+            moveWindow(direction: .down)
         case .swapStageUp:
             swapStage(direction: .up)
         case .swapStageDown:
@@ -232,70 +263,146 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func handleCmdTabTap() {
         let activeStage = stageManager.activeStage
-        guard activeStage.apps.count >= 2 else { return }
-        let targetApp = activeStage.apps[1]
-        _ = windowService.activateApp(bundleID: targetApp.bundleID)
-        stageManager.bringAppToFront(bundleID: targetApp.bundleID, inStageID: activeStage.id)
+        guard activeStage.windows.count >= 2 else { return }
+        let targetWindow = activeStage.windows[1]
+        _ = windowService.raiseWindow(windowID: targetWindow.windowID)
+        stageManager.bringWindowToFront(windowID: targetWindow.windowID, inStageID: activeStage.id)
     }
 
-    private func openOverlay() {
+    private func openOverlay(selectNextWindow: Bool) {
+        setupOverlay()
+        let windowCount = stageManager.activeStage.windows.count
+        selectedWindowIndex = windowCount >= 2 ? 1 : 0
+    }
+
+    private func openOverlay(selectLastWindow: Bool) {
+        setupOverlay()
+        let windowCount = stageManager.activeStage.windows.count
+        selectedWindowIndex = windowCount > 0 ? windowCount - 1 : 0
+    }
+
+    private func openOverlay(selectNextStage: Bool) {
+        setupOverlay()
+        selectedWindowIndex = 0
+        if stageManager.stages.count > 1 {
+            selectedStageIndex = (selectedStageIndex + 1) % stageManager.stages.count
+        }
+    }
+
+    private func openOverlay(selectPreviousStage: Bool) {
+        setupOverlay()
+        selectedWindowIndex = 0
+        if stageManager.stages.count > 1 {
+            selectedStageIndex = (selectedStageIndex - 1 + stageManager.stages.count) % stageManager.stages.count
+        }
+    }
+
+    private func setupOverlay() {
+        // Don't show overlay when a fullscreen app is active
+        if isFullscreenAppActive() { return }
+
         isStageManagerVisible = true
+        if let tapService = keyboardService as? EventTapKeyboardService {
+            tapService.overlayVisible = true
+        }
         if let index = stageManager.stages.firstIndex(where: { $0.id == stageManager.activeStageID }) {
             selectedStageIndex = index
         }
-        let appCount = stageManager.activeStage.apps.count
-        selectedAppIndex = appCount >= 2 ? 1 : 0
         preOverlayStageID = stageManager.activeStageID
-
+        captureWindowPreviews()
         diag.report("overlay_opened")
         delegate?.stageControllerDidOpenOverlay(self)
+    }
+
+    private func isFullscreenAppActive() -> Bool {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication,
+              frontApp.bundleIdentifier != "com.thomplth.Debut"
+        else { return false }
+
+        let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &windowsRef) == .success else {
+            return false
+        }
+        let axWindow = windowsRef as! AXUIElement
+        var fullscreenRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axWindow, "AXFullScreen" as CFString, &fullscreenRef) == .success else {
+            return false
+        }
+        return (fullscreenRef as? Bool) == true
+    }
+
+    private func captureWindowPreviews() {
+        // Don't clear — keep last good capture for hidden windows
+        for stage in stageManager.stages {
+            for window in stage.windows {
+                if let image = windowService.captureWindowImage(windowID: window.windowID) {
+                    windowPreviews[window.windowID] = image
+                }
+                // else: keep previous capture in windowPreviews (if any)
+            }
+        }
+
+        // Remove entries for windows no longer in any stage
+        let allWindowIDs = Set(stageManager.stages.flatMap { $0.windows.map(\.windowID) })
+        windowPreviews = windowPreviews.filter { allWindowIDs.contains($0.key) }
     }
 
     private func commitSelection() {
         guard isStageManagerVisible, !isRenaming else { return }
         isStageManagerVisible = false
+        if let tapService = keyboardService as? EventTapKeyboardService {
+            tapService.overlayVisible = false
+        }
 
         delegate?.stageControllerDidCloseOverlay(self)
 
         guard stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let targetStage = stageManager.stages[selectedStageIndex]
 
-        var activateBundleID: String?
-        if targetStage.apps.indices.contains(selectedAppIndex) {
-            activateBundleID = targetStage.apps[selectedAppIndex].bundleID
+        var raiseWindowID: CGWindowID?
+        if targetStage.windows.indices.contains(selectedWindowIndex) {
+            raiseWindowID = targetStage.windows[selectedWindowIndex].windowID
         }
 
-        switchToStage(id: targetStage.id, activateBundleID: activateBundleID)
+        switchToStage(id: targetStage.id, raiseWindowID: raiseWindowID)
 
         diag.report("overlay_committed", details: [
             "stageIndex": "\(selectedStageIndex)",
-            "appIndex": "\(selectedAppIndex)",
+            "windowIndex": "\(selectedWindowIndex)",
             "targetStage": targetStage.name,
         ])
     }
 
-    private func discardSelection() {
+    /// Close the overlay but keep the Cmd session alive.
+    /// Next Cmd+Tab or Cmd+Option+Tab reopens the overlay.
+    private func discardOverlay() {
         guard isStageManagerVisible else { return }
         if isRenaming {
             exitRenameMode(commit: false)
             return
         }
         isStageManagerVisible = false
+        if let tapService = keyboardService as? EventTapKeyboardService {
+            tapService.overlayVisible = false
+        }
         selectedStageIndex = stageManager.stages.firstIndex(where: { $0.id == preOverlayStageID }) ?? 0
-        selectedAppIndex = 0
+        selectedWindowIndex = 0
         delegate?.stageControllerDidCloseOverlay(self)
+        // stageManagerActive stays true — session continues until Cmd release
+        // But overlayVisible is false — ` passes through to system as Cmd+`
     }
 
-    private func cycleApp(forward: Bool) {
+    private func cycleWindow(forward: Bool) {
         guard isStageManagerVisible, !isRenaming,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
-        guard !stage.apps.isEmpty else { return }
+        guard !stage.windows.isEmpty else { return }
 
         if forward {
-            selectedAppIndex = (selectedAppIndex + 1) % stage.apps.count
+            selectedWindowIndex = (selectedWindowIndex + 1) % stage.windows.count
         } else {
-            selectedAppIndex = (selectedAppIndex - 1 + stage.apps.count) % stage.apps.count
+            selectedWindowIndex = (selectedWindowIndex - 1 + stage.windows.count) % stage.windows.count
         }
         delegate?.stageControllerDidUpdateSelection(self)
     }
@@ -308,7 +415,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         } else {
             selectedStageIndex = (selectedStageIndex - 1 + stageManager.stages.count) % stageManager.stages.count
         }
-        selectedAppIndex = 0
+        selectedWindowIndex = 0
         delegate?.stageControllerDidUpdateSelection(self)
     }
 
@@ -316,7 +423,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         guard isStageManagerVisible, !isRenaming,
               stageManager.stages.indices.contains(index) else { return }
         selectedStageIndex = index
-        selectedAppIndex = 0
+        selectedWindowIndex = 0
         delegate?.stageControllerDidUpdateSelection(self)
     }
 
@@ -329,7 +436,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         if let newIndex = stageManager.stages.firstIndex(where: { $0.id == stageManager.activeStageID }) {
             selectedStageIndex = newIndex
         }
-        selectedAppIndex = 0
+        selectedWindowIndex = 0
         delegate?.stageControllerDidUpdateSelection(self)
     }
 
@@ -339,7 +446,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         let targetID = stageManager.stages[selectedStageIndex].id
         stageManager.deleteStage(id: targetID)
         selectedStageIndex = min(selectedStageIndex, stageManager.stages.count - 1)
-        selectedAppIndex = 0
+        selectedWindowIndex = 0
         delegate?.stageControllerDidUpdateSelection(self)
     }
 
@@ -350,12 +457,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         stageManager.saveStageAsTemplate(stageID: stage.id, templateName: stage.name)
     }
 
-    private func moveApp(direction: SwapDirection) {
+    private func moveWindow(direction: SwapDirection) {
         guard isStageManagerVisible, !isRenaming,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
-        guard stage.apps.indices.contains(selectedAppIndex) else { return }
-        let app = stage.apps[selectedAppIndex]
+        guard stage.windows.indices.contains(selectedWindowIndex) else { return }
+        let window = stage.windows[selectedWindowIndex]
 
         let targetStageIndex: Int
         switch direction {
@@ -368,8 +475,16 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         let targetStageID = stageManager.stages[targetStageIndex].id
-        stageManager.moveApp(bundleID: app.bundleID, fromStageID: stage.id, toStageID: targetStageID)
+        stageManager.moveWindow(windowID: window.windowID, fromStageID: stage.id, toStageID: targetStageID)
+
+        // Follow the moved window to the target stage
+        selectedStageIndex = targetStageIndex
+        let targetWindows = stageManager.stages[targetStageIndex].windows
+        selectedWindowIndex = targetWindows.firstIndex(where: { $0.windowID == window.windowID }) ?? 0
+
         delegate?.stageControllerDidUpdateSelection(self)
+        // Force overlay rebuild since stage contents changed
+        delegate?.stageControllerDidOpenOverlay(self)
     }
 
     private func swapStage(direction: SwapDirection) {

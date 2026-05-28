@@ -1,15 +1,20 @@
 import Foundation
+import CoreGraphics
 
-public struct PlateAppData: Sendable {
-    public let bundleID: String
-    public let name: String
+public struct PlateWindowData: Sendable, Identifiable {
+    public let id: CGWindowID
+    public let windowID: CGWindowID
+    public let ownerBundleID: String
+    public let ownerName: String
+    public let windowTitle: String
     public let isShared: Bool
+    public let previewImage: CGImage?
 }
 
 public struct PlateData: Sendable, Identifiable {
     public let id: UUID
     public let name: String
-    public let apps: [PlateAppData]
+    public let windows: [PlateWindowData]
     public let isActive: Bool
     public let index: Int
 }
@@ -17,12 +22,16 @@ public struct PlateData: Sendable, Identifiable {
 public struct OverlayViewModel: Sendable {
     public let stageManager: StageManager
     public var activeStageIndex: Int
-    public var selectedAppIndex: Int
+    public var selectedWindowIndex: Int
+    public let windowPreviews: [CGWindowID: CGImage]
+    public var appearance: AppSettings
 
-    public init(stageManager: StageManager, activeStageIndex: Int, selectedAppIndex: Int) {
+    public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings()) {
         self.stageManager = stageManager
         self.activeStageIndex = activeStageIndex
-        self.selectedAppIndex = selectedAppIndex
+        self.selectedWindowIndex = selectedWindowIndex
+        self.windowPreviews = windowPreviews
+        self.appearance = appearance
     }
 
     public var plates: [PlateData] {
@@ -30,8 +39,16 @@ public struct OverlayViewModel: Sendable {
             PlateData(
                 id: stage.id,
                 name: stage.name,
-                apps: stage.apps.map { app in
-                    PlateAppData(bundleID: app.bundleID, name: app.name, isShared: app.isShared)
+                windows: stage.windows.map { window in
+                    PlateWindowData(
+                        id: window.windowID,
+                        windowID: window.windowID,
+                        ownerBundleID: window.ownerBundleID,
+                        ownerName: window.ownerName,
+                        windowTitle: window.windowTitle,
+                        isShared: window.isShared,
+                        previewImage: windowPreviews[window.windowID]
+                    )
                 },
                 isActive: index == activeStageIndex,
                 index: index
@@ -39,15 +56,23 @@ public struct OverlayViewModel: Sendable {
         }
     }
 
-    public var selectedApp: PlateAppData? {
+    public var selectedWindow: PlateWindowData? {
         guard stageManager.stages.indices.contains(activeStageIndex) else { return nil }
         let stage = stageManager.stages[activeStageIndex]
-        guard stage.apps.indices.contains(selectedAppIndex) else { return nil }
-        let app = stage.apps[selectedAppIndex]
-        return PlateAppData(bundleID: app.bundleID, name: app.name, isShared: app.isShared)
+        guard stage.windows.indices.contains(selectedWindowIndex) else { return nil }
+        let window = stage.windows[selectedWindowIndex]
+        return PlateWindowData(
+            id: window.windowID,
+            windowID: window.windowID,
+            ownerBundleID: window.ownerBundleID,
+            ownerName: window.ownerName,
+            windowTitle: window.windowTitle,
+            isShared: window.isShared,
+            previewImage: windowPreviews[window.windowID]
+        )
     }
 
-    public func isSelected(stageIndex: Int, appIndex: Int) -> Bool {
-        stageIndex == activeStageIndex && appIndex == selectedAppIndex
+    public func isSelected(stageIndex: Int, windowIndex: Int) -> Bool {
+        stageIndex == activeStageIndex && windowIndex == selectedWindowIndex
     }
 }

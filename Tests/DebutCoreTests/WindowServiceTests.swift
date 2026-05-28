@@ -15,50 +15,37 @@ struct WindowServiceTests {
         #expect(svc.listRunningApps().count == 2)
     }
 
-    @Test("Hide app")
-    func hideApp() {
+    @Test("List windows")
+    func listWindows() {
         let svc = MockWindowService()
-        #expect(svc.hideApp(bundleID: "com.a"))
-        #expect(svc.hiddenBundleIDs.contains("com.a"))
+        svc.windowList = [
+            WindowInfo(windowID: 101, ownerBundleID: "com.a", ownerName: "A", ownerPID: 100, title: "T1", bounds: .zero, isOnScreen: true),
+            WindowInfo(windowID: 202, ownerBundleID: "com.b", ownerName: "B", ownerPID: 200, title: "T2", bounds: .zero, isOnScreen: true),
+        ]
+        #expect(svc.listWindows().count == 2)
     }
 
-    @Test("Unhide app")
-    func unhideApp() {
+    @Test("Raise window")
+    func raiseWindow() {
         let svc = MockWindowService()
-        _ = svc.hideApp(bundleID: "com.a")
-        #expect(svc.unhideApp(bundleID: "com.a"))
-        #expect(!svc.hiddenBundleIDs.contains("com.a"))
+        #expect(svc.raiseWindow(windowID: 101))
+        #expect(svc.raisedWindowID == 101)
+        #expect(svc.raisedWindowIDs == [101])
+    }
+
+    @Test("Raise tracks all raised windows")
+    func raiseMultiple() {
+        let svc = MockWindowService()
+        _ = svc.raiseWindow(windowID: 101)
+        _ = svc.raiseWindow(windowID: 202)
+        #expect(svc.raisedWindowIDs == [101, 202])
+        #expect(svc.raisedWindowID == 202)
     }
 
     @Test("Activate app")
     func activateApp() {
         let svc = MockWindowService()
-        _ = svc.hideApp(bundleID: "com.a")
         #expect(svc.activateApp(bundleID: "com.a"))
         #expect(svc.activatedBundleID == "com.a")
-        #expect(!svc.hiddenBundleIDs.contains("com.a"))
-    }
-
-    @Test("Stage switch hides old apps, unhides new")
-    func stageSwitchHideShow() {
-        let svc = MockWindowService()
-        var sm = StageManager()
-        let stageA = sm.stages[0].id
-        sm.createStage(name: "B", position: .below)
-        let stageB = sm.stages[1].id
-
-        sm.addApp(StageApp(bundleID: "com.a", name: "A"), toStageID: stageA)
-        sm.addApp(StageApp(bundleID: "com.b", name: "B"), toStageID: stageB)
-
-        // Simulate switching from B to A
-        for app in sm.stages.first(where: { $0.id == stageB })!.apps {
-            _ = svc.hideApp(bundleID: app.bundleID)
-        }
-        for app in sm.stages.first(where: { $0.id == stageA })!.apps {
-            _ = svc.unhideApp(bundleID: app.bundleID)
-        }
-
-        #expect(svc.hiddenBundleIDs.contains("com.b"))
-        #expect(!svc.hiddenBundleIDs.contains("com.a"))
     }
 }

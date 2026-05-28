@@ -1,31 +1,36 @@
 import SwiftUI
+import CoreGraphics
 
 public struct PlateConstants {
-    public static let preferredIconSize: CGFloat = 128
-    public static let iconSpacing: CGFloat = 10
+    public static let thumbnailWidth: CGFloat = 160
+    public static let thumbnailHeight: CGFloat = 100
+    public static let windowSpacing: CGFloat = 12
     public static let padding: CGFloat = 24
     public static let minPlateWidth: CGFloat = 300
     public static let topInset: CGFloat = 12
-    public static let iconTopPad: CGFloat = 8
+    public static let thumbnailTopPad: CGFloat = 8
     public static let labelBottomPad: CGFloat = 24
     public static let screenMargin: CGFloat = 80
+    public static let badgeSize: CGFloat = 40
 
-    public static func iconSize(forAppCount count: Int, screenWidth: CGFloat) -> CGFloat {
+    public static func thumbnailSize(forWindowCount count: Int, screenWidth: CGFloat) -> (width: CGFloat, height: CGFloat) {
         let maxWidth = screenWidth - screenMargin * 2
-        let availableForIcons = maxWidth - padding * 2
-        let maxPerIcon = count > 0
-            ? (availableForIcons - CGFloat(max(0, count - 1)) * iconSpacing) / CGFloat(count)
-            : preferredIconSize
-        return min(preferredIconSize, max(48, maxPerIcon))
+        let availableForThumbnails = maxWidth - padding * 2
+        let maxPerWindow = count > 0
+            ? (availableForThumbnails - CGFloat(max(0, count - 1)) * windowSpacing) / CGFloat(count)
+            : thumbnailWidth
+        let w = min(thumbnailWidth, max(80, maxPerWindow))
+        let h = w * (thumbnailHeight / thumbnailWidth)
+        return (w, h)
     }
 
-    public static func plateHeight(iconSize: CGFloat) -> CGFloat {
-        topInset + 16 + iconTopPad + iconSize + labelBottomPad
+    public static func plateHeight(thumbnailHeight: CGFloat) -> CGFloat {
+        topInset + 16 + thumbnailTopPad + thumbnailHeight + 16 + labelBottomPad
     }
 
-    public static func plateWidth(forAppCount count: Int, iconSize: CGFloat) -> CGFloat {
-        let iconsWidth = CGFloat(max(count, 1)) * iconSize + CGFloat(max(0, count - 1)) * iconSpacing
-        return max(iconsWidth + padding * 2, minPlateWidth)
+    public static func plateWidth(forWindowCount count: Int, thumbnailWidth: CGFloat) -> CGFloat {
+        let thumbsWidth = CGFloat(max(count, 1)) * thumbnailWidth + CGFloat(max(0, count - 1)) * windowSpacing
+        return max(thumbsWidth + padding * 2, minPlateWidth)
     }
 }
 
@@ -40,31 +45,41 @@ public struct OverlaySwiftUIView: View {
 
     public var body: some View {
         let plates = viewModel.plates
-        let maxApps = plates.map(\.apps.count).max() ?? 0
+        let maxWindows = plates.map(\.windows.count).max() ?? 0
 
         GeometryReader { geo in
-            let iSize = PlateConstants.iconSize(forAppCount: maxApps, screenWidth: geo.size.width)
-            let pHeight = PlateConstants.plateHeight(iconSize: iSize)
-            let plateWidth = PlateConstants.plateWidth(forAppCount: maxApps, iconSize: iSize)
+            let tSize = PlateConstants.thumbnailSize(forWindowCount: maxWindows, screenWidth: geo.size.width)
+            let pHeight = PlateConstants.plateHeight(thumbnailHeight: tSize.height)
+            let plateWidth = PlateConstants.plateWidth(forWindowCount: maxWindows, thumbnailWidth: tSize.width)
+
+            let inactiveScale = CGFloat(viewModel.appearance.inactivePlateScale)
             let spacing: CGFloat = 14
-            let totalHeight = CGFloat(plates.count) * pHeight + CGFloat(max(0, plates.count - 1)) * spacing
-            let activeTop = CGFloat(viewModel.activeStageIndex) * (pHeight + spacing)
-            let activeCenter = activeTop + pHeight / 2
+
+            // Calculate offset to center the active plate
+            let totalBefore = CGFloat(viewModel.activeStageIndex) * (pHeight * inactiveScale + spacing)
+            let activeCenter = totalBefore + pHeight / 2
             let offset = geo.size.height / 2 - activeCenter
 
             VStack(spacing: spacing) {
                 ForEach(Array(plates.enumerated()), id: \.element.id) { index, plate in
+                    let isActive = index == viewModel.activeStageIndex
+                    let scale = isActive ? 1.0 : inactiveScale
+
                     PlateSwiftUIView(
                         plate: plate,
-                        isSelected: index == viewModel.activeStageIndex,
-                        selectedAppIndex: index == viewModel.activeStageIndex ? viewModel.selectedAppIndex : nil,
-                        isRenaming: isRenaming && index == viewModel.activeStageIndex,
-                        iconSize: iSize
+                        isSelected: isActive,
+                        selectedWindowIndex: isActive ? viewModel.selectedWindowIndex : nil,
+                        isRenaming: isRenaming && isActive,
+                        thumbnailWidth: tSize.width,
+                        thumbnailHeight: tSize.height,
+                        appearance: viewModel.appearance
                     )
                     .frame(width: plateWidth, height: pHeight)
+                    .scaleEffect(scale)
+                    .frame(width: plateWidth * scale, height: pHeight * scale)
                 }
             }
-            .frame(width: geo.size.width, height: totalHeight, alignment: .top)
+            .frame(width: geo.size.width, alignment: .center)
             .offset(y: offset)
         }
     }
@@ -73,9 +88,11 @@ public struct OverlaySwiftUIView: View {
 struct PlateSwiftUIView: View {
     let plate: PlateData
     let isSelected: Bool
-    let selectedAppIndex: Int?
+    let selectedWindowIndex: Int?
     let isRenaming: Bool
-    let iconSize: CGFloat
+    let thumbnailWidth: CGFloat
+    let thumbnailHeight: CGFloat
+    let appearance: AppSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -91,51 +108,85 @@ struct PlateSwiftUIView: View {
                     .padding(.top, PlateConstants.topInset)
             }
 
-            HStack(spacing: PlateConstants.iconSpacing) {
-                if plate.apps.isEmpty {
+            HStack(spacing: PlateConstants.windowSpacing) {
+                if plate.windows.isEmpty {
                     Text("Empty")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary.opacity(0.5))
                         .frame(maxWidth: .infinity)
                 } else {
-                    ForEach(Array(plate.apps.enumerated()), id: \.offset) { index, app in
-                        AppIconView(app: app, isAppSelected: selectedAppIndex == index, iconSize: iconSize)
+                    ForEach(Array(plate.windows.enumerated()), id: \.element.id) { index, window in
+                        WindowPreviewView(
+                            window: window,
+                            isWindowSelected: selectedWindowIndex == index,
+                            thumbnailWidth: thumbnailWidth,
+                            thumbnailHeight: thumbnailHeight,
+                            appearance: appearance
+                        )
                     }
                 }
             }
             .padding(.horizontal, PlateConstants.padding)
-            .padding(.top, PlateConstants.iconTopPad)
+            .padding(.top, PlateConstants.thumbnailTopPad)
 
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .modifier(LiquidGlassModifier(cornerRadius: 22, isSelected: isSelected))
+        .modifier(LiquidGlassModifier(
+            cornerRadius: CGFloat(appearance.plateCornerRadius),
+            appearance: appearance
+        ))
     }
 }
 
-struct AppIconView: View {
-    let app: PlateAppData
-    let isAppSelected: Bool
-    let iconSize: CGFloat
+struct WindowPreviewView: View {
+    let window: PlateWindowData
+    let isWindowSelected: Bool
+    let thumbnailWidth: CGFloat
+    let thumbnailHeight: CGFloat
+    let appearance: AppSettings
 
     var body: some View {
         VStack(spacing: 4) {
-            ZStack {
-                if isAppSelected {
-                    RoundedRectangle(cornerRadius: iconSize * 0.12)
-                        .fill(.primary.opacity(0.08))
-                        .frame(width: iconSize + 12, height: iconSize + 12)
+            ZStack(alignment: .topLeading) {
+                // Window preview or placeholder
+                Group {
+                    if let cgImage = window.previewImage {
+                        Image(decorative: cgImage, scale: 1.0)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    } else {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(.quaternary.opacity(0.3))
+                            .overlay {
+                                AppIconImage(bundleID: window.ownerBundleID, name: window.ownerName, iconSize: 32)
+                                    .frame(width: 32, height: 32)
+                            }
+                    }
                 }
-                AppIconImage(bundleID: app.bundleID, name: app.name, iconSize: iconSize)
-                    .frame(width: iconSize, height: iconSize)
+                .frame(width: thumbnailWidth, height: thumbnailHeight)
+
+                // App icon badge (top-left)
+                AppIconImage(bundleID: window.ownerBundleID, name: window.ownerName, iconSize: PlateConstants.badgeSize)
+                    .frame(width: PlateConstants.badgeSize, height: PlateConstants.badgeSize)
+                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                    .offset(x: -4, y: -4)
             }
 
-            Text(app.name)
-                .font(.system(size: max(10, iconSize * 0.09)))
-                .foregroundStyle(isAppSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.clear))
+            // Window title — always visible
+            Text(window.windowTitle.isEmpty ? window.ownerName : window.windowTitle)
+                .font(.system(size: max(9, thumbnailWidth * 0.065)))
+                .foregroundStyle(isWindowSelected ? .primary : .secondary)
                 .lineLimit(1)
-                .frame(width: iconSize + 16)
+                .frame(width: thumbnailWidth + 8)
         }
+        .padding(6)
+        .background(
+            isWindowSelected
+                ? RoundedRectangle(cornerRadius: 8).fill(.primary.opacity(appearance.selectionOpacity))
+                : nil
+        )
     }
 }
 
@@ -178,26 +229,16 @@ struct RenameField: NSViewRepresentable {
 
 struct LiquidGlassModifier: ViewModifier {
     let cornerRadius: CGFloat
-    let isSelected: Bool
+    let appearance: AppSettings
 
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
+            let glass: Glass = appearance.glassStyle == .clear ? .clear : .regular
             content
-                .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-                .opacity(isSelected ? 1.0 : 0.85)
-                .overlay(
-                    isSelected
-                        ? RoundedRectangle(cornerRadius: cornerRadius).stroke(.primary.opacity(0.12), lineWidth: 1)
-                        : nil
-                )
+                .glassEffect(glass, in: .rect(cornerRadius: cornerRadius))
         } else {
             content
-                .background(.ultraThinMaterial.opacity(0.8), in: RoundedRectangle(cornerRadius: cornerRadius))
-                .overlay(
-                    isSelected
-                        ? RoundedRectangle(cornerRadius: cornerRadius).stroke(.primary.opacity(0.12), lineWidth: 1)
-                        : nil
-                )
+                .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: cornerRadius))
         }
     }
 }
