@@ -131,6 +131,28 @@ struct StageManagerTests {
         #expect(sm.templates[0].appBundleIDs == ["com.a"])
     }
 
+    @Test("Remove empty stages preserves non-empty ones")
+    func removeEmpty() {
+        var sm = StageManager()
+        sm.createStage(name: "B", position: .below)
+        sm.createStage(name: "C", position: .below)
+        // Add window only to "B" (index 1 after creation)
+        let bID = sm.stages.first(where: { $0.name == "B" })!.id
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toStageID: bID)
+        sm.removeEmptyStages()
+        #expect(sm.stages.count == 1)
+        #expect(sm.stages[0].id == bID)
+        #expect(sm.activeStageID == bID)
+    }
+
+    @Test("Remove empty stages keeps all when all empty")
+    func removeEmptyKeepsAll() {
+        var sm = StageManager()
+        sm.createStage(name: "B", position: .below)
+        sm.removeEmptyStages()
+        #expect(sm.stages.count == 2) // all empty, keep all
+    }
+
     @Test("StageManager is Codable")
     func codable() throws {
         var sm = StageManager()

@@ -105,6 +105,17 @@ public struct StageManager: Codable, Sendable {
         activeStageID = id
     }
 
+    /// Remove stages that have no windows, keeping at least one stage.
+    public mutating func removeEmptyStages() {
+        let nonEmpty = stages.filter { !$0.windows.isEmpty }
+        if nonEmpty.isEmpty { return } // keep all if everything is empty
+        stages = nonEmpty
+        // Fix activeStageID if it pointed to a removed stage
+        if !stages.contains(where: { $0.id == activeStageID }) {
+            activeStageID = stages[0].id
+        }
+    }
+
     // MARK: - Window management
 
     public mutating func addWindow(_ window: StageWindow, toStageID stageID: UUID) {
@@ -142,9 +153,9 @@ public struct StageManager: Codable, Sendable {
         stages[stageIndex].markShared(windowID: windowID)
     }
 
-    public mutating func updateWindowIDs(stageIndex: Int, windowIndex: Int, windowID: CGWindowID, ownerPID: pid_t?) {
+    public mutating func updateWindowIDs(stageIndex: Int, windowIndex: Int, windowID: CGWindowID, ownerPID: pid_t?, windowTitle: String? = nil) {
         guard stages.indices.contains(stageIndex) else { return }
-        stages[stageIndex].updateWindow(at: windowIndex, windowID: windowID, ownerPID: ownerPID)
+        stages[stageIndex].updateWindow(at: windowIndex, windowID: windowID, ownerPID: ownerPID, windowTitle: windowTitle)
     }
 
     public func stageContainingWindow(windowID: CGWindowID) -> UUID? {

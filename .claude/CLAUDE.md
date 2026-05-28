@@ -68,3 +68,21 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 ### State Management
 - **Exclusion list must filter at ALL layers** — Discovery, launch, activation, reconciliation, and AXObserver.
 - **Cross-stage activation = stage switch** — Don't duplicate windows. Exception: truly new windows go to active stage.
+
+### Persistence & Reconciliation
+- **Window titles are NOT stable keys** — Terminal prompts, browser tabs, Slack channels all change titles between sessions. Reconciliation must fall back to bundleID-only matching when (bundleID, title) exact match fails.
+- **Prune empty stages on restore** — After reconciliation removes stale windows, drop stages with zero windows remaining (keep at least one).
+- **Focus-based starting stage** — On launch, query AX for the currently focused window, find its owning stage, and activate that stage instead of always stage 0.
+
+## Wrap Process
+
+When the user asks to "wrap", perform the following steps:
+
+1. **Review all changes** since the last wrap/commit — `git diff`, `git status`, `git log`
+2. **Update spec docs** (`spec/`) to reflect any new or changed requirements, and update task tracker checkboxes
+3. **Update CLAUDE.md** with any architecture rules or learnings discovered during the session
+4. **Commit all changes** to the GitHub repo with a descriptive commit message
+5. **Push to remote**
+6. **Create a GitHub release** with:
+   - Release notes summarizing changes
+   - DMG built via `./scripts/build-app.sh` and packaged with `hdiutil`

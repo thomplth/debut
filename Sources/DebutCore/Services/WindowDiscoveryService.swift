@@ -87,7 +87,35 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             }
         }
 
+        // Second pass: for stale entries, try matching by bundleID alone (handles title changes)
+        var remainingLiveByBundle: [String: [WindowInfo]] = [:]
+        for info in liveWindows where !matchedLiveIDs.contains(info.windowID) && !excludedBundleIDs.contains(info.ownerBundleID) {
+            remainingLiveByBundle[info.ownerBundleID, default: []].append(info)
+        }
+
+        var trulyStale: [(stageID: UUID, windowID: CGWindowID)] = []
         for (stageID, windowID) in staleEntries {
+            // Find the persisted window's bundleID
+            guard let stageIdx = stageManager.stages.firstIndex(where: { $0.id == stageID }),
+                  let winIdx = stageManager.stages[stageIdx].windows.firstIndex(where: { $0.windowID == windowID })
+            else {
+                trulyStale.append((stageID, windowID))
+                continue
+            }
+            let bundleID = stageManager.stages[stageIdx].windows[winIdx].ownerBundleID
+
+            if var candidates = remainingLiveByBundle[bundleID], !candidates.isEmpty {
+                let match = candidates.removeFirst()
+                remainingLiveByBundle[bundleID] = candidates.isEmpty ? nil : candidates
+                stageManager.updateWindowIDs(stageIndex: stageIdx, windowIndex: winIdx, windowID: match.windowID, ownerPID: match.ownerPID, windowTitle: match.title)
+                matchedLiveIDs.insert(match.windowID)
+                knownWindowIDs.insert(match.windowID)
+            } else {
+                trulyStale.append((stageID, windowID))
+            }
+        }
+
+        for (stageID, windowID) in trulyStale {
             stageManager.removeWindow(windowID: windowID, fromStageID: stageID)
         }
 
@@ -235,7 +263,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     // MARK: - Helpers
 
-    private func focusedWindowID(for pid: pid_t) -> CGWindowID? {
+    public func focusedWindowID(for pid: pid_t) -> CGWindowID? {
         let axApp = AXUIElementCreateApplication(pid)
         var windowRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &windowRef) == .success else {

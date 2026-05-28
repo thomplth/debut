@@ -86,11 +86,13 @@ Full persistence across app restarts and system reboots.
 
 - [x] Load saved stage state from state.json
 - [x] Reconcile: match persisted windows to live windows by (bundleID, windowTitle)
-- [x] Update ephemeral CGWindowIDs and PIDs to current values
+- [x] Fallback reconciliation: if title match fails, match by bundleID alone (handles dynamic titles like terminals, browsers, Slack)
+- [x] Update ephemeral CGWindowIDs, PIDs, and window titles to current values
 - [x] Remove windows that no longer exist (app was quit between sessions)
+- [x] Remove empty stages after reconciliation (keep at least one)
 - [x] Add new live windows (not in snapshot) to first stage
 - [x] Excluded apps filtered during reconciliation
-- [x] Activate first stage on launch, raise its windows above surface
+- [x] Activate stage containing currently focused window on launch (fall back to first stage)
 
 ### Storage
 
