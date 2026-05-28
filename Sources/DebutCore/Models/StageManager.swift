@@ -130,6 +130,11 @@ public struct StageManager: Codable, Sendable {
         stages[index].bringAppToFront(bundleID: bundleID)
     }
 
+    public mutating func markAppShared(bundleID: String, inStageID stageID: UUID) {
+        guard let stageIndex = stages.firstIndex(where: { $0.id == stageID }) else { return }
+        stages[stageIndex].markShared(bundleID: bundleID)
+    }
+
     // MARK: - Templates
 
     public mutating func saveStageAsTemplate(stageID: UUID, templateName: String) {

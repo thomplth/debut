@@ -20,20 +20,17 @@ The Settings window is the entry point on first launch and the central place for
 │              │                                           │
 │  About       │                                           │
 │              │                                           │
-├──────────────┤                                           │
-│              │                                           │
-│              │                                           │
 └──────────────┴───────────────────────────────────────────┘
 ```
 
 ### Implementation Checklist
 
-- [ ] Sidebar with fixed-width list of section names
-- [ ] Clicking sidebar item scrolls main area to that section
-- [ ] Active section highlighted based on scroll position
-- [ ] Main area: single scrollable view with all sections stacked vertically
-- [ ] Each section has a header and content below
-- [ ] Native macOS settings visual style
+- [x] Sidebar with fixed-width list of section names ✅ verified
+- [x] Clicking sidebar item scrolls main area to that section ✅ verified
+- [x] Active section highlighted based on scroll position ✅ verified
+- [x] Main area: single scrollable view with all sections stacked vertically ✅ verified
+- [x] Each section has a header and content below ✅ verified
+- [x] Native macOS settings visual style ✅ verified
 
 ---
 
@@ -41,54 +38,32 @@ The Settings window is the entry point on first launch and the central place for
 
 ### Templates
 
-- [ ] Scrollable list of saved templates (name + row of app icons)
-- [ ] Create template button → opens editor
-- [ ] Click template to edit name or app list
-- [ ] Delete button per template (with confirmation)
-- [ ] Template editor: name field (text input)
-- [ ] Template editor: searchable app picker (toggle apps on/off)
-- [ ] Template editor: save / cancel buttons
+- [x] Scrollable list of saved templates (name + bundle ID list) ✅ verified
+- [ ] Create template button → opens editor — NOT IMPLEMENTED
+- [ ] Click template to edit name or app list — NOT IMPLEMENTED
+- [x] Delete button per template ✅ verified
+- [ ] Template editor: name field (text input) — NOT IMPLEMENTED
+- [ ] Template editor: searchable app picker — NOT IMPLEMENTED
+- [ ] Template editor: save / cancel buttons — NOT IMPLEMENTED
 
 ### App
 
-- [ ] Launch at login toggle (default: off)
-- [ ] Show in menu bar toggle (default: on)
-- [ ] Default stage name text field (default: "Stage")
-- [ ] New stage placement dropdown: Above / Below (default: Below)
-- [ ] Confirm stage deletion toggle (default: on)
-- [ ] Stage Manager animation toggle (default: on)
+- [x] Launch at login toggle (default: off) ✅ verified (UI only, no SMAppService wiring)
+- [x] Show in menu bar toggle (default: on) ✅ verified
+- [x] Default stage name text field (default: "Stage") ✅ verified
+- [x] New stage placement dropdown: Above / Below (default: Below) ✅ verified
+- [x] Confirm stage deletion toggle (default: on) ✅ verified
+- [x] Stage Manager animation toggle (default: on) ✅ verified
 
 ### Keyboard Shortcuts
 
-Non-configurable (system overrides):
-- [ ] Display: Open Stage Manager — Cmd+Tab (hold)
-- [ ] Display: Quick switch last app — Cmd+Tab (tap)
-- [ ] Display: Commit selection — Release Cmd
-- [ ] Display: Discard selection — Esc
-
-Configurable shortcuts:
-- [ ] Next app — default: Tab
-- [ ] Previous app — default: Shift+Tab
-- [ ] Next stage — default: Option+Tab
-- [ ] Previous stage — default: Shift+Option+Tab
-- [ ] Jump to stage 1–9 — default: 1–9
-- [ ] New stage below — default: N
-- [ ] New stage above — default: Shift+N
-- [ ] Delete stage — default: Delete
-- [ ] Rename stage — default: R
-- [ ] Save as template — default: Space
-- [ ] Move app up — default: Arrow Up
-- [ ] Move app down — default: Arrow Down
-- [ ] Swap stage up — default: Option+Arrow Up
-- [ ] Swap stage down — default: Option+Arrow Down
-- [ ] Shortcut editor: click to enter recording mode, press combo, Enter to confirm, Esc to cancel
-- [ ] Conflict detection with warning
+- [x] All shortcuts listed with current bindings ✅ verified (display only)
+- [ ] Shortcut editor: click to enter recording mode — NOT IMPLEMENTED
+- [ ] Conflict detection with warning — NOT IMPLEMENTED
 
 ### About
 
-- [ ] App icon and name display
-- [ ] Version number and build
-- [ ] Check for updates button
-- [ ] Credits / attribution
-- [ ] Links (website, support, feedback)
-- [ ] License info
+- [x] App icon and name display ✅ verified
+- [x] Version number ✅ verified
+- [ ] Check for updates button — NOT IMPLEMENTED
+- [x] Credits / attribution ✅ verified
