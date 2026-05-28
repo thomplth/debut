@@ -34,10 +34,11 @@ public struct Stage: Codable, Identifiable, Equatable, Sendable {
         windows[index].isShared = true
     }
 
-    public mutating func updateWindow(at index: Int, windowID: CGWindowID, ownerPID: pid_t?) {
+    public mutating func updateWindow(at index: Int, windowID: CGWindowID, ownerPID: pid_t?, windowTitle: String? = nil) {
         guard windows.indices.contains(index) else { return }
         windows[index].windowID = windowID
         windows[index].ownerPID = ownerPID
+        if let windowTitle { windows[index].windowTitle = windowTitle }
     }
 
     public mutating func bringWindowToFront(windowID: CGWindowID) {

@@ -73,12 +73,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             stageManager.removeAllWindows(forBundleID: bundleID)
         }
 
+        // Remove empty stages (unless all are empty)
+        stageManager.removeEmptyStages()
+
         if stageManager.stages[0].windows.isEmpty {
             discovery.populateDefaultStage(&stageManager)
         }
 
-        // Always start on the first stage
-        stageManager.activateStage(id: stageManager.stages[0].id)
+        // Activate the stage containing the currently focused window, or fall back to first stage
+        let startStageID: UUID
+        if let frontApp = NSWorkspace.shared.frontmostApplication,
+           frontApp.bundleIdentifier != "com.thomplth.Debut",
+           let focusedWID = discovery.focusedWindowID(for: frontApp.processIdentifier),
+           let owningStage = stageManager.stageContainingWindow(windowID: focusedWID) {
+            startStageID = owningStage
+        } else {
+            startStageID = stageManager.stages[0].id
+        }
+        stageManager.activateStage(id: startStageID)
 
         // Create desktop surface — sits between active and inactive stage windows
         let surface = DesktopSurfaceWindow()
@@ -94,8 +106,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         controller.desktopSurface = surface
         stageController = controller
 
-        // Raise first stage windows above the desktop surface
-        controller.switchToStage(id: stageManager.stages[0].id)
+        // Raise active stage windows above the desktop surface
+        controller.switchToStage(id: stageManager.activeStageID)
 
         discovery.onWindowDiscovered = { [weak self] window in
             DispatchQueue.main.async {
