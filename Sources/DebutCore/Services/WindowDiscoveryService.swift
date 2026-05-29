@@ -188,6 +188,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     private func trackWindow(windowID: CGWindowID, pid: pid_t) {
+        // Already tracking this window
+        if perAppObservers[pid]?.trackedWindows[windowID] != nil { return }
         guard let observer = getOrCreateObserver(for: pid),
               let axElement = axWindowElement(for: windowID, pid: pid)
         else { return }

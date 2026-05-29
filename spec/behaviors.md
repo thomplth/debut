@@ -11,6 +11,9 @@ Debut tracks individual **windows** (by CGWindowID), not apps. Each stage contai
 - [x] Windows identified by CGWindowID (ephemeral) + ownerBundleID/windowTitle (stable for persistence)
 - [x] Window list sourced from AX API (kAXWindowsAttribute) cross-referenced with CGWindowList
 - [x] Real windows only — AX filters out shadows, toolbars, and other CG surfaces
+- [x] Per-window AXObserver lifecycle tracking: kAXUIElementDestroyedNotification removes closed windows instantly
+- [x] Per-window AXObserver title tracking: kAXTitleChangedNotification updates titles in real-time
+- [x] One AXObserver per PID, shared across all that app's window notifications
 
 ---
 
@@ -114,12 +117,15 @@ Full persistence across app restarts and system reboots.
 
 - [x] Overlay not shown when frontmost app is in fullscreen (AXFullScreen check)
 - [x] Cmd+Tab passes through to system in fullscreen mode
+- [x] Desktop surface does not follow into fullscreen Spaces (no .canJoinAllSpaces)
 
 ---
 
 ## Edge Cases
 
 - [x] First launch: create single default stage with all running windows
-- [x] App quits: all its windows removed from all stages
-- [x] Window created outside Debut's awareness -> added to active stage on focus
+- [x] App quits: all its windows removed from all stages (per-app observer cleaned up)
+- [x] Window closed (Cmd+W, red button): removed from stage instantly via kAXUIElementDestroyedNotification
+- [x] Window title changes (cd, tab switch, save): updated in real-time via kAXTitleChangedNotification
+- [x] Window created outside Debut's awareness -> added to active stage on focus, lifecycle tracking registered
 - [x] System Cmd+` restored — Debut does not intercept backtick

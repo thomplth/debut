@@ -132,7 +132,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
         discovery.onWindowActivated = { [weak self] windowID in
             DispatchQueue.main.async {
-                self?.stageController?.recordWindowActivation(windowID: windowID)
+                guard let self else { return }
+                self.stageController?.recordWindowActivation(windowID: windowID)
+                // Ensure lifecycle tracking for windows discovered via focus change
+                if let frontApp = NSWorkspace.shared.frontmostApplication {
+                    discovery.registerTracking(windowID: windowID, pid: frontApp.processIdentifier)
+                }
             }
         }
         discovery.onAppTerminated = { [weak self] bundleID in
