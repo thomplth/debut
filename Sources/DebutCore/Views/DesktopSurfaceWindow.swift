@@ -18,7 +18,7 @@ public final class DesktopSurfaceWindow: NSWindow {
         self.isOpaque = true
         self.hasShadow = false
         self.backgroundColor = .black
-        self.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        self.collectionBehavior = [.stationary, .ignoresCycle]
         self.isReleasedWhenClosed = false
         self.hidesOnDeactivate = false
         self.isMovable = false
