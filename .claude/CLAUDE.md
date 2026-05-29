@@ -69,6 +69,10 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 - **Exclusion list must filter at ALL layers** — Discovery, launch, activation, reconciliation, and AXObserver.
 - **Cross-stage activation = stage switch** — Don't duplicate windows. Exception: truly new windows go to active stage.
 
+### Window Lifecycle
+- **All discovery paths must register tracking** — Windows enter the stage manager via three paths: startup reconciliation, app launch, and focus-change (Cmd+N). All three must call `registerTracking` to get `kAXUIElementDestroyedNotification` and `kAXTitleChangedNotification`. Missing any path causes ghost windows.
+- **Desktop surface must not join all Spaces** — `.canJoinAllSpaces` causes the surface to follow into fullscreen Spaces, covering the fullscreen app. The surface only matters on the normal desktop.
+
 ### Persistence & Reconciliation
 - **Window titles are NOT stable keys** — Terminal prompts, browser tabs, Slack channels all change titles between sessions. Reconciliation must fall back to bundleID-only matching when (bundleID, title) exact match fails.
 - **Prune empty stages on restore** — After reconciliation removes stale windows, drop stages with zero windows remaining (keep at least one).
