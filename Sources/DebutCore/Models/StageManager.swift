@@ -153,6 +153,15 @@ public struct StageManager: Codable, Sendable {
         stages[stageIndex].markShared(windowID: windowID)
     }
 
+    public mutating func updateWindowTitle(windowID: CGWindowID, title: String) {
+        for stageIndex in stages.indices {
+            if let winIndex = stages[stageIndex].windows.firstIndex(where: { $0.windowID == windowID }) {
+                stages[stageIndex].updateWindowTitle(at: winIndex, title: title)
+                return
+            }
+        }
+    }
+
     public mutating func updateWindowIDs(stageIndex: Int, windowIndex: Int, windowID: CGWindowID, ownerPID: pid_t?, windowTitle: String? = nil) {
         guard stages.indices.contains(stageIndex) else { return }
         stages[stageIndex].updateWindow(at: windowIndex, windowID: windowID, ownerPID: ownerPID, windowTitle: windowTitle)

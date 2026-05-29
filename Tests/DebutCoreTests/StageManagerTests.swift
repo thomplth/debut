@@ -153,6 +153,22 @@ struct StageManagerTests {
         #expect(sm.stages.count == 2) // all empty, keep all
     }
 
+    @Test("Update window title")
+    func updateTitle() {
+        var sm = StageManager()
+        let id = sm.stages[0].id
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Old Title"), toStageID: id)
+        sm.updateWindowTitle(windowID: 101, title: "New Title")
+        #expect(sm.stages[0].windows[0].windowTitle == "New Title")
+    }
+
+    @Test("Update window title for nonexistent window is a no-op")
+    func updateTitleNonexistent() {
+        var sm = StageManager()
+        sm.updateWindowTitle(windowID: 999, title: "Whatever")
+        #expect(sm.stages.count == 1) // no crash, no changes
+    }
+
     @Test("StageManager is Codable")
     func codable() throws {
         var sm = StageManager()

@@ -124,6 +124,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 }
             }
         }
+        discovery.onWindowTitleChanged = { [weak self] windowID, newTitle in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.stageController?.stageManager.updateWindowTitle(windowID: windowID, title: newTitle)
+            }
+        }
         discovery.onWindowActivated = { [weak self] windowID in
             DispatchQueue.main.async {
                 self?.stageController?.recordWindowActivation(windowID: windowID)
