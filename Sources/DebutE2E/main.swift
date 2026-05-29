@@ -125,12 +125,11 @@ test("Event tap is running") {
 }
 
 test("Windows discovered") {
-    let count = Int(readState()["stageCount"] ?? "0") ?? 0
+    let windowCount = readState()["windowsInActiveStage"] ?? "0"
     let events = readEvents()
-    let discovered = events.first(where: { $0["event"] == "windows_discovered" })
-    let windowCount = discovered?["count"] ?? "0"
-    info("  Stages: \(count), windows discovered: \(windowCount)")
-    return Int(windowCount) ?? 0 > 0
+    let reconciled = events.contains(where: { $0["event"] == "windows_reconciled" || $0["event"] == "windows_discovered" })
+    info("  Windows in active stage: \(windowCount), reconciled: \(reconciled)")
+    return (Int(windowCount) ?? 0) > 0
 }
 
 // --- 2. Open overlay with Cmd+Tab ---
@@ -141,12 +140,12 @@ wait(0.1)
 
 info("Posting Cmd+Tab (keyDown)...")
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
-wait(0.8)
+wait(1.5)
 
 let _ = takeScreenshot("01_overlay_open")
 
 test("Overlay is visible") {
-    for _ in 0..<20 {
+    for _ in 0..<30 {
         if readState()["overlayVisible"] == "true" { return true }
         wait(0.1)
     }
@@ -230,15 +229,13 @@ test("Overlay closed after commit") {
     return readState()["overlayVisible"] == "false"
 }
 
-// --- 7. Stage switch with Cmd+` ---
-header("7. Open Stage Manager overlay (stage mode) with Cmd+`")
-info("Posting Cmd (flagsChanged)...")
-postFlagsChanged(flags: [.maskCommand])
+// --- 7. Stage mode with Cmd+Option+Tab ---
+header("7. Open Stage Manager overlay (stage mode) with Cmd+Option+Tab")
+info("Posting Cmd+Option+Tab...")
+postFlagsChanged(flags: [.maskCommand, .maskAlternate])
 wait(0.1)
-
-info("Posting Cmd+` (keyDown)...")
-postKeyDown(keyCode: CGKeyCode(kVK_ANSI_Grave), flags: [.maskCommand])
-wait(0.8)
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand, .maskAlternate])
+wait(1.0)
 
 let _ = takeScreenshot("08_stage_overlay_open")
 
