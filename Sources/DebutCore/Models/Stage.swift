@@ -41,6 +41,11 @@ public struct Stage: Codable, Identifiable, Equatable, Sendable {
         if let windowTitle { windows[index].windowTitle = windowTitle }
     }
 
+    public mutating func updateWindowTitle(at index: Int, title: String) {
+        guard windows.indices.contains(index) else { return }
+        windows[index].windowTitle = title
+    }
+
     public mutating func bringWindowToFront(windowID: CGWindowID) {
         guard let index = windows.firstIndex(where: { $0.windowID == windowID }) else { return }
         let window = windows.remove(at: index)
