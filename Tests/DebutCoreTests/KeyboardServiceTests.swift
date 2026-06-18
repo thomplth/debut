@@ -63,16 +63,26 @@ struct KeyboardServiceTests {
         svc.simulateEvent(.newStageBelow)
         svc.simulateEvent(.newStageAbove)
         svc.simulateEvent(.deleteStage)
-        svc.simulateEvent(.renameStage)
         svc.simulateEvent(.saveAsTemplate)
         svc.simulateEvent(.cmdRelease)
 
-        #expect(delegate.receivedEvents.count == 7)
+        #expect(delegate.receivedEvents.count == 6)
         #expect(delegate.receivedEvents[1] == .newStageBelow)
         #expect(delegate.receivedEvents[2] == .newStageAbove)
         #expect(delegate.receivedEvents[3] == .deleteStage)
-        #expect(delegate.receivedEvents[4] == .renameStage)
-        #expect(delegate.receivedEvents[5] == .saveAsTemplate)
+        #expect(delegate.receivedEvents[4] == .saveAsTemplate)
+    }
+
+    @Test("Quick switch events")
+    func quickSwitch() {
+        let svc = MockKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        _ = svc.start(delegate: delegate)
+
+        svc.simulateEvent(.switchToStage(1))
+        svc.simulateEvent(.switchToStage(5))
+
+        #expect(delegate.receivedEvents == [.switchToStage(1), .switchToStage(5)])
     }
 
     @Test("Reordering events")

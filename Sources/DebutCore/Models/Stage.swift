@@ -3,12 +3,10 @@ import CoreGraphics
 
 public struct Stage: Codable, Identifiable, Equatable, Sendable {
     public let id: UUID
-    public var name: String
     public private(set) var windows: [StageWindow]
 
-    public init(name: String) {
+    public init() {
         self.id = UUID()
-        self.name = name
         self.windows = []
     }
 

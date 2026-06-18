@@ -39,23 +39,22 @@ struct StageWindowTests {
 
 @Suite("Stage")
 struct StageTests {
-    @Test("Create stage with name")
+    @Test("Create stage starts empty")
     func createStage() {
-        let stage = Stage(name: "Coding")
-        #expect(stage.name == "Coding")
+        let stage = Stage()
         #expect(stage.windows.isEmpty)
     }
 
     @Test("Add window to stage")
     func addWindow() {
-        var stage = Stage(name: "Work")
+        var stage = Stage()
         stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"))
         #expect(stage.windows.count == 1)
     }
 
     @Test("Remove window from stage")
     func removeWindow() {
-        var stage = Stage(name: "Work")
+        var stage = Stage()
         stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"))
         stage.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"))
         stage.removeWindow(windowID: 101)
@@ -65,7 +64,7 @@ struct StageTests {
 
     @Test("Duplicate window not added")
     func noDuplicates() {
-        var stage = Stage(name: "Work")
+        var stage = Stage()
         stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"))
         stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"))
         #expect(stage.windows.count == 1)
@@ -73,7 +72,7 @@ struct StageTests {
 
     @Test("Bring window to front (MRU)")
     func bringToFront() {
-        var stage = Stage(name: "Work")
+        var stage = Stage()
         stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"))
         stage.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"))
         stage.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"))
@@ -85,7 +84,7 @@ struct StageTests {
 
     @Test("Remove all windows for bundle ID")
     func removeAllForBundle() {
-        var stage = Stage(name: "Work")
+        var stage = Stage()
         stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"))
         stage.addWindow(StageWindow(windowID: 102, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T2"))
         stage.addWindow(StageWindow(windowID: 201, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T3"))
@@ -96,20 +95,12 @@ struct StageTests {
 
     @Test("Stage is Codable")
     func stageCodable() throws {
-        var stage = Stage(name: "Coding")
+        var stage = Stage()
         stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"))
         let data = try JSONEncoder().encode(stage)
         let decoded = try JSONDecoder().decode(Stage.self, from: data)
-        #expect(decoded.name == "Coding")
         #expect(decoded.windows.count == 1)
         #expect(decoded.id == stage.id)
-    }
-
-    @Test("Stage rename")
-    func rename() {
-        var stage = Stage(name: "Old")
-        stage.name = "New"
-        #expect(stage.name == "New")
     }
 }
 

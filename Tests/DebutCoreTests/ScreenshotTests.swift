@@ -43,7 +43,6 @@ struct ScreenshotTests {
 
     private func makeSampleViewModel(stageCount: Int = 3, windowsPerStage: [Int] = [3, 4, 2], activeIndex: Int = 1) -> OverlayViewModel {
         var sm = StageManager()
-        let stageNames = ["Email", "Coding", "Review"]
         let windowData: [(String, String, String)] = [
             ("com.apple.mail", "Mail", "Inbox"), ("com.apple.Safari", "Safari", "Google"),
             ("com.apple.Terminal", "Terminal", "~ zsh"), ("com.microsoft.VSCode", "VS Code", "main.swift"),
@@ -56,7 +55,6 @@ struct ScreenshotTests {
 
         for i in 0..<stageCount {
             if i == 0 {
-                sm.renameStage(id: defaultID, to: stageNames[i % stageNames.count])
                 for _ in 0..<windowsPerStage[i % windowsPerStage.count] {
                     let w = windowData[Int(windowCounter - 100) % windowData.count]
                     sm.addWindow(StageWindow(windowID: windowCounter, ownerBundleID: w.0, ownerName: w.1, windowTitle: w.2), toStageID: defaultID)
@@ -64,7 +62,7 @@ struct ScreenshotTests {
                 }
             } else {
                 sm.activateStage(id: sm.stages[i - 1].id)
-                sm.createStage(name: stageNames[i % stageNames.count], position: .below)
+                sm.createStage(position: .below)
                 let stageID = sm.stages[i].id
                 for _ in 0..<windowsPerStage[i % windowsPerStage.count] {
                     let w = windowData[Int(windowCounter - 100) % windowData.count]

@@ -15,14 +15,12 @@ public struct StageManager: Codable, Sendable {
     public private(set) var stages: [Stage]
     public private(set) var activeStageID: UUID
     public private(set) var templates: [Template]
-    private var nextStageNumber: Int
 
     public init() {
-        let initial = Stage(name: "Stage 1")
+        let initial = Stage()
         self.stages = [initial]
         self.activeStageID = initial.id
         self.templates = []
-        self.nextStageNumber = 2
     }
 
     public var activeStage: Stage {
@@ -36,10 +34,8 @@ public struct StageManager: Codable, Sendable {
 
     // MARK: - Stage lifecycle
 
-    public mutating func createStage(name: String? = nil, position: StageInsertPosition) {
-        let stageName = name ?? "Stage \(nextStageNumber)"
-        nextStageNumber += 1
-        let newStage = Stage(name: stageName)
+    public mutating func createStage(position: StageInsertPosition) {
+        let newStage = Stage()
 
         guard let activeIndex = stages.firstIndex(where: { $0.id == activeStageID }) else { return }
 
@@ -59,10 +55,9 @@ public struct StageManager: Codable, Sendable {
 
         if stages.count == 1 {
             stages.removeAll()
-            let newDefault = Stage(name: "Stage 1")
+            let newDefault = Stage()
             stages = [newDefault]
             activeStageID = newDefault.id
-            nextStageNumber = 2
             return
         }
 
@@ -77,11 +72,6 @@ public struct StageManager: Codable, Sendable {
         stages.remove(at: index)
         let newActiveIndex = min(overflowIndex, stages.count - 1)
         activeStageID = stages[newActiveIndex].id
-    }
-
-    public mutating func renameStage(id: UUID, to newName: String) {
-        guard let index = stages.firstIndex(where: { $0.id == id }) else { return }
-        stages[index].name = newName
     }
 
     // MARK: - Stage reordering
