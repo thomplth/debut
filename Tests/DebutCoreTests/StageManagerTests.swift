@@ -9,7 +9,6 @@ struct StageManagerTests {
     func defaultState() {
         let sm = StageManager()
         #expect(sm.stages.count == 1)
-        #expect(sm.stages[0].name == "Stage 1")
         #expect(sm.activeStageID == sm.stages[0].id)
     }
 
@@ -17,10 +16,9 @@ struct StageManagerTests {
     func createBelow() {
         var sm = StageManager()
         let originalID = sm.activeStageID
-        sm.createStage(name: "New", position: .below)
+        sm.createStage(position: .below)
         #expect(sm.stages.count == 2)
         #expect(sm.stages[0].id == originalID)
-        #expect(sm.stages[1].name == "New")
         #expect(sm.activeStageID == sm.stages[1].id)
     }
 
@@ -28,23 +26,15 @@ struct StageManagerTests {
     func createAbove() {
         var sm = StageManager()
         let originalID = sm.activeStageID
-        sm.createStage(name: "New", position: .above)
+        sm.createStage(position: .above)
         #expect(sm.stages.count == 2)
-        #expect(sm.stages[0].name == "New")
         #expect(sm.stages[1].id == originalID)
-    }
-
-    @Test("Auto-name stages")
-    func autoName() {
-        var sm = StageManager()
-        sm.createStage(position: .below)
-        #expect(sm.stages[1].name == "Stage 2")
     }
 
     @Test("Delete overflows windows up")
     func deleteOverflowUp() {
         var sm = StageManager()
-        sm.createStage(name: "Second", position: .below)
+        sm.createStage(position: .below)
         let secondID = sm.stages[1].id
         sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toStageID: secondID)
         sm.activateStage(id: secondID)
@@ -58,29 +48,21 @@ struct StageManagerTests {
         var sm = StageManager()
         sm.deleteStage(id: sm.stages[0].id)
         #expect(sm.stages.count == 1)
-        #expect(sm.stages[0].name == "Stage 1")
-    }
-
-    @Test("Rename stage")
-    func rename() {
-        var sm = StageManager()
-        sm.renameStage(id: sm.stages[0].id, to: "Coding")
-        #expect(sm.stages[0].name == "Coding")
     }
 
     @Test("Swap stages")
     func swap() {
         var sm = StageManager()
-        sm.createStage(name: "Second", position: .below)
+        sm.createStage(position: .below)
         let secondID = sm.stages[1].id
         sm.swapStage(id: secondID, direction: .up)
-        #expect(sm.stages[0].name == "Second")
+        #expect(sm.stages[0].id == secondID)
     }
 
     @Test("Add and move window")
     func moveWindow() {
         var sm = StageManager()
-        sm.createStage(name: "B", position: .below)
+        sm.createStage(position: .below)
         let aID = sm.stages[0].id
         let bID = sm.stages[1].id
         sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.x", ownerName: "X", windowTitle: "T"), toStageID: aID)
@@ -134,10 +116,10 @@ struct StageManagerTests {
     @Test("Remove empty stages preserves non-empty ones")
     func removeEmpty() {
         var sm = StageManager()
-        sm.createStage(name: "B", position: .below)
-        sm.createStage(name: "C", position: .below)
-        // Add window only to "B" (index 1 after creation)
-        let bID = sm.stages.first(where: { $0.name == "B" })!.id
+        sm.createStage(position: .below)
+        sm.createStage(position: .below)
+        // Add a window only to the middle stage (index 1)
+        let bID = sm.stages[1].id
         sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toStageID: bID)
         sm.removeEmptyStages()
         #expect(sm.stages.count == 1)
@@ -148,7 +130,7 @@ struct StageManagerTests {
     @Test("Remove empty stages keeps all when all empty")
     func removeEmptyKeepsAll() {
         var sm = StageManager()
-        sm.createStage(name: "B", position: .below)
+        sm.createStage(position: .below)
         sm.removeEmptyStages()
         #expect(sm.stages.count == 2) // all empty, keep all
     }
@@ -172,7 +154,7 @@ struct StageManagerTests {
     @Test("StageManager is Codable")
     func codable() throws {
         var sm = StageManager()
-        sm.createStage(name: "Coding", position: .below)
+        sm.createStage(position: .below)
         sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toStageID: sm.stages[1].id)
         let data = try JSONEncoder().encode(sm)
         let decoded = try JSONDecoder().decode(StageManager.self, from: data)

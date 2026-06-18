@@ -30,7 +30,7 @@ struct StageControllerTests {
     func switchStage() {
         let (controller, windowSvc, _) = makeController()
         let stageAID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(name: "B", position: .below)
+        controller.stageManager.createStage(position: .below)
         let stageBID = controller.stageManager.stages[1].id
 
         controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageAID)
@@ -64,7 +64,7 @@ struct StageControllerTests {
     @Test("Cmd+Option+Tab hold opens overlay in stage mode")
     func cmdOptionTabHold() {
         let (controller, _, keyboardSvc) = makeController()
-        controller.stageManager.createStage(name: "B", position: .below)
+        controller.stageManager.createStage(position: .below)
         controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
         keyboardSvc.simulateEvent(.cmdOptionTabHold)
         #expect(controller.isStageManagerVisible)
@@ -116,7 +116,7 @@ struct StageControllerTests {
     func crossStageSwitches() {
         let (controller, _, _) = makeController()
         let stageAID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(name: "B", position: .below)
+        controller.stageManager.createStage(position: .below)
         let stageBID = controller.stageManager.stages[1].id
 
         controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageAID)

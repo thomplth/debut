@@ -72,7 +72,6 @@ The Settings window is the entry point on first launch and the central place for
 
 - [x] Launch at login toggle (default: off)
 - [x] Show in menu bar toggle (default: on)
-- [x] Default stage name text field (default: "Stage")
 - [x] New stage placement picker: Above / Below (default: Below)
 - [x] Confirm stage deletion toggle (default: on)
 - [x] Stage Manager animation toggle (default: on)

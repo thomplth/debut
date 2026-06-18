@@ -46,7 +46,6 @@ public struct SettingsView: View {
         .onChange(of: viewModel.settings.excludedBundleIDs) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.launchAtLogin) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.showInMenuBar) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.defaultStageName) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.confirmStageDeletion) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.animationsEnabled) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.glassStyle) { _, _ in saveSettings() }
@@ -263,14 +262,6 @@ public struct SettingsView: View {
 
             settingsToggle("Launch at login", isOn: $viewModel.settings.launchAtLogin)
             settingsToggle("Show in menu bar", isOn: $viewModel.settings.showInMenuBar)
-
-            HStack {
-                Text("Default stage name")
-                Spacer()
-                TextField("Stage", text: $viewModel.settings.defaultStageName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 150)
-            }
 
             HStack {
                 Text("New stage placement")

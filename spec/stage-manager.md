@@ -37,7 +37,7 @@ Each window item shows:
 - [x] Plate styled with liquid glass (.clear or .regular, configurable in Settings)
 - [x] Active plate vertically centered on screen at 1.0x scale
 - [x] Inactive plates at configurable scale (default 0.8x)
-- [x] Stage name displayed in top-left corner of each plate
+- [x] Stage position number (1-based) displayed in top-left corner of each plate
 - [x] Selection highlight wraps thumbnail + title with configurable opacity
 - [x] Window previews captured on overlay open, cached for hidden windows
 - [x] Icon size adaptive to screen width
@@ -74,13 +74,19 @@ All navigation wraps cyclically. Session persists until Cmd is released. Esc clo
 
 - [x] Option+Tab: select next stage (move down), wraps to first after last
 - [x] Shift+Option+Tab: select previous stage (move up), wraps to last after first
-- [x] 1-9: jump directly to stage at that index position
+- [x] 1-9: jump directly to stage at that index position (selection only, within open overlay)
 - [x] When changing stages, selection defaults to first (most recently used) window in that stage
 
 ### After Esc (overlay closed, Cmd still held)
 
 - [x] Tab / Option+Tab: reopens overlay
 - [x] ` (backtick): passes through to system (Cmd+` native window cycling)
+
+### Quick switch (global, no overlay)
+
+- [x] Ctrl+Option+1-9: immediately switch to the stage at that position, without opening the overlay
+- [x] Works without a Cmd session; dismisses the overlay first if it happens to be open
+- [x] Excludes Cmd so it never collides with the in-overlay 1-9 selection
 
 ---
 
@@ -90,7 +96,7 @@ All navigation wraps cyclically. Session persists until Cmd is released. Esc clo
 
 - [x] N: create new empty stage below currently selected stage
 - [x] Shift+N: create new empty stage above currently selected stage
-- [x] New stages receive a default name and are immediately selected
+- [x] New stages are immediately selected; their label is their position number
 
 ### Delete
 
@@ -99,18 +105,15 @@ All navigation wraps cyclically. Session persists until Cmd is released. Esc clo
 - [x] Active stage moves to stage that received overflow
 - [x] If only stage, create new empty default stage
 
-### Rename
+### Naming
 
-- [x] R: enter inline rename mode for currently selected stage
-- [x] Stage name label becomes editable text field, pre-filled with current name
-- [x] Enter: commit new name via distributed notification
-- [x] Esc: discard changes and exit rename mode
-- [x] Manager locked during rename — Cmd release does NOT dismiss
+- [x] Stages are not nameable — each plate's label is hardcoded to its 1-based position
+- [x] Labels update automatically when stages are created, deleted, or reordered
 
 ### Save as Template
 
 - [x] Space: save currently selected stage's app list as a new template
-- [ ] Opens naming prompt (defaults to stage name) — currently saves silently
+- [ ] Opens naming prompt — currently saves silently with the stage's position label
 
 ---
 
@@ -144,20 +147,18 @@ All navigation wraps cyclically. Session persists until Cmd is released. Esc clo
 | Cmd+Shift+Tab (hold) | Global | Open Stage Manager (last window selected) | [x] |
 | Cmd+Option+Tab (hold) | Global | Open Stage Manager (next stage selected) | [x] |
 | Cmd+Shift+Option+Tab (hold) | Global | Open Stage Manager (previous stage selected) | [x] |
+| Ctrl+Option+1-9 | Global | Quick switch to stage at that position (no overlay) | [x] |
 | Tab | Stage Manager | Next window (right) | [x] |
 | Shift+Tab | Stage Manager | Previous window (left) | [x] |
 | ` (backtick) | Stage Manager | Previous window (same as Shift+Tab) | [x] |
 | Option+Tab | Stage Manager | Next stage (down) | [x] |
 | Shift+Option+Tab | Stage Manager | Previous stage (up) | [x] |
-| 1-9 | Stage Manager | Jump to stage by index | [x] |
+| 1-9 | Stage Manager | Jump to stage by index (selection within overlay) | [x] |
 | N | Stage Manager | New stage below | [x] |
 | Shift+N | Stage Manager | New stage above | [x] |
 | Delete | Stage Manager | Delete selected stage | [x] |
-| R | Stage Manager | Rename selected stage | [x] |
 | Space | Stage Manager | Save stage as template | [x] |
 | Arrow Up/Down | Stage Manager | Move selected window to stage above/below | [x] |
 | Option+Arrow Up/Down | Stage Manager | Swap stage position with neighbor | [x] |
-| Enter | Rename mode | Commit rename | [x] |
-| Esc | Rename mode | Cancel rename | [x] |
 | Esc | Stage Manager | Close overlay (session continues) | [x] |
 | Release Cmd | Stage Manager | Commit selection, close overlay | [x] |

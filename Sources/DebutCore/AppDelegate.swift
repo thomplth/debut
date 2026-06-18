@@ -200,18 +200,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     nonisolated public func stageControllerDidSwitchStage(_ controller: StageController) {}
 
-    nonisolated public func stageControllerDidEnterRenameMode(_ controller: StageController) {
-        DispatchQueue.main.async { [weak self] in
-            self?.updateOverlay()
-        }
-    }
-
-    nonisolated public func stageControllerDidExitRenameMode(_ controller: StageController) {
-        DispatchQueue.main.async { [weak self] in
-            self?.updateOverlay()
-        }
-    }
-
     private func showStageManagerOverlay() {
         guard let stageController, let overlayWindow else { return }
         let vm = OverlayViewModel(
@@ -221,7 +209,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings
         )
-        overlayWindow.update(viewModel: vm, isRenaming: stageController.isRenaming)
+        overlayWindow.update(viewModel: vm)
         overlayWindow.showOverlay()
         diag.report("overlay_shown")
     }
@@ -240,7 +228,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings
         )
-        overlayWindow.update(viewModel: vm, isRenaming: stageController.isRenaming)
+        overlayWindow.update(viewModel: vm)
     }
 
     // MARK: - Menu Bar

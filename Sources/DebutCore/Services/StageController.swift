@@ -7,8 +7,6 @@ public protocol StageControllerDelegate: AnyObject {
     func stageControllerDidCloseOverlay(_ controller: StageController)
     func stageControllerDidUpdateSelection(_ controller: StageController)
     func stageControllerDidSwitchStage(_ controller: StageController)
-    func stageControllerDidEnterRenameMode(_ controller: StageController)
-    func stageControllerDidExitRenameMode(_ controller: StageController)
 }
 
 public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
@@ -18,7 +16,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public weak var delegate: StageControllerDelegate?
 
     public private(set) var isStageManagerVisible: Bool = false
-    public private(set) var isRenaming: Bool = false
     public var selectedStageIndex: Int = 0
     public var selectedWindowIndex: Int = 0
     public private(set) var keyboardServiceStarted: Bool = false
@@ -50,7 +47,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             guard let self else { return ["error": "controller deallocated"] }
             return [
                 "overlayVisible": "\(self.isStageManagerVisible)",
-                "isRenaming": "\(self.isRenaming)",
                 "stageCount": "\(self.stageManager.stages.count)",
                 "activeStageIndex": "\(self.selectedStageIndex)",
                 "selectedWindowIndex": "\(self.selectedWindowIndex)",
@@ -63,11 +59,18 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     // MARK: - Stage switching
 
+    /// Position-based label for a stage, e.g. "Stage 2". Used for diagnostics only.
+    private func stageLabel(forID id: UUID) -> String {
+        guard let index = stageManager.stages.firstIndex(where: { $0.id == id }) else { return "?" }
+        return "Stage \(index + 1)"
+    }
+
     public func switchToStage(id targetID: UUID, raiseWindowID: CGWindowID? = nil) {
         let previousID = stageManager.activeStageID
 
         if previousID != targetID {
-            let previousStage = stageManager.stages.first(where: { $0.id == previousID })
+            let fromLabel = stageLabel(forID: previousID)
+            let toLabel = stageLabel(forID: targetID)
             let targetStage = stageManager.stages.first(where: { $0.id == targetID })
 
             self.previousStageID = previousID
@@ -84,8 +87,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             }
 
             diag.report("stage_switched", details: [
-                "from": previousStage?.name ?? "?",
-                "to": targetStage?.name ?? "?",
+                "from": fromLabel,
+                "to": toLabel,
                 "windowsInTarget": "\(targetStage?.windows.count ?? 0)",
             ])
         }
@@ -121,7 +124,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             // Window belongs to another stage — switch to that stage
             diag.report("switching_to_window_stage", details: [
                 "windowID": "\(windowID)",
-                "targetStage": stageManager.stages.first(where: { $0.id == ownerStageID })?.name ?? "?",
+                "targetStage": stageLabel(forID: ownerStageID),
             ])
             switchToStage(id: ownerStageID, raiseWindowID: windowID)
         } else {
@@ -189,18 +192,14 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             cycleStage(forward: false)
         case .jumpToStage(let index):
             jumpToStage(index: index - 1)
+        case .switchToStage(let position):
+            quickSwitchToStage(index: position - 1)
         case .newStageBelow:
             createStage(position: .below)
         case .newStageAbove:
             createStage(position: .above)
         case .deleteStage:
             deleteSelectedStage()
-        case .renameStage:
-            enterRenameMode()
-        case .renameCommit:
-            break // Rename commit handled via distributed notification from text field
-        case .renameCancel:
-            exitRenameMode(commit: false)
         case .saveAsTemplate:
             saveSelectedStageAsTemplate()
         case .moveWindowUp:
@@ -214,49 +213,25 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
-    // MARK: - Rename mode
+    // MARK: - Quick switch
 
-    private var renameObserver: Any?
+    /// Immediately switch to the stage at the given index (Ctrl+Option+<1-9>).
+    /// Works whether or not the overlay is open; if open, it is dismissed first.
+    private func quickSwitchToStage(index: Int) {
+        guard stageManager.stages.indices.contains(index) else { return }
 
-    private func enterRenameMode() {
-        guard isStageManagerVisible, !isRenaming else { return }
-        isRenaming = true
-        if let tapService = keyboardService as? EventTapKeyboardService {
-            tapService.isLocked = true
-        }
-
-        renameObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.thomplth.Debut.renameCommit"),
-            object: nil, queue: .main
-        ) { [weak self] notification in
-            guard let self, self.isRenaming else { return }
-            if let newName = notification.object as? String, !newName.isEmpty {
-                self.commitRename(newName: newName)
+        if isStageManagerVisible {
+            isStageManagerVisible = false
+            if let tapService = keyboardService as? EventTapKeyboardService {
+                tapService.overlayVisible = false
             }
+            delegate?.stageControllerDidCloseOverlay(self)
         }
 
-        delegate?.stageControllerDidEnterRenameMode(self)
-    }
-
-    private func commitRename(newName: String) {
-        guard isRenaming, stageManager.stages.indices.contains(selectedStageIndex) else { return }
-        let stageID = stageManager.stages[selectedStageIndex].id
-        stageManager.renameStage(id: stageID, to: newName)
-        exitRenameMode(commit: true)
-    }
-
-    private func exitRenameMode(commit: Bool) {
-        guard isRenaming else { return }
-        isRenaming = false
-        if let tapService = keyboardService as? EventTapKeyboardService {
-            tapService.isLocked = false
-        }
-        if let observer = renameObserver {
-            DistributedNotificationCenter.default().removeObserver(observer)
-            renameObserver = nil
-        }
-        delegate?.stageControllerDidExitRenameMode(self)
-        delegate?.stageControllerDidUpdateSelection(self)
+        let targetID = stageManager.stages[index].id
+        switchToStage(id: targetID)
+        selectedStageIndex = index
+        selectedWindowIndex = 0
     }
 
     // MARK: - Private
@@ -349,7 +324,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func commitSelection() {
-        guard isStageManagerVisible, !isRenaming else { return }
+        guard isStageManagerVisible else { return }
         isStageManagerVisible = false
         if let tapService = keyboardService as? EventTapKeyboardService {
             tapService.overlayVisible = false
@@ -370,7 +345,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         diag.report("overlay_committed", details: [
             "stageIndex": "\(selectedStageIndex)",
             "windowIndex": "\(selectedWindowIndex)",
-            "targetStage": targetStage.name,
+            "targetStage": stageLabel(forID: targetStage.id),
         ])
     }
 
@@ -378,10 +353,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// Next Cmd+Tab or Cmd+Option+Tab reopens the overlay.
     private func discardOverlay() {
         guard isStageManagerVisible else { return }
-        if isRenaming {
-            exitRenameMode(commit: false)
-            return
-        }
         isStageManagerVisible = false
         if let tapService = keyboardService as? EventTapKeyboardService {
             tapService.overlayVisible = false
@@ -394,7 +365,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func cycleWindow(forward: Bool) {
-        guard isStageManagerVisible, !isRenaming,
+        guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
         guard !stage.windows.isEmpty else { return }
@@ -408,7 +379,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func cycleStage(forward: Bool) {
-        guard isStageManagerVisible, !isRenaming, !stageManager.stages.isEmpty else { return }
+        guard isStageManagerVisible, !stageManager.stages.isEmpty else { return }
 
         if forward {
             selectedStageIndex = (selectedStageIndex + 1) % stageManager.stages.count
@@ -420,7 +391,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func jumpToStage(index: Int) {
-        guard isStageManagerVisible, !isRenaming,
+        guard isStageManagerVisible,
               stageManager.stages.indices.contains(index) else { return }
         selectedStageIndex = index
         selectedWindowIndex = 0
@@ -428,7 +399,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func createStage(position: StageInsertPosition) {
-        guard isStageManagerVisible, !isRenaming else { return }
+        guard isStageManagerVisible else { return }
         let currentID = stageManager.stages.indices.contains(selectedStageIndex)
             ? stageManager.stages[selectedStageIndex].id : stageManager.activeStageID
         stageManager.activateStage(id: currentID)
@@ -441,7 +412,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func deleteSelectedStage() {
-        guard isStageManagerVisible, !isRenaming,
+        guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let targetID = stageManager.stages[selectedStageIndex].id
         stageManager.deleteStage(id: targetID)
@@ -451,14 +422,14 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func saveSelectedStageAsTemplate() {
-        guard isStageManagerVisible, !isRenaming,
+        guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
-        stageManager.saveStageAsTemplate(stageID: stage.id, templateName: stage.name)
+        stageManager.saveStageAsTemplate(stageID: stage.id, templateName: stageLabel(forID: stage.id))
     }
 
     private func moveWindow(direction: SwapDirection) {
-        guard isStageManagerVisible, !isRenaming,
+        guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
         guard stage.windows.indices.contains(selectedWindowIndex) else { return }
@@ -488,7 +459,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func swapStage(direction: SwapDirection) {
-        guard isStageManagerVisible, !isRenaming,
+        guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stageID = stageManager.stages[selectedStageIndex].id
         stageManager.swapStage(id: stageID, direction: direction)

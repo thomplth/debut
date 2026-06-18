@@ -64,10 +64,12 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 - **Consume ALL events when overlay is active** — Return nil for both keyDown and keyUp. Passing keyUp through leaks to the active app.
 - **Session vs overlay** — Cmd-held session and overlay visibility are separate states. Esc closes overlay but keeps session alive. Track via `stageManagerActive` (EventTap) and `overlayVisible` (synced from StageController).
 - **Check Option flag BEFORE bare Tab** — Prevents Cmd+Option+Tab being caught by the Cmd+Tab handler.
+- **Global quick-switch gates on `!maskCommand`** — `Ctrl+Option+<1-9>` switches stages without the overlay open. It must be checked BEFORE Cmd-state tracking and require Control+Option WITHOUT Command, so it never collides with the in-overlay Cmd+digit selection (which always has Cmd held).
 
 ### State Management
 - **Exclusion list must filter at ALL layers** — Discovery, launch, activation, reconciliation, and AXObserver.
 - **Cross-stage activation = stage switch** — Don't duplicate windows. Exception: truly new windows go to active stage.
+- **Stage labels are position-derived, not stored** — Stages have no `name` field. The displayed label is the 1-based array index (`stageLabel(forID:)` / `PlateData.name = "\(index + 1)"`), so create/delete/reorder need zero bookkeeping. Rename was removed entirely. Removing `Stage.name`/`AppSettings.defaultStageName` is Codable-forward-safe (JSONDecoder ignores leftover keys in existing state.json/settings.json).
 
 ### Window Lifecycle
 - **All discovery paths must register tracking** — Windows enter the stage manager via three paths: startup reconciliation, app launch, and focus-change (Cmd+N). All three must call `registerTracking` to get `kAXUIElementDestroyedNotification` and `kAXTitleChangedNotification`. Missing any path causes ghost windows.

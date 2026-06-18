@@ -21,8 +21,8 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
 
-    public func update(viewModel: OverlayViewModel, isRenaming: Bool = false) {
-        let view = OverlaySwiftUIView(viewModel: viewModel, isRenaming: isRenaming)
+    public func update(viewModel: OverlayViewModel) {
+        let view = OverlaySwiftUIView(viewModel: viewModel)
         if let hostingView {
             hostingView.rootView = view
         } else {
