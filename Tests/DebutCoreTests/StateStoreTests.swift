@@ -19,7 +19,7 @@ struct StateStoreTests {
 
         let store = StateStore(directory: dir)
         var sm = StageManager()
-        sm.createStage(name: "Coding", position: .below)
+        sm.createStage(position: .below)
         sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toStageID: sm.stages[1].id)
         sm.saveStageAsTemplate(stageID: sm.stages[1].id, templateName: "Dev")
 
@@ -27,7 +27,6 @@ struct StateStoreTests {
         let loaded = try store.load()
 
         #expect(loaded.stages.count == 2)
-        #expect(loaded.stages[1].name == "Coding")
         #expect(loaded.stages[1].windows.count == 1)
         #expect(loaded.templates.count == 1)
     }
@@ -50,7 +49,7 @@ struct StateStoreTests {
 
         let store = StateStore(directory: dir)
         var sm = StageManager()
-        sm.createStage(name: "Test", position: .below)
+        sm.createStage(position: .below)
         try store.save(sm)
         let loaded = try store.load()
         #expect(loaded.stages.count == 2)
@@ -64,12 +63,12 @@ struct StateStoreTests {
         let store = StateStore(directory: dir)
         var settings = AppSettings()
         settings.launchAtLogin = true
-        settings.defaultStageName = "Workspace"
+        settings.confirmStageDeletion = false
 
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
         #expect(loaded.launchAtLogin == true)
-        #expect(loaded.defaultStageName == "Workspace")
+        #expect(loaded.confirmStageDeletion == false)
     }
 
     @Test("Settings defaults when no file")

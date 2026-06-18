@@ -36,11 +36,9 @@ public struct PlateConstants {
 
 public struct OverlaySwiftUIView: View {
     public let viewModel: OverlayViewModel
-    public let isRenaming: Bool
 
-    public init(viewModel: OverlayViewModel, isRenaming: Bool = false) {
+    public init(viewModel: OverlayViewModel) {
         self.viewModel = viewModel
-        self.isRenaming = isRenaming
     }
 
     public var body: some View {
@@ -69,7 +67,6 @@ public struct OverlaySwiftUIView: View {
                         plate: plate,
                         isSelected: isActive,
                         selectedWindowIndex: isActive ? viewModel.selectedWindowIndex : nil,
-                        isRenaming: isRenaming && isActive,
                         thumbnailWidth: tSize.width,
                         thumbnailHeight: tSize.height,
                         appearance: viewModel.appearance
@@ -89,24 +86,17 @@ struct PlateSwiftUIView: View {
     let plate: PlateData
     let isSelected: Bool
     let selectedWindowIndex: Int?
-    let isRenaming: Bool
     let thumbnailWidth: CGFloat
     let thumbnailHeight: CGFloat
     let appearance: AppSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if isRenaming {
-                RenameField(initialName: plate.name)
-                    .padding(.leading, PlateConstants.padding)
-                    .padding(.top, PlateConstants.topInset)
-            } else {
-                Text(plate.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-                    .padding(.leading, PlateConstants.padding)
-                    .padding(.top, PlateConstants.topInset)
-            }
+            Text(plate.name)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(isSelected ? .primary : .secondary)
+                .padding(.leading, PlateConstants.padding)
+                .padding(.top, PlateConstants.topInset)
 
             HStack(spacing: PlateConstants.windowSpacing) {
                 if plate.windows.isEmpty {
@@ -187,43 +177,6 @@ struct WindowPreviewView: View {
                 ? RoundedRectangle(cornerRadius: 8).fill(.primary.opacity(appearance.selectionOpacity))
                 : nil
         )
-    }
-}
-
-struct RenameField: NSViewRepresentable {
-    let initialName: String
-
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
-        field.stringValue = initialName
-        field.font = .systemFont(ofSize: 13, weight: .medium)
-        field.isBordered = true
-        field.bezelStyle = .roundedBezel
-        field.focusRingType = .exterior
-        field.isEditable = true
-        field.selectText(nil)
-        DispatchQueue.main.async {
-            field.window?.makeFirstResponder(field)
-            field.currentEditor()?.selectAll(nil)
-        }
-        field.target = context.coordinator
-        field.action = #selector(Coordinator.commitRename(_:))
-        return field
-    }
-
-    func updateNSView(_ nsView: NSTextField, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    class Coordinator: NSObject {
-        @objc func commitRename(_ sender: NSTextField) {
-            DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name("com.thomplth.Debut.renameCommit"),
-                object: sender.stringValue,
-                userInfo: nil,
-                deliverImmediately: true
-            )
-        }
     }
 }
 

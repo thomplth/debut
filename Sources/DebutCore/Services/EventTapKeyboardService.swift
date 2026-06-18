@@ -9,7 +9,6 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     private var cmdHeld: Bool = false
     private var stageManagerActive: Bool = false
 
-    public var isLocked: Bool = false
     public var overlayVisible: Bool = false
 
     public init() {}
@@ -59,27 +58,15 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
-        // When locked (rename mode), block all events from propagating.
-        // Pass Enter through to the text field so it can fire its action.
-        // Escape cancels rename via the delegate.
-        if isLocked {
-            if type == .flagsChanged {
-                let cmdDown = flags.contains(.maskCommand)
-                if cmdHeld && !cmdDown {
-                    cmdHeld = false
-                }
-                cmdHeld = cmdDown
-                return nil
-            }
-            if type == .keyDown {
-                if keyCode == Int64(kVK_Return) {
-                    return event // Let Enter reach the text field
-                }
-                if keyCode == Int64(kVK_Escape) {
-                    delegate?.handleKeyEvent(.renameCancel)
-                    return nil
-                }
-            }
+        // Ctrl+Option+<1-9> — global immediate switch to the stage at that position.
+        // Works without a Cmd session or open overlay. Excludes Cmd so it never
+        // collides with the in-overlay digit selection (which requires Cmd held).
+        if type == .keyDown
+            && flags.contains(.maskControl)
+            && flags.contains(.maskAlternate)
+            && !flags.contains(.maskCommand),
+           let stageNumber = stageNumber(forKeyCode: keyCode) {
+            delegate?.handleKeyEvent(.switchToStage(stageNumber))
             return nil
         }
 
@@ -151,7 +138,6 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         case kVK_ANSI_N where shift: .newStageAbove
         case kVK_ANSI_N: .newStageBelow
         case kVK_Delete, kVK_ForwardDelete: .deleteStage
-        case kVK_ANSI_R: .renameStage
         case kVK_Space: .saveAsTemplate
         case kVK_UpArrow where option: .swapStageUp
         case kVK_DownArrow where option: .swapStageDown
@@ -175,6 +161,22 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
 
         // Always consume — never let keyboard events leak to the active app
         return nil
+    }
+
+    /// Maps a number-row keycode (1-9) to its stage position. Returns nil otherwise.
+    private func stageNumber(forKeyCode keyCode: Int64) -> Int? {
+        switch Int(keyCode) {
+        case kVK_ANSI_1: return 1
+        case kVK_ANSI_2: return 2
+        case kVK_ANSI_3: return 3
+        case kVK_ANSI_4: return 4
+        case kVK_ANSI_5: return 5
+        case kVK_ANSI_6: return 6
+        case kVK_ANSI_7: return 7
+        case kVK_ANSI_8: return 8
+        case kVK_ANSI_9: return 9
+        default: return nil
+        }
     }
 }
 

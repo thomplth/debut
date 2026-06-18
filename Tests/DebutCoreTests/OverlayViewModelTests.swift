@@ -9,7 +9,7 @@ struct OverlayViewModelTests {
         var sm = StageManager()
         sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "AppA", windowTitle: "Window A"), toStageID: sm.stages[0].id)
         sm.addWindow(StageWindow(windowID: 102, ownerBundleID: "com.b", ownerName: "AppB", windowTitle: "Window B"), toStageID: sm.stages[0].id)
-        sm.createStage(name: "Coding", position: .below)
+        sm.createStage(position: .below)
         sm.addWindow(StageWindow(windowID: 201, ownerBundleID: "com.c", ownerName: "AppC", windowTitle: "Window C"), toStageID: sm.stages[1].id)
         sm.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.d", ownerName: "AppD", windowTitle: "Window D"), toStageID: sm.stages[1].id)
         sm.addWindow(StageWindow(windowID: 203, ownerBundleID: "com.e", ownerName: "AppE", windowTitle: "Window E"), toStageID: sm.stages[1].id)
@@ -22,9 +22,9 @@ struct OverlayViewModelTests {
     func plateData() {
         let vm = makeViewModel()
         #expect(vm.plates.count == 2)
-        #expect(vm.plates[0].name == "Stage 1")
+        #expect(vm.plates[0].name == "1")
         #expect(vm.plates[0].windows.count == 2)
-        #expect(vm.plates[1].name == "Coding")
+        #expect(vm.plates[1].name == "2")
         #expect(vm.plates[1].windows.count == 3)
     }
 

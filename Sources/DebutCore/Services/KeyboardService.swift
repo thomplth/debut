@@ -13,12 +13,12 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case previousWindow         // Shift+Tab
     case nextStage              // Option+Tab
     case previousStage          // Shift+Option+Tab
-    case jumpToStage(Int)       // 1-9
+    case jumpToStage(Int)       // 1-9 (selects stage within open overlay)
+    case switchToStage(Int)     // Ctrl+Option+1-9 (global immediate switch)
 
     case newStageBelow          // N
     case newStageAbove          // Shift+N
     case deleteStage            // Delete/Forward Delete
-    case renameStage            // R
     case saveAsTemplate         // Space
 
     case moveWindowUp           // Up Arrow
@@ -27,9 +27,6 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case swapStageDown          // Option+Down Arrow
 
     case escape
-
-    case renameCommit           // Return (in rename mode)
-    case renameCancel           // Escape (in rename mode)
 }
 
 public protocol KeyboardEventDelegate: AnyObject, Sendable {

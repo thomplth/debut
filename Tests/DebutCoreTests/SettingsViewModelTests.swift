@@ -10,7 +10,7 @@ struct SettingsViewModelTests {
         let vm = SettingsViewModel()
         #expect(vm.settings.launchAtLogin == false)
         #expect(vm.settings.showInMenuBar == true)
-        #expect(vm.settings.defaultStageName == "Stage")
+        #expect(vm.settings.confirmStageDeletion == true)
     }
 
     @Test("Update settings")

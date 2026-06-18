@@ -38,7 +38,7 @@ public struct OverlayViewModel: Sendable {
         stageManager.stages.enumerated().map { index, stage in
             PlateData(
                 id: stage.id,
-                name: stage.name,
+                name: "\(index + 1)",
                 windows: stage.windows.map { window in
                     PlateWindowData(
                         id: window.windowID,
