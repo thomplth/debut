@@ -236,6 +236,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             self.updateOverlay()
         }
 
+        overlayWindow.onStageReordered = { [weak self] fromIndex, toIndex in
+            guard let self, let ctrl = self.stageController else { return }
+            let activeID = ctrl.stageManager.stages[safe: ctrl.selectedStageIndex]?.id
+            ctrl.stageManager.moveStage(fromIndex: fromIndex, toIndex: toIndex)
+            if let activeID, let newIndex = ctrl.stageManager.stages.firstIndex(where: { $0.id == activeID }) {
+                ctrl.selectedStageIndex = newIndex
+            }
+            self.updateOverlay()
+        }
+
         let vm = OverlayViewModel(
             stageManager: stageController.stageManager,
             activeStageIndex: stageController.selectedStageIndex,

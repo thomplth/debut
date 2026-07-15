@@ -9,6 +9,13 @@ struct WindowDragState: Equatable {
     var dropTargetStageIndex: Int?
 }
 
+struct StageDragState: Equatable {
+    let stageIndex: Int
+    let stageID: UUID
+    var offset: CGSize
+    var insertionIndex: Int?
+}
+
 struct PlateFramePreferenceKey: PreferenceKey {
     nonisolated(unsafe) static var defaultValue: [Int: CGRect] = [:]
     static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {

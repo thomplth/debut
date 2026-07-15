@@ -4,6 +4,7 @@ import SwiftUI
 public final class OverlayWindow: NSWindow, @unchecked Sendable {
     private var hostingView: NSHostingView<OverlaySwiftUIView>?
     public var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
+    public var onStageReordered: ((Int, Int) -> Void)?
 
     public init() {
         let screen = NSScreen.main ?? NSScreen.screens[0]
@@ -23,7 +24,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     }
 
     public func update(viewModel: OverlayViewModel) {
-        let view = OverlaySwiftUIView(viewModel: viewModel, onWindowMoved: onWindowMoved)
+        let view = OverlaySwiftUIView(viewModel: viewModel, onWindowMoved: onWindowMoved, onStageReordered: onStageReordered)
         if let hostingView {
             hostingView.rootView = view
         } else {
