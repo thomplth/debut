@@ -7,6 +7,7 @@ public protocol StageControllerDelegate: AnyObject {
     func stageControllerDidCloseOverlay(_ controller: StageController)
     func stageControllerDidUpdateSelection(_ controller: StageController)
     func stageControllerDidSwitchStage(_ controller: StageController)
+    func stageControllerDidMutateState(_ controller: StageController)
 }
 
 public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
@@ -104,6 +105,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             }
         }
 
+        delegate?.stageControllerDidMutateState(self)
         delegate?.stageControllerDidSwitchStage(self)
     }
 
@@ -120,6 +122,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         if ownerStageID == activeStageID {
             // Window is in the active stage — update MRU
             stageManager.bringWindowToFront(windowID: windowID, inStageID: activeStageID)
+            delegate?.stageControllerDidMutateState(self)
         } else if let ownerStageID {
             // Window belongs to another stage — switch to that stage
             diag.report("switching_to_window_stage", details: [
@@ -142,6 +145,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 )
                 stageManager.addWindow(window, toStageID: activeStageID)
                 stageManager.bringWindowToFront(windowID: windowID, inStageID: activeStageID)
+                delegate?.stageControllerDidMutateState(self)
             }
         }
     }
@@ -242,6 +246,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         let targetWindow = activeStage.windows[1]
         _ = windowService.raiseWindow(windowID: targetWindow.windowID)
         stageManager.bringWindowToFront(windowID: targetWindow.windowID, inStageID: activeStage.id)
+        delegate?.stageControllerDidMutateState(self)
     }
 
     private func openOverlay(selectNextWindow: Bool) {
@@ -408,6 +413,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             selectedStageIndex = newIndex
         }
         selectedWindowIndex = 0
+        delegate?.stageControllerDidMutateState(self)
         delegate?.stageControllerDidUpdateSelection(self)
     }
 
@@ -418,6 +424,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         stageManager.deleteStage(id: targetID)
         selectedStageIndex = min(selectedStageIndex, stageManager.stages.count - 1)
         selectedWindowIndex = 0
+        delegate?.stageControllerDidMutateState(self)
         delegate?.stageControllerDidUpdateSelection(self)
     }
 
@@ -426,6 +433,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
         stageManager.saveStageAsTemplate(stageID: stage.id, templateName: stageLabel(forID: stage.id))
+        delegate?.stageControllerDidMutateState(self)
     }
 
     private func moveWindow(direction: SwapDirection) {
@@ -453,6 +461,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         let targetWindows = stageManager.stages[targetStageIndex].windows
         selectedWindowIndex = targetWindows.firstIndex(where: { $0.windowID == window.windowID }) ?? 0
 
+        delegate?.stageControllerDidMutateState(self)
         delegate?.stageControllerDidUpdateSelection(self)
         // Force overlay rebuild since stage contents changed
         delegate?.stageControllerDidOpenOverlay(self)
@@ -469,6 +478,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         case .down where selectedStageIndex < stageManager.stages.count - 1: selectedStageIndex += 1
         default: break
         }
+        delegate?.stageControllerDidMutateState(self)
         delegate?.stageControllerDidUpdateSelection(self)
     }
 }
