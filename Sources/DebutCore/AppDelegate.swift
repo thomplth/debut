@@ -223,6 +223,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     private func showStageManagerOverlay() {
         guard let stageController, let overlayWindow else { return }
+
+        overlayWindow.onWindowMoved = { [weak self] windowID, fromIndex, toIndex in
+            guard let self, let ctrl = self.stageController else { return }
+            let stages = ctrl.stageManager.stages
+            guard stages.indices.contains(fromIndex), stages.indices.contains(toIndex) else { return }
+            ctrl.stageManager.moveWindow(
+                windowID: windowID,
+                fromStageID: stages[fromIndex].id,
+                toStageID: stages[toIndex].id
+            )
+            self.updateOverlay()
+        }
+
         let vm = OverlayViewModel(
             stageManager: stageController.stageManager,
             activeStageIndex: stageController.selectedStageIndex,

@@ -36,9 +36,14 @@ public struct PlateConstants {
 
 public struct OverlaySwiftUIView: View {
     public let viewModel: OverlayViewModel
+    public var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
 
-    public init(viewModel: OverlayViewModel) {
+    @State private var windowDrag: WindowDragState?
+    @State private var plateFrames: [Int: CGRect] = [:]
+
+    public init(viewModel: OverlayViewModel, onWindowMoved: ((CGWindowID, Int, Int) -> Void)? = nil) {
         self.viewModel = viewModel
+        self.onWindowMoved = onWindowMoved
     }
 
     public var body: some View {
@@ -53,31 +58,68 @@ public struct OverlaySwiftUIView: View {
             let inactiveScale = CGFloat(viewModel.appearance.inactivePlateScale)
             let spacing: CGFloat = 14
 
-            // Calculate offset to center the active plate
             let totalBefore = CGFloat(viewModel.activeStageIndex) * (pHeight * inactiveScale + spacing)
             let activeCenter = totalBefore + pHeight / 2
-            let offset = geo.size.height / 2 - activeCenter
+            let yOffset = geo.size.height / 2 - activeCenter
 
-            VStack(spacing: spacing) {
-                ForEach(Array(plates.enumerated()), id: \.element.id) { index, plate in
-                    let isActive = index == viewModel.activeStageIndex
-                    let scale = isActive ? 1.0 : inactiveScale
+            ZStack {
+                VStack(spacing: spacing) {
+                    ForEach(Array(plates.enumerated()), id: \.element.id) { index, plate in
+                        let isActive = index == viewModel.activeStageIndex
+                        let scale = isActive ? 1.0 : inactiveScale
+                        let isDropTarget = windowDrag?.dropTargetStageIndex == index
+                            && windowDrag?.sourceStageIndex != index
 
-                    PlateSwiftUIView(
-                        plate: plate,
-                        isSelected: isActive,
-                        selectedWindowIndex: isActive ? viewModel.selectedWindowIndex : nil,
+                        PlateSwiftUIView(
+                            plate: plate,
+                            isSelected: isActive,
+                            selectedWindowIndex: isActive ? viewModel.selectedWindowIndex : nil,
+                            thumbnailWidth: tSize.width,
+                            thumbnailHeight: tSize.height,
+                            appearance: viewModel.appearance,
+                            isDropTarget: isDropTarget,
+                            windowDrag: $windowDrag,
+                            plateFrames: $plateFrames,
+                            stageIndex: index,
+                            onWindowMoved: onWindowMoved
+                        )
+                        .frame(width: plateWidth, height: pHeight)
+                        .scaleEffect(scale)
+                        .frame(width: plateWidth * scale, height: pHeight * scale)
+                        .background(
+                            GeometryReader { plateGeo in
+                                Color.clear.preference(
+                                    key: PlateFramePreferenceKey.self,
+                                    value: [index: plateGeo.frame(in: .named("overlay"))]
+                                )
+                            }
+                        )
+                    }
+                }
+                .frame(width: geo.size.width, alignment: .center)
+                .offset(y: yOffset)
+
+                if let drag = windowDrag,
+                   let plate = plates[safe: drag.sourceStageIndex],
+                   let window = plate.windows[safe: drag.sourceWindowIndex] {
+                    WindowPreviewView(
+                        window: window,
+                        isWindowSelected: true,
                         thumbnailWidth: tSize.width,
                         thumbnailHeight: tSize.height,
                         appearance: viewModel.appearance
                     )
-                    .frame(width: plateWidth, height: pHeight)
-                    .scaleEffect(scale)
-                    .frame(width: plateWidth * scale, height: pHeight * scale)
+                    .opacity(0.85)
+                    .scaleEffect(1.05)
+                    .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                    .offset(drag.offset)
+                    .allowsHitTesting(false)
                 }
             }
-            .frame(width: geo.size.width, alignment: .center)
-            .offset(y: offset)
+            .coordinateSpace(name: "overlay")
+            .onPreferenceChange(PlateFramePreferenceKey.self) { frames in
+                plateFrames = frames
+            }
         }
     }
 }
@@ -89,6 +131,11 @@ struct PlateSwiftUIView: View {
     let thumbnailWidth: CGFloat
     let thumbnailHeight: CGFloat
     let appearance: AppSettings
+    var isDropTarget: Bool = false
+    @Binding var windowDrag: WindowDragState?
+    @Binding var plateFrames: [Int: CGRect]
+    let stageIndex: Int
+    var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -106,13 +153,17 @@ struct PlateSwiftUIView: View {
                         .frame(maxWidth: .infinity)
                 } else {
                     ForEach(Array(plate.windows.enumerated()), id: \.element.id) { index, window in
+                        let isDragging = windowDrag?.sourceStageIndex == stageIndex
+                            && windowDrag?.sourceWindowIndex == index
                         WindowPreviewView(
                             window: window,
-                            isWindowSelected: selectedWindowIndex == index,
+                            isWindowSelected: selectedWindowIndex == index && !isDragging,
                             thumbnailWidth: thumbnailWidth,
                             thumbnailHeight: thumbnailHeight,
                             appearance: appearance
                         )
+                        .opacity(isDragging ? 0.3 : 1.0)
+                        .gesture(windowDragGesture(window: window, windowIndex: index))
                     }
                 }
             }
@@ -122,10 +173,49 @@ struct PlateSwiftUIView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(
+            isDropTarget
+                ? RoundedRectangle(cornerRadius: CGFloat(appearance.plateCornerRadius))
+                    .stroke(Color.accentColor, lineWidth: 2)
+                : nil
+        )
         .modifier(LiquidGlassModifier(
             cornerRadius: CGFloat(appearance.plateCornerRadius),
             appearance: appearance
         ))
+    }
+
+    private func windowDragGesture(window: PlateWindowData, windowIndex: Int) -> some Gesture {
+        DragGesture(coordinateSpace: .named("overlay"))
+            .onChanged { value in
+                if windowDrag == nil {
+                    windowDrag = WindowDragState(
+                        windowID: window.windowID,
+                        sourceStageIndex: stageIndex,
+                        sourceWindowIndex: windowIndex,
+                        offset: value.translation
+                    )
+                } else {
+                    windowDrag?.offset = value.translation
+                    windowDrag?.dropTargetStageIndex = dropTargetIndex(at: value.location)
+                }
+            }
+            .onEnded { _ in
+                guard let drag = windowDrag else { return }
+                if let target = drag.dropTargetStageIndex, target != drag.sourceStageIndex {
+                    onWindowMoved?(drag.windowID, drag.sourceStageIndex, target)
+                }
+                windowDrag = nil
+            }
+    }
+
+    private func dropTargetIndex(at location: CGPoint) -> Int? {
+        for (index, frame) in plateFrames {
+            if frame.contains(location) {
+                return index
+            }
+        }
+        return nil
     }
 }
 
@@ -139,7 +229,6 @@ struct WindowPreviewView: View {
     var body: some View {
         VStack(spacing: 4) {
             ZStack(alignment: .topLeading) {
-                // Window preview or placeholder
                 Group {
                     if let cgImage = window.previewImage {
                         Image(decorative: cgImage, scale: 1.0)
@@ -157,14 +246,12 @@ struct WindowPreviewView: View {
                 }
                 .frame(width: thumbnailWidth, height: thumbnailHeight)
 
-                // App icon badge (top-left)
                 AppIconImage(bundleID: window.ownerBundleID, name: window.ownerName, iconSize: PlateConstants.badgeSize)
                     .frame(width: PlateConstants.badgeSize, height: PlateConstants.badgeSize)
                     .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                     .offset(x: -4, y: -4)
             }
 
-            // Window title — always visible
             Text(window.windowTitle.isEmpty ? window.ownerName : window.windowTitle)
                 .font(.system(size: max(9, thumbnailWidth * 0.065)))
                 .foregroundStyle(isWindowSelected ? .primary : .secondary)
@@ -232,5 +319,11 @@ struct AppIconImage: NSViewRepresentable {
         (label as NSString).draw(at: NSPoint(x: size / 2 - sz.width / 2, y: size / 2 - sz.height / 2), withAttributes: attrs)
         img.unlockFocus()
         return img
+    }
+}
+
+extension Array {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
