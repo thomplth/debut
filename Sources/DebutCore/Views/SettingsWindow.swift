@@ -54,6 +54,7 @@ public struct SettingsView: View {
         .onChange(of: viewModel.settings.selectionBorderWidth) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.selectionBorderOpacity) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.inactivePlateScale) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.keyBindings) { _, _ in saveSettings() }
     }
 
     // MARK: - Helpers
@@ -291,20 +292,26 @@ public struct SettingsView: View {
             shortcutRow("Switch windows (hold)", shortcut: "Cmd+Tab", configurable: false)
             shortcutRow("Quick switch last window", shortcut: "Cmd+Tab (tap)", configurable: false)
             shortcutRow("Switch stages (hold)", shortcut: "Cmd+Opt+Tab", configurable: false)
-            shortcutRow("Next window", shortcut: "Tab", configurable: true)
-            shortcutRow("Previous window", shortcut: "Shift+Tab", configurable: true)
-            shortcutRow("Next stage", shortcut: "Option+Tab", configurable: true)
-            shortcutRow("Previous stage", shortcut: "Shift+Option+Tab", configurable: true)
-            shortcutRow("Jump to stage 1–9", shortcut: "1–9", configurable: true)
-            shortcutRow("New stage below", shortcut: "N", configurable: true)
-            shortcutRow("New stage above", shortcut: "Shift+N", configurable: true)
-            shortcutRow("Delete stage", shortcut: "Delete", configurable: true)
-            shortcutRow("Rename stage", shortcut: "R", configurable: true)
-            shortcutRow("Save as template", shortcut: "Space", configurable: true)
-            shortcutRow("Move window up/down", shortcut: "Arrow Up/Down", configurable: true)
-            shortcutRow("Swap stage up/down", shortcut: "Option+Arrow Up/Down", configurable: true)
+
+            Text("Click a shortcut to rebind it")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 4)
+
+            ForEach(KeyAction.allCases, id: \.self) { action in
+                ShortcutRecorderRow(
+                    action: action,
+                    keyBindings: $viewModel.settings.keyBindings
+                )
+            }
+
             shortcutRow("Commit selection", shortcut: "Release Cmd", configurable: false)
             shortcutRow("Discard selection", shortcut: "Esc", configurable: false)
+
+            Button("Restore Defaults") {
+                viewModel.settings.keyBindings.restoreDefaults()
+            }
+            .padding(.top, 8)
         }
     }
 

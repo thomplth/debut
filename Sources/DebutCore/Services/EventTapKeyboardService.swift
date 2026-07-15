@@ -10,6 +10,7 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     private var stageManagerActive: Bool = false
 
     public var overlayVisible: Bool = false
+    public var keyBindings: KeyBindings = KeyBindings()
 
     public init() {}
 
@@ -125,38 +126,32 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
             return nil // Consume keyUp events too
         }
 
-        let option = flags.contains(.maskAlternate)
-
-        // Tab cycles windows, Option+Tab cycles stages, ` acts as Shift+Tab (previous window).
-        let debutEvent: DebutKeyEvent? = switch Int(keyCode) {
-        case kVK_Tab where option && shift: .previousStage
-        case kVK_Tab where option: .nextStage
-        case kVK_Tab where shift: .previousWindow
-        case kVK_Tab: .nextWindow
-        case kVK_ANSI_Grave: .previousWindow
-        case kVK_Escape: .escape
-        case kVK_ANSI_N where shift: .newStageAbove
-        case kVK_ANSI_N: .newStageBelow
-        case kVK_Delete, kVK_ForwardDelete: .deleteStage
-        case kVK_Space: .saveAsTemplate
-        case kVK_UpArrow where option: .swapStageUp
-        case kVK_DownArrow where option: .swapStageDown
-        case kVK_UpArrow: .moveWindowUp
-        case kVK_DownArrow: .moveWindowDown
-        case kVK_ANSI_1: .jumpToStage(1)
-        case kVK_ANSI_2: .jumpToStage(2)
-        case kVK_ANSI_3: .jumpToStage(3)
-        case kVK_ANSI_4: .jumpToStage(4)
-        case kVK_ANSI_5: .jumpToStage(5)
-        case kVK_ANSI_6: .jumpToStage(6)
-        case kVK_ANSI_7: .jumpToStage(7)
-        case kVK_ANSI_8: .jumpToStage(8)
-        case kVK_ANSI_9: .jumpToStage(9)
-        default: nil
+        // Escape is always hardcoded
+        if Int(keyCode) == kVK_Escape {
+            delegate?.handleKeyEvent(.escape)
+            return nil
         }
 
-        if let debutEvent {
-            delegate?.handleKeyEvent(debutEvent)
+        // Backtick always maps to previousWindow (Cmd+` equivalent)
+        if Int(keyCode) == kVK_ANSI_Grave {
+            delegate?.handleKeyEvent(.previousWindow)
+            return nil
+        }
+
+        // Forward delete also maps to deleteStage (in addition to regular delete)
+        if Int(keyCode) == kVK_ForwardDelete {
+            delegate?.handleKeyEvent(.deleteStage)
+            return nil
+        }
+
+        // Look up configurable bindings
+        let combo = KeyCombo(
+            keyCode: Int(keyCode),
+            shift: shift,
+            option: flags.contains(.maskAlternate)
+        )
+        if let action = keyBindings.action(for: combo) {
+            delegate?.handleKeyEvent(action.toKeyEvent())
         }
 
         // Always consume — never let keyboard events leak to the active app
