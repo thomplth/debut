@@ -37,13 +37,20 @@ public struct PlateConstants {
 public struct OverlaySwiftUIView: View {
     public let viewModel: OverlayViewModel
     public var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
+    public var onStageReordered: ((Int, Int) -> Void)?
 
     @State private var windowDrag: WindowDragState?
+    @State private var stageDrag: StageDragState?
     @State private var plateFrames: [Int: CGRect] = [:]
 
-    public init(viewModel: OverlayViewModel, onWindowMoved: ((CGWindowID, Int, Int) -> Void)? = nil) {
+    public init(
+        viewModel: OverlayViewModel,
+        onWindowMoved: ((CGWindowID, Int, Int) -> Void)? = nil,
+        onStageReordered: ((Int, Int) -> Void)? = nil
+    ) {
         self.viewModel = viewModel
         self.onWindowMoved = onWindowMoved
+        self.onStageReordered = onStageReordered
     }
 
     public var body: some View {
@@ -69,6 +76,12 @@ public struct OverlaySwiftUIView: View {
                         let scale = isActive ? 1.0 : inactiveScale
                         let isDropTarget = windowDrag?.dropTargetStageIndex == index
                             && windowDrag?.sourceStageIndex != index
+                        let isStageDragging = stageDrag?.stageIndex == index
+
+                        // Insertion indicator above this plate
+                        if let drag = stageDrag, drag.insertionIndex == index, drag.stageIndex != index {
+                            insertionIndicator(width: plateWidth * scale)
+                        }
 
                         PlateSwiftUIView(
                             plate: plate,
@@ -86,6 +99,7 @@ public struct OverlaySwiftUIView: View {
                         .frame(width: plateWidth, height: pHeight)
                         .scaleEffect(scale)
                         .frame(width: plateWidth * scale, height: pHeight * scale)
+                        .opacity(isStageDragging ? 0.3 : 1.0)
                         .background(
                             GeometryReader { plateGeo in
                                 Color.clear.preference(
@@ -94,6 +108,15 @@ public struct OverlaySwiftUIView: View {
                                 )
                             }
                         )
+                        .gesture(stageDragGesture(index: index, plate: plate, pHeight: pHeight * inactiveScale + spacing))
+
+                        // Insertion indicator after the last plate
+                        if index == plates.count - 1,
+                           let drag = stageDrag,
+                           drag.insertionIndex == plates.count,
+                           drag.stageIndex != plates.count - 1 {
+                            insertionIndicator(width: plateWidth * scale)
+                        }
                     }
                 }
                 .frame(width: geo.size.width, alignment: .center)
@@ -121,6 +144,52 @@ public struct OverlaySwiftUIView: View {
                 plateFrames = frames
             }
         }
+    }
+
+    private func stageDragGesture(index: Int, plate: PlateData, pHeight: CGFloat) -> some Gesture {
+        DragGesture(coordinateSpace: .named("overlay"))
+            .onChanged { value in
+                guard windowDrag == nil else { return }
+                if stageDrag == nil {
+                    guard viewModel.plates.count > 1 else { return }
+                    stageDrag = StageDragState(
+                        stageIndex: index,
+                        stageID: plate.id,
+                        offset: value.translation
+                    )
+                } else {
+                    stageDrag?.offset = value.translation
+                    stageDrag?.insertionIndex = computeInsertionIndex(
+                        draggedIndex: index,
+                        yTranslation: value.translation.height,
+                        plateHeight: pHeight
+                    )
+                }
+            }
+            .onEnded { _ in
+                guard let drag = stageDrag else { return }
+                if let target = drag.insertionIndex, target != drag.stageIndex {
+                    let adjustedTarget = target > drag.stageIndex ? target - 1 : target
+                    if adjustedTarget != drag.stageIndex {
+                        onStageReordered?(drag.stageIndex, adjustedTarget)
+                    }
+                }
+                stageDrag = nil
+            }
+    }
+
+    private func computeInsertionIndex(draggedIndex: Int, yTranslation: CGFloat, plateHeight: CGFloat) -> Int {
+        let platesMoved = Int(round(yTranslation / plateHeight))
+        let rawTarget = draggedIndex + platesMoved
+        return max(0, min(rawTarget, viewModel.plates.count))
+    }
+
+    @ViewBuilder
+    private func insertionIndicator(width: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 1)
+            .fill(Color.accentColor)
+            .frame(width: width, height: 2)
+            .padding(.vertical, -6)
     }
 }
 
