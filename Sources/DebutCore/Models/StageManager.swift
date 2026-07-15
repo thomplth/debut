@@ -88,6 +88,15 @@ public struct StageManager: Codable, Sendable {
         }
     }
 
+    public mutating func moveStage(fromIndex: Int, toIndex: Int) {
+        guard stages.indices.contains(fromIndex),
+              toIndex >= 0, toIndex < stages.count,
+              fromIndex != toIndex
+        else { return }
+        let stage = stages.remove(at: fromIndex)
+        stages.insert(stage, at: toIndex)
+    }
+
     // MARK: - Active stage
 
     public mutating func activateStage(id: UUID) {
