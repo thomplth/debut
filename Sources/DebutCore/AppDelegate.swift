@@ -109,6 +109,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         controller.desktopSurface = surface
         stageController = controller
 
+        keyboardService.keyBindings = currentSettings.keyBindings
+
         // Raise active stage windows above the desktop surface
         controller.switchToStage(id: stageManager.activeStageID)
 
@@ -315,6 +317,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 for bundleID in newSettings.excludedBundleIDs {
                     self.stageController?.stageManager.removeAllWindows(forBundleID: bundleID)
                 }
+                self.keyboardService?.keyBindings = newSettings.keyBindings
             }
         }
         let view = SettingsView(viewModel: vm)
