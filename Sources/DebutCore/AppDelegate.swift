@@ -17,6 +17,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var desktopSurface: DesktopSurfaceWindow?
     private var currentSettings: AppSettings = AppSettings()
     private var pendingStageManager: StageManager?
+    private var debouncedSaver: DebouncedSaver?
 
     public override init() {
         super.init()
@@ -26,9 +27,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         NSApp.setActivationPolicy(.accessory)
         diag.report("app_launched")
 
-        stateStore = StateStore()
-        pendingStageManager = (try? stateStore?.load()) ?? StageManager()
-        currentSettings = (try? stateStore?.loadSettings()) ?? AppSettings()
+        let store = StateStore()
+        stateStore = store
+        debouncedSaver = DebouncedSaver(store: store)
+        pendingStageManager = (try? store.load()) ?? StageManager()
+        currentSettings = (try? store.loadSettings()) ?? AppSettings()
 
         windowService = AccessibilityWindowService()
         keyboardService = EventTapKeyboardService()
@@ -114,6 +117,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 guard let self else { return }
                 let activeID = self.stageController?.stageManager.activeStageID ?? self.stageController!.stageManager.stages[0].id
                 self.stageController?.stageManager.addWindow(window, toStageID: activeID)
+                if let sm = self.stageController?.stageManager {
+                    self.debouncedSaver?.scheduleSave(sm)
+                }
             }
         }
         discovery.onWindowClosed = { [weak self] windowID in
@@ -122,12 +128,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 for stage in self.stageController?.stageManager.stages ?? [] {
                     self.stageController?.stageManager.removeWindow(windowID: windowID, fromStageID: stage.id)
                 }
+                if let sm = self.stageController?.stageManager {
+                    self.debouncedSaver?.scheduleSave(sm)
+                }
             }
         }
         discovery.onWindowTitleChanged = { [weak self] windowID, newTitle in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.stageController?.stageManager.updateWindowTitle(windowID: windowID, title: newTitle)
+                if let sm = self.stageController?.stageManager {
+                    self.debouncedSaver?.scheduleSave(sm)
+                }
             }
         }
         discovery.onWindowActivated = { [weak self] windowID in
@@ -144,6 +156,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.stageController?.stageManager.removeAllWindows(forBundleID: bundleID)
+                if let sm = self.stageController?.stageManager {
+                    self.debouncedSaver?.scheduleSave(sm)
+                }
             }
         }
         discovery.startObserving()
@@ -173,9 +188,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     nonisolated public func applicationWillTerminate(_ notification: Notification) {
         let stageController = MainActor.assumeIsolated { self.stageController }
-        let stateStore = MainActor.assumeIsolated { self.stateStore }
-        guard let stageController, let stateStore else { return }
-        try? stateStore.save(stageController.stageManager)
+        let debouncedSaver = MainActor.assumeIsolated { self.debouncedSaver }
+        guard let stageController, let debouncedSaver else { return }
+        debouncedSaver.flushNow(stageController.stageManager)
     }
 
     // MARK: - StageControllerDelegate
@@ -199,6 +214,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     }
 
     nonisolated public func stageControllerDidSwitchStage(_ controller: StageController) {}
+
+    nonisolated public func stageControllerDidMutateState(_ controller: StageController) {
+        DispatchQueue.main.async { [weak self] in
+            self?.debouncedSaver?.scheduleSave(controller.stageManager)
+        }
+    }
 
     private func showStageManagerOverlay() {
         guard let stageController, let overlayWindow else { return }
