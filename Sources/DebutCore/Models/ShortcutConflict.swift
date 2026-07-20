@@ -23,7 +23,7 @@ public struct ShortcutConflict: Sendable {
 public struct ConflictDetector: Sendable {
     private static let systemAdvisory: [KeyCombo: String] = [
         KeyCombo(keyCode: kVK_Tab): "Tab is also used for overlay activation",
-        KeyCombo(keyCode: kVK_ANSI_Grave): "Backtick passes through as Cmd+` after Esc",
+        KeyCombo(keyCode: kVK_ANSI_Grave): "Backtick is reserved for Cmd+` same-app window cycling",
         KeyCombo(keyCode: kVK_ANSI_Q): "Cmd+Q quits apps outside the overlay",
         KeyCombo(keyCode: kVK_ANSI_W): "Cmd+W closes windows outside the overlay",
     ]

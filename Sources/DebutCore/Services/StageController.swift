@@ -29,6 +29,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     private var preOverlayStageID: UUID?
     private var previousStageID: UUID?
+    private var backtickCycleWindows: [CGWindowID] = []
+    private var backtickCycleIndex: Int = 0
     private let diag = DiagnosticReporter.shared
 
     public init(
@@ -67,6 +69,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     public func switchToStage(id targetID: UUID, raiseWindowID: CGWindowID? = nil) {
+        backtickCycleWindows = []
+        backtickCycleIndex = 0
+
         let previousID = stageManager.activeStageID
 
         if previousID != targetID {
@@ -116,6 +121,13 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     public func recordWindowActivation(windowID: CGWindowID) {
+        if !backtickCycleWindows.isEmpty {
+            if backtickCycleWindows.contains(windowID) {
+                return
+            }
+            commitBacktickCycle()
+        }
+
         let activeStageID = stageManager.activeStageID
         let ownerStageID = stageOwningWindow(windowID: windowID)
 
@@ -182,7 +194,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             } else {
                 openOverlay(selectPreviousStage: true)
             }
+        case .cmdBacktick:
+            handleCmdBacktick(reverse: false)
+        case .cmdShiftBacktick:
+            handleCmdBacktick(reverse: true)
         case .cmdRelease:
+            commitBacktickCycle()
             commitSelection()
         case .escape:
             discardOverlay()
@@ -224,6 +241,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private func quickSwitchToStage(index: Int) {
         guard stageManager.stages.indices.contains(index) else { return }
 
+        backtickCycleWindows = []
+        backtickCycleIndex = 0
+
         if isStageManagerVisible {
             isStageManagerVisible = false
             if let tapService = keyboardService as? EventTapKeyboardService {
@@ -239,6 +259,45 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     // MARK: - Private
+
+    private func handleCmdBacktick(reverse: Bool) {
+        let activeStage = stageManager.activeStage
+        guard let frontWindow = activeStage.windows.first else { return }
+
+        let bundleID = frontWindow.ownerBundleID
+        let sameAppWindows = activeStage.windows.filter { $0.ownerBundleID == bundleID }
+        guard sameAppWindows.count >= 2 else { return }
+
+        let windowIDs = sameAppWindows.map(\.windowID)
+
+        if backtickCycleWindows != windowIDs {
+            backtickCycleWindows = windowIDs
+            backtickCycleIndex = 0
+        }
+
+        if reverse {
+            backtickCycleIndex = (backtickCycleIndex - 1 + backtickCycleWindows.count)
+                % backtickCycleWindows.count
+        } else {
+            backtickCycleIndex = (backtickCycleIndex + 1) % backtickCycleWindows.count
+        }
+
+        let targetID = backtickCycleWindows[backtickCycleIndex]
+        _ = windowService.raiseWindow(windowID: targetID)
+        _ = windowService.activateApp(bundleID: bundleID)
+    }
+
+    private func commitBacktickCycle() {
+        guard !backtickCycleWindows.isEmpty else { return }
+        let finalWindowID = backtickCycleWindows[backtickCycleIndex]
+        stageManager.bringWindowToFront(
+            windowID: finalWindowID,
+            inStageID: stageManager.activeStageID
+        )
+        backtickCycleWindows = []
+        backtickCycleIndex = 0
+        delegate?.stageControllerDidMutateState(self)
+    }
 
     private func handleCmdTabTap() {
         let activeStage = stageManager.activeStage
@@ -280,6 +339,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private func setupOverlay() {
         // Don't show overlay when a fullscreen app is active
         if isFullscreenAppActive() { return }
+
+        backtickCycleWindows = []
+        backtickCycleIndex = 0
 
         isStageManagerVisible = true
         if let tapService = keyboardService as? EventTapKeyboardService {
@@ -366,7 +428,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         selectedWindowIndex = 0
         delegate?.stageControllerDidCloseOverlay(self)
         // stageManagerActive stays true — session continues until Cmd release
-        // But overlayVisible is false — ` passes through to system as Cmd+`
+        // Cmd+` still stage-isolated (intercepted before the overlay gate)
     }
 
     private func cycleWindow(forward: Bool) {
