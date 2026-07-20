@@ -108,12 +108,22 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
             return nil
         }
 
+        // Cmd+` (without Option, overlay closed) — stage-isolated same-app window cycling
+        if type == .keyDown && flags.contains(.maskCommand) && !flags.contains(.maskAlternate) && keyCode == Int64(kVK_ANSI_Grave) && !overlayVisible {
+            if !stageManagerActive {
+                cmdHeld = true
+            }
+            stageManagerActive = true
+            delegate?.handleKeyEvent(shift ? .cmdShiftBacktick : .cmdBacktick)
+            return nil
+        }
+
         guard stageManagerActive else {
             return event
         }
 
         // Session active but overlay closed (after Esc): only intercept Tab to reopen.
-        // Pass everything else (including `) through to the system.
+        // Cmd+` is already handled above; pass everything else through.
         if !overlayVisible {
             if type == .keyDown && keyCode == Int64(kVK_Tab) {
                 // Tab/Shift+Tab/Option+Tab will reopen — already handled above

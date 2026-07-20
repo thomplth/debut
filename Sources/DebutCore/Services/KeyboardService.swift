@@ -26,6 +26,9 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case swapStageUp            // Option+Up Arrow
     case swapStageDown          // Option+Down Arrow
 
+    case cmdBacktick            // Cmd+` — next same-app window in stage
+    case cmdShiftBacktick       // Cmd+Shift+` — previous same-app window in stage
+
     case escape
 }
 
