@@ -133,6 +133,24 @@ public struct StageManager: Codable, Sendable {
         }
     }
 
+    @discardableResult
+    public mutating func removeAllWindows(forOwnerPID ownerPID: pid_t) -> Int {
+        var removedCount = 0
+        for index in stages.indices {
+            removedCount += stages[index].removeAllWindows(forOwnerPID: ownerPID)
+        }
+        return removedCount
+    }
+
+    @discardableResult
+    public mutating func removeWindowsOwnedByStoppedProcesses(runningPIDs: Set<pid_t>) -> Int {
+        var removedCount = 0
+        for index in stages.indices {
+            removedCount += stages[index].removeWindowsOwnedByStoppedProcesses(runningPIDs: runningPIDs)
+        }
+        return removedCount
+    }
+
     public mutating func moveWindow(windowID: CGWindowID, fromStageID: UUID, toStageID: UUID) {
         guard let fromIndex = stages.firstIndex(where: { $0.id == fromStageID }),
               let toIndex = stages.firstIndex(where: { $0.id == toStageID }),

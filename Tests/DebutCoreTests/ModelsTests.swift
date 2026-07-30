@@ -93,6 +93,32 @@ struct StageTests {
         #expect(stage.windows[0].ownerBundleID == "com.b")
     }
 
+    @Test("Remove all windows for owner PID")
+    func removeAllForOwnerPID() {
+        var stage = Stage()
+        stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 10))
+        stage.addWindow(StageWindow(windowID: 102, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T2", ownerPID: 20))
+        stage.addWindow(StageWindow(windowID: 201, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T3", ownerPID: 10))
+
+        let removedCount = stage.removeAllWindows(forOwnerPID: 10)
+
+        #expect(removedCount == 2)
+        #expect(stage.windows.map(\.windowID) == [102])
+    }
+
+    @Test("Remove windows owned by stopped processes")
+    func removeStoppedProcesses() {
+        var stage = Stage()
+        stage.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Live", ownerPID: 10))
+        stage.addWindow(StageWindow(windowID: 102, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Stopped", ownerPID: 20))
+        stage.addWindow(StageWindow(windowID: 103, ownerBundleID: "com.legacy", ownerName: "Legacy", windowTitle: "Unknown PID"))
+
+        let removedCount = stage.removeWindowsOwnedByStoppedProcesses(runningPIDs: [10])
+
+        #expect(removedCount == 1)
+        #expect(stage.windows.map(\.windowID) == [101, 103])
+    }
+
     @Test("Stage is Codable")
     func stageCodable() throws {
         var stage = Stage()

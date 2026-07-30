@@ -9,8 +9,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onWindowClosed: ((CGWindowID) -> Void)?
     public var onWindowActivated: ((CGWindowID) -> Void)?
     public var onWindowTitleChanged: ((CGWindowID, String) -> Void)?
-    public var onAppTerminated: ((String) -> Void)?
+    public var onAppActivated: ((RuntimeWindowSnapshot) -> Void)?
+    public var onAppTerminated: ((pid_t) -> Void)?
     public var excludedBundleIDs: Set<String> = []
+
+    private let focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)?
 
     private var knownWindowIDs: Set<CGWindowID> = []
 
@@ -25,8 +28,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
     private var perAppObservers: [pid_t: AppObserverState] = [:]
 
-    public init(windowService: any WindowService) {
+    public init(
+        windowService: any WindowService,
+        focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)? = nil
+    ) {
         self.windowService = windowService
+        self.focusedWindowProvider = focusedWindowProvider
         super.init()
     }
 
@@ -58,9 +65,25 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     /// Reconcile persisted stage windows against live windows.
     /// CGWindowIDs and PIDs are ephemeral — match by (bundleID, title).
-    /// Unmatched persisted windows are removed. Unmatched live windows go to active stage.
+    /// Unmatched windows from running apps are preserved for runtime confirmation.
+    /// Unmatched live windows go to the first stage.
     public func reconcileWindows(_ stageManager: inout StageManager) {
         let liveWindows = windowService.listWindows()
+        let runningApps = windowService.listRunningApps()
+
+        // An empty snapshot while regular apps are running usually means AX window
+        // enumeration failed. Treating it as authoritative would erase every saved
+        // stage assignment, so leave persisted state intact for runtime PID cleanup.
+        let persistedWindowCount = stageManager.stages.reduce(0) { $0 + $1.windows.count }
+        if liveWindows.isEmpty,
+           persistedWindowCount > 0,
+           !runningApps.isEmpty {
+            DiagnosticReporter.shared.report("windows_reconcile_skipped", details: [
+                "persistedCount": "\(persistedWindowCount)",
+                "reason": "empty_snapshot_with_running_apps",
+            ])
+            return
+        }
 
         // Build lookup: (bundleID, title) -> [WindowInfo]
         var liveByKey: [String: [WindowInfo]] = [:]
@@ -123,7 +146,20 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             }
         }
 
+        let runningPIDs = Set(runningApps.map(\.pid))
+        let runningBundleIDs = Set(runningApps.map(\.bundleID))
         for (stageID, windowID) in trulyStale {
+            guard let stage = stageManager.stages.first(where: { $0.id == stageID }),
+                  let window = stage.windows.first(where: { $0.windowID == windowID })
+            else { continue }
+
+            // A non-empty AX result can still omit arbitrary windows. Preserve an
+            // unmatched assignment while its process (or a relaunched instance of
+            // the same app) is running. Runtime CG-ID sweeps confirm real closures.
+            if window.ownerPID.map(runningPIDs.contains) == true ||
+                runningBundleIDs.contains(window.ownerBundleID) {
+                continue
+            }
             stageManager.removeWindow(windowID: windowID, fromStageID: stageID)
         }
 
@@ -215,7 +251,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     private func removeAppObserver(for pid: pid_t) {
         guard let state = perAppObservers.removeValue(forKey: pid) else { return }
+        knownWindowIDs.subtract(state.trackedWindows.keys)
         CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(state.observer), .defaultMode)
+    }
+
+    private func pruneTracking(runningPIDs: Set<pid_t>) {
+        if let observedPID, !runningPIDs.contains(observedPID) {
+            removeFocusObserver()
+        }
+        let stoppedPIDs = perAppObservers.keys.filter { !runningPIDs.contains($0) }
+        for pid in stoppedPIDs {
+            removeAppObserver(for: pid)
+        }
     }
 
     private func axWindowElement(for windowID: CGWindowID, pid: pid_t) -> AXUIElement? {
@@ -301,6 +348,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         guard let pid = observedPID,
               let windowID = focusedWindowID(for: pid)
         else { return }
+        trackAndRegister(windowID: windowID, pid: pid)
         onWindowActivated?(windowID)
     }
 
@@ -334,27 +382,62 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     @objc private func appDidActivate(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              let bundleID = app.bundleIdentifier,
-              bundleID != "com.thomplth.Debut",
-              !excludedBundleIDs.contains(bundleID),
-              app.activationPolicy == .regular
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
         else { return }
 
         let pid = app.processIdentifier
+        let bundleID = app.bundleIdentifier ?? ""
+        handleAppActivation(AppInfo(
+            bundleID: bundleID,
+            name: app.localizedName ?? bundleID,
+            pid: pid,
+            isHidden: app.isHidden
+        ))
 
-        // Update MRU for the activated app's focused window
-        if let windowID = focusedWindowID(for: pid) {
-            onWindowActivated?(windowID)
-        }
+        guard bundleID != "com.thomplth.Debut",
+              !excludedBundleIDs.contains(bundleID),
+              app.activationPolicy == .regular
+        else { return }
 
         // Move the focus observer to this app
         installFocusObserver(for: pid)
     }
 
+    func handleAppActivation(_ app: AppInfo) {
+        let pid = app.pid
+
+        // Sample focus before performing any enumeration so transient activation
+        // windows are not introduced by reconciliation latency.
+        if app.bundleID != "com.thomplth.Debut",
+           !excludedBundleIDs.contains(app.bundleID),
+           let windowID = focusedWindowProvider?(pid) ?? focusedWindowID(for: pid) {
+            trackAndRegister(windowID: windowID, pid: pid)
+            onWindowActivated?(windowID)
+        }
+
+        var runningPIDs = Set(windowService.listRunningApps().map(\.pid))
+        // The activation notification is authoritative even if Launch Services has not
+        // inserted the newly activated process into runningApplications yet.
+        runningPIDs.insert(pid)
+        pruneTracking(runningPIDs: runningPIDs)
+        let liveWindows = windowService.listWindows().filter {
+            !excludedBundleIDs.contains($0.ownerBundleID)
+        }
+        // The full snapshot drives reconciliation, but only the activated app needs
+        // fresh AX lifecycle registration here. Other apps are registered when they
+        // activate, avoiding cross-process AX work for every window on every switch.
+        for window in liveWindows where window.ownerPID == pid {
+            trackAndRegister(windowID: window.windowID, pid: window.ownerPID)
+        }
+        onAppActivated?(RuntimeWindowSnapshot(
+            runningPIDs: runningPIDs,
+            liveWindows: liveWindows,
+            allWindowIDs: windowService.listAllWindowIDs()
+        ))
+    }
+
     @objc private func appDidTerminate(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              let bundleID = app.bundleIdentifier
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
         else { return }
 
         let pid = app.processIdentifier
@@ -367,7 +450,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // Clean up per-window lifecycle observer for this app
         removeAppObserver(for: pid)
 
-        onAppTerminated?(bundleID)
+        onAppTerminated?(pid)
     }
 
     // MARK: - Helpers
