@@ -31,16 +31,19 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private var previousStageID: UUID?
     private var backtickCycleWindows: [CGWindowID] = []
     private var backtickCycleIndex: Int = 0
+    private let fullscreenAppActiveProvider: (() -> Bool)?
     private let diag = DiagnosticReporter.shared
 
     public init(
         windowService: any WindowService,
         keyboardService: any KeyboardService,
-        stageManager: StageManager = StageManager()
+        stageManager: StageManager = StageManager(),
+        fullscreenAppActiveProvider: (() -> Bool)? = nil
     ) {
         self.windowService = windowService
         self.keyboardService = keyboardService
         self.stageManager = stageManager
+        self.fullscreenAppActiveProvider = fullscreenAppActiveProvider
 
         let started = keyboardService.start(delegate: self)
         self.keyboardServiceStarted = started
@@ -357,6 +360,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func isFullscreenAppActive() -> Bool {
+        if let fullscreenAppActiveProvider {
+            return fullscreenAppActiveProvider()
+        }
         guard let frontApp = NSWorkspace.shared.frontmostApplication,
               frontApp.bundleIdentifier != "com.thomplth.Debut"
         else { return false }
