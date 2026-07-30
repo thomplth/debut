@@ -84,9 +84,9 @@ All navigation wraps cyclically. Session persists until Cmd is released. Esc clo
 
 ### Quick switch (global, no overlay)
 
-- [x] Ctrl+Option+1-9: immediately switch to the stage at that position, without opening the overlay
+- [x] Ctrl+0-9: immediately switch to the stage at that position without opening the overlay; 0 targets stage 10 and a matching app window is preferred
 - [x] Works without a Cmd session; dismisses the overlay first if it happens to be open
-- [x] Excludes Cmd so it never collides with the in-overlay 1-9 selection
+- [x] Requires Ctrl without Command, Option, or Shift, so it never collides with other shortcuts
 
 ---
 
@@ -147,7 +147,7 @@ All navigation wraps cyclically. Session persists until Cmd is released. Esc clo
 | Cmd+Shift+Tab (hold) | Global | Open Stage Manager (last window selected) | [x] |
 | Cmd+Option+Tab (hold) | Global | Open Stage Manager (next stage selected) | [x] |
 | Cmd+Shift+Option+Tab (hold) | Global | Open Stage Manager (previous stage selected) | [x] |
-| Ctrl+Option+1-9 | Global | Quick switch to stage at that position (no overlay) | [x] |
+| Ctrl+0-9 | Global | Quick switch to stage at that position (0 targets stage 10; no overlay) | [x] |
 | Tab | Stage Manager | Next window (right) | [x] |
 | Shift+Tab | Stage Manager | Previous window (left) | [x] |
 | ` (backtick) | Stage Manager | Previous window (same as Shift+Tab) | [x] |

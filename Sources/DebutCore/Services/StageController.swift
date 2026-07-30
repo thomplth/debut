@@ -239,10 +239,18 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     // MARK: - Quick switch
 
-    /// Immediately switch to the stage at the given index (Ctrl+Option+<1-9>).
+    /// Immediately switch to the stage at the given index (Ctrl+<0-9>).
     /// Works whether or not the overlay is open; if open, it is dismissed first.
     private func quickSwitchToStage(index: Int) {
         guard stageManager.stages.indices.contains(index) else { return }
+
+        // Stage window order is MRU. Capture the active app before switching,
+        // then prefer that app's most-recent window in the destination stage.
+        let activeBundleID = stageManager.activeStage.windows.first?.ownerBundleID
+        let targetStage = stageManager.stages[index]
+        let matchingWindowID = activeBundleID.flatMap { bundleID in
+            targetStage.windows.first(where: { $0.ownerBundleID == bundleID })?.windowID
+        }
 
         backtickCycleWindows = []
         backtickCycleIndex = 0
@@ -255,8 +263,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             delegate?.stageControllerDidCloseOverlay(self)
         }
 
-        let targetID = stageManager.stages[index].id
-        switchToStage(id: targetID)
+        switchToStage(id: targetStage.id, raiseWindowID: matchingWindowID)
         selectedStageIndex = index
         selectedWindowIndex = 0
     }

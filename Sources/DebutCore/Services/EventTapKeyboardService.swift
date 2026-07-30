@@ -8,6 +8,7 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     private var runLoopSource: CFRunLoopSource?
     private var cmdHeld: Bool = false
     private var stageManagerActive: Bool = false
+    private var quickSwitchKeysDown: Set<Int64> = []
 
     public var overlayVisible: Bool = false
     public var keyBindings: KeyBindings = KeyBindings()
@@ -55,19 +56,21 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         isRunning = false
     }
 
-    fileprivate func handleCGEvent(type: CGEventType, event: CGEvent) -> CGEvent? {
+    func handleCGEvent(type: CGEventType, event: CGEvent) -> CGEvent? {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
-        // Ctrl+Option+<1-9> — global immediate switch to the stage at that position.
-        // Works without a Cmd session or open overlay. Excludes Cmd so it never
-        // collides with the in-overlay digit selection (which requires Cmd held).
-        if type == .keyDown
-            && flags.contains(.maskControl)
-            && flags.contains(.maskAlternate)
-            && !flags.contains(.maskCommand),
-           let stageNumber = stageNumber(forKeyCode: keyCode) {
-            delegate?.handleKeyEvent(.switchToStage(stageNumber))
+        // Ctrl+<0-9> — global immediate switch to the stage at that position.
+        // Consume both key-down and key-up so the shortcut never leaks to the
+        // active app or a system mapping. Only key-down triggers the switch.
+        if type == .keyDown,
+           let stagePosition = Self.quickSwitchStagePosition(keyCode: keyCode, flags: flags) {
+            if quickSwitchKeysDown.insert(keyCode).inserted {
+                delegate?.handleKeyEvent(.switchToStage(stagePosition))
+            }
+            return nil
+        }
+        if type == .keyUp, quickSwitchKeysDown.remove(keyCode) != nil {
             return nil
         }
 
@@ -168,8 +171,15 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         return nil
     }
 
-    /// Maps a number-row keycode (1-9) to its stage position. Returns nil otherwise.
-    private func stageNumber(forKeyCode keyCode: Int64) -> Int? {
+    /// Maps an exact Ctrl+number-row shortcut to its 1-based stage position.
+    /// Ctrl+0 targets stage 10.
+    static func quickSwitchStagePosition(keyCode: Int64, flags: CGEventFlags) -> Int? {
+        guard flags.contains(.maskControl),
+              !flags.contains(.maskCommand),
+              !flags.contains(.maskAlternate),
+              !flags.contains(.maskShift)
+        else { return nil }
+
         switch Int(keyCode) {
         case kVK_ANSI_1: return 1
         case kVK_ANSI_2: return 2
@@ -180,6 +190,7 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         case kVK_ANSI_7: return 7
         case kVK_ANSI_8: return 8
         case kVK_ANSI_9: return 9
+        case kVK_ANSI_0: return 10
         default: return nil
         }
     }

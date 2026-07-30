@@ -149,6 +149,63 @@ struct StageControllerTests {
         #expect(controller.stageManager.activeStage.windows[0].windowID == 202)
     }
 
+    @Test("Quick switch focuses the current app's MRU window in the target stage")
+    func quickSwitchKeepsCurrentApp() {
+        let (controller, windowSvc, keyboardSvc) = makeController()
+        let sourceStageID = controller.stageManager.stages[0].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
+            toStageID: sourceStageID
+        )
+
+        controller.stageManager.createStage(position: .below)
+        let targetStageID = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
+            toStageID: targetStageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 303, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Target Current"),
+            toStageID: targetStageID
+        )
+        controller.stageManager.activateStage(id: sourceStageID)
+
+        keyboardSvc.simulateEvent(.switchToStage(2))
+
+        #expect(controller.stageManager.activeStageID == targetStageID)
+        #expect(windowSvc.raisedWindowID == 303)
+        #expect(windowSvc.activatedBundleID == "com.current")
+        #expect(controller.stageManager.activeStage.windows.first?.windowID == 303)
+    }
+
+    @Test("Quick switch falls back to the target stage's MRU window when the current app is absent")
+    func quickSwitchFallsBackToTargetMRU() {
+        let (controller, windowSvc, keyboardSvc) = makeController()
+        let sourceStageID = controller.stageManager.stages[0].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
+            toStageID: sourceStageID
+        )
+
+        controller.stageManager.createStage(position: .below)
+        let targetStageID = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
+            toStageID: targetStageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 303, ownerBundleID: "com.third", ownerName: "Third", windowTitle: "Target Older"),
+            toStageID: targetStageID
+        )
+        controller.stageManager.activateStage(id: sourceStageID)
+
+        keyboardSvc.simulateEvent(.switchToStage(2))
+
+        #expect(controller.stageManager.activeStageID == targetStageID)
+        #expect(windowSvc.raisedWindowID == 202)
+        #expect(windowSvc.activatedBundleID == "com.other")
+    }
+
     @Test("Window previews persist for hidden windows")
     func previewPersistsWhenHidden() {
         let (controller, windowSvc, keyboardSvc) = makeController()
