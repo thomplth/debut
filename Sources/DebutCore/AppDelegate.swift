@@ -18,6 +18,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var currentSettings: AppSettings = AppSettings()
     private var pendingStageManager: StageManager?
     private var debouncedSaver: DebouncedSaver?
+    private var runtimeWindowReconciler = RuntimeWindowReconciler()
 
     public override init() {
         super.init()
@@ -148,17 +149,35 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.stageController?.recordWindowActivation(windowID: windowID)
-                // Ensure lifecycle tracking for windows discovered via focus change
-                if let frontApp = NSWorkspace.shared.frontmostApplication {
-                    discovery.registerTracking(windowID: windowID, pid: frontApp.processIdentifier)
+            }
+        }
+        discovery.onAppActivated = { [weak self] snapshot in
+            DispatchQueue.main.async {
+                guard let self, let controller = self.stageController else { return }
+                let result = self.runtimeWindowReconciler.reconcile(
+                    snapshot,
+                    stageManager: &controller.stageManager
+                )
+                if result.didMutate {
+                    self.diag.report("runtime_windows_reconciled", details: [
+                        "added": "\(result.addedCount)",
+                        "removed": "\(result.removedCount)",
+                        "trigger": "app_activation",
+                    ])
+                    self.debouncedSaver?.scheduleSave(controller.stageManager)
                 }
             }
         }
-        discovery.onAppTerminated = { [weak self] bundleID in
+        discovery.onAppTerminated = { [weak self] ownerPID in
             DispatchQueue.main.async {
-                guard let self else { return }
-                self.stageController?.stageManager.removeAllWindows(forBundleID: bundleID)
-                if let sm = self.stageController?.stageManager {
+                guard let self, let controller = self.stageController else { return }
+                let removedCount = controller.stageManager.removeAllWindows(forOwnerPID: ownerPID)
+                if removedCount > 0 {
+                    self.diag.report("terminated_app_windows_removed", details: [
+                        "count": "\(removedCount)",
+                        "ownerPID": "\(ownerPID)",
+                    ])
+                    let sm = controller.stageManager
                     self.debouncedSaver?.scheduleSave(sm)
                 }
             }

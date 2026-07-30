@@ -86,6 +86,17 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         }
     }
 
+    /// Returns the unfiltered Core Graphics window IDs. Unlike the AX-filtered
+    /// metadata list, this is suitable for confirming that a saved ID no longer
+    /// exists. Nil means the system snapshot failed and must not drive removal.
+    public func listAllWindowIDs() -> Set<CGWindowID>? {
+        let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
+        guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[CFString: Any]] else {
+            return nil
+        }
+        return Set(infoList.compactMap { $0[kCGWindowNumber] as? CGWindowID })
+    }
+
     private func axWindowIDs() -> Set<CGWindowID> {
         var ids = Set<CGWindowID>()
         let runningApps = NSWorkspace.shared.runningApplications
