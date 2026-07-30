@@ -14,7 +14,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case nextStage              // Option+Tab
     case previousStage          // Shift+Option+Tab
     case jumpToStage(Int)       // 1-9 (selects stage within open overlay)
-    case switchToStage(Int)     // Ctrl+Option+1-9 (global immediate switch)
+    case switchToStage(Int)     // Ctrl+0-9 (global immediate switch; 0 is stage 10)
 
     case newStageBelow          // N
     case newStageAbove          // Shift+N

@@ -1,5 +1,7 @@
 import Testing
 import Foundation
+import Carbon.HIToolbox
+import CoreGraphics
 @testable import DebutCore
 
 final class TestKeyboardDelegate: KeyboardEventDelegate, @unchecked Sendable {
@@ -83,6 +85,63 @@ struct KeyboardServiceTests {
         svc.simulateEvent(.switchToStage(5))
 
         #expect(delegate.receivedEvents == [.switchToStage(1), .switchToStage(5)])
+    }
+
+    @Test("Ctrl digit shortcuts map 1-9 to stages 1-9 and 0 to stage 10")
+    func quickSwitchKeyMapping() {
+        let mappings = [
+            (kVK_ANSI_1, 1), (kVK_ANSI_2, 2), (kVK_ANSI_3, 3),
+            (kVK_ANSI_4, 4), (kVK_ANSI_5, 5), (kVK_ANSI_6, 6),
+            (kVK_ANSI_7, 7), (kVK_ANSI_8, 8), (kVK_ANSI_9, 9),
+            (kVK_ANSI_0, 10),
+        ]
+
+        for (keyCode, expectedPosition) in mappings {
+            #expect(EventTapKeyboardService.quickSwitchStagePosition(
+                keyCode: Int64(keyCode),
+                flags: .maskControl
+            ) == expectedPosition)
+        }
+    }
+
+    @Test("Quick switch requires Ctrl without Command, Option, or Shift")
+    func quickSwitchKeyModifiers() {
+        #expect(EventTapKeyboardService.quickSwitchStagePosition(
+            keyCode: Int64(kVK_ANSI_1),
+            flags: []
+        ) == nil)
+        #expect(EventTapKeyboardService.quickSwitchStagePosition(
+            keyCode: Int64(kVK_ANSI_1),
+            flags: [.maskControl, .maskAlternate]
+        ) == nil)
+        #expect(EventTapKeyboardService.quickSwitchStagePosition(
+            keyCode: Int64(kVK_ANSI_1),
+            flags: [.maskControl, .maskShift]
+        ) == nil)
+        #expect(EventTapKeyboardService.quickSwitchStagePosition(
+            keyCode: Int64(kVK_ANSI_1),
+            flags: [.maskControl, .maskCommand]
+        ) == nil)
+    }
+
+    @Test("Quick switch consumes key-up even when Ctrl was released first")
+    func quickSwitchConsumesKeyUpAfterControlRelease() {
+        let service = EventTapKeyboardService()
+        let keyDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_1),
+            keyDown: true
+        )!
+        keyDown.flags = .maskControl
+        let keyUp = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_1),
+            keyDown: false
+        )!
+        keyUp.flags = []
+
+        #expect(service.handleCGEvent(type: .keyDown, event: keyDown) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: keyUp) == nil)
     }
 
     @Test("Reordering events")
