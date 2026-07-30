@@ -3,7 +3,7 @@ import Foundation
 import CoreGraphics
 @testable import DebutCore
 
-@Suite("StageController")
+@Suite("StageController", .serialized)
 struct StageControllerTests {
 
     private func makeTestImage() -> CGImage {
@@ -21,7 +21,8 @@ struct StageControllerTests {
         let keyboardService = MockKeyboardService()
         let controller = StageController(
             windowService: windowService,
-            keyboardService: keyboardService
+            keyboardService: keyboardService,
+            fullscreenAppActiveProvider: { false }
         )
         return (controller, windowService, keyboardService)
     }
