@@ -94,6 +94,33 @@ struct StageManagerTests {
         #expect(sm.stages[0].windows[0].ownerBundleID == "com.b")
     }
 
+    @Test("Remove windows for owner PID across stages")
+    func removeAllForOwnerPIDAcrossStages() {
+        var sm = StageManager()
+        sm.createStage(position: .below)
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 10), toStageID: sm.stages[0].id)
+        sm.addWindow(StageWindow(windowID: 102, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T2", ownerPID: 10), toStageID: sm.stages[1].id)
+        sm.addWindow(StageWindow(windowID: 201, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T3", ownerPID: 20), toStageID: sm.stages[1].id)
+
+        let removedCount = sm.removeAllWindows(forOwnerPID: 10)
+
+        #expect(removedCount == 2)
+        #expect(sm.stages.flatMap(\.windows).map(\.windowID) == [201])
+    }
+
+    @Test("Sweep removes stopped owner PIDs across stages")
+    func removeStoppedProcessesAcrossStages() {
+        var sm = StageManager()
+        sm.createStage(position: .below)
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Live", ownerPID: 10), toStageID: sm.stages[0].id)
+        sm.addWindow(StageWindow(windowID: 201, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Stopped", ownerPID: 20), toStageID: sm.stages[1].id)
+
+        let removedCount = sm.removeWindowsOwnedByStoppedProcesses(runningPIDs: [10])
+
+        #expect(removedCount == 1)
+        #expect(sm.stages.flatMap(\.windows).map(\.windowID) == [101])
+    }
+
     @Test("stageContainingWindow")
     func stageContaining() {
         var sm = StageManager()

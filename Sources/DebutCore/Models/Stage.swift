@@ -27,6 +27,23 @@ public struct Stage: Codable, Identifiable, Equatable, Sendable {
         windows.removeAll { $0.ownerBundleID == bundleID }
     }
 
+    @discardableResult
+    public mutating func removeAllWindows(forOwnerPID ownerPID: pid_t) -> Int {
+        let previousCount = windows.count
+        windows.removeAll { $0.ownerPID == ownerPID }
+        return previousCount - windows.count
+    }
+
+    @discardableResult
+    public mutating func removeWindowsOwnedByStoppedProcesses(runningPIDs: Set<pid_t>) -> Int {
+        let previousCount = windows.count
+        windows.removeAll { window in
+            guard let ownerPID = window.ownerPID else { return false }
+            return !runningPIDs.contains(ownerPID)
+        }
+        return previousCount - windows.count
+    }
+
     public mutating func markShared(windowID: CGWindowID) {
         guard let index = windows.firstIndex(where: { $0.windowID == windowID }) else { return }
         windows[index].isShared = true

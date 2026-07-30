@@ -38,6 +38,7 @@ public struct AppInfo: Sendable, Equatable {
 public protocol WindowService: Sendable {
     func listRunningApps() -> [AppInfo]
     func listWindows() -> [WindowInfo]
+    func listAllWindowIDs() -> Set<CGWindowID>?
     func captureWindowImage(windowID: CGWindowID) -> CGImage?
     func raiseWindow(windowID: CGWindowID) -> Bool
     func activateApp(bundleID: String) -> Bool
