@@ -16,21 +16,29 @@ For every task:
 
 ## Build & Test Workflow
 
-After any code change, always run the full cycle:
+After any code change, run the relevant unit and screenshot tests, then build, install, and launch the app:
 ```bash
-./scripts/rebuild.sh
+TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test
+./scripts/build-app.sh
+pkill -f "Debut.app" || true
+rm -rf /Applications/Debut.app
+cp -R .build/Debut.app /Applications/Debut.app
+open /Applications/Debut.app
 ```
-This kills the running app, builds, installs to /Applications, launches, and runs E2E tests.
 
 Never leave code changes uninstalled — the installed app must always match the source.
 
-### Quick build without E2E:
+### Full E2E
+
+Do not run the full E2E suite by default. Full E2E is optional and should only be run when the change is risky, such as changes to global keyboard handling, Accessibility integration, window discovery or lifecycle, stage switching, overlay presentation, persistence reconciliation, app installation, or code signing.
+
+The full E2E suite is interactive: it launches Debut, displays its overlay, injects global keyboard events into the active macOS session, and captures the live desktop. Warn the user before running it when it could disrupt their session.
+
+For risky changes, run the full cycle:
 ```bash
-pkill -f "Debut.app" || true; sleep 1
-TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift package clean
-TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift build -c release
-# Then assemble .app, sign, install, launch (see build-app.sh)
+./scripts/rebuild.sh
 ```
+This kills the running app, builds, installs to `/Applications`, launches, and runs E2E tests.
 
 ## Toolchain
 
@@ -57,8 +65,8 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 ## Tests
 
 - Unit + screenshot tests: `TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test`
-- E2E only: `./scripts/e2e-test.sh`
-- Full cycle: `./scripts/rebuild.sh`
+- Interactive E2E only, for risky changes: `./scripts/e2e-test.sh`
+- Full build, install, launch, and interactive E2E cycle, for risky changes: `./scripts/rebuild.sh`
 
 ## Architecture Rules
 
