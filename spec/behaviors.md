@@ -51,6 +51,7 @@ Debut tracks individual **windows** (by CGWindowID), not apps. Each stage contai
 
 - [x] Configured apps keep their Ctrl+number shortcuts while frontmost
 - [x] Exclusion list is persisted and applied immediately
+- [x] Frontmost app is cached from activation events; quick switching performs no workspace or AX lookup
 
 ---
 

@@ -87,7 +87,7 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 - **Session vs overlay** — Cmd-held session and overlay visibility are separate states. Esc closes overlay but keeps session alive. Track via `stageManagerActive` (EventTap) and `overlayVisible` (synced from StageController).
 - **Check Option flag BEFORE bare Tab** — Prevents Cmd+Option+Tab being caught by the Cmd+Tab handler.
 - **Global quick-switch is Ctrl+0-9** — It must be checked BEFORE Cmd-state tracking and require Control WITHOUT Command, Option, or Shift. Digits 1-9 target stages 1-9 and 0 targets stage 10.
-- **Never traverse AX menus in the event-tap callback** — Cross-process Accessibility calls block keyboard delivery and can disable the event tap. Quick-switch app priority is controlled only by the configured bundle-ID exclusion list; skip even the frontmost-app lookup when that list is empty.
+- **No app queries in the event-tap callback** — Workspace and cross-process Accessibility calls block keyboard delivery and can disable the event tap. Cache the frontmost bundle ID from `NSWorkspace.didActivateApplicationNotification`; quick-switch app priority is then only an in-memory exclusion-set lookup.
 
 ### State Management
 - **Exclusion list must filter at ALL layers** — Discovery, launch, activation, reconciliation, and AXObserver.
