@@ -87,6 +87,7 @@ All navigation wraps cyclically. Session persists until Cmd is released. Esc clo
 - [x] Ctrl+0-9: immediately switch to the stage at that position without opening the overlay; 0 targets stage 10 and a matching app window is preferred
 - [x] Works without a Cmd session; dismisses the overlay first if it happens to be open
 - [x] Requires Ctrl without Command, Option, or Shift, so it never collides with other shortcuts
+- [x] Defers only to user-configured frontmost app exclusions
 
 ---
 

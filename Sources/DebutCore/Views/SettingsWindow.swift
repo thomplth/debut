@@ -44,6 +44,7 @@ public struct SettingsView: View {
         }
         .frame(minWidth: 600, minHeight: 400)
         .onChange(of: viewModel.settings.excludedBundleIDs) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.quickSwitchExcludedBundleIDs) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.launchAtLogin) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.showInMenuBar) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.confirmStageDeletion) { _, _ in saveSettings() }
@@ -178,6 +179,7 @@ public struct SettingsView: View {
     }
 
     @State private var selectedAppToExclude: String = ""
+    @State private var selectedQuickSwitchExcludedApp: String = ""
 
     private var excludedAppsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -191,7 +193,10 @@ public struct SettingsView: View {
             HStack {
                 Picker("Add app", selection: $selectedAppToExclude) {
                     Text("Select an app...").tag("")
-                    ForEach(runningAppNames, id: \.bundleID) { app in
+                    ForEach(
+                        runningAppNames(excluding: viewModel.settings.excludedBundleIDs),
+                        id: \.bundleID
+                    ) { app in
                         Text(app.name).tag(app.bundleID)
                     }
                 }
@@ -237,12 +242,12 @@ public struct SettingsView: View {
         var id: String { bundleID }
     }
 
-    private var runningAppNames: [RunningApp] {
+    private func runningAppNames(excluding bundleIDs: [String]) -> [RunningApp] {
         NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.bundleIdentifier != "com.thomplth.Debut" }
             .compactMap { app in
                 guard let bundleID = app.bundleIdentifier,
-                      !viewModel.settings.excludedBundleIDs.contains(bundleID)
+                      !bundleIDs.contains(bundleID)
                 else { return nil }
                 return RunningApp(bundleID: bundleID, name: app.localizedName ?? bundleID)
             }
@@ -292,6 +297,67 @@ public struct SettingsView: View {
             shortcutRow("Switch windows (hold)", shortcut: "Cmd+Tab", configurable: false)
             shortcutRow("Quick switch last window", shortcut: "Cmd+Tab (tap)", configurable: false)
             shortcutRow("Switch stages (hold)", shortcut: "Cmd+Opt+Tab", configurable: false)
+            shortcutRow("Quick switch stages", shortcut: "Ctrl+1…9 / Ctrl+0", configurable: false)
+
+            Text("Quick switch exclusions")
+                .font(.headline)
+                .padding(.top, 8)
+
+            Text("Apps in this list keep their own Ctrl+number shortcuts while frontmost. Debut quick switching remains active in other apps.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Picker("Add app", selection: $selectedQuickSwitchExcludedApp) {
+                    Text("Select an app...").tag("")
+                    ForEach(
+                        runningAppNames(
+                            excluding: viewModel.settings.quickSwitchExcludedBundleIDs
+                        ),
+                        id: \.bundleID
+                    ) { app in
+                        Text(app.name).tag(app.bundleID)
+                    }
+                }
+                .frame(maxWidth: 250)
+
+                Button("Add") {
+                    guard !selectedQuickSwitchExcludedApp.isEmpty,
+                          !viewModel.settings.quickSwitchExcludedBundleIDs.contains(
+                            selectedQuickSwitchExcludedApp
+                          )
+                    else { return }
+                    viewModel.settings.quickSwitchExcludedBundleIDs.append(
+                        selectedQuickSwitchExcludedApp
+                    )
+                    selectedQuickSwitchExcludedApp = ""
+                }
+                .disabled(selectedQuickSwitchExcludedApp.isEmpty)
+            }
+
+            if !viewModel.settings.quickSwitchExcludedBundleIDs.isEmpty {
+                ForEach(viewModel.settings.quickSwitchExcludedBundleIDs, id: \.self) { bundleID in
+                    HStack {
+                        AppIconImage(bundleID: bundleID, name: bundleID, iconSize: 20)
+                            .frame(width: 20, height: 20)
+                        Text(appName(for: bundleID))
+                        Spacer()
+                        Text(bundleID)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button(role: .destructive) {
+                            viewModel.settings.quickSwitchExcludedBundleIDs.removeAll {
+                                $0 == bundleID
+                            }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(8)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
 
             Text("Click a shortcut to rebind it")
                 .font(.caption)

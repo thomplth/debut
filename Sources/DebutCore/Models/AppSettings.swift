@@ -23,6 +23,7 @@ public struct AppSettings: Codable, Sendable {
 
     // Keyboard
     public var keyBindings: KeyBindings
+    public var quickSwitchExcludedBundleIDs: [String]
 
     public init() {
         self.launchAtLogin = false
@@ -40,6 +41,7 @@ public struct AppSettings: Codable, Sendable {
         self.inactivePlateScale = 0.8
 
         self.keyBindings = KeyBindings()
+        self.quickSwitchExcludedBundleIDs = []
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,9 +59,17 @@ public struct AppSettings: Codable, Sendable {
         selectionBorderOpacity = try container.decode(Double.self, forKey: .selectionBorderOpacity)
         inactivePlateScale = try container.decode(Double.self, forKey: .inactivePlateScale)
         keyBindings = try container.decodeIfPresent(KeyBindings.self, forKey: .keyBindings) ?? KeyBindings()
+        quickSwitchExcludedBundleIDs = try container.decodeIfPresent(
+            [String].self,
+            forKey: .quickSwitchExcludedBundleIDs
+        ) ?? []
     }
 
     public func isExcluded(bundleID: String) -> Bool {
         excludedBundleIDs.contains(bundleID)
+    }
+
+    public func isQuickSwitchExcluded(bundleID: String) -> Bool {
+        quickSwitchExcludedBundleIDs.contains(bundleID)
     }
 }

@@ -9,11 +9,17 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     private var cmdHeld: Bool = false
     private var stageManagerActive: Bool = false
     private var quickSwitchKeysDown: Set<Int64> = []
+    private let frontmostAppBundleIdentifier: @Sendable () -> String?
 
     public var overlayVisible: Bool = false
     public var keyBindings: KeyBindings = KeyBindings()
+    public var quickSwitchExcludedBundleIDs: Set<String> = []
 
-    public init() {}
+    public init(frontmostAppBundleIdentifier: (@Sendable () -> String?)? = nil) {
+        self.frontmostAppBundleIdentifier = frontmostAppBundleIdentifier ?? {
+            NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        }
+    }
 
     public func start(delegate: KeyboardEventDelegate) -> Bool {
         self.delegate = delegate
@@ -60,11 +66,19 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
-        // Ctrl+<0-9> — global immediate switch to the stage at that position.
-        // Consume both key-down and key-up so the shortcut never leaks to the
-        // active app or a system mapping. Only key-down triggers the switch.
+        // Ctrl+<0-9> — immediate switch unless the frontmost app is excluded.
+        // Once Debut captures a key-down, consume its repeats and key-up too so a
+        // stage switch cannot leak the remainder of the key sequence to another app.
         if type == .keyDown,
            let stagePosition = Self.quickSwitchStagePosition(keyCode: keyCode, flags: flags) {
+            if quickSwitchKeysDown.contains(keyCode) {
+                return nil
+            }
+            if !quickSwitchExcludedBundleIDs.isEmpty,
+               let bundleID = frontmostAppBundleIdentifier(),
+               quickSwitchExcludedBundleIDs.contains(bundleID) {
+                return event
+            }
             if quickSwitchKeysDown.insert(keyCode).inserted {
                 delegate?.handleKeyEvent(.switchToStage(stagePosition))
             }

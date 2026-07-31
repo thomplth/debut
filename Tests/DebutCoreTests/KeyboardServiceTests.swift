@@ -12,6 +12,10 @@ final class TestKeyboardDelegate: KeyboardEventDelegate, @unchecked Sendable {
     }
 }
 
+final class FrontmostLookupState: @unchecked Sendable {
+    var callCount = 0
+}
+
 @Suite("KeyboardService")
 struct KeyboardServiceTests {
 
@@ -142,6 +146,84 @@ struct KeyboardServiceTests {
 
         #expect(service.handleCGEvent(type: .keyDown, event: keyDown) == nil)
         #expect(service.handleCGEvent(type: .keyUp, event: keyUp) == nil)
+    }
+
+    @Test("Unconfigured app Ctrl digit shortcuts do not take priority over quick switch")
+    func unconfiguredAppShortcutDoesNotTakePriority() {
+        let service = EventTapKeyboardService(
+            frontmostAppBundleIdentifier: { "com.example.Unconfigured" }
+        )
+        let keyDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_1),
+            keyDown: true
+        )!
+        keyDown.flags = .maskControl
+        let keyUp = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_1),
+            keyDown: false
+        )!
+        keyUp.flags = []
+
+        #expect(service.handleCGEvent(type: .keyDown, event: keyDown) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: keyUp) == nil)
+    }
+
+    @Test("Quick switch skips frontmost app lookup when exclusions are empty")
+    func quickSwitchSkipsUnneededFrontmostAppLookup() {
+        let lookupState = FrontmostLookupState()
+        let service = EventTapKeyboardService(frontmostAppBundleIdentifier: {
+            lookupState.callCount += 1
+            return "com.example.Frontmost"
+        })
+        let keyDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_1),
+            keyDown: true
+        )!
+        keyDown.flags = .maskControl
+
+        #expect(service.handleCGEvent(type: .keyDown, event: keyDown) == nil)
+        #expect(lookupState.callCount == 0)
+    }
+
+    @Test("A Debut-captured quick switch remains captured during key repeat")
+    func capturedQuickSwitchRepeatStaysCaptured() {
+        let service = EventTapKeyboardService()
+        let initialKeyDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_1),
+            keyDown: true
+        )!
+        initialKeyDown.flags = .maskControl
+        let repeatedKeyDown = initialKeyDown.copy()!
+
+        #expect(service.handleCGEvent(type: .keyDown, event: initialKeyDown) == nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: repeatedKeyDown) == nil)
+    }
+
+    @Test("Configured frontmost apps keep Ctrl digit shortcuts")
+    func configuredAppKeepsShortcut() {
+        let bundleID = "com.example.Reserved"
+        let service = EventTapKeyboardService(
+            frontmostAppBundleIdentifier: { bundleID }
+        )
+        service.quickSwitchExcludedBundleIDs = [bundleID]
+        let keyDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_1),
+            keyDown: true
+        )!
+        keyDown.flags = .maskControl
+        let keyUp = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_1),
+            keyDown: false
+        )!
+
+        #expect(service.handleCGEvent(type: .keyDown, event: keyDown) != nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: keyUp) != nil)
     }
 
     @Test("Reordering events")
