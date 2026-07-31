@@ -47,6 +47,11 @@ Debut tracks individual **windows** (by CGWindowID), not apps. Each stage contai
 - [x] Exclusion list persisted in settings.json
 - [x] Changes take effect immediately (live update to discovery service)
 
+### Quick switch exclusions
+
+- [x] Configured apps keep their Ctrl+number shortcuts while frontmost
+- [x] Exclusion list is persisted and applied immediately
+
 ---
 
 ## Stage Switching via Desktop Surface

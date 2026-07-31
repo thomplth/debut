@@ -64,11 +64,27 @@ struct StateStoreTests {
         var settings = AppSettings()
         settings.launchAtLogin = true
         settings.confirmStageDeletion = false
+        settings.quickSwitchExcludedBundleIDs = ["com.tinyspeck.slackmacgap"]
 
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
         #expect(loaded.launchAtLogin == true)
         #expect(loaded.confirmStageDeletion == false)
+        #expect(loaded.quickSwitchExcludedBundleIDs == ["com.tinyspeck.slackmacgap"])
+    }
+
+    @Test("Older settings default quick switch exclusions to empty")
+    func legacySettingsDefaultQuickSwitchExclusions() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "quickSwitchExcludedBundleIDs")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+
+        #expect(decoded.quickSwitchExcludedBundleIDs.isEmpty)
     }
 
     @Test("Settings defaults when no file")

@@ -11,13 +11,16 @@ struct SettingsViewModelTests {
         #expect(vm.settings.launchAtLogin == false)
         #expect(vm.settings.showInMenuBar == true)
         #expect(vm.settings.confirmStageDeletion == true)
+        #expect(vm.settings.quickSwitchExcludedBundleIDs.isEmpty)
     }
 
     @Test("Update settings")
     func updateSettings() {
         var vm = SettingsViewModel()
         vm.settings.launchAtLogin = true
+        vm.settings.quickSwitchExcludedBundleIDs.append("com.tinyspeck.slackmacgap")
         #expect(vm.settings.launchAtLogin == true)
+        #expect(vm.settings.isQuickSwitchExcluded(bundleID: "com.tinyspeck.slackmacgap"))
     }
 
     @Test("Sections list")

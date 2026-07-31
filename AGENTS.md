@@ -86,7 +86,8 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 - **Consume ALL events when overlay is active** — Return nil for both keyDown and keyUp. Passing keyUp through leaks to the active app.
 - **Session vs overlay** — Cmd-held session and overlay visibility are separate states. Esc closes overlay but keeps session alive. Track via `stageManagerActive` (EventTap) and `overlayVisible` (synced from StageController).
 - **Check Option flag BEFORE bare Tab** — Prevents Cmd+Option+Tab being caught by the Cmd+Tab handler.
-- **Global quick-switch gates on `!maskCommand`** — `Ctrl+Option+<1-9>` switches stages without the overlay open. It must be checked BEFORE Cmd-state tracking and require Control+Option WITHOUT Command, so it never collides with the in-overlay Cmd+digit selection (which always has Cmd held).
+- **Global quick-switch is Ctrl+0-9** — It must be checked BEFORE Cmd-state tracking and require Control WITHOUT Command, Option, or Shift. Digits 1-9 target stages 1-9 and 0 targets stage 10.
+- **Never traverse AX menus in the event-tap callback** — Cross-process Accessibility calls block keyboard delivery and can disable the event tap. Quick-switch app priority is controlled only by the configured bundle-ID exclusion list; skip even the frontmost-app lookup when that list is empty.
 
 ### State Management
 - **Exclusion list must filter at ALL layers** — Discovery, launch, activation, reconciliation, and AXObserver.
