@@ -12,10 +12,6 @@ final class TestKeyboardDelegate: KeyboardEventDelegate, @unchecked Sendable {
     }
 }
 
-final class FrontmostLookupState: @unchecked Sendable {
-    var callCount = 0
-}
-
 @Suite("KeyboardService")
 struct KeyboardServiceTests {
 
@@ -150,9 +146,8 @@ struct KeyboardServiceTests {
 
     @Test("Unconfigured app Ctrl digit shortcuts do not take priority over quick switch")
     func unconfiguredAppShortcutDoesNotTakePriority() {
-        let service = EventTapKeyboardService(
-            frontmostAppBundleIdentifier: { "com.example.Unconfigured" }
-        )
+        let service = EventTapKeyboardService()
+        service.updateFrontmostApp(bundleIdentifier: "com.example.Unconfigured")
         let keyDown = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_ANSI_1),
@@ -168,24 +163,6 @@ struct KeyboardServiceTests {
 
         #expect(service.handleCGEvent(type: .keyDown, event: keyDown) == nil)
         #expect(service.handleCGEvent(type: .keyUp, event: keyUp) == nil)
-    }
-
-    @Test("Quick switch skips frontmost app lookup when exclusions are empty")
-    func quickSwitchSkipsUnneededFrontmostAppLookup() {
-        let lookupState = FrontmostLookupState()
-        let service = EventTapKeyboardService(frontmostAppBundleIdentifier: {
-            lookupState.callCount += 1
-            return "com.example.Frontmost"
-        })
-        let keyDown = CGEvent(
-            keyboardEventSource: nil,
-            virtualKey: CGKeyCode(kVK_ANSI_1),
-            keyDown: true
-        )!
-        keyDown.flags = .maskControl
-
-        #expect(service.handleCGEvent(type: .keyDown, event: keyDown) == nil)
-        #expect(lookupState.callCount == 0)
     }
 
     @Test("A Debut-captured quick switch remains captured during key repeat")
@@ -206,9 +183,8 @@ struct KeyboardServiceTests {
     @Test("Configured frontmost apps keep Ctrl digit shortcuts")
     func configuredAppKeepsShortcut() {
         let bundleID = "com.example.Reserved"
-        let service = EventTapKeyboardService(
-            frontmostAppBundleIdentifier: { bundleID }
-        )
+        let service = EventTapKeyboardService()
+        service.updateFrontmostApp(bundleIdentifier: bundleID)
         service.quickSwitchExcludedBundleIDs = [bundleID]
         let keyDown = CGEvent(
             keyboardEventSource: nil,

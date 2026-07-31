@@ -9,6 +9,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onWindowClosed: ((CGWindowID) -> Void)?
     public var onWindowActivated: ((CGWindowID) -> Void)?
     public var onWindowTitleChanged: ((CGWindowID, String) -> Void)?
+    public var onFrontmostAppChanged: ((String?) -> Void)?
     public var onAppActivated: ((RuntimeWindowSnapshot) -> Void)?
     public var onAppTerminated: ((pid_t) -> Void)?
     public var excludedBundleIDs: Set<String> = []
@@ -195,8 +196,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         nc.addObserver(self, selector: #selector(appDidActivate(_:)),
                        name: NSWorkspace.didActivateApplicationNotification, object: nil)
 
+        // Seed frontmost-app state outside the keyboard event-tap callback.
+        let front = NSWorkspace.shared.frontmostApplication
+        onFrontmostAppChanged?(front?.bundleIdentifier)
+
         // Install focus observer on the current frontmost app
-        if let front = NSWorkspace.shared.frontmostApplication,
+        if let front,
            front.bundleIdentifier != "com.thomplth.Debut" {
             installFocusObserver(for: front.processIdentifier)
         }
@@ -404,6 +409,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     func handleAppActivation(_ app: AppInfo) {
+        onFrontmostAppChanged?(app.bundleID)
+
         let pid = app.pid
 
         // Sample focus before performing any enumeration so transient activation

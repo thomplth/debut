@@ -27,6 +27,9 @@ struct WindowDiscoveryServiceTests {
         var callbackOrder: [String] = []
         var snapshotWindowIDs: Set<CGWindowID> = []
         var snapshotAllWindowIDs: Set<CGWindowID>?
+        service.onFrontmostAppChanged = { bundleID in
+            callbackOrder.append("app:\(bundleID ?? "nil")")
+        }
         service.onWindowActivated = { _ in callbackOrder.append("focus") }
         service.onAppActivated = { snapshot in
             callbackOrder.append("snapshot")
@@ -36,7 +39,7 @@ struct WindowDiscoveryServiceTests {
 
         service.handleAppActivation(AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false))
 
-        #expect(callbackOrder == ["focus", "snapshot"])
+        #expect(callbackOrder == ["app:notion.id", "focus", "snapshot"])
         #expect(snapshotWindowIDs == [1, 2, 3, 4])
         #expect(snapshotAllWindowIDs == [1, 2, 3, 4, 99])
     }

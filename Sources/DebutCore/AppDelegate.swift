@@ -154,6 +154,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.stageController?.recordWindowActivation(windowID: windowID)
             }
         }
+        discovery.onFrontmostAppChanged = { [weak keyboardService] bundleID in
+            keyboardService?.updateFrontmostApp(bundleIdentifier: bundleID)
+        }
         discovery.onAppActivated = { [weak self] snapshot in
             DispatchQueue.main.async {
                 guard let self, let controller = self.stageController else { return }

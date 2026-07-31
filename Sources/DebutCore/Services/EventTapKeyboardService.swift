@@ -9,16 +9,16 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     private var cmdHeld: Bool = false
     private var stageManagerActive: Bool = false
     private var quickSwitchKeysDown: Set<Int64> = []
-    private let frontmostAppBundleIdentifier: @Sendable () -> String?
+    private var cachedFrontmostAppBundleIdentifier: String?
 
     public var overlayVisible: Bool = false
     public var keyBindings: KeyBindings = KeyBindings()
     public var quickSwitchExcludedBundleIDs: Set<String> = []
 
-    public init(frontmostAppBundleIdentifier: (@Sendable () -> String?)? = nil) {
-        self.frontmostAppBundleIdentifier = frontmostAppBundleIdentifier ?? {
-            NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        }
+    public init() {}
+
+    public func updateFrontmostApp(bundleIdentifier: String?) {
+        cachedFrontmostAppBundleIdentifier = bundleIdentifier
     }
 
     public func start(delegate: KeyboardEventDelegate) -> Bool {
@@ -75,7 +75,7 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
                 return nil
             }
             if !quickSwitchExcludedBundleIDs.isEmpty,
-               let bundleID = frontmostAppBundleIdentifier(),
+               let bundleID = cachedFrontmostAppBundleIdentifier,
                quickSwitchExcludedBundleIDs.contains(bundleID) {
                 return event
             }
