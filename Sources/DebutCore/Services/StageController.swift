@@ -123,6 +123,16 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         stageManager.stageContainingWindow(windowID: windowID)
     }
 
+    public func recordLaunchedWindow(_ window: StageWindow) {
+        let activeStageID = stageManager.activeStageID
+        stageManager.addWindow(window, toStageID: activeStageID)
+        stageManager.bringWindowToFront(
+            windowID: window.windowID,
+            inStageID: activeStageID
+        )
+        delegate?.stageControllerDidMutateState(self)
+    }
+
     public func recordWindowActivation(windowID: CGWindowID) {
         if !backtickCycleWindows.isEmpty {
             if backtickCycleWindows.contains(windowID) {
