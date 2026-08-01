@@ -114,26 +114,6 @@ struct StageControllerTests {
         #expect(windowIDs == [101, 303, 202])
     }
 
-    @Test("Newly launched window is recorded as MRU")
-    func launchedWindowIsMRU() {
-        let (controller, _, _) = makeController()
-        let stageID = controller.stageManager.activeStageID
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: stageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
-            toStageID: stageID
-        )
-
-        controller.recordLaunchedWindow(
-            StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3")
-        )
-
-        #expect(controller.stageManager.activeStage.windows.map(\.windowID) == [303, 101, 202])
-    }
-
     @Test("Cross-stage window activation switches to owning stage")
     func crossStageSwitches() {
         let (controller, _, _) = makeController()

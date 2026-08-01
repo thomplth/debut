@@ -15,6 +15,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var excludedBundleIDs: Set<String> = []
 
     private let focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)?
+    private let frontmostPIDProvider: @Sendable () -> pid_t?
+    private let launchDiscoveryDelay: TimeInterval
 
     private var knownWindowIDs: Set<CGWindowID> = []
 
@@ -31,10 +33,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     public init(
         windowService: any WindowService,
-        focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)? = nil
+        focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)? = nil,
+        frontmostPIDProvider: (@Sendable () -> pid_t?)? = nil,
+        launchDiscoveryDelay: TimeInterval = 0.5
     ) {
         self.windowService = windowService
         self.focusedWindowProvider = focusedWindowProvider
+        self.frontmostPIDProvider = frontmostPIDProvider ?? {
+            NSWorkspace.shared.frontmostApplication?.processIdentifier
+        }
+        self.launchDiscoveryDelay = launchDiscoveryDelay
         super.init()
     }
 
@@ -375,22 +383,40 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
               app.activationPolicy == .regular
         else { return }
 
-        let pid = app.processIdentifier
-        let name = app.localizedName ?? bundleID
+        handleAppLaunch(AppInfo(
+            bundleID: bundleID,
+            name: app.localizedName ?? bundleID,
+            pid: app.processIdentifier,
+            isHidden: app.isHidden
+        ))
+    }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+    func handleAppLaunch(_ app: AppInfo) {
+        let pid = app.pid
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + launchDiscoveryDelay) { [weak self] in
             guard let self else { return }
             let windows = self.windowService.listWindows().filter { $0.ownerPID == pid }
             for info in windows where !self.knownWindowIDs.contains(info.windowID) {
                 self.trackAndRegister(windowID: info.windowID, pid: pid)
                 let stageWindow = StageWindow(
                     windowID: info.windowID,
-                    ownerBundleID: bundleID,
-                    ownerName: name,
+                    ownerBundleID: app.bundleID,
+                    ownerName: app.name,
                     windowTitle: info.title,
                     ownerPID: pid
                 )
                 self.onWindowDiscovered?(stageWindow)
+            }
+
+            guard self.frontmostPIDProvider() == pid else { return }
+            let focusedWindowID = self.focusedWindowProvider?(pid)
+                ?? self.focusedWindowID(for: pid)
+                ?? windows.first?.windowID
+            if let focusedWindowID,
+               windows.contains(where: { $0.windowID == focusedWindowID }) {
+                self.trackAndRegister(windowID: focusedWindowID, pid: pid)
+                self.onWindowActivated?(focusedWindowID)
             }
         }
     }
@@ -421,17 +447,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         onFrontmostAppChanged?(app.bundleID)
 
         let pid = app.pid
-        let focusedWindowID: CGWindowID?
+        let shouldTrackActivation = app.bundleID != "com.thomplth.Debut"
+            && !excludedBundleIDs.contains(app.bundleID)
+        let sampledFocusedWindowID: CGWindowID?
 
         // Sample focus before performing any enumeration so transient activation
         // windows are not introduced by reconciliation latency.
-        if app.bundleID != "com.thomplth.Debut",
-           !excludedBundleIDs.contains(app.bundleID) {
-            focusedWindowID = focusedWindowProvider?(pid) ?? self.focusedWindowID(for: pid)
+        if shouldTrackActivation {
+            sampledFocusedWindowID = focusedWindowProvider?(pid) ?? self.focusedWindowID(for: pid)
         } else {
-            focusedWindowID = nil
+            sampledFocusedWindowID = nil
         }
-        if let focusedWindowID {
+        if let focusedWindowID = sampledFocusedWindowID {
             trackAndRegister(windowID: focusedWindowID, pid: pid)
             onWindowActivated?(focusedWindowID)
         }
@@ -449,6 +476,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // activate, avoiding cross-process AX work for every window on every switch.
         for window in liveWindows where window.ownerPID == pid {
             trackAndRegister(windowID: window.windowID, pid: window.ownerPID)
+        }
+        // Newly launched apps can report no AX-focused window during the activation
+        // notification. CGWindowList is front-to-back, so use the activated process's
+        // first enumerated window until the delayed AX confirmation arrives.
+        let focusedWindowID = sampledFocusedWindowID
+            ?? (shouldTrackActivation
+                ? liveWindows.first(where: { $0.ownerPID == pid })?.windowID
+                : nil)
+        if sampledFocusedWindowID == nil, let focusedWindowID {
+            onWindowActivated?(focusedWindowID)
         }
         onAppActivated?(RuntimeWindowSnapshot(
             runningPIDs: runningPIDs,
