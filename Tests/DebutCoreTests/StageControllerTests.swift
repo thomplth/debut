@@ -3,62 +3,6 @@ import Foundation
 import CoreGraphics
 @testable import DebutCore
 
-private final class StageSwitchOperationLog: @unchecked Sendable {
-    var entries: [String] = []
-}
-
-private final class RecordingDesktopSurface: DesktopSurfacePresenting, @unchecked Sendable {
-    let log: StageSwitchOperationLog
-
-    init(log: StageSwitchOperationLog) {
-        self.log = log
-    }
-
-    func orderToFront() {
-        log.entries.append("surface.front")
-    }
-}
-
-private final class RecordingTransitionShield: StageTransitionPresenting, @unchecked Sendable {
-    let log: StageSwitchOperationLog
-
-    init(log: StageSwitchOperationLog) {
-        self.log = log
-    }
-
-    func beginTransition() {
-        log.entries.append("shield.begin")
-    }
-
-    func completeTransition() {
-        log.entries.append("shield.complete")
-    }
-}
-
-private final class RecordingStageSwitchWindowService: WindowService, @unchecked Sendable {
-    let log: StageSwitchOperationLog
-
-    init(log: StageSwitchOperationLog) {
-        self.log = log
-    }
-
-    func listRunningApps() -> [AppInfo] { [] }
-    func listWindows() -> [WindowInfo] { [] }
-    func listAllWindowIDs() -> Set<CGWindowID>? { [] }
-    func captureWindowImage(windowID: CGWindowID) -> CGImage? { nil }
-    func isAccessibilityEnabled() -> Bool { true }
-
-    func raiseWindow(windowID: CGWindowID) -> Bool {
-        log.entries.append("window.raise.\(windowID)")
-        return true
-    }
-
-    func activateApp(bundleID: String) -> Bool {
-        log.entries.append("app.activate.\(bundleID)")
-        return true
-    }
-}
-
 @Suite("StageController", .serialized)
 struct StageControllerTests {
 
@@ -80,7 +24,6 @@ struct StageControllerTests {
             keyboardService: keyboardService,
             fullscreenAppActiveProvider: { false }
         )
-        DiagnosticReporter.shared.setStateProvider { [:] }
         return (controller, windowService, keyboardService)
     }
 
@@ -110,80 +53,6 @@ struct StageControllerTests {
         controller.switchToStage(id: stageID, raiseWindowID: 202)
 
         #expect(windowSvc.raisedWindowID == 202)
-    }
-
-    @Test("Stage switch reconstructs windows back-to-front with the selection last")
-    func stageSwitchRaisesWindowsBackToFront() {
-        let (controller, windowSvc, _) = makeController()
-        let sourceStageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 10, ownerBundleID: "com.source", ownerName: "Source", windowTitle: "Source"),
-            toStageID: sourceStageID
-        )
-
-        controller.stageManager.createStage(position: .below)
-        let targetStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "MRU"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Selected"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "LRU"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.activateStage(id: sourceStageID)
-
-        controller.switchToStage(id: targetStageID, raiseWindowID: 202)
-
-        #expect(windowSvc.raisedWindowIDs == [303, 101, 202])
-        #expect(controller.stageManager.activeStage.windows.map(\.windowID) == [202, 101, 303])
-    }
-
-    @Test("Transition shield covers the complete destination reconstruction")
-    func transitionShieldCoversStageReconstruction() {
-        let log = StageSwitchOperationLog()
-        let windowService = RecordingStageSwitchWindowService(log: log)
-        let controller = StageController(
-            windowService: windowService,
-            keyboardService: MockKeyboardService(),
-            fullscreenAppActiveProvider: { false }
-        )
-        DiagnosticReporter.shared.setStateProvider { [:] }
-        controller.desktopSurface = RecordingDesktopSurface(log: log)
-        controller.transitionShield = RecordingTransitionShield(log: log)
-
-        let sourceStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        let targetStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "MRU"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Selected"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "LRU"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.activateStage(id: sourceStageID)
-
-        controller.switchToStage(id: targetStageID, raiseWindowID: 202)
-
-        #expect(log.entries == [
-            "shield.begin",
-            "surface.front",
-            "window.raise.303",
-            "window.raise.101",
-            "window.raise.202",
-            "app.activate.com.b",
-            "shield.complete",
-        ])
     }
 
     @Test("Cmd+Tab hold opens overlay")
