@@ -6,17 +6,20 @@ public struct RuntimeWindowSnapshot: Sendable {
     public let liveWindows: [WindowInfo]
     public let allWindowIDs: Set<CGWindowID>?
     public let untrackableWindowIDs: Set<CGWindowID>
+    public let focusedWindowID: CGWindowID?
 
     public init(
         runningPIDs: Set<pid_t>,
         liveWindows: [WindowInfo],
         allWindowIDs: Set<CGWindowID>?,
-        untrackableWindowIDs: Set<CGWindowID> = []
+        untrackableWindowIDs: Set<CGWindowID> = [],
+        focusedWindowID: CGWindowID? = nil
     ) {
         self.runningPIDs = runningPIDs
         self.liveWindows = liveWindows
         self.allWindowIDs = allWindowIDs
         self.untrackableWindowIDs = untrackableWindowIDs
+        self.focusedWindowID = focusedWindowID
     }
 }
 
@@ -87,6 +90,7 @@ public struct RuntimeWindowReconciler: Sendable {
         // AX metadata is still useful for additions, but never for destructive
         // absence checks. Existing assignments are left untouched.
         let targetStageID = stageManager.activeStageID
+        var addedWindowIDs = Set<CGWindowID>()
         for info in snapshot.liveWindows where stageManager.stageContainingWindow(windowID: info.windowID) == nil {
             stageManager.addWindow(
                 StageWindow(
@@ -98,7 +102,16 @@ public struct RuntimeWindowReconciler: Sendable {
                 ),
                 toStageID: targetStageID
             )
+            addedWindowIDs.insert(info.windowID)
             addedCount += 1
+        }
+
+        if let focusedWindowID = snapshot.focusedWindowID,
+           addedWindowIDs.contains(focusedWindowID) {
+            stageManager.bringWindowToFront(
+                windowID: focusedWindowID,
+                inStageID: targetStageID
+            )
         }
 
         return RuntimeWindowReconciliationResult(

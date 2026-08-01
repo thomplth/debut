@@ -421,14 +421,19 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         onFrontmostAppChanged?(app.bundleID)
 
         let pid = app.pid
+        let focusedWindowID: CGWindowID?
 
         // Sample focus before performing any enumeration so transient activation
         // windows are not introduced by reconciliation latency.
         if app.bundleID != "com.thomplth.Debut",
-           !excludedBundleIDs.contains(app.bundleID),
-           let windowID = focusedWindowProvider?(pid) ?? focusedWindowID(for: pid) {
-            trackAndRegister(windowID: windowID, pid: pid)
-            onWindowActivated?(windowID)
+           !excludedBundleIDs.contains(app.bundleID) {
+            focusedWindowID = focusedWindowProvider?(pid) ?? self.focusedWindowID(for: pid)
+        } else {
+            focusedWindowID = nil
+        }
+        if let focusedWindowID {
+            trackAndRegister(windowID: focusedWindowID, pid: pid)
+            onWindowActivated?(focusedWindowID)
         }
 
         var runningPIDs = Set(windowService.listRunningApps().map(\.pid))
@@ -449,7 +454,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             runningPIDs: runningPIDs,
             liveWindows: liveWindows,
             allWindowIDs: windowService.listAllWindowIDs(),
-            untrackableWindowIDs: windowService.listUntrackableWindowIDs()
+            untrackableWindowIDs: windowService.listUntrackableWindowIDs(),
+            focusedWindowID: focusedWindowID
         ))
     }
 

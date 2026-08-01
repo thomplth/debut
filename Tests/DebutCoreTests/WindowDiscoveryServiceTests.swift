@@ -27,6 +27,7 @@ struct WindowDiscoveryServiceTests {
         var callbackOrder: [String] = []
         var snapshotWindowIDs: Set<CGWindowID> = []
         var snapshotAllWindowIDs: Set<CGWindowID>?
+        var snapshotFocusedWindowID: CGWindowID?
         service.onFrontmostAppChanged = { bundleID in
             callbackOrder.append("app:\(bundleID ?? "nil")")
         }
@@ -35,6 +36,7 @@ struct WindowDiscoveryServiceTests {
             callbackOrder.append("snapshot")
             snapshotWindowIDs = Set(snapshot.liveWindows.map(\.windowID))
             snapshotAllWindowIDs = snapshot.allWindowIDs
+            snapshotFocusedWindowID = snapshot.focusedWindowID
         }
 
         service.handleAppActivation(AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false))
@@ -42,6 +44,7 @@ struct WindowDiscoveryServiceTests {
         #expect(callbackOrder == ["app:notion.id", "focus", "snapshot"])
         #expect(snapshotWindowIDs == [1, 2, 3, 4])
         #expect(snapshotAllWindowIDs == [1, 2, 3, 4, 99])
+        #expect(snapshotFocusedWindowID == 4)
     }
 
     @Test("Empty window snapshot does not erase state while apps are running")

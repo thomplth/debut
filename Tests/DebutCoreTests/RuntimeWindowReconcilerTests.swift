@@ -48,6 +48,39 @@ struct RuntimeWindowReconcilerTests {
         #expect(manager.stageContainingWindow(windowID: 3) == stage2)
     }
 
+    @Test("Promotes only the focused newly discovered window to MRU")
+    func focusedNewWindowBecomesMRU() {
+        var manager = StageManager()
+        let stageID = manager.activeStageID
+        manager.addWindow(
+            StageWindow(windowID: 1, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Current", ownerPID: 10),
+            toStageID: stageID
+        )
+        manager.addWindow(
+            StageWindow(windowID: 2, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Older", ownerPID: 20),
+            toStageID: stageID
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                runningPIDs: [10, 20, 30],
+                liveWindows: [
+                    liveWindow(1, bundleID: "com.a", ownerName: "A", ownerPID: 10),
+                    liveWindow(2, bundleID: "com.b", ownerName: "B", ownerPID: 20),
+                    liveWindow(3, bundleID: "com.c", ownerName: "C", ownerPID: 30),
+                    liveWindow(4, bundleID: "com.c", ownerName: "C", ownerPID: 30),
+                ],
+                allWindowIDs: [1, 2, 3, 4],
+                focusedWindowID: 4
+            ),
+            stageManager: &manager
+        )
+
+        #expect(result.addedCount == 2)
+        #expect(manager.activeStage.windows.map(\.windowID) == [4, 1, 2, 3])
+    }
+
     @Test("Removes a closed window from a running app after two misses")
     func removesClosedWindowAfterTwoMisses() {
         var manager = StageManager()
