@@ -120,8 +120,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
         discovery.onWindowDiscovered = { [weak self] window in
             DispatchQueue.main.async {
-                guard let self else { return }
-                self.stageController?.recordLaunchedWindow(window)
+                guard let self, let controller = self.stageController else { return }
+                let activeID = controller.stageManager.activeStageID
+                controller.stageManager.addWindow(window, toStageID: activeID)
+                self.debouncedSaver?.scheduleSave(controller.stageManager)
             }
         }
         discovery.onWindowClosed = { [weak self] windowID in
