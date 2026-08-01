@@ -25,10 +25,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
 
     /// Desktop surface window — sits between active and inactive stage windows
-    public var desktopSurface: (any DesktopSurfacePresenting)?
-
-    /// Temporary cover shown above normal windows during stage reconstruction.
-    public var transitionShield: (any StageTransitionPresenting)?
+    public var desktopSurface: DesktopSurfaceWindow?
 
     private var preOverlayStageID: UUID?
     private var previousStageID: UUID?
@@ -78,47 +75,42 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         backtickCycleWindows = []
         backtickCycleIndex = 0
 
-        guard let targetStage = stageManager.stages.first(where: { $0.id == targetID }) else { return }
         let previousID = stageManager.activeStageID
-        let focusWindowID = raiseWindowID ?? targetStage.windows.first?.windowID
-        let isChangingStage = previousID != targetID
 
-        if isChangingStage {
+        if previousID != targetID {
             let fromLabel = stageLabel(forID: previousID)
             let toLabel = stageLabel(forID: targetID)
+            let targetStage = stageManager.stages.first(where: { $0.id == targetID })
 
             self.previousStageID = previousID
-            transitionShield?.beginTransition()
             stageManager.activateStage(id: targetID)
 
             // 1. Bring desktop surface to front — covers all inactive windows
             desktopSurface?.orderToFront()
 
-            // 2. Reconstruct the destination back-to-front. Leave the selected
-            // window out because it is raised once, last, below.
-            for window in targetStage.windows.reversed()
-                where window.windowID != focusWindowID {
-                _ = windowService.raiseWindow(windowID: window.windowID)
+            // 2. Raise all windows in the target stage above the surface (no app activation yet)
+            if let targetStage {
+                for window in targetStage.windows {
+                    _ = windowService.raiseWindow(windowID: window.windowID)
+                }
             }
 
             diag.report("stage_switched", details: [
                 "from": fromLabel,
                 "to": toLabel,
-                "windowsInTarget": "\(targetStage.windows.count)",
+                "windowsInTarget": "\(targetStage?.windows.count ?? 0)",
             ])
         }
 
-        // Focus the selected window last and activate its app after reconstruction.
+        // Focus the selected window and activate its app (single activation, no flash)
+        let targetWindows = stageManager.stages.first(where: { $0.id == targetID })?.windows
+        let focusWindowID = raiseWindowID ?? targetWindows?.first?.windowID
         if let focusWindowID {
             _ = windowService.raiseWindow(windowID: focusWindowID)
             stageManager.bringWindowToFront(windowID: focusWindowID, inStageID: targetID)
-            if let bundleID = targetStage.windows.first(where: { $0.windowID == focusWindowID })?.ownerBundleID {
+            if let bundleID = targetWindows?.first(where: { $0.windowID == focusWindowID })?.ownerBundleID {
                 _ = windowService.activateApp(bundleID: bundleID)
             }
-        }
-
-        if isChangingStage {
-            transitionShield?.completeTransition()
         }
 
         delegate?.stageControllerDidMutateState(self)
