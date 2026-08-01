@@ -10,7 +10,7 @@ Debut tracks individual **windows** (by CGWindowID), not apps. Each stage contai
 
 - [x] Windows identified by CGWindowID (ephemeral) + ownerBundleID/windowTitle (stable for persistence)
 - [x] Window list sourced from AX API (kAXWindowsAttribute) cross-referenced with CGWindowList
-- [x] Real windows only — AX filters out shadows, toolbars, and other CG surfaces
+- [x] Real windows only — track non-modal `AXStandardWindow` elements; exclude dialogs, floating windows, `AXUnknown` popups, shadows, toolbars, and other auxiliary surfaces
 - [x] Per-window AXObserver lifecycle tracking: kAXUIElementDestroyedNotification removes closed windows instantly
 - [x] Per-window AXObserver title tracking: kAXTitleChangedNotification updates titles in real-time
 - [x] One AXObserver per PID, shared across all that app's window notifications

@@ -70,7 +70,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Unmatched live windows go to the first stage.
     public func reconcileWindows(_ stageManager: inout StageManager) {
         let liveWindows = windowService.listWindows()
+        let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
         let runningApps = windowService.listRunningApps()
+
+        // Explicit AX classification is authoritative. Unlike an omitted AX
+        // result, these IDs are known dialogs, floating windows, or auxiliary UI.
+        for stage in stageManager.stages {
+            for windowID in stage.windowIDs where untrackableWindowIDs.contains(windowID) {
+                stageManager.removeWindow(windowID: windowID, fromStageID: stage.id)
+            }
+        }
 
         // An empty snapshot while regular apps are running usually means AX window
         // enumeration failed. Treating it as authoritative would erase every saved
@@ -439,7 +448,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         onAppActivated?(RuntimeWindowSnapshot(
             runningPIDs: runningPIDs,
             liveWindows: liveWindows,
-            allWindowIDs: windowService.listAllWindowIDs()
+            allWindowIDs: windowService.listAllWindowIDs(),
+            untrackableWindowIDs: windowService.listUntrackableWindowIDs()
         ))
     }
 
