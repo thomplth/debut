@@ -5,11 +5,18 @@ public struct RuntimeWindowSnapshot: Sendable {
     public let runningPIDs: Set<pid_t>
     public let liveWindows: [WindowInfo]
     public let allWindowIDs: Set<CGWindowID>?
+    public let untrackableWindowIDs: Set<CGWindowID>
 
-    public init(runningPIDs: Set<pid_t>, liveWindows: [WindowInfo], allWindowIDs: Set<CGWindowID>?) {
+    public init(
+        runningPIDs: Set<pid_t>,
+        liveWindows: [WindowInfo],
+        allWindowIDs: Set<CGWindowID>?,
+        untrackableWindowIDs: Set<CGWindowID> = []
+    ) {
         self.runningPIDs = runningPIDs
         self.liveWindows = liveWindows
         self.allWindowIDs = allWindowIDs
+        self.untrackableWindowIDs = untrackableWindowIDs
     }
 }
 
@@ -41,6 +48,16 @@ public struct RuntimeWindowReconciler: Sendable {
         var removedCount = stageManager.removeWindowsOwnedByStoppedProcesses(
             runningPIDs: snapshot.runningPIDs
         )
+
+        // Unlike an AX omission, these IDs were returned by AX and explicitly
+        // classified as dialogs, floating windows, or other auxiliary UI.
+        for stage in stageManager.stages {
+            for windowID in stage.windowIDs where snapshot.untrackableWindowIDs.contains(windowID) {
+                stageManager.removeWindow(windowID: windowID, fromStageID: stage.id)
+                missingSnapshotCounts.removeValue(forKey: windowID)
+                removedCount += 1
+            }
+        }
 
         let retainedWindowIDs = Set(stageManager.stages.flatMap(\.windows).map(\.windowID))
         missingSnapshotCounts = missingSnapshotCounts.filter { retainedWindowIDs.contains($0.key) }

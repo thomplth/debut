@@ -62,6 +62,39 @@ struct WindowDiscoveryServiceTests {
         #expect(stageManager.activeStage.windows.map(\.windowID) == [101])
     }
 
+    @Test("Startup reconciliation removes explicitly untrackable AX windows")
+    func startupRemovesUntrackableWindows() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "com.google.Chrome", name: "Chrome", pid: 10, isHidden: false),
+        ]
+        windowService.windowList = [WindowInfo(
+            windowID: 1,
+            ownerBundleID: "com.google.Chrome",
+            ownerName: "Chrome",
+            ownerPID: 10,
+            title: "Tab",
+            bounds: .zero,
+            isOnScreen: true
+        )]
+        windowService.untrackableWindowIDList = [99]
+
+        var stageManager = StageManager()
+        let stageID = stageManager.activeStageID
+        stageManager.addWindow(
+            StageWindow(windowID: 1, ownerBundleID: "com.google.Chrome", ownerName: "Chrome", windowTitle: "Tab", ownerPID: 10),
+            toStageID: stageID
+        )
+        stageManager.addWindow(
+            StageWindow(windowID: 99, ownerBundleID: "com.google.Chrome", ownerName: "Chrome", windowTitle: "Recent Download History", ownerPID: 10),
+            toStageID: stageID
+        )
+
+        WindowDiscoveryService(windowService: windowService).reconcileWindows(&stageManager)
+
+        #expect(stageManager.activeStage.windows.map(\.windowID) == [1])
+    }
+
     @Test("Empty window snapshot clears stale state when no apps are running")
     func emptySnapshotWithoutRunningApps() {
         let windowService = MockWindowService()

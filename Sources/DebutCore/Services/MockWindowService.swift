@@ -4,6 +4,7 @@ import CoreGraphics
 public final class MockWindowService: WindowService, @unchecked Sendable {
     public var apps: [AppInfo] = []
     public var windowList: [WindowInfo] = []
+    public var untrackableWindowIDList: Set<CGWindowID> = []
     public var allWindowIDList: Set<CGWindowID>?
     public var raisedWindowIDs: [CGWindowID] = []
     public var raisedWindowID: CGWindowID?
@@ -15,6 +16,7 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
 
     public func listRunningApps() -> [AppInfo] { apps }
     public func listWindows() -> [WindowInfo] { windowList }
+    public func listUntrackableWindowIDs() -> Set<CGWindowID> { untrackableWindowIDList }
     public func listAllWindowIDs() -> Set<CGWindowID>? { allWindowIDList }
 
     public func captureWindowImage(windowID: CGWindowID) -> CGImage? {

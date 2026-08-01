@@ -70,6 +70,29 @@ struct RuntimeWindowReconcilerTests {
         #expect(manager.stageContainingWindow(windowID: 99) == nil)
     }
 
+    @Test("Explicitly untrackable AX windows are removed immediately")
+    func removesUntrackableWindowsImmediately() {
+        var manager = StageManager()
+        let stageID = manager.activeStageID
+        manager.addWindow(StageWindow(windowID: 1, ownerBundleID: "com.google.Chrome", ownerName: "Chrome", windowTitle: "Tab", ownerPID: 10), toStageID: stageID)
+        manager.addWindow(StageWindow(windowID: 99, ownerBundleID: "com.google.Chrome", ownerName: "Chrome", windowTitle: "Recent Download History", ownerPID: 10), toStageID: stageID)
+        var reconciler = RuntimeWindowReconciler(requiredMissingSnapshots: 2)
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                runningPIDs: [10],
+                liveWindows: [liveWindow(1, bundleID: "com.google.Chrome", ownerName: "Chrome")],
+                allWindowIDs: [1, 99],
+                untrackableWindowIDs: [99]
+            ),
+            stageManager: &manager
+        )
+
+        #expect(result.removedCount == 1)
+        #expect(manager.stageContainingWindow(windowID: 1) == stageID)
+        #expect(manager.stageContainingWindow(windowID: 99) == nil)
+    }
+
     @Test("Failed empty snapshots preserve windows and do not count as misses")
     func failedSnapshotsDoNotCountAsMisses() {
         var manager = StageManager()
