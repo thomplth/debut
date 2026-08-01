@@ -59,7 +59,9 @@ Debut tracks individual **windows** (by CGWindowID), not apps. Each stage contai
 
 Debut uses a full-screen "desktop surface" window (OLED black, NSWindow.level.normal) positioned between active and inactive stage windows in z-order.
 
-- [x] On switch: surface ordered to front, then active stage windows raised above it via AX
+- [x] On switch: selected destination app is activated and its window AX-raised first
+- [x] Surface is then ordered directly behind the selected window and verified in Window Server z-order
+- [x] Other destination windows remain behind the surface until explicitly selected
 - [x] Inactive windows remain at their positions — occluded by the surface
 - [x] No minimize animation, no position manipulation
 - [x] Surface locked: canBecomeKey=false, canBecomeMain=false, mouseDown no-op, isMovable=false

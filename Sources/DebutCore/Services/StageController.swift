@@ -25,7 +25,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
 
     /// Desktop surface window — sits between active and inactive stage windows
-    public var desktopSurface: DesktopSurfaceWindow?
+    public var desktopSurface: (any DesktopSurfacePresenting)?
 
     private var preOverlayStageID: UUID?
     private var previousStageID: UUID?
@@ -75,42 +75,43 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         backtickCycleWindows = []
         backtickCycleIndex = 0
 
+        guard let targetStage = stageManager.stages.first(where: { $0.id == targetID }) else { return }
         let previousID = stageManager.activeStageID
+        let requestedWindowID = raiseWindowID ?? targetStage.windows.first?.windowID
+        let focusWindow = requestedWindowID.flatMap { requestedID in
+            targetStage.windows.first(where: { $0.windowID == requestedID })
+        } ?? targetStage.windows.first
+        let isChangingStage = previousID != targetID
+        let fromLabel = isChangingStage ? stageLabel(forID: previousID) : nil
+        let toLabel = isChangingStage ? stageLabel(forID: targetID) : nil
 
-        if previousID != targetID {
-            let fromLabel = stageLabel(forID: previousID)
-            let toLabel = stageLabel(forID: targetID)
-            let targetStage = stageManager.stages.first(where: { $0.id == targetID })
-
+        if isChangingStage {
             self.previousStageID = previousID
             stageManager.activateStage(id: targetID)
+        }
 
-            // 1. Bring desktop surface to front — covers all inactive windows
+        if let focusWindow {
+            // Foreground only the selected window, then place the black surface
+            // directly behind it. Repeating this for same-stage selections keeps
+            // the previously selected window behind the surface too.
+            _ = windowService.activateApp(bundleID: focusWindow.ownerBundleID)
+            _ = windowService.raiseWindow(windowID: focusWindow.windowID)
+            _ = desktopSurface?.orderBehind(windowID: focusWindow.windowID)
+        } else {
+            // An empty stage intentionally shows only the desktop surface.
             desktopSurface?.orderToFront()
+        }
 
-            // 2. Raise all windows in the target stage above the surface (no app activation yet)
-            if let targetStage {
-                for window in targetStage.windows {
-                    _ = windowService.raiseWindow(windowID: window.windowID)
-                }
-            }
+        if let focusWindow {
+            stageManager.bringWindowToFront(windowID: focusWindow.windowID, inStageID: targetID)
+        }
 
+        if let fromLabel, let toLabel {
             diag.report("stage_switched", details: [
                 "from": fromLabel,
                 "to": toLabel,
-                "windowsInTarget": "\(targetStage?.windows.count ?? 0)",
+                "windowsInTarget": "\(targetStage.windows.count)",
             ])
-        }
-
-        // Focus the selected window and activate its app (single activation, no flash)
-        let targetWindows = stageManager.stages.first(where: { $0.id == targetID })?.windows
-        let focusWindowID = raiseWindowID ?? targetWindows?.first?.windowID
-        if let focusWindowID {
-            _ = windowService.raiseWindow(windowID: focusWindowID)
-            stageManager.bringWindowToFront(windowID: focusWindowID, inStageID: targetID)
-            if let bundleID = targetWindows?.first(where: { $0.windowID == focusWindowID })?.ownerBundleID {
-                _ = windowService.activateApp(bundleID: bundleID)
-            }
         }
 
         delegate?.stageControllerDidMutateState(self)
