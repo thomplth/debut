@@ -74,7 +74,7 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 - **CGWindowIDs are ephemeral** — they change between app restarts. Never persist them directly. Use (bundleID, windowTitle) as the stable key for cross-session matching.
 - **AX position clamping** — macOS keeps 40px of every window visible on all sides via AX. Cannot be bypassed. Don't use position-based window hiding.
 - **SLS/CGS private APIs** (SLSSetWindowAlpha, SLSMoveWindow, etc.) only work on windows owned by the calling process. They silently no-op on other processes' windows without SIP disabled.
-- **Desktop surface approach** — Use a Debut-owned full-screen NSWindow at .normal level between active and inactive windows in z-order. Order surface to front, then AX-raise active windows above it. No position/minimize manipulation needed.
+- **Desktop surface approach** — Use a Debut-owned full-screen NSWindow at .normal level above stage windows in z-order. On a stage switch, order the surface to front, then AX-raise only the selected destination window above it. No position/minimize manipulation needed.
 - **AX raise doesn't activate** — AXUIElementPerformAction(kAXRaiseAction) only reorders the window within its app's stack. Always also call NSRunningApplication.activate() on the target app.
 
 ### Performance

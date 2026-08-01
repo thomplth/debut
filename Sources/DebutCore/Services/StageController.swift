@@ -85,15 +85,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             self.previousStageID = previousID
             stageManager.activateStage(id: targetID)
 
-            // 1. Bring desktop surface to front — covers all inactive windows
+            // Bring the desktop surface to front. The selected destination window
+            // is raised above it below; every other window remains behind it.
             desktopSurface?.orderToFront()
-
-            // 2. Raise all windows in the target stage above the surface (no app activation yet)
-            if let targetStage {
-                for window in targetStage.windows {
-                    _ = windowService.raiseWindow(windowID: window.windowID)
-                }
-            }
 
             diag.report("stage_switched", details: [
                 "from": fromLabel,
