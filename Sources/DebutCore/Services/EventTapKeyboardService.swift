@@ -2,28 +2,75 @@ import AppKit
 import Carbon.HIToolbox
 
 public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable {
-    public private(set) var isRunning: Bool = false
+    private let lifecycleLock = NSLock()
+    private var storedIsRunning: Bool = false
+    private var storedEventTapRunsOnDedicatedThread: Bool = false
+    public var isRunning: Bool {
+        lifecycleLock.withLock { storedIsRunning }
+    }
+    public var eventTapRunsOnDedicatedThread: Bool {
+        lifecycleLock.withLock { storedEventTapRunsOnDedicatedThread }
+    }
     private weak var delegate: KeyboardEventDelegate?
-    fileprivate var eventTap: CFMachPort?
+    private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var eventTapRunLoop: CFRunLoop?
+    private var eventTapThread: Thread?
     private var cmdHeld: Bool = false
     private var stageManagerActive: Bool = false
     private var quickSwitchKeysDown: Set<Int64> = []
+    private let configurationLock = NSLock()
     private var cachedFrontmostAppBundleIdentifier: String?
+    private var storedOverlayVisible: Bool = false
+    private var storedKeyBindings: KeyBindings = KeyBindings()
+    private var storedQuickSwitchExcludedBundleIDs: Set<String> = []
 
-    public var overlayVisible: Bool = false
-    public var keyBindings: KeyBindings = KeyBindings()
-    public var quickSwitchExcludedBundleIDs: Set<String> = []
+    public var overlayVisible: Bool {
+        get { configurationLock.withLock { storedOverlayVisible } }
+        set { configurationLock.withLock { storedOverlayVisible = newValue } }
+    }
+    public var keyBindings: KeyBindings {
+        get { configurationLock.withLock { storedKeyBindings } }
+        set { configurationLock.withLock { storedKeyBindings = newValue } }
+    }
+    public var quickSwitchExcludedBundleIDs: Set<String> {
+        get { configurationLock.withLock { storedQuickSwitchExcludedBundleIDs } }
+        set { configurationLock.withLock { storedQuickSwitchExcludedBundleIDs = newValue } }
+    }
 
     public init() {}
 
     public func updateFrontmostApp(bundleIdentifier: String?) {
-        cachedFrontmostAppBundleIdentifier = bundleIdentifier
+        configurationLock.withLock {
+            cachedFrontmostAppBundleIdentifier = bundleIdentifier
+        }
     }
 
     public func start(delegate: KeyboardEventDelegate) -> Bool {
+        if isRunning { return true }
         self.delegate = delegate
 
+        let startupSignal = DispatchSemaphore(value: 0)
+        let thread = Thread { [weak self] in
+            guard let self else {
+                startupSignal.signal()
+                return
+            }
+            self.runEventTap(startupSignal: startupSignal)
+        }
+        thread.name = "com.thomplth.Debut.event-tap"
+        lifecycleLock.withLock {
+            eventTapThread = thread
+        }
+        thread.start()
+
+        guard startupSignal.wait(timeout: .now() + 2) == .success else {
+            return false
+        }
+        return isRunning
+    }
+
+    private func runEventTap(startupSignal: DispatchSemaphore) {
         let eventMask: CGEventMask =
             (1 << CGEventType.keyDown.rawValue) |
             (1 << CGEventType.keyUp.rawValue) |
@@ -39,30 +86,73 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
             callback: eventTapCallback,
             userInfo: selfPtr
         ) else {
-            return false
+            startupSignal.signal()
+            return
         }
 
-        self.eventTap = tap
-        self.runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        let runLoop = CFRunLoopGetCurrent()
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        lifecycleLock.withLock {
+            self.eventTap = tap
+            self.runLoopSource = source
+            self.eventTapRunLoop = runLoop
+        }
+        CFRunLoopAddSource(runLoop, source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        isRunning = true
-        return true
+        lifecycleLock.withLock {
+            storedEventTapRunsOnDedicatedThread = !Thread.isMainThread
+            storedIsRunning = true
+        }
+        startupSignal.signal()
+
+        CFRunLoopRun()
+
+        CGEvent.tapEnable(tap: tap, enable: false)
+        CFRunLoopRemoveSource(runLoop, source, .commonModes)
+        lifecycleLock.withLock {
+            eventTap = nil
+            runLoopSource = nil
+            eventTapRunLoop = nil
+            storedEventTapRunsOnDedicatedThread = false
+            storedIsRunning = false
+        }
     }
 
     public func stop() {
-        if let tap = eventTap {
+        let resources = lifecycleLock.withLock { (eventTap, eventTapRunLoop) }
+        if let tap = resources.0 {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        if let runLoop = resources.1 {
+            CFRunLoopStop(runLoop)
+            CFRunLoopWakeUp(runLoop)
         }
-        eventTap = nil
-        runLoopSource = nil
-        isRunning = false
+        lifecycleLock.withLock {
+            storedIsRunning = false
+            eventTapThread = nil
+        }
+    }
+
+    fileprivate func reenableEventTap() {
+        let tap = lifecycleLock.withLock { eventTap }
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: true)
+        }
     }
 
     func handleCGEvent(type: CGEventType, event: CGEvent) -> CGEvent? {
+        handleCGEvent(type: type, event: event, deliverAsynchronously: false)
+    }
+
+    func handleCGEventFromTap(type: CGEventType, event: CGEvent) -> CGEvent? {
+        handleCGEvent(type: type, event: event, deliverAsynchronously: true)
+    }
+
+    private func handleCGEvent(
+        type: CGEventType,
+        event: CGEvent,
+        deliverAsynchronously: Bool
+    ) -> CGEvent? {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
@@ -74,13 +164,16 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
             if quickSwitchKeysDown.contains(keyCode) {
                 return nil
             }
-            if !quickSwitchExcludedBundleIDs.isEmpty,
-               let bundleID = cachedFrontmostAppBundleIdentifier,
-               quickSwitchExcludedBundleIDs.contains(bundleID) {
+            let quickSwitchConfiguration = configurationLock.withLock {
+                (storedQuickSwitchExcludedBundleIDs, cachedFrontmostAppBundleIdentifier)
+            }
+            if !quickSwitchConfiguration.0.isEmpty,
+               let bundleID = quickSwitchConfiguration.1,
+               quickSwitchConfiguration.0.contains(bundleID) {
                 return event
             }
             if quickSwitchKeysDown.insert(keyCode).inserted {
-                delegate?.handleKeyEvent(.switchToStage(stagePosition))
+                deliver(.switchToStage(stagePosition), asynchronously: deliverAsynchronously)
             }
             return nil
         }
@@ -95,7 +188,7 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
                 cmdHeld = false
                 if stageManagerActive {
                     stageManagerActive = false
-                    delegate?.handleKeyEvent(.cmdRelease)
+                    deliver(.cmdRelease, asynchronously: deliverAsynchronously)
                     return nil
                 }
             }
@@ -111,7 +204,10 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
                 cmdHeld = true
             }
             stageManagerActive = true
-            delegate?.handleKeyEvent(shift ? .cmdOptionShiftTabHold : .cmdOptionTabHold)
+            deliver(
+                shift ? .cmdOptionShiftTabHold : .cmdOptionTabHold,
+                asynchronously: deliverAsynchronously
+            )
             return nil
         }
 
@@ -121,7 +217,10 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
                 cmdHeld = true
             }
             stageManagerActive = true
-            delegate?.handleKeyEvent(shift ? .cmdShiftTabHold : .cmdTabHold)
+            deliver(
+                shift ? .cmdShiftTabHold : .cmdTabHold,
+                asynchronously: deliverAsynchronously
+            )
             return nil
         }
 
@@ -131,7 +230,10 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
                 cmdHeld = true
             }
             stageManagerActive = true
-            delegate?.handleKeyEvent(shift ? .cmdShiftBacktick : .cmdBacktick)
+            deliver(
+                shift ? .cmdShiftBacktick : .cmdBacktick,
+                asynchronously: deliverAsynchronously
+            )
             return nil
         }
 
@@ -155,19 +257,19 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
 
         // Escape is always hardcoded
         if Int(keyCode) == kVK_Escape {
-            delegate?.handleKeyEvent(.escape)
+            deliver(.escape, asynchronously: deliverAsynchronously)
             return nil
         }
 
         // Backtick always maps to previousWindow (Cmd+` equivalent)
         if Int(keyCode) == kVK_ANSI_Grave {
-            delegate?.handleKeyEvent(.previousWindow)
+            deliver(.previousWindow, asynchronously: deliverAsynchronously)
             return nil
         }
 
         // Forward delete also maps to deleteStage (in addition to regular delete)
         if Int(keyCode) == kVK_ForwardDelete {
-            delegate?.handleKeyEvent(.deleteStage)
+            deliver(.deleteStage, asynchronously: deliverAsynchronously)
             return nil
         }
 
@@ -178,11 +280,21 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
             option: flags.contains(.maskAlternate)
         )
         if let action = keyBindings.action(for: combo) {
-            delegate?.handleKeyEvent(action.toKeyEvent())
+            deliver(action.toKeyEvent(), asynchronously: deliverAsynchronously)
         }
 
         // Always consume — never let keyboard events leak to the active app
         return nil
+    }
+
+    private func deliver(_ event: DebutKeyEvent, asynchronously: Bool) {
+        if asynchronously {
+            DispatchQueue.main.async { [weak self] in
+                self?.delegate?.handleKeyEvent(event)
+            }
+        } else {
+            delegate?.handleKeyEvent(event)
+        }
     }
 
     /// Maps an exact Ctrl+number-row shortcut to its 1-based stage position.
@@ -220,14 +332,12 @@ private func eventTapCallback(
 
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
         let service = Unmanaged<EventTapKeyboardService>.fromOpaque(userInfo).takeUnretainedValue()
-        if let tap = service.eventTap {
-            CGEvent.tapEnable(tap: tap, enable: true)
-        }
+        service.reenableEventTap()
         return Unmanaged.passUnretained(event)
     }
 
     let service = Unmanaged<EventTapKeyboardService>.fromOpaque(userInfo).takeUnretainedValue()
-    if let result = service.handleCGEvent(type: type, event: event) {
+    if let result = service.handleCGEventFromTap(type: type, event: event) {
         return Unmanaged.passUnretained(result)
     }
     return nil

@@ -12,6 +12,21 @@ final class TestKeyboardDelegate: KeyboardEventDelegate, @unchecked Sendable {
     }
 }
 
+final class SlowKeyboardDelegate: KeyboardEventDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedReceivedEvents: [DebutKeyEvent] = []
+    var receivedEvents: [DebutKeyEvent] {
+        lock.withLock { storedReceivedEvents }
+    }
+
+    func handleKeyEvent(_ event: DebutKeyEvent) {
+        Thread.sleep(forTimeInterval: 0.25)
+        lock.withLock {
+            storedReceivedEvents.append(event)
+        }
+    }
+}
+
 @Suite("KeyboardService")
 struct KeyboardServiceTests {
 
@@ -178,6 +193,32 @@ struct KeyboardServiceTests {
 
         #expect(service.handleCGEvent(type: .keyDown, event: initialKeyDown) == nil)
         #expect(service.handleCGEvent(type: .keyDown, event: repeatedKeyDown) == nil)
+    }
+
+    @Test("Event-tap callback returns before delegate work completes")
+    func eventTapDoesNotBlockOnDelegate() async throws {
+        let service = EventTapKeyboardService()
+        let delegate = SlowKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        #expect(service.eventTapRunsOnDedicatedThread)
+        defer { service.stop() }
+
+        let tabDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        tabDown.flags = .maskCommand
+
+        let start = Date()
+        let result = service.handleCGEventFromTap(type: .keyDown, event: tabDown)
+        let elapsed = Date().timeIntervalSince(start)
+
+        #expect(result == nil)
+        #expect(elapsed < 0.1)
+
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(delegate.receivedEvents == [.cmdTabHold])
     }
 
     @Test("Configured frontmost apps keep Ctrl digit shortcuts")

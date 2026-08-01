@@ -47,6 +47,59 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshotFocusedWindowID == 4)
     }
 
+    @Test("Delayed launch activates a focused window already known from reconciliation")
+    func knownLaunchedWindowStillActivates() async throws {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(3, ownerPID: 30)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 3 },
+            frontmostPIDProvider: { 30 },
+            launchDiscoveryDelay: 0
+        )
+        service.registerTracking(windowID: 3, pid: 30)
+
+        var discoveredWindowIDs: [CGWindowID] = []
+        var activatedWindowIDs: [CGWindowID] = []
+        service.onWindowDiscovered = { discoveredWindowIDs.append($0.windowID) }
+        service.onWindowActivated = { activatedWindowIDs.append($0) }
+
+        service.handleAppLaunch(
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 30, isHidden: false)
+        )
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(discoveredWindowIDs.isEmpty)
+        #expect(activatedWindowIDs == [3])
+    }
+
+    @Test("Activation falls back to the activated app's frontmost enumerated window")
+    func activationFallsBackToEnumeratedWindow() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 30, isHidden: false),
+        ]
+        windowService.windowList = [
+            liveWindow(3, ownerPID: 30),
+            liveWindow(4, ownerPID: 30),
+        ]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil }
+        )
+        var activatedWindowIDs: [CGWindowID] = []
+        var snapshotFocusedWindowID: CGWindowID?
+        service.onWindowActivated = { activatedWindowIDs.append($0) }
+        service.onAppActivated = { snapshotFocusedWindowID = $0.focusedWindowID }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 30, isHidden: false)
+        )
+
+        #expect(activatedWindowIDs == [3])
+        #expect(snapshotFocusedWindowID == 3)
+    }
+
     @Test("Empty window snapshot does not erase state while apps are running")
     func emptySnapshotWithRunningApps() {
         let windowService = MockWindowService()
