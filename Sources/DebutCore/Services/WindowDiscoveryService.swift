@@ -392,6 +392,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         let pid = app.processIdentifier
         let bundleID = app.bundleIdentifier ?? ""
+        let activationStarted = DispatchTime.now().uptimeNanoseconds
+        defer {
+            let durationMicroseconds = (
+                DispatchTime.now().uptimeNanoseconds - activationStarted
+            ) / 1_000
+            DiagnosticReporter.shared.reportAsync("app_activation_latency", details: [
+                "bundleID": bundleID,
+                "durationUs": "\(durationMicroseconds)",
+            ])
+        }
         handleAppActivation(AppInfo(
             bundleID: bundleID,
             name: app.localizedName ?? bundleID,
