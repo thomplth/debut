@@ -1,37 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
 
-struct QuickSwitchLatencySample: Equatable, Sendable {
-    let queueDelayMicroseconds: UInt64
-    let callbackDurationMicroseconds: UInt64
-    let wasPassedThrough: Bool
-    let frontmostBundleIdentifier: String?
-
-    init(
-        eventTimestamp: UInt64,
-        callbackStarted: UInt64,
-        callbackFinished: UInt64,
-        wasPassedThrough: Bool,
-        frontmostBundleIdentifier: String?
-    ) {
-        queueDelayMicroseconds = Self.microseconds(
-            from: eventTimestamp,
-            to: callbackStarted
-        )
-        callbackDurationMicroseconds = Self.microseconds(
-            from: callbackStarted,
-            to: callbackFinished
-        )
-        self.wasPassedThrough = wasPassedThrough
-        self.frontmostBundleIdentifier = frontmostBundleIdentifier
-    }
-
-    private static func microseconds(from start: UInt64, to end: UInt64) -> UInt64 {
-        guard end >= start else { return 0 }
-        return (end - start) / 1_000
-    }
-}
-
 public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable {
     public private(set) var isRunning: Bool = false
     private weak var delegate: KeyboardEventDelegate?
@@ -41,32 +10,12 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     private var stageManagerActive: Bool = false
     private var quickSwitchKeysDown: Set<Int64> = []
     private var cachedFrontmostAppBundleIdentifier: String?
-    private let monotonicNow: @Sendable () -> UInt64
-    private let quickSwitchLatencyReporter: @Sendable (QuickSwitchLatencySample) -> Void
 
     public var overlayVisible: Bool = false
     public var keyBindings: KeyBindings = KeyBindings()
     public var quickSwitchExcludedBundleIDs: Set<String> = []
 
-    public init() {
-        monotonicNow = { DispatchTime.now().uptimeNanoseconds }
-        quickSwitchLatencyReporter = { sample in
-            DiagnosticReporter.shared.reportAsync("quick_switch_latency", details: [
-                "callbackDurationUs": "\(sample.callbackDurationMicroseconds)",
-                "frontmostBundleID": sample.frontmostBundleIdentifier ?? "unknown",
-                "passedThrough": "\(sample.wasPassedThrough)",
-                "queueDelayUs": "\(sample.queueDelayMicroseconds)",
-            ])
-        }
-    }
-
-    init(
-        monotonicNow: @escaping @Sendable () -> UInt64,
-        quickSwitchLatencyReporter: @escaping @Sendable (QuickSwitchLatencySample) -> Void
-    ) {
-        self.monotonicNow = monotonicNow
-        self.quickSwitchLatencyReporter = quickSwitchLatencyReporter
-    }
+    public init() {}
 
     public func updateFrontmostApp(bundleIdentifier: String?) {
         cachedFrontmostAppBundleIdentifier = bundleIdentifier
@@ -122,25 +71,12 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         // stage switch cannot leak the remainder of the key sequence to another app.
         if type == .keyDown,
            let stagePosition = Self.quickSwitchStagePosition(keyCode: keyCode, flags: flags) {
-            let callbackStarted = monotonicNow()
-            var wasPassedThrough = false
-            defer {
-                let sample = QuickSwitchLatencySample(
-                    eventTimestamp: event.timestamp,
-                    callbackStarted: callbackStarted,
-                    callbackFinished: monotonicNow(),
-                    wasPassedThrough: wasPassedThrough,
-                    frontmostBundleIdentifier: cachedFrontmostAppBundleIdentifier
-                )
-                quickSwitchLatencyReporter(sample)
-            }
             if quickSwitchKeysDown.contains(keyCode) {
                 return nil
             }
             if !quickSwitchExcludedBundleIDs.isEmpty,
                let bundleID = cachedFrontmostAppBundleIdentifier,
                quickSwitchExcludedBundleIDs.contains(bundleID) {
-                wasPassedThrough = true
                 return event
             }
             if quickSwitchKeysDown.insert(keyCode).inserted {
