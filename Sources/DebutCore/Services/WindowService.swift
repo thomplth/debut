@@ -45,3 +45,7 @@ public protocol WindowService: Sendable {
     func activateApp(bundleID: String) -> Bool
     func isAccessibilityEnabled() -> Bool
 }
+
+public extension WindowService {
+    func listUntrackableWindowIDs() -> Set<CGWindowID> { [] }
+}
