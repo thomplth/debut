@@ -32,18 +32,6 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         writeDiagnosticFile()
     }
 
-    public func reportAsync(_ event: String, details: [String: String] = [:]) {
-        queue.async { [self] in
-            NSLog("[Debut] %@ %@", event, details.description)
-            var entry = details
-            entry["event"] = event
-            entry["timestamp"] = ISO8601DateFormatter().string(from: Date())
-            eventLog.append(entry)
-            if eventLog.count > 100 { eventLog.removeFirst(eventLog.count - 100) }
-            writeDiagnosticFile()
-        }
-    }
-
     public func setStateProvider(_ provider: @escaping () -> [String: String]) {
         queue.sync { self.stateProvider = provider }
         writeDiagnosticFile()
