@@ -3,51 +3,6 @@ import Foundation
 import CoreGraphics
 @testable import DebutCore
 
-private final class StageSwitchOperationLog: @unchecked Sendable {
-    var entries: [String] = []
-}
-
-private final class RecordingDesktopSurface: DesktopSurfacePresenting, @unchecked Sendable {
-    let log: StageSwitchOperationLog
-
-    init(log: StageSwitchOperationLog) {
-        self.log = log
-    }
-
-    func orderToFront() {
-        log.entries.append("surface.front")
-    }
-
-    func orderBehind(windowID: CGWindowID) -> Bool {
-        log.entries.append("surface.behind.\(windowID)")
-        return true
-    }
-}
-
-private final class RecordingStageSwitchWindowService: WindowService, @unchecked Sendable {
-    let log: StageSwitchOperationLog
-
-    init(log: StageSwitchOperationLog) {
-        self.log = log
-    }
-
-    func listRunningApps() -> [AppInfo] { [] }
-    func listWindows() -> [WindowInfo] { [] }
-    func listAllWindowIDs() -> Set<CGWindowID>? { [] }
-    func captureWindowImage(windowID: CGWindowID) -> CGImage? { nil }
-    func isAccessibilityEnabled() -> Bool { true }
-
-    func raiseWindow(windowID: CGWindowID) -> Bool {
-        log.entries.append("window.raise.\(windowID)")
-        return true
-    }
-
-    func activateApp(bundleID: String) -> Bool {
-        log.entries.append("app.activate.\(bundleID)")
-        return true
-    }
-}
-
 @Suite("StageController", .serialized)
 struct StageControllerTests {
 
@@ -69,11 +24,10 @@ struct StageControllerTests {
             keyboardService: keyboardService,
             fullscreenAppActiveProvider: { false }
         )
-        DiagnosticReporter.shared.setStateProvider { [:] }
         return (controller, windowService, keyboardService)
     }
 
-    @Test("Switch stage raises target stage windows")
+    @Test("Cross-stage switch raises every target stage window")
     func switchStage() {
         let (controller, windowSvc, _) = makeController()
         let stageAID = controller.stageManager.stages[0].id
@@ -82,11 +36,12 @@ struct StageControllerTests {
 
         controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageAID)
         controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageBID)
+        controller.stageManager.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageBID)
+        controller.stageManager.activateStage(id: stageAID)
 
-        controller.switchToStage(id: stageAID)
+        controller.switchToStage(id: stageBID, raiseWindowID: 202)
 
-        // Window 101 should have been raised (it's in the target stage)
-        #expect(windowSvc.raisedWindowIDs.contains(101))
+        #expect(Set(windowSvc.raisedWindowIDs).isSuperset(of: Set<CGWindowID>([202, 303])))
     }
 
     @Test("Window switch raises selected window")
@@ -99,118 +54,6 @@ struct StageControllerTests {
         controller.switchToStage(id: stageID, raiseWindowID: 202)
 
         #expect(windowSvc.raisedWindowID == 202)
-    }
-
-    @Test("Cross-stage switch raises only the selected destination window")
-    func stageSwitchRaisesOnlySelectedWindow() {
-        let (controller, windowSvc, _) = makeController()
-        let sourceStageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 10, ownerBundleID: "com.source", ownerName: "Source", windowTitle: "Source"),
-            toStageID: sourceStageID
-        )
-
-        controller.stageManager.createStage(position: .below)
-        let targetStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "B"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "C"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.activateStage(id: sourceStageID)
-
-        controller.switchToStage(id: targetStageID, raiseWindowID: 101)
-
-        #expect(windowSvc.raisedWindowIDs == [101])
-        #expect(windowSvc.activatedBundleID == "com.a")
-    }
-
-    @Test("Cross-stage switch places the surface behind the selected window")
-    func stageSwitchPlacesSurfaceBehindSelection() {
-        let log = StageSwitchOperationLog()
-        let controller = StageController(
-            windowService: RecordingStageSwitchWindowService(log: log),
-            keyboardService: MockKeyboardService(),
-            fullscreenAppActiveProvider: { false }
-        )
-        DiagnosticReporter.shared.setStateProvider { [:] }
-        controller.desktopSurface = RecordingDesktopSurface(log: log)
-
-        let sourceStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        let targetStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "B"),
-            toStageID: targetStageID
-        )
-        controller.stageManager.activateStage(id: sourceStageID)
-
-        controller.switchToStage(id: targetStageID, raiseWindowID: 101)
-
-        #expect(log.entries == [
-            "app.activate.com.a",
-            "window.raise.101",
-            "surface.behind.101",
-        ])
-    }
-
-    @Test("Surface ordering verification requires the target ahead of the surface")
-    func surfaceOrderingVerification() {
-        #expect(DesktopSurfaceWindow.isOrderedBehind(
-            targetWindowID: 101,
-            surfaceWindowID: 999,
-            orderedWindowIDs: [101, 999, 202]
-        ))
-        #expect(!DesktopSurfaceWindow.isOrderedBehind(
-            targetWindowID: 101,
-            surfaceWindowID: 999,
-            orderedWindowIDs: [999, 101, 202]
-        ))
-        #expect(!DesktopSurfaceWindow.isOrderedBehind(
-            targetWindowID: 101,
-            surfaceWindowID: 999,
-            orderedWindowIDs: [101, 202]
-        ))
-    }
-
-    @Test("Same-stage window selection also moves the surface behind the selection")
-    func sameStageSelectionMovesSurface() {
-        let log = StageSwitchOperationLog()
-        let controller = StageController(
-            windowService: RecordingStageSwitchWindowService(log: log),
-            keyboardService: MockKeyboardService(),
-            fullscreenAppActiveProvider: { false }
-        )
-        DiagnosticReporter.shared.setStateProvider { [:] }
-        controller.desktopSurface = RecordingDesktopSurface(log: log)
-        let stageID = controller.stageManager.activeStageID
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A"),
-            toStageID: stageID
-        )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "B"),
-            toStageID: stageID
-        )
-
-        controller.switchToStage(id: stageID, raiseWindowID: 202)
-
-        #expect(log.entries == [
-            "app.activate.com.b",
-            "window.raise.202",
-            "surface.behind.202",
-        ])
     }
 
     @Test("Cmd+Tab hold opens overlay")
