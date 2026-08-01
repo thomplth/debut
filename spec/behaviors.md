@@ -57,10 +57,10 @@ Debut tracks individual **windows** (by CGWindowID), not apps. Each stage contai
 
 ## Stage Switching via Desktop Surface
 
-Debut uses a full-screen "desktop surface" window (OLED black, NSWindow.level.normal) positioned above stage windows in z-order. The selected destination window is then raised above the surface.
+Debut uses a full-screen "desktop surface" window (OLED black, NSWindow.level.normal) positioned between active and inactive stage windows in z-order.
 
-- [x] On switch: surface ordered to front, then only the selected destination window is raised above it via AX
-- [x] All other stage windows remain at their positions — occluded by the surface
+- [x] On switch: surface ordered to front, then active stage windows raised above it via AX
+- [x] Inactive windows remain at their positions — occluded by the surface
 - [x] No minimize animation, no position manipulation
 - [x] Surface locked: canBecomeKey=false, canBecomeMain=false, mouseDown no-op, isMovable=false
 - [x] Focus moves to selected window in new stage
