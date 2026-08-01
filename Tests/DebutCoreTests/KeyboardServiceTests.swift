@@ -12,6 +12,22 @@ final class TestKeyboardDelegate: KeyboardEventDelegate, @unchecked Sendable {
     }
 }
 
+final class LatencyClockState: @unchecked Sendable {
+    private var values: [UInt64]
+
+    init(_ values: [UInt64]) {
+        self.values = values
+    }
+
+    func next() -> UInt64 {
+        values.removeFirst()
+    }
+}
+
+final class QuickSwitchLatencyState: @unchecked Sendable {
+    var sample: QuickSwitchLatencySample?
+}
+
 @Suite("KeyboardService")
 struct KeyboardServiceTests {
 
@@ -200,6 +216,29 @@ struct KeyboardServiceTests {
 
         #expect(service.handleCGEvent(type: .keyDown, event: keyDown) != nil)
         #expect(service.handleCGEvent(type: .keyUp, event: keyUp) != nil)
+    }
+
+    @Test("Quick switch records queue and callback latency without synchronous diagnostics")
+    func quickSwitchLatencyMeasurement() throws {
+        let clock = LatencyClockState([31_000_000, 33_000_000])
+        let latency = QuickSwitchLatencyState()
+        let service = EventTapKeyboardService(
+            monotonicNow: { clock.next() },
+            quickSwitchLatencyReporter: { latency.sample = $0 }
+        )
+        let keyDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_1),
+            keyDown: true
+        )!
+        keyDown.flags = .maskControl
+        keyDown.timestamp = 1_000_000
+
+        #expect(service.handleCGEvent(type: .keyDown, event: keyDown) == nil)
+        let sample = try #require(latency.sample)
+        #expect(sample.queueDelayMicroseconds == 30_000)
+        #expect(sample.callbackDurationMicroseconds == 2_000)
+        #expect(!sample.wasPassedThrough)
     }
 
     @Test("Reordering events")
