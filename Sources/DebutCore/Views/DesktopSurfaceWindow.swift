@@ -1,8 +1,8 @@
 import AppKit
 
-/// A full-screen OLED-black window that occludes stage windows in z-order. The selected
-/// destination window is raised above it. No position/size manipulation is needed on
-/// other windows.
+/// A full-screen OLED-black window that sits between active and inactive stage windows
+/// in z-order. Active stage windows are raised above it; inactive stage windows are
+/// occluded behind it. No position/size manipulation needed on other windows.
 public final class DesktopSurfaceWindow: NSWindow {
 
     public init() {
@@ -37,8 +37,8 @@ public final class DesktopSurfaceWindow: NSWindow {
     public override var canBecomeMain: Bool { false }
     public override func mouseDown(with event: NSEvent) {}
 
-    /// Bring the surface to front, covering stage windows.
-    /// Call this before raising the selected destination window.
+    /// Bring the surface to front, covering all inactive stage windows.
+    /// Call this BEFORE raising active stage windows.
     public func orderToFront() {
         // Re-assert frame in case something moved us
         if let screen = NSScreen.main {
