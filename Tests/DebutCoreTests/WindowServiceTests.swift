@@ -1,9 +1,34 @@
 import Testing
 import Foundation
+import ApplicationServices
 @testable import DebutCore
 
 @Suite("MockWindowService")
 struct WindowServiceTests {
+
+    @Test("Only non-modal AX standard windows are trackable")
+    func classifiesTrackableAXWindows() {
+        #expect(AccessibilityWindowService.isTrackableAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+        #expect(!AccessibilityWindowService.isTrackableAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXUnknownSubrole as String,
+            isModal: false
+        ))
+        #expect(!AccessibilityWindowService.isTrackableAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXDialogSubrole as String,
+            isModal: true
+        ))
+        #expect(!AccessibilityWindowService.isTrackableAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: true
+        ))
+    }
 
     @Test("List running apps")
     func listApps() {

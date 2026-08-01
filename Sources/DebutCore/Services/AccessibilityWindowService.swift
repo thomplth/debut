@@ -34,7 +34,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     // MARK: - Window listing
 
     public func listWindows() -> [WindowInfo] {
-        let realWindowIDs = axWindowIDs()
+        let trackableWindowIDs = classifyAXWindowIDs().trackable
 
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[CFString: Any]] else {
@@ -60,7 +60,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                   let bundleID = pidToBundleID[ownerPID]
             else { return nil }
 
-            guard realWindowIDs.contains(windowID) else { return nil }
+            guard trackableWindowIDs.contains(windowID) else { return nil }
             guard seen.insert(windowID).inserted else { return nil }
 
             let bounds = CGRect(
@@ -86,6 +86,13 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         }
     }
 
+    /// Returns window IDs that AX explicitly identifies as auxiliary UI rather
+    /// than user-manageable standard windows. This is separate from an omitted
+    /// AX result, which may only mean that an app returned a partial snapshot.
+    public func listUntrackableWindowIDs() -> Set<CGWindowID> {
+        classifyAXWindowIDs().untrackable
+    }
+
     /// Returns the unfiltered Core Graphics window IDs. Unlike the AX-filtered
     /// metadata list, this is suitable for confirming that a saved ID no longer
     /// exists. Nil means the system snapshot failed and must not drive removal.
@@ -97,8 +104,15 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return Set(infoList.compactMap { $0[kCGWindowNumber] as? CGWindowID })
     }
 
-    private func axWindowIDs() -> Set<CGWindowID> {
-        var ids = Set<CGWindowID>()
+    static func isTrackableAXWindow(role: String, subrole: String, isModal: Bool) -> Bool {
+        role == kAXWindowRole as String &&
+            subrole == kAXStandardWindowSubrole as String &&
+            !isModal
+    }
+
+    private func classifyAXWindowIDs() -> (trackable: Set<CGWindowID>, untrackable: Set<CGWindowID>) {
+        var trackable = Set<CGWindowID>()
+        var untrackable = Set<CGWindowID>()
         let runningApps = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular }
 
@@ -109,13 +123,40 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             guard result == .success, let axWindows = windowsRef as? [AXUIElement] else { continue }
 
             for axWindow in axWindows {
+                guard let role = stringAttribute(kAXRoleAttribute, of: axWindow),
+                      let subrole = stringAttribute(kAXSubroleAttribute, of: axWindow)
+                else { continue }
+
                 var cgWindowID: CGWindowID = 0
-                if _AXUIElementGetWindow(axWindow, &cgWindowID) == .success {
-                    ids.insert(cgWindowID)
+                guard _AXUIElementGetWindow(axWindow, &cgWindowID) == .success,
+                      cgWindowID != 0
+                else { continue }
+
+                let isModal = boolAttribute(kAXModalAttribute, of: axWindow) ?? false
+                if Self.isTrackableAXWindow(role: role, subrole: subrole, isModal: isModal) {
+                    trackable.insert(cgWindowID)
+                } else {
+                    untrackable.insert(cgWindowID)
                 }
             }
         }
-        return ids
+        return (trackable, untrackable)
+    }
+
+    private func stringAttribute(_ attribute: String, of element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+        return value as? String
+    }
+
+    private func boolAttribute(_ attribute: String, of element: AXUIElement) -> Bool? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+        return value as? Bool
     }
 
     // MARK: - Window capture
