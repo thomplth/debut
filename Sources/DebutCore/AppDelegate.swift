@@ -115,7 +115,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             currentSettings.quickSwitchExcludedBundleIDs
         )
 
-        // Raise the selected active-stage window above the desktop surface
+        // Raise active stage windows above the desktop surface
         controller.switchToStage(id: stageManager.activeStageID)
 
         discovery.onWindowDiscovered = { [weak self] window in

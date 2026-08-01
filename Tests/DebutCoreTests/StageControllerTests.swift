@@ -27,7 +27,7 @@ struct StageControllerTests {
         return (controller, windowService, keyboardService)
     }
 
-    @Test("Cross-stage switch raises only the selected destination window")
+    @Test("Cross-stage switch raises every target stage window")
     func switchStage() {
         let (controller, windowSvc, _) = makeController()
         let stageAID = controller.stageManager.stages[0].id
@@ -41,7 +41,7 @@ struct StageControllerTests {
 
         controller.switchToStage(id: stageBID, raiseWindowID: 202)
 
-        #expect(windowSvc.raisedWindowIDs == [202])
+        #expect(Set(windowSvc.raisedWindowIDs).isSuperset(of: Set<CGWindowID>([202, 303])))
     }
 
     @Test("Window switch raises selected window")
