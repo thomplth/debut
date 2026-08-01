@@ -15,6 +15,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var windowService: AccessibilityWindowService?
     private var keyboardService: EventTapKeyboardService?
     private var desktopSurface: DesktopSurfaceWindow?
+    private var stageTransitionWindow: StageTransitionWindow?
     private var currentSettings: AppSettings = AppSettings()
     private var pendingStageManager: StageManager?
     private var debouncedSaver: DebouncedSaver?
@@ -100,6 +101,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let surface = DesktopSurfaceWindow()
         surface.orderFront(nil)
         self.desktopSurface = surface
+        let transitionWindow = StageTransitionWindow()
+        self.stageTransitionWindow = transitionWindow
 
         let controller = StageController(
             windowService: windowService,
@@ -108,6 +111,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         )
         controller.delegate = self
         controller.desktopSurface = surface
+        controller.transitionShield = transitionWindow
         stageController = controller
 
         keyboardService.keyBindings = currentSettings.keyBindings
