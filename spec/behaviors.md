@@ -134,4 +134,6 @@ Full persistence across app restarts and system reboots.
 - [x] Window closed (Cmd+W, red button): removed from stage instantly via kAXUIElementDestroyedNotification
 - [x] Window title changes (cd, tab switch, save): updated in real-time via kAXTitleChangedNotification
 - [x] Window created outside Debut's awareness -> added to active stage on focus, lifecycle tracking registered
+- [x] Hidden apps preserve ordered-out window assignments until their windows are visible again
+- [x] Recreated windows reclaim recent assignments by bundle ID + title, with complete one-to-one bundle fallback for dynamic titles
 - [x] System Cmd+` restored — Debut does not intercept backtick

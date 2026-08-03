@@ -17,8 +17,8 @@ struct WindowDiscoveryServiceTests {
         )
     }
 
-    @Test("Activation samples focus before taking the reconciliation snapshot")
-    func activationSamplesFocusFirst() {
+    @Test("Activation reconciles the early focus sample before publishing focus")
+    func activationReconcilesBeforePublishingFocus() {
         let windowService = MockWindowService()
         windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
         windowService.windowList = [liveWindow(1), liveWindow(2), liveWindow(3), liveWindow(4)]
@@ -41,10 +41,31 @@ struct WindowDiscoveryServiceTests {
 
         service.handleAppActivation(AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false))
 
-        #expect(callbackOrder == ["app:notion.id", "focus", "snapshot"])
+        #expect(callbackOrder == ["app:notion.id", "snapshot", "focus"])
         #expect(snapshotWindowIDs == [1, 2, 3, 4])
         #expect(snapshotAllWindowIDs == [1, 2, 3, 4, 99])
         #expect(snapshotFocusedWindowID == 4)
+    }
+
+    @Test("Activation snapshots identify other hidden applications")
+    func activationSnapshotIncludesHiddenPIDs() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false),
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 20, isHidden: true),
+        ]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil }
+        )
+        var hiddenPIDs: Set<pid_t> = []
+        service.onAppActivated = { hiddenPIDs = $0.hiddenPIDs }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)
+        )
+
+        #expect(hiddenPIDs == [20])
     }
 
     @Test("Delayed launch activates a focused window already known from reconciliation")
