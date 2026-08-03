@@ -19,6 +19,11 @@ public struct Stage: Codable, Identifiable, Equatable, Sendable {
         windows.append(window)
     }
 
+    public mutating func insertWindow(_ window: StageWindow, at index: Int) {
+        guard !windows.contains(where: { $0.windowID == window.windowID }) else { return }
+        windows.insert(window, at: min(max(index, 0), windows.count))
+    }
+
     public mutating func removeWindow(windowID: CGWindowID) {
         windows.removeAll { $0.windowID == windowID }
     }

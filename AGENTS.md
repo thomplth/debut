@@ -100,6 +100,7 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 
 ### Persistence & Reconciliation
 - **Window titles are NOT stable keys** — Terminal prompts, browser tabs, Slack channels all change titles between sessions. Reconciliation must fall back to bundleID-only matching when (bundleID, title) exact match fails.
+- **Hidden apps order windows out** — Their CGWindowIDs can disappear from `CGWindowList` without closing. Runtime reconciliation must reset absence counts for hidden owner PIDs, and must reconcile an activation snapshot before publishing its focused-window event so recreated windows can reclaim saved assignments.
 - **Prune empty stages on restore** — After reconciliation removes stale windows, drop stages with zero windows remaining (keep at least one).
 - **Focus-based starting stage** — On launch, query AX for the currently focused window, find its owning stage, and activate that stage instead of always stage 0.
 

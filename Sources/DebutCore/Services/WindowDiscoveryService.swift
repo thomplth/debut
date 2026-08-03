@@ -460,10 +460,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
         if let focusedWindowID = sampledFocusedWindowID {
             trackAndRegister(windowID: focusedWindowID, pid: pid)
-            onWindowActivated?(focusedWindowID)
         }
 
-        var runningPIDs = Set(windowService.listRunningApps().map(\.pid))
+        let runningApps = windowService.listRunningApps()
+        var runningPIDs = Set(runningApps.map(\.pid))
+        let hiddenPIDs = Set(runningApps.filter(\.isHidden).map(\.pid))
         // The activation notification is authoritative even if Launch Services has not
         // inserted the newly activated process into runningApplications yet.
         runningPIDs.insert(pid)
@@ -484,16 +485,17 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             ?? (shouldTrackActivation
                 ? liveWindows.first(where: { $0.ownerPID == pid })?.windowID
                 : nil)
-        if sampledFocusedWindowID == nil, let focusedWindowID {
-            onWindowActivated?(focusedWindowID)
-        }
         onAppActivated?(RuntimeWindowSnapshot(
             runningPIDs: runningPIDs,
+            hiddenPIDs: hiddenPIDs,
             liveWindows: liveWindows,
             allWindowIDs: windowService.listAllWindowIDs(),
             untrackableWindowIDs: windowService.listUntrackableWindowIDs(),
             focusedWindowID: focusedWindowID
         ))
+        if let focusedWindowID {
+            onWindowActivated?(focusedWindowID)
+        }
     }
 
     @objc private func appDidTerminate(_ notification: Notification) {

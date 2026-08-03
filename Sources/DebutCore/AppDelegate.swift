@@ -166,6 +166,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                     self.diag.report("runtime_windows_reconciled", details: [
                         "added": "\(result.addedCount)",
                         "removed": "\(result.removedCount)",
+                        "reassigned": "\(result.reassignedCount)",
                         "trigger": "app_activation",
                     ])
                     self.debouncedSaver?.scheduleSave(controller.stageManager)

@@ -122,6 +122,11 @@ public struct StageManager: Codable, Sendable {
         stages[index].addWindow(window)
     }
 
+    public mutating func insertWindow(_ window: StageWindow, at windowIndex: Int, inStageID stageID: UUID) {
+        guard let stageIndex = stages.firstIndex(where: { $0.id == stageID }) else { return }
+        stages[stageIndex].insertWindow(window, at: windowIndex)
+    }
+
     public mutating func removeWindow(windowID: CGWindowID, fromStageID stageID: UUID) {
         guard let index = stages.firstIndex(where: { $0.id == stageID }) else { return }
         stages[index].removeWindow(windowID: windowID)
