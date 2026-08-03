@@ -175,6 +175,46 @@ struct RuntimeWindowReconcilerTests {
         #expect(manager.stageContainingWindow(windowID: 99) != nil)
     }
 
+    @Test("Hidden apps preserve missing windows and reset their miss counts")
+    func hiddenAppsPreserveMissingWindows() {
+        var manager = StageManager()
+        let stageID = manager.activeStageID
+        manager.addWindow(
+            StageWindow(
+                windowID: 99,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                windowTitle: "Work",
+                ownerPID: 10
+            ),
+            toStageID: stageID
+        )
+        var reconciler = RuntimeWindowReconciler(requiredMissingSnapshots: 2)
+        let visibleMiss = RuntimeWindowSnapshot(
+            runningPIDs: [10],
+            liveWindows: [],
+            allWindowIDs: []
+        )
+        let hiddenMiss = RuntimeWindowSnapshot(
+            runningPIDs: [10],
+            hiddenPIDs: [10],
+            liveWindows: [],
+            allWindowIDs: []
+        )
+
+        _ = reconciler.reconcile(visibleMiss, stageManager: &manager)
+        _ = reconciler.reconcile(hiddenMiss, stageManager: &manager)
+        _ = reconciler.reconcile(hiddenMiss, stageManager: &manager)
+        let firstVisibleMissAfterShowing = reconciler.reconcile(visibleMiss, stageManager: &manager)
+
+        #expect(firstVisibleMissAfterShowing.removedCount == 0)
+        #expect(manager.stageContainingWindow(windowID: 99) == stageID)
+
+        let secondVisibleMissAfterShowing = reconciler.reconcile(visibleMiss, stageManager: &manager)
+        #expect(secondVisibleMissAfterShowing.removedCount == 1)
+        #expect(manager.stageContainingWindow(windowID: 99) == nil)
+    }
+
     @Test("A non-empty partial AX snapshot preserves omitted windows")
     func partialSnapshotPreservesOmittedWindows() {
         var manager = StageManager()
@@ -267,5 +307,180 @@ struct RuntimeWindowReconcilerTests {
 
         #expect(result.removedCount == 0)
         #expect(manager.stageContainingWindow(windowID: 2) == stageID)
+    }
+
+    @Test("A recreated window keeps its stage when its stable identity matches")
+    func recreatedWindowKeepsStageByStableIdentity() {
+        var manager = StageManager()
+        let originalStageID = manager.activeStageID
+        manager.createStage(position: .below)
+        let activeStageID = manager.activeStageID
+        manager.addWindow(
+            StageWindow(
+                windowID: 1,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                windowTitle: "Work",
+                ownerPID: 10
+            ),
+            toStageID: originalStageID
+        )
+        var reconciler = RuntimeWindowReconciler(requiredMissingSnapshots: 1)
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                runningPIDs: [10],
+                liveWindows: [
+                    liveWindow(
+                        101,
+                        bundleID: "company.thebrowser.dia",
+                        ownerName: "Dia",
+                        ownerPID: 10,
+                        title: "Work"
+                    ),
+                ],
+                allWindowIDs: [101]
+            ),
+            stageManager: &manager
+        )
+
+        #expect(result.reassignedCount == 1)
+        #expect(manager.stageContainingWindow(windowID: 101) == originalStageID)
+        #expect(manager.stages.first(where: { $0.id == activeStageID })?.windows.isEmpty == true)
+    }
+
+    @Test("Reconciliation does not reclaim an already assigned duplicate title")
+    func assignedDuplicateTitleIsNotReclaimed() {
+        var manager = StageManager()
+        let originalStageID = manager.activeStageID
+        manager.createStage(position: .below)
+        let activeStageID = manager.activeStageID
+        manager.addWindow(
+            StageWindow(
+                windowID: 1,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                windowTitle: "Work",
+                ownerPID: 10
+            ),
+            toStageID: originalStageID
+        )
+        manager.addWindow(
+            StageWindow(
+                windowID: 101,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                windowTitle: "Work",
+                ownerPID: 10
+            ),
+            toStageID: activeStageID
+        )
+        var reconciler = RuntimeWindowReconciler(requiredMissingSnapshots: 1)
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                runningPIDs: [10],
+                liveWindows: [
+                    liveWindow(
+                        101,
+                        bundleID: "company.thebrowser.dia",
+                        ownerName: "Dia",
+                        ownerPID: 10,
+                        title: "Work"
+                    ),
+                ],
+                allWindowIDs: [101],
+                focusedWindowID: 101
+            ),
+            stageManager: &manager
+        )
+
+        #expect(result.reassignedCount == 0)
+        #expect(manager.stageContainingWindow(windowID: 101) == activeStageID)
+        #expect(manager.stages.first(where: { $0.id == originalStageID })?.windows.isEmpty == true)
+    }
+
+    @Test("A window rediscovered after removal reclaims its recent assignment")
+    func rediscoveredWindowReclaimsRecentAssignment() {
+        var manager = StageManager()
+        let originalStageID = manager.activeStageID
+        manager.createStage(position: .below)
+        let activeStageID = manager.activeStageID
+        manager.addWindow(
+            StageWindow(
+                windowID: 1,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                windowTitle: "Work",
+                ownerPID: 10
+            ),
+            toStageID: originalStageID
+        )
+        var reconciler = RuntimeWindowReconciler(requiredMissingSnapshots: 1)
+
+        _ = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                runningPIDs: [10],
+                liveWindows: [],
+                allWindowIDs: []
+            ),
+            stageManager: &manager
+        )
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                runningPIDs: [10],
+                liveWindows: [
+                    liveWindow(
+                        101,
+                        bundleID: "company.thebrowser.dia",
+                        ownerName: "Dia",
+                        ownerPID: 10,
+                        title: "Work"
+                    ),
+                ],
+                allWindowIDs: [101]
+            ),
+            stageManager: &manager
+        )
+
+        #expect(result.reassignedCount == 1)
+        #expect(manager.stageContainingWindow(windowID: 101) == originalStageID)
+        #expect(manager.stages.first(where: { $0.id == activeStageID })?.windows.isEmpty == true)
+    }
+
+    @Test("A complete bundle recreation falls back one-to-one to the original stages")
+    func recreatedWindowsKeepStagesByBundleFallback() {
+        var manager = StageManager()
+        let stage1 = manager.activeStageID
+        manager.createStage(position: .below)
+        let stage2 = manager.activeStageID
+        manager.createStage(position: .below)
+        let activeStage = manager.activeStageID
+        manager.addWindow(
+            StageWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old A", ownerPID: 10),
+            toStageID: stage1
+        )
+        manager.addWindow(
+            StageWindow(windowID: 2, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old B", ownerPID: 10),
+            toStageID: stage2
+        )
+        var reconciler = RuntimeWindowReconciler(requiredMissingSnapshots: 1)
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                runningPIDs: [10],
+                liveWindows: [
+                    liveWindow(101, bundleID: "company.thebrowser.dia", ownerName: "Dia", ownerPID: 10, title: "New A"),
+                    liveWindow(102, bundleID: "company.thebrowser.dia", ownerName: "Dia", ownerPID: 10, title: "New B"),
+                ],
+                allWindowIDs: [101, 102]
+            ),
+            stageManager: &manager
+        )
+
+        #expect(result.reassignedCount == 2)
+        #expect(manager.stageContainingWindow(windowID: 101) == stage1)
+        #expect(manager.stageContainingWindow(windowID: 102) == stage2)
+        #expect(manager.stages.first(where: { $0.id == activeStage })?.windows.isEmpty == true)
     }
 }
