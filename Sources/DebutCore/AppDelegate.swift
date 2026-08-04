@@ -80,7 +80,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         // Remove empty stages (unless all are empty)
         stageManager.removeEmptyStages()
 
-        if stageManager.stages[0].windows.isEmpty {
+        if stageManager.stages.allSatisfy({ $0.windows.isEmpty }) &&
+            stageManager.dormantWindowAssignments.isEmpty {
             discovery.populateDefaultStage(&stageManager)
         }
 
@@ -118,12 +119,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         // Raise active stage windows above the desktop surface
         controller.switchToStage(id: stageManager.activeStageID)
 
-        discovery.onWindowDiscovered = { [weak self] window in
+        discovery.onWindowsDiscovered = { [weak self] windows in
             DispatchQueue.main.async {
                 guard let self, let controller = self.stageController else { return }
-                let activeID = controller.stageManager.activeStageID
-                controller.stageManager.addWindow(window, toStageID: activeID)
-                self.debouncedSaver?.scheduleSave(controller.stageManager)
+                let result = self.runtimeWindowReconciler.reconcile(
+                    RuntimeWindowSnapshot(
+                        liveWindows: windows,
+                        allWindowIDs: nil
+                    ),
+                    stageManager: &controller.stageManager
+                )
+                if result.didMutate {
+                    self.diag.report("runtime_windows_reconciled", details: [
+                        "added": "\(result.addedCount)",
+                        "reassigned": "\(result.reassignedCount)",
+                        "trigger": "app_launch",
+                    ])
+                    self.debouncedSaver?.scheduleSave(controller.stageManager)
+                }
             }
         }
         discovery.onWindowClosed = { [weak self] windowID in
@@ -165,7 +178,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 if result.didMutate {
                     self.diag.report("runtime_windows_reconciled", details: [
                         "added": "\(result.addedCount)",
-                        "removed": "\(result.removedCount)",
                         "reassigned": "\(result.reassignedCount)",
                         "trigger": "app_activation",
                     ])
@@ -176,10 +188,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         discovery.onAppTerminated = { [weak self] ownerPID in
             DispatchQueue.main.async {
                 guard let self, let controller = self.stageController else { return }
-                let removedCount = controller.stageManager.removeAllWindows(forOwnerPID: ownerPID)
-                if removedCount > 0 {
-                    self.diag.report("terminated_app_windows_removed", details: [
-                        "count": "\(removedCount)",
+                let dormantCount = controller.stageManager.makeWindowsDormant(forOwnerPID: ownerPID)
+                if dormantCount > 0 {
+                    self.diag.report("terminated_app_windows_made_dormant", details: [
+                        "count": "\(dormantCount)",
                         "ownerPID": "\(ownerPID)",
                     ])
                     let sm = controller.stageManager
@@ -340,6 +352,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
                 for bundleID in newSettings.excludedBundleIDs {
                     self.stageController?.stageManager.removeAllWindows(forBundleID: bundleID)
+                }
+                if let stageManager = self.stageController?.stageManager {
+                    self.debouncedSaver?.scheduleSave(stageManager)
                 }
                 self.keyboardService?.keyBindings = newSettings.keyBindings
                 self.keyboardService?.quickSwitchExcludedBundleIDs = Set(

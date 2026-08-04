@@ -47,29 +47,8 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshotFocusedWindowID == 4)
     }
 
-    @Test("Activation snapshots identify other hidden applications")
-    func activationSnapshotIncludesHiddenPIDs() {
-        let windowService = MockWindowService()
-        windowService.apps = [
-            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false),
-            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 20, isHidden: true),
-        ]
-        let service = WindowDiscoveryService(
-            windowService: windowService,
-            focusedWindowProvider: { _ in nil }
-        )
-        var hiddenPIDs: Set<pid_t> = []
-        service.onAppActivated = { hiddenPIDs = $0.hiddenPIDs }
-
-        service.handleAppActivation(
-            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)
-        )
-
-        #expect(hiddenPIDs == [20])
-    }
-
-    @Test("Delayed launch activates a focused window already known from reconciliation")
-    func knownLaunchedWindowStillActivates() async throws {
+    @Test("Launch publishes its complete window batch before focused-window activation")
+    func knownLaunchedWindowStillActivates() {
         let windowService = MockWindowService()
         windowService.windowList = [liveWindow(3, ownerPID: 30)]
         let service = WindowDiscoveryService(
@@ -80,18 +59,25 @@ struct WindowDiscoveryServiceTests {
         )
         service.registerTracking(windowID: 3, pid: 30)
 
-        var discoveredWindowIDs: [CGWindowID] = []
+        var availableWindowIDs: [CGWindowID] = []
         var activatedWindowIDs: [CGWindowID] = []
-        service.onWindowDiscovered = { discoveredWindowIDs.append($0.windowID) }
-        service.onWindowActivated = { activatedWindowIDs.append($0) }
+        var callbackOrder: [String] = []
+        service.onWindowsDiscovered = {
+            callbackOrder.append("windows")
+            availableWindowIDs = $0.map(\.windowID)
+        }
+        service.onWindowActivated = {
+            callbackOrder.append("focus")
+            activatedWindowIDs.append($0)
+        }
 
         service.handleAppLaunch(
             AppInfo(bundleID: "notion.id", name: "Notion", pid: 30, isHidden: false)
         )
-        try await Task.sleep(for: .milliseconds(50))
 
-        #expect(discoveredWindowIDs.isEmpty)
+        #expect(availableWindowIDs == [3])
         #expect(activatedWindowIDs == [3])
+        #expect(callbackOrder == ["windows", "focus"])
     }
 
     @Test("Activation falls back to the activated app's frontmost enumerated window")
@@ -172,8 +158,8 @@ struct WindowDiscoveryServiceTests {
         #expect(stageManager.activeStage.windows.map(\.windowID) == [1])
     }
 
-    @Test("Empty window snapshot clears stale state when no apps are running")
-    func emptySnapshotWithoutRunningApps() {
+    @Test("Empty window snapshot makes stopped-app assignments dormant")
+    func emptySnapshotMakesStoppedWindowsDormant() {
         let windowService = MockWindowService()
         var stageManager = StageManager()
         stageManager.addWindow(
@@ -184,6 +170,36 @@ struct WindowDiscoveryServiceTests {
         WindowDiscoveryService(windowService: windowService).reconcileWindows(&stageManager)
 
         #expect(stageManager.activeStage.windows.isEmpty)
+        #expect(stageManager.dormantWindowAssignments.map(\.window.windowID) == [101])
+    }
+
+    @Test("Startup reconciliation restores a dormant window after relaunch")
+    func startupRestoresDormantWindowAfterRelaunch() {
+        let windowService = MockWindowService()
+        var stageManager = StageManager()
+        let originalStageID = stageManager.activeStageID
+        stageManager.createStage(position: .below)
+        stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Saved", ownerPID: 10),
+            toStageID: originalStageID
+        )
+        _ = stageManager.makeWindowsDormant(forOwnerPID: 10)
+        windowService.apps = [AppInfo(bundleID: "com.a", name: "A", pid: 20, isHidden: false)]
+        windowService.windowList = [WindowInfo(
+            windowID: 201,
+            ownerBundleID: "com.a",
+            ownerName: "A",
+            ownerPID: 20,
+            title: "Saved",
+            bounds: .zero,
+            isOnScreen: true
+        )]
+        windowService.allWindowIDList = [201]
+
+        WindowDiscoveryService(windowService: windowService).reconcileWindows(&stageManager)
+
+        #expect(stageManager.dormantWindowAssignments.isEmpty)
+        #expect(stageManager.stageContainingWindow(windowID: 201) == originalStageID)
     }
 
     @Test("Startup partial snapshot preserves omitted windows and their stages")
