@@ -96,12 +96,14 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 
 ### Window Lifecycle
 - **All discovery paths must register tracking** — Windows enter the stage manager via three paths: startup reconciliation, app launch, and focus-change (Cmd+N). All three must call `registerTracking` to get `kAXUIElementDestroyedNotification` and `kAXTitleChangedNotification`. Missing any path causes ghost windows.
+- **Only lifecycle events remove live assignments** — Absence from AX or `CGWindowList` never proves destruction; hidden and ordered-out windows disappear from those snapshots. Remove a live assignment on `kAXUIElementDestroyedNotification`, explicit exclusion/reset, or stage deletion.
+- **App termination makes assignments dormant** — `didTerminateApplicationNotification` removes windows from the live stage view but persists their stage and position as dormant assignments. A later launch restores exact bundle/title matches, then complete one-to-one bundle matches for dynamic titles. There is no time-based expiry.
 - **Desktop surface must not join all Spaces** — `.canJoinAllSpaces` causes the surface to follow into fullscreen Spaces, covering the fullscreen app. The surface only matters on the normal desktop.
 
 ### Persistence & Reconciliation
 - **Window titles are NOT stable keys** — Terminal prompts, browser tabs, Slack channels all change titles between sessions. Reconciliation must fall back to bundleID-only matching when (bundleID, title) exact match fails.
-- **Hidden apps order windows out** — Their CGWindowIDs can disappear from `CGWindowList` without closing. Runtime reconciliation must reset absence counts for hidden owner PIDs, and must reconcile an activation snapshot before publishing its focused-window event so recreated windows can reclaim saved assignments.
-- **Prune empty stages on restore** — After reconciliation removes stale windows, drop stages with zero windows remaining (keep at least one).
+- **Dormant assignments are persistent state** — Preserve them across Debut restarts and deliberate app quits as well as updater relaunches; macOS does not reliably distinguish those termination reasons. Purge them only through explicit window destruction, exclusion/reset, or stage deletion.
+- **Prune only truly empty stages on restore** — Keep stages that have dormant assignments even when they currently have no live windows.
 - **Focus-based starting stage** — On launch, query AX for the currently focused window, find its owning stage, and activate that stage instead of always stage 0.
 
 ## Wrap Process

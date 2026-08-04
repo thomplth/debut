@@ -5,7 +5,7 @@ import CoreGraphics
 
 public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private let windowService: any WindowService
-    public var onWindowDiscovered: ((StageWindow) -> Void)?
+    public var onWindowsDiscovered: (([WindowInfo]) -> Void)?
     public var onWindowClosed: ((CGWindowID) -> Void)?
     public var onWindowActivated: ((CGWindowID) -> Void)?
     public var onWindowTitleChanged: ((CGWindowID, String) -> Void)?
@@ -74,10 +74,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     /// Reconcile persisted stage windows against live windows.
     /// CGWindowIDs and PIDs are ephemeral — match by (bundleID, title).
-    /// Unmatched windows from running apps are preserved for runtime confirmation.
+    /// Assignments from stopped processes become dormant rather than being deleted.
     /// Unmatched live windows go to the first stage.
     public func reconcileWindows(_ stageManager: inout StageManager) {
-        let liveWindows = windowService.listWindows()
+        let liveWindows = windowService.listWindows().filter {
+            !excludedBundleIDs.contains($0.ownerBundleID)
+        }
         let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
         let runningApps = windowService.listRunningApps()
 
@@ -103,102 +105,38 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             return
         }
 
-        // Build lookup: (bundleID, title) -> [WindowInfo]
-        var liveByKey: [String: [WindowInfo]] = [:]
-        for info in liveWindows {
-            let key = "\(info.ownerBundleID)|\(info.title)"
-            liveByKey[key, default: []].append(info)
-        }
-
-        var matchedLiveIDs = Set<CGWindowID>()
-        var staleEntries: [(stageID: UUID, windowID: CGWindowID)] = []
-
-        for stageIndex in stageManager.stages.indices {
-            for windowIndex in stageManager.stages[stageIndex].windows.indices {
-                let window = stageManager.stages[stageIndex].windows[windowIndex]
-                // Skip excluded apps — treat as stale
-                if excludedBundleIDs.contains(window.ownerBundleID) {
-                    staleEntries.append((stageManager.stages[stageIndex].id, window.windowID))
-                    continue
-                }
-
-                let key = "\(window.ownerBundleID)|\(window.windowTitle)"
-
-                if var candidates = liveByKey[key], !candidates.isEmpty {
-                    let match = candidates.removeFirst()
-                    liveByKey[key] = candidates.isEmpty ? nil : candidates
-                    stageManager.updateWindowIDs(stageIndex: stageIndex, windowIndex: windowIndex, windowID: match.windowID, ownerPID: match.ownerPID)
-                    matchedLiveIDs.insert(match.windowID)
-                    trackAndRegister(windowID: match.windowID, pid: match.ownerPID)
-                } else {
-                    staleEntries.append((stageManager.stages[stageIndex].id, window.windowID))
-                }
-            }
-        }
-
-        // Second pass: for stale entries, try matching by bundleID alone (handles title changes)
-        var remainingLiveByBundle: [String: [WindowInfo]] = [:]
-        for info in liveWindows where !matchedLiveIDs.contains(info.windowID) && !excludedBundleIDs.contains(info.ownerBundleID) {
-            remainingLiveByBundle[info.ownerBundleID, default: []].append(info)
-        }
-
-        var trulyStale: [(stageID: UUID, windowID: CGWindowID)] = []
-        for (stageID, windowID) in staleEntries {
-            // Find the persisted window's bundleID
-            guard let stageIdx = stageManager.stages.firstIndex(where: { $0.id == stageID }),
-                  let winIdx = stageManager.stages[stageIdx].windows.firstIndex(where: { $0.windowID == windowID })
-            else {
-                trulyStale.append((stageID, windowID))
-                continue
-            }
-            let bundleID = stageManager.stages[stageIdx].windows[winIdx].ownerBundleID
-
-            if var candidates = remainingLiveByBundle[bundleID], !candidates.isEmpty {
-                let match = candidates.removeFirst()
-                remainingLiveByBundle[bundleID] = candidates.isEmpty ? nil : candidates
-                stageManager.updateWindowIDs(stageIndex: stageIdx, windowIndex: winIdx, windowID: match.windowID, ownerPID: match.ownerPID, windowTitle: match.title)
-                matchedLiveIDs.insert(match.windowID)
-                trackAndRegister(windowID: match.windowID, pid: match.ownerPID)
-            } else {
-                trulyStale.append((stageID, windowID))
-            }
-        }
-
         let runningPIDs = Set(runningApps.map(\.pid))
         let runningBundleIDs = Set(runningApps.map(\.bundleID))
-        for (stageID, windowID) in trulyStale {
-            guard let stage = stageManager.stages.first(where: { $0.id == stageID }),
-                  let window = stage.windows.first(where: { $0.windowID == windowID })
-            else { continue }
-
-            // A non-empty AX result can still omit arbitrary windows. Preserve an
-            // unmatched assignment while its process (or a relaunched instance of
-            // the same app) is running. Runtime CG-ID sweeps confirm real closures.
-            if window.ownerPID.map(runningPIDs.contains) == true ||
-                runningBundleIDs.contains(window.ownerBundleID) {
-                continue
-            }
-            stageManager.removeWindow(windowID: windowID, fromStageID: stageID)
+        let stoppedPIDs: Set<pid_t> = Set(stageManager.stages.flatMap(\.windows).compactMap { window -> pid_t? in
+            guard let ownerPID = window.ownerPID,
+                  !runningPIDs.contains(ownerPID),
+                  !runningBundleIDs.contains(window.ownerBundleID)
+            else { return nil }
+            return ownerPID
+        })
+        for ownerPID in stoppedPIDs {
+            _ = stageManager.makeWindowsDormant(forOwnerPID: ownerPID)
         }
 
-        // Add unmatched live windows to the first stage (not the last-active stage)
         let firstStageID = stageManager.stages[0].id
-        for info in liveWindows where !matchedLiveIDs.contains(info.windowID) && !excludedBundleIDs.contains(info.ownerBundleID) {
-            let window = StageWindow(
-                windowID: info.windowID,
-                ownerBundleID: info.ownerBundleID,
-                ownerName: info.ownerName,
-                windowTitle: info.title,
-                ownerPID: info.ownerPID
-            )
-            stageManager.addWindow(window, toStageID: firstStageID)
+        var reconciler = RuntimeWindowReconciler()
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: liveWindows,
+                allWindowIDs: windowService.listAllWindowIDs()
+            ),
+            stageManager: &stageManager,
+            newWindowStageID: firstStageID
+        )
+        for info in liveWindows {
             trackAndRegister(windowID: info.windowID, pid: info.ownerPID)
         }
 
         DiagnosticReporter.shared.report("windows_reconciled", details: [
             "liveCount": "\(liveWindows.count)",
-            "matched": "\(matchedLiveIDs.count)",
-            "stale": "\(staleEntries.count)",
+            "added": "\(result.addedCount)",
+            "reassigned": "\(result.reassignedCount)",
+            "dormant": "\(stageManager.dormantWindowAssignments.count)",
         ])
     }
 
@@ -392,32 +330,34 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     func handleAppLaunch(_ app: AppInfo) {
-        let pid = app.pid
-
+        if launchDiscoveryDelay == 0 {
+            discoverLaunchedWindows(for: app)
+            return
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + launchDiscoveryDelay) { [weak self] in
-            guard let self else { return }
-            let windows = self.windowService.listWindows().filter { $0.ownerPID == pid }
-            for info in windows where !self.knownWindowIDs.contains(info.windowID) {
-                self.trackAndRegister(windowID: info.windowID, pid: pid)
-                let stageWindow = StageWindow(
-                    windowID: info.windowID,
-                    ownerBundleID: app.bundleID,
-                    ownerName: app.name,
-                    windowTitle: info.title,
-                    ownerPID: pid
-                )
-                self.onWindowDiscovered?(stageWindow)
-            }
+            self?.discoverLaunchedWindows(for: app)
+        }
+    }
 
-            guard self.frontmostPIDProvider() == pid else { return }
-            let focusedWindowID = self.focusedWindowProvider?(pid)
-                ?? self.focusedWindowID(for: pid)
-                ?? windows.first?.windowID
-            if let focusedWindowID,
-               windows.contains(where: { $0.windowID == focusedWindowID }) {
-                self.trackAndRegister(windowID: focusedWindowID, pid: pid)
-                self.onWindowActivated?(focusedWindowID)
-            }
+    private func discoverLaunchedWindows(for app: AppInfo) {
+        let pid = app.pid
+        let windows = windowService.listWindows().filter { $0.ownerPID == pid }
+        for info in windows where !knownWindowIDs.contains(info.windowID) {
+            trackAndRegister(windowID: info.windowID, pid: pid)
+        }
+
+        // Publish the complete app window set as one reconciliation unit so
+        // dormant dynamic-title assignments can use one-to-one matching.
+        onWindowsDiscovered?(windows)
+
+        guard frontmostPIDProvider() == pid else { return }
+        let focusedWindowID = focusedWindowProvider?(pid)
+            ?? focusedWindowID(for: pid)
+            ?? windows.first?.windowID
+        if let focusedWindowID,
+           windows.contains(where: { $0.windowID == focusedWindowID }) {
+            trackAndRegister(windowID: focusedWindowID, pid: pid)
+            onWindowActivated?(focusedWindowID)
         }
     }
 
@@ -464,7 +404,6 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         let runningApps = windowService.listRunningApps()
         var runningPIDs = Set(runningApps.map(\.pid))
-        let hiddenPIDs = Set(runningApps.filter(\.isHidden).map(\.pid))
         // The activation notification is authoritative even if Launch Services has not
         // inserted the newly activated process into runningApplications yet.
         runningPIDs.insert(pid)
@@ -486,11 +425,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 ? liveWindows.first(where: { $0.ownerPID == pid })?.windowID
                 : nil)
         onAppActivated?(RuntimeWindowSnapshot(
-            runningPIDs: runningPIDs,
-            hiddenPIDs: hiddenPIDs,
             liveWindows: liveWindows,
             allWindowIDs: windowService.listAllWindowIDs(),
-            untrackableWindowIDs: windowService.listUntrackableWindowIDs(),
             focusedWindowID: focusedWindowID
         ))
         if let focusedWindowID {

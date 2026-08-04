@@ -108,19 +108,6 @@ struct StageManagerTests {
         #expect(sm.stages.flatMap(\.windows).map(\.windowID) == [201])
     }
 
-    @Test("Sweep removes stopped owner PIDs across stages")
-    func removeStoppedProcessesAcrossStages() {
-        var sm = StageManager()
-        sm.createStage(position: .below)
-        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Live", ownerPID: 10), toStageID: sm.stages[0].id)
-        sm.addWindow(StageWindow(windowID: 201, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Stopped", ownerPID: 20), toStageID: sm.stages[1].id)
-
-        let removedCount = sm.removeWindowsOwnedByStoppedProcesses(runningPIDs: [10])
-
-        #expect(removedCount == 1)
-        #expect(sm.stages.flatMap(\.windows).map(\.windowID) == [101])
-    }
-
     @Test("stageContainingWindow")
     func stageContaining() {
         var sm = StageManager()
@@ -187,5 +174,91 @@ struct StageManagerTests {
         let decoded = try JSONDecoder().decode(StageManager.self, from: data)
         #expect(decoded.stages.count == 2)
         #expect(decoded.stages[1].windows.count == 1)
+    }
+
+    @Test("App termination makes windows dormant with their stage positions")
+    func makeWindowsDormantPreservesAssignments() {
+        var sm = StageManager()
+        let stage1 = sm.activeStageID
+        sm.createStage(position: .below)
+        let stage2 = sm.activeStageID
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toStageID: stage1)
+        sm.addWindow(StageWindow(windowID: 102, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Two", ownerPID: 10), toStageID: stage2)
+        sm.addWindow(StageWindow(windowID: 201, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Other", ownerPID: 20), toStageID: stage2)
+
+        let count = sm.makeWindowsDormant(forOwnerPID: 10)
+
+        #expect(count == 2)
+        #expect(sm.stages.flatMap(\.windows).map(\.windowID) == [201])
+        #expect(sm.dormantWindowAssignments.map(\.stageID) == [stage1, stage2])
+        #expect(sm.dormantWindowAssignments.map(\.windowIndex) == [0, 0])
+        #expect(sm.dormantWindowAssignments.map(\.window.windowID) == [101, 102])
+    }
+
+    @Test("Dormant assignments survive persistence and legacy state still decodes")
+    func dormantAssignmentsAreCodableAndForwardCompatible() throws {
+        var sm = StageManager()
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toStageID: sm.activeStageID)
+        _ = sm.makeWindowsDormant(forOwnerPID: 10)
+
+        let data = try JSONEncoder().encode(sm)
+        let decoded = try JSONDecoder().decode(StageManager.self, from: data)
+        #expect(decoded.dormantWindowAssignments.count == 1)
+
+        var legacyObject = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacyObject.removeValue(forKey: "dormantWindowAssignments")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let legacyDecoded = try JSONDecoder().decode(StageManager.self, from: legacyData)
+        #expect(legacyDecoded.dormantWindowAssignments.isEmpty)
+    }
+
+    @Test("Explicit removal purges a dormant assignment")
+    func explicitRemovalPurgesDormantAssignment() {
+        var sm = StageManager()
+        let stageID = sm.activeStageID
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toStageID: stageID)
+        _ = sm.makeWindowsDormant(forOwnerPID: 10)
+
+        sm.removeWindow(windowID: 101, fromStageID: stageID)
+
+        #expect(sm.dormantWindowAssignments.isEmpty)
+    }
+
+    @Test("Excluding a bundle purges its dormant assignments")
+    func bundleRemovalPurgesDormantAssignments() {
+        var sm = StageManager()
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toStageID: sm.activeStageID)
+        _ = sm.makeWindowsDormant(forOwnerPID: 10)
+
+        sm.removeAllWindows(forBundleID: "com.a")
+
+        #expect(sm.dormantWindowAssignments.isEmpty)
+    }
+
+    @Test("Deleting a stage purges its dormant assignments")
+    func stageDeletionPurgesDormantAssignments() {
+        var sm = StageManager()
+        let stageID = sm.activeStageID
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toStageID: stageID)
+        _ = sm.makeWindowsDormant(forOwnerPID: 10)
+
+        sm.deleteStage(id: stageID)
+
+        #expect(sm.dormantWindowAssignments.isEmpty)
+    }
+
+    @Test("Automatic empty-stage pruning retains stages with dormant assignments")
+    func emptyStagePruningRetainsDormantAssignments() {
+        var sm = StageManager()
+        let dormantStageID = sm.activeStageID
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toStageID: dormantStageID)
+        _ = sm.makeWindowsDormant(forOwnerPID: 10)
+        sm.createStage(position: .below)
+        sm.addWindow(StageWindow(windowID: 201, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Live", ownerPID: 20), toStageID: sm.activeStageID)
+
+        sm.removeEmptyStages()
+
+        #expect(sm.stages.contains(where: { $0.id == dormantStageID }))
+        #expect(sm.dormantWindowAssignments.first?.stageID == dormantStageID)
     }
 }
