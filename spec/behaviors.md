@@ -97,8 +97,8 @@ Full persistence across app restarts and system reboots.
 - [x] Reconcile: match persisted windows to live windows by (bundleID, windowTitle)
 - [x] Fallback reconciliation: if title match fails, match by bundleID alone (handles dynamic titles like terminals, browsers, Slack)
 - [x] Update ephemeral CGWindowIDs, PIDs, and window titles to current values
-- [x] Remove windows that no longer exist (app was quit between sessions)
-- [x] Remove empty stages after reconciliation (keep at least one)
+- [x] Keep stopped-app assignments dormant and restore them on a later launch
+- [x] Remove empty stages after reconciliation, except stages with dormant assignments (keep at least one)
 - [x] Add new live windows (not in snapshot) to first stage
 - [x] Excluded apps filtered during reconciliation
 - [x] Activate stage containing currently focused window on launch (fall back to first stage)
@@ -130,10 +130,12 @@ Full persistence across app restarts and system reboots.
 ## Edge Cases
 
 - [x] First launch: create single default stage with all running windows
-- [x] App quits: all its windows removed from all stages (per-app observer cleaned up)
+- [x] App quits: live windows become persistent dormant assignments and the per-app observer is cleaned up
 - [x] Window closed (Cmd+W, red button): removed from stage instantly via kAXUIElementDestroyedNotification
 - [x] Window title changes (cd, tab switch, save): updated in real-time via kAXTitleChangedNotification
 - [x] Window created outside Debut's awareness -> added to active stage on focus, lifecycle tracking registered
 - [x] Hidden apps preserve ordered-out window assignments until their windows are visible again
-- [x] Recreated windows reclaim recent assignments by bundle ID + title, with complete one-to-one bundle fallback for dynamic titles
+- [x] AX/CG snapshot absence never removes an assignment without a lifecycle event
+- [x] Recreated or relaunched windows reclaim retained/dormant assignments by bundle ID + title, with complete one-to-one bundle fallback for dynamic titles
+- [x] Dormant assignments have no time-based expiry and survive deliberate quits as well as updater relaunches
 - [x] System Cmd+` restored — Debut does not intercept backtick

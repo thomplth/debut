@@ -15,12 +15,42 @@ public struct StageManager: Codable, Sendable {
     public private(set) var stages: [Stage]
     public private(set) var activeStageID: UUID
     public private(set) var templates: [Template]
+    public private(set) var dormantWindowAssignments: [DormantWindowAssignment]
+
+    private enum CodingKeys: String, CodingKey {
+        case stages
+        case activeStageID
+        case templates
+        case dormantWindowAssignments
+    }
 
     public init() {
         let initial = Stage()
         self.stages = [initial]
         self.activeStageID = initial.id
         self.templates = []
+        self.dormantWindowAssignments = []
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.stages = try container.decode([Stage].self, forKey: .stages)
+        self.activeStageID = try container.decode(UUID.self, forKey: .activeStageID)
+        self.templates = try container.decode([Template].self, forKey: .templates)
+        self.dormantWindowAssignments = try container.decodeIfPresent(
+            [DormantWindowAssignment].self,
+            forKey: .dormantWindowAssignments
+        ) ?? []
+        let stageIDs = Set(stages.map(\.id))
+        self.dormantWindowAssignments.removeAll { !stageIDs.contains($0.stageID) }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(stages, forKey: .stages)
+        try container.encode(activeStageID, forKey: .activeStageID)
+        try container.encode(templates, forKey: .templates)
+        try container.encode(dormantWindowAssignments, forKey: .dormantWindowAssignments)
     }
 
     public var activeStage: Stage {
@@ -52,6 +82,7 @@ public struct StageManager: Codable, Sendable {
     public mutating func deleteStage(id: UUID) {
         guard let index = stages.firstIndex(where: { $0.id == id }) else { return }
         let deletedStage = stages[index]
+        dormantWindowAssignments.removeAll { $0.stageID == id }
 
         if stages.count == 1 {
             stages.removeAll()
@@ -106,7 +137,8 @@ public struct StageManager: Codable, Sendable {
 
     /// Remove stages that have no windows, keeping at least one stage.
     public mutating func removeEmptyStages() {
-        let nonEmpty = stages.filter { !$0.windows.isEmpty }
+        let dormantStageIDs = Set(dormantWindowAssignments.map(\.stageID))
+        let nonEmpty = stages.filter { !$0.windows.isEmpty || dormantStageIDs.contains($0.id) }
         if nonEmpty.isEmpty { return } // keep all if everything is empty
         stages = nonEmpty
         // Fix activeStageID if it pointed to a removed stage
@@ -128,14 +160,25 @@ public struct StageManager: Codable, Sendable {
     }
 
     public mutating func removeWindow(windowID: CGWindowID, fromStageID stageID: UUID) {
-        guard let index = stages.firstIndex(where: { $0.id == stageID }) else { return }
-        stages[index].removeWindow(windowID: windowID)
+        if let index = stages.firstIndex(where: { $0.id == stageID }) {
+            stages[index].removeWindow(windowID: windowID)
+        }
+        dormantWindowAssignments.removeAll {
+            $0.stageID == stageID && $0.window.windowID == windowID
+        }
+    }
+
+    mutating func removeLiveWindowFromAllStages(windowID: CGWindowID) {
+        for index in stages.indices {
+            stages[index].removeWindow(windowID: windowID)
+        }
     }
 
     public mutating func removeAllWindows(forBundleID bundleID: String) {
         for index in stages.indices {
             stages[index].removeAllWindows(forBundleID: bundleID)
         }
+        dormantWindowAssignments.removeAll { $0.window.ownerBundleID == bundleID }
     }
 
     @discardableResult
@@ -144,16 +187,57 @@ public struct StageManager: Codable, Sendable {
         for index in stages.indices {
             removedCount += stages[index].removeAllWindows(forOwnerPID: ownerPID)
         }
-        return removedCount
+        let previousDormantCount = dormantWindowAssignments.count
+        dormantWindowAssignments.removeAll { $0.window.ownerPID == ownerPID }
+        return removedCount + previousDormantCount - dormantWindowAssignments.count
     }
 
     @discardableResult
-    public mutating func removeWindowsOwnedByStoppedProcesses(runningPIDs: Set<pid_t>) -> Int {
-        var removedCount = 0
-        for index in stages.indices {
-            removedCount += stages[index].removeWindowsOwnedByStoppedProcesses(runningPIDs: runningPIDs)
+    public mutating func makeWindowsDormant(forOwnerPID ownerPID: pid_t) -> Int {
+        let assignments: [DormantWindowAssignment] = stages.flatMap { stage in
+            stage.windows.enumerated().compactMap { windowIndex, window -> DormantWindowAssignment? in
+                guard window.ownerPID == ownerPID else { return nil }
+                return DormantWindowAssignment(
+                    stageID: stage.id,
+                    windowIndex: windowIndex,
+                    window: window
+                )
+            }
         }
-        return removedCount
+        guard !assignments.isEmpty else { return 0 }
+
+        let assignmentIDs = Set(assignments.map(\.id))
+        dormantWindowAssignments.removeAll { assignmentIDs.contains($0.id) }
+        dormantWindowAssignments.append(contentsOf: assignments)
+        for index in stages.indices {
+            _ = stages[index].removeAllWindows(forOwnerPID: ownerPID)
+        }
+        return assignments.count
+    }
+
+    @discardableResult
+    public mutating func restoreDormantWindow(
+        assignmentID: UUID,
+        windowID: CGWindowID,
+        ownerPID: pid_t,
+        windowTitle: String
+    ) -> Bool {
+        guard let assignmentIndex = dormantWindowAssignments.firstIndex(where: {
+            $0.id == assignmentID
+        }) else { return false }
+        let assignment = dormantWindowAssignments.remove(at: assignmentIndex)
+        guard stages.contains(where: { $0.id == assignment.stageID }) else { return false }
+
+        var restoredWindow = assignment.window
+        restoredWindow.windowID = windowID
+        restoredWindow.ownerPID = ownerPID
+        restoredWindow.windowTitle = windowTitle
+        insertWindow(
+            restoredWindow,
+            at: assignment.windowIndex,
+            inStageID: assignment.stageID
+        )
+        return true
     }
 
     public mutating func moveWindow(windowID: CGWindowID, fromStageID: UUID, toStageID: UUID) {
