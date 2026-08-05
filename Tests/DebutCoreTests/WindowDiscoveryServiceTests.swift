@@ -51,7 +51,11 @@ struct WindowDiscoveryServiceTests {
         windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
         windowService.windowList = [liveWindow(1), liveWindow(2), liveWindow(3), liveWindow(4)]
         windowService.allWindowIDList = [1, 2, 3, 4, 99]
-        let service = WindowDiscoveryService(windowService: windowService) { _ in 4 }
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 4 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
         var callbackOrder: [String] = []
         var snapshotWindowIDs: Set<CGWindowID> = []
         var snapshotAllWindowIDs: Set<CGWindowID>?
@@ -83,7 +87,8 @@ struct WindowDiscoveryServiceTests {
             windowService: windowService,
             focusedWindowProvider: { _ in 3 },
             frontmostPIDProvider: { 30 },
-            launchDiscoveryDelay: 0
+            launchDiscoveryDelay: 0,
+            processExitMonitor: MockProcessExitMonitor()
         )
         service.registerTracking(windowID: 3, pid: 30)
 
@@ -120,7 +125,8 @@ struct WindowDiscoveryServiceTests {
         ]
         let service = WindowDiscoveryService(
             windowService: windowService,
-            focusedWindowProvider: { _ in nil }
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: MockProcessExitMonitor()
         )
         var activatedWindowIDs: [CGWindowID] = []
         var snapshotFocusedWindowID: CGWindowID?
@@ -148,7 +154,10 @@ struct WindowDiscoveryServiceTests {
             toStageID: stageManager.activeStageID
         )
 
-        WindowDiscoveryService(windowService: windowService).reconcileWindows(&stageManager)
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        ).reconcileWindows(&stageManager)
 
         #expect(stageManager.activeStage.windows.map(\.windowID) == [101])
     }
@@ -181,7 +190,10 @@ struct WindowDiscoveryServiceTests {
             toStageID: stageID
         )
 
-        WindowDiscoveryService(windowService: windowService).reconcileWindows(&stageManager)
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        ).reconcileWindows(&stageManager)
 
         #expect(stageManager.activeStage.windows.map(\.windowID) == [1])
     }
@@ -195,7 +207,10 @@ struct WindowDiscoveryServiceTests {
             toStageID: stageManager.activeStageID
         )
 
-        WindowDiscoveryService(windowService: windowService).reconcileWindows(&stageManager)
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        ).reconcileWindows(&stageManager)
 
         #expect(stageManager.activeStage.windows.isEmpty)
         #expect(stageManager.dormantWindowAssignments.map(\.window.windowID) == [101])
@@ -224,7 +239,10 @@ struct WindowDiscoveryServiceTests {
         )]
         windowService.allWindowIDList = [201]
 
-        WindowDiscoveryService(windowService: windowService).reconcileWindows(&stageManager)
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        ).reconcileWindows(&stageManager)
 
         #expect(stageManager.dormantWindowAssignments.isEmpty)
         #expect(stageManager.stageContainingWindow(windowID: 201) == originalStageID)
@@ -251,7 +269,10 @@ struct WindowDiscoveryServiceTests {
             toStageID: stage2
         )
 
-        let discovery = WindowDiscoveryService(windowService: windowService)
+        let discovery = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
         discovery.reconcileWindows(&stageManager)
 
         #expect(stageManager.stageContainingWindow(windowID: 1) == stage1)
