@@ -17,8 +17,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private let focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)?
     private let frontmostPIDProvider: @Sendable () -> pid_t?
     private let launchDiscoveryDelay: TimeInterval
+    private let processExitMonitor: any ProcessExitMonitoring
 
     private var knownWindowIDs: Set<CGWindowID> = []
+    private var monitoredProcessIDs: Set<pid_t> = []
+    private var handledExitedProcessIDs: Set<pid_t> = []
 
     // AXObserver for tracking focused window changes within the frontmost app
     private var focusObserver: AXObserver?
@@ -31,11 +34,27 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
     private var perAppObservers: [pid_t: AppObserverState] = [:]
 
-    public init(
+    public convenience init(
         windowService: any WindowService,
         focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)? = nil,
         frontmostPIDProvider: (@Sendable () -> pid_t?)? = nil,
         launchDiscoveryDelay: TimeInterval = 0.5
+    ) {
+        self.init(
+            windowService: windowService,
+            focusedWindowProvider: focusedWindowProvider,
+            frontmostPIDProvider: frontmostPIDProvider,
+            launchDiscoveryDelay: launchDiscoveryDelay,
+            processExitMonitor: ProcessExitMonitor()
+        )
+    }
+
+    init(
+        windowService: any WindowService,
+        focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)? = nil,
+        frontmostPIDProvider: (@Sendable () -> pid_t?)? = nil,
+        launchDiscoveryDelay: TimeInterval = 0.5,
+        processExitMonitor: any ProcessExitMonitoring
     ) {
         self.windowService = windowService
         self.focusedWindowProvider = focusedWindowProvider
@@ -43,6 +62,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             NSWorkspace.shared.frontmostApplication?.processIdentifier
         }
         self.launchDiscoveryDelay = launchDiscoveryDelay
+        self.processExitMonitor = processExitMonitor
         super.init()
     }
 
@@ -168,6 +188,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         for pid in perAppObservers.keys {
             removeAppObserver(for: pid)
         }
+        processExitMonitor.stopMonitoringAll()
+        monitoredProcessIDs.removeAll()
     }
 
     // MARK: - Per-window lifecycle tracking
@@ -175,12 +197,21 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Combined insert into knownWindowIDs + register AX notifications
     private func trackAndRegister(windowID: CGWindowID, pid: pid_t) {
         knownWindowIDs.insert(windowID)
+        registerProcessExitMonitoring(for: pid)
         trackWindow(windowID: windowID, pid: pid)
     }
 
     /// Public entry point for external callers (e.g., StageController adding new windows)
     public func registerTracking(windowID: CGWindowID, pid: pid_t) {
         trackAndRegister(windowID: windowID, pid: pid)
+    }
+
+    private func registerProcessExitMonitoring(for pid: pid_t) {
+        guard pid > 0, monitoredProcessIDs.insert(pid).inserted else { return }
+        handledExitedProcessIDs.remove(pid)
+        processExitMonitor.startMonitoring(pid: pid) { [weak self] exitedPID in
+            self?.handleProcessExit(pid: exitedPID)
+        }
     }
 
     private func trackWindow(windowID: CGWindowID, pid: pid_t) {
@@ -438,7 +469,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
         else { return }
 
-        let pid = app.processIdentifier
+        handleProcessExit(pid: app.processIdentifier)
+    }
+
+    /// Central cleanup for both kernel PID-exit events and NSWorkspace's backup signal.
+    /// Multiple lifecycle sources may report the same exit, so this must remain idempotent.
+    func handleProcessExit(pid: pid_t) {
+        guard pid > 0, handledExitedProcessIDs.insert(pid).inserted else { return }
+
+        monitoredProcessIDs.remove(pid)
+        processExitMonitor.stopMonitoring(pid: pid)
 
         // Clean up focus observer if we were observing this app
         if pid == observedPID {

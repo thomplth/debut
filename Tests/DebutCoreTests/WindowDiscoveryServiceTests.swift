@@ -3,6 +3,34 @@ import Foundation
 import Testing
 @testable import DebutCore
 
+private final class MockProcessExitMonitor: ProcessExitMonitoring, @unchecked Sendable {
+    private(set) var monitoredPIDs: Set<pid_t> = []
+    private(set) var cancelledPIDs: [pid_t] = []
+    private var handlers: [pid_t: @Sendable (pid_t) -> Void] = [:]
+
+    func startMonitoring(pid: pid_t, onExit: @escaping @Sendable (pid_t) -> Void) {
+        guard handlers[pid] == nil else { return }
+        monitoredPIDs.insert(pid)
+        handlers[pid] = onExit
+    }
+
+    func stopMonitoring(pid: pid_t) {
+        monitoredPIDs.remove(pid)
+        handlers.removeValue(forKey: pid)
+        cancelledPIDs.append(pid)
+    }
+
+    func stopMonitoringAll() {
+        for pid in monitoredPIDs {
+            stopMonitoring(pid: pid)
+        }
+    }
+
+    func emitExit(pid: pid_t) {
+        handlers[pid]?(pid)
+    }
+}
+
 @Suite("WindowDiscoveryService")
 struct WindowDiscoveryServiceTests {
     private func liveWindow(_ windowID: CGWindowID, ownerPID: pid_t = 10) -> WindowInfo {
@@ -234,5 +262,138 @@ struct WindowDiscoveryServiceTests {
 
         #expect(stageManager.stageContainingWindow(windowID: 1) == stage1)
         #expect(stageManager.stageContainingWindow(windowID: 2) == stage2)
+    }
+
+    @Test("Tracking a window also monitors its process even when AX registration fails")
+    func trackingStartsProcessExitMonitoring() {
+        let processExitMonitor = MockProcessExitMonitor()
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: processExitMonitor
+        )
+
+        service.registerTracking(windowID: 101, pid: 10)
+
+        #expect(processExitMonitor.monitoredPIDs == [10])
+    }
+
+    @Test("Direct and workspace exit signals share idempotent cleanup")
+    func duplicateProcessExitSignalsAreIdempotent() {
+        let processExitMonitor = MockProcessExitMonitor()
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: processExitMonitor
+        )
+        var terminatedPIDs: [pid_t] = []
+        service.onAppTerminated = { terminatedPIDs.append($0) }
+        service.registerTracking(windowID: 101, pid: 10)
+
+        processExitMonitor.emitExit(pid: 10)
+        service.handleProcessExit(pid: 10)
+
+        #expect(terminatedPIDs == [10])
+        #expect(!processExitMonitor.monitoredPIDs.contains(10))
+    }
+
+    @Test("Observer pruning does not discard process exit monitoring")
+    func observerPruningKeepsProcessExitMonitoring() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "com.b", name: "B", pid: 20, isHidden: false),
+        ]
+        let processExitMonitor = MockProcessExitMonitor()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: processExitMonitor
+        )
+        service.registerTracking(windowID: 101, pid: 10)
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "com.b", name: "B", pid: 20, isHidden: false)
+        )
+
+        #expect(processExitMonitor.monitoredPIDs.contains(10))
+    }
+
+    @Test("A hidden tracked app remains live until its process exits")
+    func hiddenAppDoesNotTriggerTermination() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "com.a", name: "A", pid: 10, isHidden: true),
+        ]
+        let processExitMonitor = MockProcessExitMonitor()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: processExitMonitor
+        )
+        var terminatedPIDs: [pid_t] = []
+        service.onAppTerminated = { terminatedPIDs.append($0) }
+        service.registerTracking(windowID: 101, pid: 10)
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "com.a", name: "A", pid: 10, isHidden: true)
+        )
+
+        #expect(terminatedPIDs.isEmpty)
+        #expect(processExitMonitor.monitoredPIDs.contains(10))
+    }
+
+    @Test("Rapid same-bundle relaunch makes the old window dormant and restores the new one")
+    func rapidSameBundleRelaunchRestoresDormantAssignment() {
+        let oldPID: pid_t = 10
+        let newPID: pid_t = 20
+        let windowService = MockWindowService()
+        let processExitMonitor = MockProcessExitMonitor()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            frontmostPIDProvider: { nil },
+            launchDiscoveryDelay: 0,
+            processExitMonitor: processExitMonitor
+        )
+        var stageManager = StageManager()
+        let originalStageID = stageManager.activeStageID
+        stageManager.addWindow(
+            StageWindow(
+                windowID: 101,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "Document",
+                ownerPID: oldPID
+            ),
+            toStageID: originalStageID
+        )
+        service.onAppTerminated = { pid in
+            _ = stageManager.makeWindowsDormant(forOwnerPID: pid)
+        }
+        service.onWindowsDiscovered = { windows in
+            var reconciler = RuntimeWindowReconciler()
+            _ = reconciler.reconcile(
+                RuntimeWindowSnapshot(liveWindows: windows, allWindowIDs: nil),
+                stageManager: &stageManager
+            )
+        }
+        service.registerTracking(windowID: 101, pid: oldPID)
+
+        processExitMonitor.emitExit(pid: oldPID)
+        windowService.windowList = [WindowInfo(
+            windowID: 201,
+            ownerBundleID: "com.a",
+            ownerName: "A",
+            ownerPID: newPID,
+            title: "Document",
+            bounds: .zero,
+            isOnScreen: true
+        )]
+        service.handleAppLaunch(
+            AppInfo(bundleID: "com.a", name: "A", pid: newPID, isHidden: false)
+        )
+
+        #expect(stageManager.dormantWindowAssignments.isEmpty)
+        #expect(stageManager.stageContainingWindow(windowID: 201) == originalStageID)
+        #expect(stageManager.stages.flatMap(\.windows).map(\.windowID) == [201])
+        #expect(processExitMonitor.monitoredPIDs == [newPID])
     }
 }
