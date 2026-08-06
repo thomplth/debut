@@ -11,6 +11,8 @@ public protocol StageControllerDelegate: AnyObject {
 }
 
 public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
+    private static let overlayPresentationDelay: TimeInterval = 0.2
+
     public var stageManager: StageManager
     public let windowService: any WindowService
     public let keyboardService: any KeyboardService
@@ -31,6 +33,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private var previousStageID: UUID?
     private var backtickCycleWindows: [CGWindowID] = []
     private var backtickCycleIndex: Int = 0
+    private var overlayPresentationGeneration: UInt = 0
+    private var isOverlayPresented: Bool = false
     private let fullscreenAppActiveProvider: (() -> Bool)?
     private let previewCaptureQueue = DispatchQueue(
         label: "com.thomplth.Debut.preview-capture",
@@ -264,7 +268,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             if let tapService = keyboardService as? EventTapKeyboardService {
                 tapService.overlayVisible = false
             }
-            delegate?.stageControllerDidCloseOverlay(self)
+            dismissOverlayPresentation()
         }
 
         switchToStage(id: targetStage.id, raiseWindowID: matchingWindowID)
@@ -365,9 +369,37 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             selectedStageIndex = index
         }
         preOverlayStageID = stageManager.activeStageID
-        diag.report("overlay_opened")
-        delegate?.stageControllerDidOpenOverlay(self)
+        scheduleOverlayPresentation()
         refreshWindowPreviews()
+    }
+
+    private func scheduleOverlayPresentation() {
+        overlayPresentationGeneration &+= 1
+        let generation = overlayPresentationGeneration
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.overlayPresentationDelay) { [weak self] in
+            guard let self,
+                  self.overlayPresentationGeneration == generation,
+                  self.isStageManagerVisible,
+                  !self.isOverlayPresented
+            else { return }
+
+            self.isOverlayPresented = true
+            self.diag.report("overlay_opened")
+            self.delegate?.stageControllerDidOpenOverlay(self)
+        }
+    }
+
+    private func dismissOverlayPresentation() {
+        overlayPresentationGeneration &+= 1
+        guard isOverlayPresented else { return }
+        isOverlayPresented = false
+        delegate?.stageControllerDidCloseOverlay(self)
+    }
+
+    private func notifyOverlayUpdated() {
+        guard isOverlayPresented else { return }
+        delegate?.stageControllerDidUpdateSelection(self)
     }
 
     private func isFullscreenAppActive() -> Bool {
@@ -422,7 +454,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 }
 
                 if self.isStageManagerVisible {
-                    self.delegate?.stageControllerDidUpdateSelection(self)
+                    self.notifyOverlayUpdated()
                 }
             }
         }
@@ -435,7 +467,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             tapService.overlayVisible = false
         }
 
-        delegate?.stageControllerDidCloseOverlay(self)
+        dismissOverlayPresentation()
 
         guard stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let targetStage = stageManager.stages[selectedStageIndex]
@@ -464,7 +496,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
         selectedStageIndex = stageManager.stages.firstIndex(where: { $0.id == preOverlayStageID }) ?? 0
         selectedWindowIndex = 0
-        delegate?.stageControllerDidCloseOverlay(self)
+        dismissOverlayPresentation()
         // stageManagerActive stays true — session continues until Cmd release
         // Cmd+` still stage-isolated (intercepted before the overlay gate)
     }
@@ -480,7 +512,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         } else {
             selectedWindowIndex = (selectedWindowIndex - 1 + stage.windows.count) % stage.windows.count
         }
-        delegate?.stageControllerDidUpdateSelection(self)
+        notifyOverlayUpdated()
     }
 
     private func cycleStage(forward: Bool) {
@@ -492,7 +524,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             selectedStageIndex = (selectedStageIndex - 1 + stageManager.stages.count) % stageManager.stages.count
         }
         selectedWindowIndex = 0
-        delegate?.stageControllerDidUpdateSelection(self)
+        notifyOverlayUpdated()
     }
 
     private func jumpToStage(index: Int) {
@@ -500,7 +532,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
               stageManager.stages.indices.contains(index) else { return }
         selectedStageIndex = index
         selectedWindowIndex = 0
-        delegate?.stageControllerDidUpdateSelection(self)
+        notifyOverlayUpdated()
     }
 
     private func createStage(position: StageInsertPosition) {
@@ -514,7 +546,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
         selectedWindowIndex = 0
         delegate?.stageControllerDidMutateState(self)
-        delegate?.stageControllerDidUpdateSelection(self)
+        notifyOverlayUpdated()
     }
 
     private func deleteSelectedStage() {
@@ -525,7 +557,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         selectedStageIndex = min(selectedStageIndex, stageManager.stages.count - 1)
         selectedWindowIndex = 0
         delegate?.stageControllerDidMutateState(self)
-        delegate?.stageControllerDidUpdateSelection(self)
+        notifyOverlayUpdated()
     }
 
     private func saveSelectedStageAsTemplate() {
@@ -562,9 +594,11 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         selectedWindowIndex = targetWindows.firstIndex(where: { $0.windowID == window.windowID }) ?? 0
 
         delegate?.stageControllerDidMutateState(self)
-        delegate?.stageControllerDidUpdateSelection(self)
+        notifyOverlayUpdated()
         // Force overlay rebuild since stage contents changed
-        delegate?.stageControllerDidOpenOverlay(self)
+        if isOverlayPresented {
+            delegate?.stageControllerDidOpenOverlay(self)
+        }
     }
 
     private func swapStage(direction: SwapDirection) {
@@ -579,6 +613,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         default: break
         }
         delegate?.stageControllerDidMutateState(self)
-        delegate?.stageControllerDidUpdateSelection(self)
+        notifyOverlayUpdated()
     }
 }

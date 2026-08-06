@@ -28,13 +28,16 @@ private final class DelayedCaptureWindowService: WindowService, @unchecked Senda
 
 private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked Sendable {
     let overlayOpened = DispatchSemaphore(value: 0)
+    let overlayClosed = DispatchSemaphore(value: 0)
     let overlayUpdated = DispatchSemaphore(value: 0)
 
     func stageControllerDidOpenOverlay(_ controller: StageController) {
         overlayOpened.signal()
     }
 
-    func stageControllerDidCloseOverlay(_ controller: StageController) {}
+    func stageControllerDidCloseOverlay(_ controller: StageController) {
+        overlayClosed.signal()
+    }
 
     func stageControllerDidUpdateSelection(_ controller: StageController) {
         overlayUpdated.signal()
@@ -104,9 +107,9 @@ struct StageControllerTests {
         #expect(controller.isStageManagerVisible)
     }
 
-    @Test("Overlay opens before window preview capture finishes")
-    func overlayOpensBeforePreviewCaptureFinishes() {
-        let windowService = DelayedCaptureWindowService(captureDelay: 0.2)
+    @Test("Cmd+Tab handling returns before window preview capture finishes")
+    func cmdTabReturnsBeforePreviewCaptureFinishes() {
+        let windowService = DelayedCaptureWindowService(captureDelay: 0.35)
         let keyboardService = MockKeyboardService()
         let controller = StageController(
             windowService: windowService,
@@ -124,15 +127,53 @@ struct StageControllerTests {
         keyboardService.simulateEvent(.cmdTabHold)
         let handlingDuration = ContinuousClock.now - start
 
-        #expect(delegate.overlayOpened.wait(timeout: .now()) == .success)
         #expect(handlingDuration < .milliseconds(50))
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 1) == .success)
         #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
+    }
+
+    @Test("Quick Cmd+Tab release switches without presenting overlay UI")
+    func quickCmdTabReleaseDoesNotPresentOverlay() {
+        let (controller, windowService, keyboardService) = makeController()
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+        let stageID = controller.stageManager.activeStageID
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: stageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toStageID: stageID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.cmdRelease)
+
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 0.35) == .timedOut)
+        #expect(delegate.overlayClosed.wait(timeout: .now()) == .timedOut)
+        #expect(windowService.raisedWindowID == 202)
+        #expect(!controller.isStageManagerVisible)
+    }
+
+    @Test("Held Cmd+Tab presents overlay UI after a short delay")
+    func heldCmdTabPresentsOverlayAfterDelay() {
+        let (controller, _, keyboardService) = makeController()
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+
+        keyboardService.simulateEvent(.cmdTabHold)
+
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 0.1) == .timedOut)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 0.4) == .success)
+        keyboardService.simulateEvent(.escape)
+        #expect(delegate.overlayClosed.wait(timeout: .now()) == .success)
     }
 
     @Test("Visible overlay updates after asynchronous preview capture")
     func visibleOverlayUpdatesAfterPreviewCapture() {
         let windowService = DelayedCaptureWindowService(
-            captureDelay: 0.02,
+            captureDelay: 0.35,
             capturedImage: makeTestImage()
         )
         let keyboardService = MockKeyboardService()
@@ -150,6 +191,7 @@ struct StageControllerTests {
 
         keyboardService.simulateEvent(.cmdTabHold)
 
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 2) == .success)
         #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
         #expect(controller.windowPreviews[101] != nil)
     }
@@ -313,7 +355,7 @@ struct StageControllerTests {
         // First overlay open — both windows capturable
         windowSvc.capturedImages = [101: testImage, 202: testImage]
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 2) == .success)
         #expect(controller.windowPreviews[101] != nil)
         #expect(controller.windowPreviews[202] != nil)
         keyboardSvc.simulateEvent(.escape)
@@ -321,7 +363,7 @@ struct StageControllerTests {
         // Second overlay open — window 202 is hidden (capture returns nil)
         windowSvc.capturedImages = [101: testImage]  // 202 no longer capturable
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 2) == .success)
 
         // Window 202 should still have its previous preview
         #expect(controller.windowPreviews[101] != nil)
@@ -342,7 +384,7 @@ struct StageControllerTests {
 
         // Open overlay to populate previews
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 2) == .success)
         #expect(controller.windowPreviews[101] != nil)
         keyboardSvc.simulateEvent(.escape)
 
@@ -351,7 +393,7 @@ struct StageControllerTests {
 
         // Open overlay again — stale preview should be cleaned up
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 2) == .success)
         #expect(controller.windowPreviews[101] == nil, "Preview for removed window should be cleaned up")
         keyboardSvc.simulateEvent(.escape)
     }
