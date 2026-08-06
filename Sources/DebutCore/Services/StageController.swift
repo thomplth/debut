@@ -11,8 +11,6 @@ public protocol StageControllerDelegate: AnyObject {
 }
 
 public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
-    private static let overlayPresentationDelay: TimeInterval = 0.2
-
     public var stageManager: StageManager
     public let windowService: any WindowService
     public let keyboardService: any KeyboardService
@@ -22,6 +20,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public var selectedStageIndex: Int = 0
     public var selectedWindowIndex: Int = 0
     public private(set) var keyboardServiceStarted: Bool = false
+    public var overlayPresentationDelay: TimeInterval
 
     /// Window previews captured when overlay opens
     public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
@@ -46,11 +45,13 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         windowService: any WindowService,
         keyboardService: any KeyboardService,
         stageManager: StageManager = StageManager(),
+        overlayPresentationDelay: TimeInterval = AppSettings.defaultOverlayPresentationDelay,
         fullscreenAppActiveProvider: (() -> Bool)? = nil
     ) {
         self.windowService = windowService
         self.keyboardService = keyboardService
         self.stageManager = stageManager
+        self.overlayPresentationDelay = overlayPresentationDelay
         self.fullscreenAppActiveProvider = fullscreenAppActiveProvider
 
         let started = keyboardService.start(delegate: self)
@@ -377,7 +378,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         overlayPresentationGeneration &+= 1
         let generation = overlayPresentationGeneration
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.overlayPresentationDelay) { [weak self] in
+        let delay = max(0, overlayPresentationDelay)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self,
                   self.overlayPresentationGeneration == generation,
                   self.isStageManagerVisible,
