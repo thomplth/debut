@@ -19,8 +19,8 @@ Debut tracks individual **windows** (by CGWindowID), not apps. Each stage contai
 
 ## App Switcher Isolation
 
-- [x] Cmd+Tab quick tap: switch to most recently used window within active stage only
-- [x] Cmd+Tab hold: open Stage Manager overlay
+- [x] Cmd+Tab quick tap (released within 200ms): switch to most recently used window within active stage only without showing UI
+- [x] Cmd+Tab hold for 200ms: open Stage Manager overlay
 - [x] Cmd+` passes through to system (native window cycling within app)
 - [x] Isolation guarantee: no keyboard-driven switching crosses stage boundaries
 
