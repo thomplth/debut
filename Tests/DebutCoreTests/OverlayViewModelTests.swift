@@ -22,10 +22,19 @@ struct OverlayViewModelTests {
     func plateData() {
         let vm = makeViewModel()
         #expect(vm.plates.count == 2)
-        #expect(vm.plates[0].name == "1")
         #expect(vm.plates[0].windows.count == 2)
-        #expect(vm.plates[1].name == "2")
         #expect(vm.plates[1].windows.count == 3)
+    }
+
+    @Test("Plate data has no presentation title")
+    func plateDataHasNoTitle() {
+        let plate = PlateData(id: UUID(), windows: [], isActive: false, index: 0)
+        #expect(plate.index == 0)
+    }
+
+    @Test("Plate content has matching top and bottom padding")
+    func plateVerticalPadding() {
+        #expect(PlateConstants.topPadding == PlateConstants.bottomPadding)
     }
 
     @Test("Selected window")
