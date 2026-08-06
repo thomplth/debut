@@ -105,7 +105,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let controller = StageController(
             windowService: windowService,
             keyboardService: keyboardService,
-            stageManager: stageManager
+            stageManager: stageManager,
+            overlayPresentationDelay: currentSettings.overlayPresentationDelay
         )
         controller.delegate = self
         controller.desktopSurface = surface
@@ -357,6 +358,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                     self.debouncedSaver?.scheduleSave(stageManager)
                 }
                 self.keyboardService?.keyBindings = newSettings.keyBindings
+                self.stageController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
                 self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
                     newSettings.quickSwitchExcludedBundleIDs
                 )

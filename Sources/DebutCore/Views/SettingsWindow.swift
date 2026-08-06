@@ -55,6 +55,7 @@ public struct SettingsView: View {
         .onChange(of: viewModel.settings.selectionBorderWidth) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.selectionBorderOpacity) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.inactivePlateScale) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.overlayPresentationDelay) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.keyBindings) { _, _ in saveSettings() }
     }
 
@@ -298,6 +299,21 @@ public struct SettingsView: View {
             shortcutRow("Quick switch last window", shortcut: "Cmd+Tab (tap)", configurable: false)
             shortcutRow("Switch stages (hold)", shortcut: "Cmd+Opt+Tab", configurable: false)
             shortcutRow("Quick switch stages", shortcut: "Ctrl+1…9 / Ctrl+0", configurable: false)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Overlay hold delay")
+                    Spacer()
+                    Text("\(Int((viewModel.settings.overlayPresentationDelay * 1000).rounded())) ms")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: $viewModel.settings.overlayPresentationDelay,
+                    in: 0...0.5,
+                    step: 0.025
+                )
+            }
 
             Text("Quick switch exclusions")
                 .font(.headline)

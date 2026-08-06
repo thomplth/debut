@@ -79,6 +79,7 @@ The Settings window is the entry point on first launch and the central place for
 ### Keyboard Shortcuts
 
 - [x] All shortcuts listed with current bindings (display only)
+- [x] Overlay hold delay slider: 0-500ms (default: 100ms), persisted and applied immediately
 - [x] Quick switch exclusion picker for apps that keep their own Ctrl+number shortcuts
 - [x] Quick switch exclusion list persisted and applied immediately
 - [ ] Shortcut editor: click to enter recording mode

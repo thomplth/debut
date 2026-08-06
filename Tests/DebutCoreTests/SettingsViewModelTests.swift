@@ -11,6 +11,7 @@ struct SettingsViewModelTests {
         #expect(vm.settings.launchAtLogin == false)
         #expect(vm.settings.showInMenuBar == true)
         #expect(vm.settings.confirmStageDeletion == true)
+        #expect(vm.settings.overlayPresentationDelay == 0.1)
         #expect(vm.settings.quickSwitchExcludedBundleIDs.isEmpty)
     }
 

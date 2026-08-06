@@ -170,6 +170,24 @@ struct StageControllerTests {
         #expect(delegate.overlayClosed.wait(timeout: .now()) == .success)
     }
 
+    @Test("Configured overlay presentation delay controls the hold threshold")
+    func configuredOverlayPresentationDelay() {
+        let windowService = MockWindowService()
+        let keyboardService = MockKeyboardService()
+        let controller = StageController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            overlayPresentationDelay: 0.02,
+            fullscreenAppActiveProvider: { false }
+        )
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+
+        keyboardService.simulateEvent(.cmdTabHold)
+
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 0.1) == .success)
+    }
+
     @Test("Visible overlay updates after asynchronous preview capture")
     func visibleOverlayUpdatesAfterPreviewCapture() {
         let windowService = DelayedCaptureWindowService(

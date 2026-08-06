@@ -64,12 +64,14 @@ struct StateStoreTests {
         var settings = AppSettings()
         settings.launchAtLogin = true
         settings.confirmStageDeletion = false
+        settings.overlayPresentationDelay = 0.25
         settings.quickSwitchExcludedBundleIDs = ["com.tinyspeck.slackmacgap"]
 
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
         #expect(loaded.launchAtLogin == true)
         #expect(loaded.confirmStageDeletion == false)
+        #expect(loaded.overlayPresentationDelay == 0.25)
         #expect(loaded.quickSwitchExcludedBundleIDs == ["com.tinyspeck.slackmacgap"])
     }
 
@@ -85,6 +87,20 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.quickSwitchExcludedBundleIDs.isEmpty)
+    }
+
+    @Test("Older settings default overlay presentation delay to 100ms")
+    func legacySettingsDefaultOverlayPresentationDelay() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "overlayPresentationDelay")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+
+        #expect(decoded.overlayPresentationDelay == 0.1)
     }
 
     @Test("Settings defaults when no file")
