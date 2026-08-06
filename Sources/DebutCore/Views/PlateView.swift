@@ -1,6 +1,47 @@
 import SwiftUI
 import CoreGraphics
 
+enum PlateFocusTransition: Equatable {
+    case spring(duration: TimeInterval, bounce: Double)
+    case fade(duration: TimeInterval)
+
+    var animation: Animation {
+        switch self {
+        case let .spring(duration, bounce):
+            .spring(duration: duration, bounce: bounce)
+        case let .fade(duration):
+            .easeOut(duration: duration)
+        }
+    }
+
+    var usesSpatialMotion: Bool {
+        switch self {
+        case .spring: true
+        case .fade: false
+        }
+    }
+}
+
+struct PlateLift: Equatable {
+    let shadowOpacity: Double
+    let shadowRadius: CGFloat
+    let shadowY: CGFloat
+}
+
+enum PlateMotion {
+    static func focusTransition(reduceMotion: Bool) -> PlateFocusTransition {
+        reduceMotion
+            ? .fade(duration: 0.12)
+            : .spring(duration: 0.26, bounce: 0.08)
+    }
+
+    static func lift(isActive: Bool) -> PlateLift {
+        isActive
+            ? PlateLift(shadowOpacity: 0.22, shadowRadius: 18, shadowY: 8)
+            : PlateLift(shadowOpacity: 0.08, shadowRadius: 6, shadowY: 2)
+    }
+}
+
 public struct PlateConstants {
     public static let thumbnailWidth: CGFloat = 160
     public static let thumbnailHeight: CGFloat = 100
@@ -42,6 +83,7 @@ public struct OverlaySwiftUIView: View {
     @State private var windowDrag: WindowDragState?
     @State private var stageDrag: StageDragState?
     @State private var plateFrames: [Int: CGRect] = [:]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
         viewModel: OverlayViewModel,
@@ -64,6 +106,7 @@ public struct OverlaySwiftUIView: View {
 
             let inactiveScale = CGFloat(viewModel.appearance.inactivePlateScale)
             let spacing: CGFloat = 14
+            let focusTransition = PlateMotion.focusTransition(reduceMotion: reduceMotion)
 
             let totalBefore = CGFloat(viewModel.activeStageIndex) * (pHeight * inactiveScale + spacing)
             let activeCenter = totalBefore + pHeight / 2
@@ -77,6 +120,7 @@ public struct OverlaySwiftUIView: View {
                         let isDropTarget = windowDrag?.dropTargetStageIndex == index
                             && windowDrag?.sourceStageIndex != index
                         let isStageDragging = stageDrag?.stageIndex == index
+                        let lift = PlateMotion.lift(isActive: isActive)
 
                         // Insertion indicator above this plate
                         if let drag = stageDrag, drag.insertionIndex == index, drag.stageIndex != index {
@@ -99,7 +143,13 @@ public struct OverlaySwiftUIView: View {
                         .frame(width: plateWidth, height: pHeight)
                         .scaleEffect(scale)
                         .frame(width: plateWidth * scale, height: pHeight * scale)
+                        .shadow(
+                            color: .black.opacity(lift.shadowOpacity),
+                            radius: lift.shadowRadius,
+                            y: lift.shadowY
+                        )
                         .opacity(isStageDragging ? 0.3 : 1.0)
+                        .zIndex(isActive ? 1 : 0)
                         .background(
                             GeometryReader { plateGeo in
                                 Color.clear.preference(
@@ -139,6 +189,9 @@ public struct OverlaySwiftUIView: View {
                     .allowsHitTesting(false)
                 }
             }
+            .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeStageIndex)
+            .transition(focusTransition.usesSpatialMotion ? .identity : .opacity)
+            .animation(focusTransition.animation, value: viewModel.activeStageIndex)
             .coordinateSpace(name: "overlay")
             .onPreferenceChange(PlateFramePreferenceKey.self) { frames in
                 plateFrames = frames
