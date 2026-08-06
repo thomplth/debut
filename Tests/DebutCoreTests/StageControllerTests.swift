@@ -3,6 +3,47 @@ import Foundation
 import CoreGraphics
 @testable import DebutCore
 
+private final class DelayedCaptureWindowService: WindowService, @unchecked Sendable {
+    let captureDelay: TimeInterval
+    let capturedImage: CGImage?
+
+    init(captureDelay: TimeInterval, capturedImage: CGImage? = nil) {
+        self.captureDelay = captureDelay
+        self.capturedImage = capturedImage
+    }
+
+    func listRunningApps() -> [AppInfo] { [] }
+    func listWindows() -> [WindowInfo] { [] }
+    func listAllWindowIDs() -> Set<CGWindowID>? { nil }
+
+    func captureWindowImage(windowID: CGWindowID) -> CGImage? {
+        Thread.sleep(forTimeInterval: captureDelay)
+        return capturedImage
+    }
+
+    func raiseWindow(windowID: CGWindowID) -> Bool { true }
+    func activateApp(bundleID: String) -> Bool { true }
+    func isAccessibilityEnabled() -> Bool { true }
+}
+
+private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked Sendable {
+    let overlayOpened = DispatchSemaphore(value: 0)
+    let overlayUpdated = DispatchSemaphore(value: 0)
+
+    func stageControllerDidOpenOverlay(_ controller: StageController) {
+        overlayOpened.signal()
+    }
+
+    func stageControllerDidCloseOverlay(_ controller: StageController) {}
+
+    func stageControllerDidUpdateSelection(_ controller: StageController) {
+        overlayUpdated.signal()
+    }
+
+    func stageControllerDidSwitchStage(_ controller: StageController) {}
+    func stageControllerDidMutateState(_ controller: StageController) {}
+}
+
 @Suite("StageController", .serialized)
 struct StageControllerTests {
 
@@ -61,6 +102,56 @@ struct StageControllerTests {
         let (controller, _, keyboardSvc) = makeController()
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(controller.isStageManagerVisible)
+    }
+
+    @Test("Overlay opens before window preview capture finishes")
+    func overlayOpensBeforePreviewCaptureFinishes() {
+        let windowService = DelayedCaptureWindowService(captureDelay: 0.2)
+        let keyboardService = MockKeyboardService()
+        let controller = StageController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            fullscreenAppActiveProvider: { false }
+        )
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: controller.stageManager.activeStageID
+        )
+
+        let start = ContinuousClock.now
+        keyboardService.simulateEvent(.cmdTabHold)
+        let handlingDuration = ContinuousClock.now - start
+
+        #expect(delegate.overlayOpened.wait(timeout: .now()) == .success)
+        #expect(handlingDuration < .milliseconds(50))
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
+    }
+
+    @Test("Visible overlay updates after asynchronous preview capture")
+    func visibleOverlayUpdatesAfterPreviewCapture() {
+        let windowService = DelayedCaptureWindowService(
+            captureDelay: 0.02,
+            capturedImage: makeTestImage()
+        )
+        let keyboardService = MockKeyboardService()
+        let controller = StageController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            fullscreenAppActiveProvider: { false }
+        )
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: controller.stageManager.activeStageID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
+        #expect(controller.windowPreviews[101] != nil)
     }
 
     @Test("Cmd+Option+Tab hold opens overlay in stage mode")
@@ -210,6 +301,8 @@ struct StageControllerTests {
     @Test("Window previews persist for hidden windows")
     func previewPersistsWhenHidden() {
         let (controller, windowSvc, keyboardSvc) = makeController()
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
         let stageID = controller.stageManager.stages[0].id
         controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
         controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
@@ -220,6 +313,7 @@ struct StageControllerTests {
         // First overlay open — both windows capturable
         windowSvc.capturedImages = [101: testImage, 202: testImage]
         keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
         #expect(controller.windowPreviews[101] != nil)
         #expect(controller.windowPreviews[202] != nil)
         keyboardSvc.simulateEvent(.escape)
@@ -227,6 +321,7 @@ struct StageControllerTests {
         // Second overlay open — window 202 is hidden (capture returns nil)
         windowSvc.capturedImages = [101: testImage]  // 202 no longer capturable
         keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
 
         // Window 202 should still have its previous preview
         #expect(controller.windowPreviews[101] != nil)
@@ -237,6 +332,8 @@ struct StageControllerTests {
     @Test("Stale window previews are cleaned up")
     func previewCleanup() {
         let (controller, windowSvc, keyboardSvc) = makeController()
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
         let stageID = controller.stageManager.stages[0].id
         controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
 
@@ -245,6 +342,7 @@ struct StageControllerTests {
 
         // Open overlay to populate previews
         keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
         #expect(controller.windowPreviews[101] != nil)
         keyboardSvc.simulateEvent(.escape)
 
@@ -253,6 +351,7 @@ struct StageControllerTests {
 
         // Open overlay again — stale preview should be cleaned up
         keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
         #expect(controller.windowPreviews[101] == nil, "Preview for removed window should be cleaned up")
         keyboardSvc.simulateEvent(.escape)
     }

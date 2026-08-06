@@ -32,6 +32,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private var backtickCycleWindows: [CGWindowID] = []
     private var backtickCycleIndex: Int = 0
     private let fullscreenAppActiveProvider: (() -> Bool)?
+    private let previewCaptureQueue = DispatchQueue(
+        label: "com.thomplth.Debut.preview-capture",
+        qos: .userInitiated
+    )
     private let diag = DiagnosticReporter.shared
 
     public init(
@@ -361,9 +365,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             selectedStageIndex = index
         }
         preOverlayStageID = stageManager.activeStageID
-        captureWindowPreviews()
         diag.report("overlay_opened")
         delegate?.stageControllerDidOpenOverlay(self)
+        refreshWindowPreviews()
     }
 
     private func isFullscreenAppActive() -> Bool {
@@ -387,20 +391,41 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         return (fullscreenRef as? Bool) == true
     }
 
-    private func captureWindowPreviews() {
-        // Don't clear — keep last good capture for hidden windows
-        for stage in stageManager.stages {
-            for window in stage.windows {
-                if let image = windowService.captureWindowImage(windowID: window.windowID) {
-                    windowPreviews[window.windowID] = image
-                }
-                // else: keep previous capture in windowPreviews (if any)
-            }
+    private func refreshWindowPreviews() {
+        let windowIDs = stageManager.stages.flatMap { stage in
+            stage.windows.map(\.windowID)
         }
 
-        // Remove entries for windows no longer in any stage
-        let allWindowIDs = Set(stageManager.stages.flatMap { $0.windows.map(\.windowID) })
-        windowPreviews = windowPreviews.filter { allWindowIDs.contains($0.key) }
+        previewCaptureQueue.async { [weak self] in
+            guard let self else { return }
+
+            var refreshedPreviews: [CGWindowID: CGImage] = [:]
+            for windowID in windowIDs {
+                if let image = self.windowService.captureWindowImage(windowID: windowID) {
+                    refreshedPreviews[windowID] = image
+                }
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+
+                // A missing capture can mean that a window is merely hidden, so
+                // retain its last good preview. Remove only windows no longer assigned.
+                let liveWindowIDs = Set(
+                    self.stageManager.stages.flatMap { $0.windows.map(\.windowID) }
+                )
+                self.windowPreviews = self.windowPreviews.filter {
+                    liveWindowIDs.contains($0.key)
+                }
+                for (windowID, image) in refreshedPreviews where liveWindowIDs.contains(windowID) {
+                    self.windowPreviews[windowID] = image
+                }
+
+                if self.isStageManagerVisible {
+                    self.delegate?.stageControllerDidUpdateSelection(self)
+                }
+            }
+        }
     }
 
     private func commitSelection() {
