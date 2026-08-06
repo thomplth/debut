@@ -37,6 +37,7 @@ Each window item shows:
 - [x] Plate styled with liquid glass (.clear or .regular, configurable in Settings)
 - [x] Active plate vertically centered on screen at 1.0x scale
 - [x] Inactive plates at configurable scale (default 0.8x)
+- [x] Stage focus changes animate as a low-bounce vertical spring with a subtle active-plate lift; Reduce Motion uses a short fade
 - [x] Stage position number (1-based) displayed in top-left corner of each plate
 - [x] Selection highlight wraps thumbnail + title with configurable opacity
 - [x] Window previews captured on overlay open, cached for hidden windows
