@@ -13,7 +13,6 @@ public struct PlateWindowData: Sendable, Identifiable {
 
 public struct PlateData: Sendable, Identifiable {
     public let id: UUID
-    public let name: String
     public let windows: [PlateWindowData]
     public let isActive: Bool
     public let index: Int
@@ -38,7 +37,6 @@ public struct OverlayViewModel: Sendable {
         stageManager.stages.enumerated().map { index, stage in
             PlateData(
                 id: stage.id,
-                name: "\(index + 1)",
                 windows: stage.windows.map { window in
                     PlateWindowData(
                         id: window.windowID,

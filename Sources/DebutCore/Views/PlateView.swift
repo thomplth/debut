@@ -48,9 +48,8 @@ public struct PlateConstants {
     public static let windowSpacing: CGFloat = 12
     public static let padding: CGFloat = 24
     public static let minPlateWidth: CGFloat = 300
-    public static let topInset: CGFloat = 12
-    public static let thumbnailTopPad: CGFloat = 8
-    public static let labelBottomPad: CGFloat = 24
+    public static let topPadding: CGFloat = 24
+    public static let bottomPadding: CGFloat = 24
     public static let screenMargin: CGFloat = 80
     public static let badgeSize: CGFloat = 40
 
@@ -66,7 +65,7 @@ public struct PlateConstants {
     }
 
     public static func plateHeight(thumbnailHeight: CGFloat) -> CGFloat {
-        topInset + 16 + thumbnailTopPad + thumbnailHeight + 16 + labelBottomPad
+        topPadding + thumbnailHeight + 16 + bottomPadding
     }
 
     public static func plateWidth(forWindowCount count: Int, thumbnailWidth: CGFloat) -> CGFloat {
@@ -129,7 +128,6 @@ public struct OverlaySwiftUIView: View {
 
                         PlateSwiftUIView(
                             plate: plate,
-                            isSelected: isActive,
                             selectedWindowIndex: isActive ? viewModel.selectedWindowIndex : nil,
                             thumbnailWidth: tSize.width,
                             thumbnailHeight: tSize.height,
@@ -248,7 +246,6 @@ public struct OverlaySwiftUIView: View {
 
 struct PlateSwiftUIView: View {
     let plate: PlateData
-    let isSelected: Bool
     let selectedWindowIndex: Int?
     let thumbnailWidth: CGFloat
     let thumbnailHeight: CGFloat
@@ -261,12 +258,6 @@ struct PlateSwiftUIView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(plate.name)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(isSelected ? .primary : .secondary)
-                .padding(.leading, PlateConstants.padding)
-                .padding(.top, PlateConstants.topInset)
-
             HStack(spacing: PlateConstants.windowSpacing) {
                 if plate.windows.isEmpty {
                     Text("Empty")
@@ -290,7 +281,7 @@ struct PlateSwiftUIView: View {
                 }
             }
             .padding(.horizontal, PlateConstants.padding)
-            .padding(.top, PlateConstants.thumbnailTopPad)
+            .padding(.top, PlateConstants.topPadding)
 
             Spacer(minLength: 0)
         }

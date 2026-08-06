@@ -38,7 +38,7 @@ Each window item shows:
 - [x] Active plate vertically centered on screen at 1.0x scale
 - [x] Inactive plates at configurable scale (default 0.8x)
 - [x] Stage focus changes animate as a low-bounce vertical spring with a subtle active-plate lift; Reduce Motion uses a short fade
-- [x] Stage position number (1-based) displayed in top-left corner of each plate
+- [x] Plates have no title; preview content uses equal top and bottom padding
 - [x] Selection highlight wraps thumbnail + title with configurable opacity
 - [x] Window previews captured on overlay open, cached for hidden windows
 - [x] Icon size adaptive to screen width
@@ -109,8 +109,8 @@ All navigation wraps cyclically. Session persists until Cmd is released. Esc clo
 
 ### Naming
 
-- [x] Stages are not nameable — each plate's label is hardcoded to its 1-based position
-- [x] Labels update automatically when stages are created, deleted, or reordered
+- [x] Stages are not nameable; position numbers remain available for shortcuts and generated template names but are not displayed on plates
+- [x] Position-derived stage identifiers update automatically when stages are created, deleted, or reordered
 
 ### Save as Template
 
