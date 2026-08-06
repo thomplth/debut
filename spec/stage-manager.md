@@ -50,8 +50,8 @@ Each window item shows:
 
 ## Activation and Dismissal
 
-- [x] Cmd+Tab quick tap (released within 200ms): switch to last-used window within active stage (Stage Manager NOT shown)
-- [x] Cmd+Tab hold Cmd for 200ms: show Stage Manager overlay with active stage centered, second MRU window pre-selected
+- [x] Cmd+Tab quick tap (released before the configurable hold delay, default 100ms): switch to last-used window within active stage (Stage Manager NOT shown)
+- [x] Cmd+Tab hold Cmd through the configurable delay: show Stage Manager overlay with active stage centered, second MRU window pre-selected
 - [x] Cmd+Shift+Tab hold: show overlay with last window pre-selected
 - [x] Cmd+Option+Tab hold: show overlay with next stage pre-selected
 - [x] Cmd+Shift+Option+Tab hold: show overlay with previous stage pre-selected

@@ -6,6 +6,8 @@ public enum GlassStyle: String, Codable, Sendable, CaseIterable {
 }
 
 public struct AppSettings: Codable, Sendable {
+    public static let defaultOverlayPresentationDelay: TimeInterval = 0.1
+
     public var launchAtLogin: Bool
     public var showInMenuBar: Bool
     public var newStagePlacement: StageInsertPosition
@@ -22,6 +24,7 @@ public struct AppSettings: Codable, Sendable {
     public var inactivePlateScale: Double
 
     // Keyboard
+    public var overlayPresentationDelay: TimeInterval
     public var keyBindings: KeyBindings
     public var quickSwitchExcludedBundleIDs: [String]
 
@@ -40,6 +43,7 @@ public struct AppSettings: Codable, Sendable {
         self.selectionBorderOpacity = 0.2
         self.inactivePlateScale = 0.8
 
+        self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
         self.keyBindings = KeyBindings()
         self.quickSwitchExcludedBundleIDs = []
     }
@@ -58,6 +62,10 @@ public struct AppSettings: Codable, Sendable {
         selectionBorderWidth = try container.decode(Double.self, forKey: .selectionBorderWidth)
         selectionBorderOpacity = try container.decode(Double.self, forKey: .selectionBorderOpacity)
         inactivePlateScale = try container.decode(Double.self, forKey: .inactivePlateScale)
+        overlayPresentationDelay = try container.decodeIfPresent(
+            TimeInterval.self,
+            forKey: .overlayPresentationDelay
+        ) ?? Self.defaultOverlayPresentationDelay
         keyBindings = try container.decodeIfPresent(KeyBindings.self, forKey: .keyBindings) ?? KeyBindings()
         quickSwitchExcludedBundleIDs = try container.decodeIfPresent(
             [String].self,
