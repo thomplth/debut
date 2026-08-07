@@ -48,6 +48,8 @@ public struct PlateConstants {
     public static let windowSpacing: CGFloat = 12
     public static let padding: CGFloat = 24
     public static let minPlateWidth: CGFloat = 300
+    public static let windowCardPadding: CGFloat = 6
+    public static let windowTitleWidthAllowance: CGFloat = 8
     public static let topPadding: CGFloat = 24
     public static let bottomPadding: CGFloat = 24
     public static let screenMargin: CGFloat = 80
@@ -55,13 +57,18 @@ public struct PlateConstants {
 
     public static func thumbnailSize(forWindowCount count: Int, screenWidth: CGFloat) -> (width: CGFloat, height: CGFloat) {
         let maxWidth = screenWidth - screenMargin * 2
-        let availableForThumbnails = maxWidth - padding * 2
+        let availableForWindowCards = maxWidth - padding * 2
         let maxPerWindow = count > 0
-            ? (availableForThumbnails - CGFloat(max(0, count - 1)) * windowSpacing) / CGFloat(count)
+            ? (availableForWindowCards - CGFloat(max(0, count - 1)) * windowSpacing) / CGFloat(count)
+                - windowCardExtraWidth
             : thumbnailWidth
         let w = min(thumbnailWidth, max(80, maxPerWindow))
         let h = w * (thumbnailHeight / thumbnailWidth)
         return (w, h)
+    }
+
+    public static var windowCardExtraWidth: CGFloat {
+        windowTitleWidthAllowance + windowCardPadding * 2
     }
 
     public static func plateHeight(thumbnailHeight: CGFloat) -> CGFloat {
@@ -69,8 +76,14 @@ public struct PlateConstants {
     }
 
     public static func plateWidth(forWindowCount count: Int, thumbnailWidth: CGFloat) -> CGFloat {
-        let thumbsWidth = CGFloat(max(count, 1)) * thumbnailWidth + CGFloat(max(0, count - 1)) * windowSpacing
-        return max(thumbsWidth + padding * 2, minPlateWidth)
+        guard count > 0 else { return minPlateWidth }
+        let cardsWidth = CGFloat(count) * (thumbnailWidth + windowCardExtraWidth)
+            + CGFloat(count - 1) * windowSpacing
+        return cardsWidth + padding * 2
+    }
+
+    public static func plateWidths(forWindowCounts counts: [Int], thumbnailWidth: CGFloat) -> [CGFloat] {
+        counts.map { plateWidth(forWindowCount: $0, thumbnailWidth: thumbnailWidth) }
     }
 }
 
@@ -101,7 +114,10 @@ public struct OverlaySwiftUIView: View {
         GeometryReader { geo in
             let tSize = PlateConstants.thumbnailSize(forWindowCount: maxWindows, screenWidth: geo.size.width)
             let pHeight = PlateConstants.plateHeight(thumbnailHeight: tSize.height)
-            let plateWidth = PlateConstants.plateWidth(forWindowCount: maxWindows, thumbnailWidth: tSize.width)
+            let plateWidths = PlateConstants.plateWidths(
+                forWindowCounts: plates.map(\.windows.count),
+                thumbnailWidth: tSize.width
+            )
 
             let inactiveScale = CGFloat(viewModel.appearance.inactivePlateScale)
             let spacing: CGFloat = 14
@@ -114,6 +130,7 @@ public struct OverlaySwiftUIView: View {
             ZStack {
                 VStack(spacing: spacing) {
                     ForEach(Array(plates.enumerated()), id: \.element.id) { index, plate in
+                        let plateWidth = plateWidths[index]
                         let isActive = index == viewModel.activeStageIndex
                         let scale = isActive ? 1.0 : inactiveScale
                         let isDropTarget = windowDrag?.dropTargetStageIndex == index
@@ -369,9 +386,9 @@ struct WindowPreviewView: View {
                 .font(.system(size: max(9, thumbnailWidth * 0.065)))
                 .foregroundStyle(isWindowSelected ? .primary : .secondary)
                 .lineLimit(1)
-                .frame(width: thumbnailWidth + 8)
+                .frame(width: thumbnailWidth + PlateConstants.windowTitleWidthAllowance)
         }
-        .padding(6)
+        .padding(PlateConstants.windowCardPadding)
         .background(
             isWindowSelected
                 ? RoundedRectangle(cornerRadius: 8).fill(.primary.opacity(appearance.selectionOpacity))
