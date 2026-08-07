@@ -37,6 +37,29 @@ struct OverlayViewModelTests {
         #expect(PlateConstants.topPadding == PlateConstants.bottomPadding)
     }
 
+    @Test("Each plate width fits its own window cards exactly")
+    func perPlateContentWidths() {
+        let widths = PlateConstants.plateWidths(
+            forWindowCounts: [1, 3, 2],
+            thumbnailWidth: 160
+        )
+
+        #expect(widths == [228, 612, 420])
+    }
+
+    @Test("Thumbnail sizing includes the full window card width")
+    func thumbnailSizingIncludesWindowCardChrome() {
+        let size = PlateConstants.thumbnailSize(forWindowCount: 6, screenWidth: 1_200)
+        let plateWidth = PlateConstants.plateWidth(forWindowCount: 6, thumbnailWidth: size.width)
+
+        #expect(plateWidth == 1_040)
+    }
+
+    @Test("Empty plates retain a useful placeholder width")
+    func emptyPlateWidth() {
+        #expect(PlateConstants.plateWidth(forWindowCount: 0, thumbnailWidth: 160) == 300)
+    }
+
     @Test("Selected window")
     func selectedWindow() {
         let vm = makeViewModel()
