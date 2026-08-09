@@ -18,12 +18,18 @@ export TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault
 app_path="/Applications/Debut.app"
 tcc_db="/Library/Application Support/com.apple.TCC/TCC.db"
 fixture_dir="${RUNNER_TEMP}/debut-e2e-fixtures"
+screen_capture_approvals="$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
 
 cleanup() {
     pkill -f "Debut.app" 2>/dev/null || true
     pkill -x TextEdit 2>/dev/null || true
 }
 trap cleanup EXIT
+
+echo "Suppressing the disposable runner's screen capture reminder..."
+mkdir -p "$(dirname "$screen_capture_approvals")"
+defaults write "$screen_capture_approvals" "/bin/bash" -date "3024-01-01 00:00:00 +0000"
+killall cfprefsd 2>/dev/null || true
 
 echo "Building and installing Debut..."
 ./scripts/build-app.sh
@@ -52,4 +58,4 @@ echo "Launching Debut..."
 open "$app_path"
 sleep 4
 
-./scripts/e2e-test.sh
+.build/release/DebutE2E

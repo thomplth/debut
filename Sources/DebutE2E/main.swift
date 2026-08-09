@@ -587,6 +587,7 @@ test("Overlay is visible") {
     info("  overlayVisible = \(readState()["overlayVisible"] ?? "nil")")
     return false
 }
+let selectedWindowIndexBeforeNext = readState()["selectedWindowIndex"]
 
 // --- 3. Navigate: Tab to next window ---
 header("3. Navigate windows with Tab")
@@ -602,12 +603,12 @@ let _ = takeScreenshot("02_after_tab")
 
 test("Selection moved") {
     for _ in 0..<10 {
-        if readState()["selectedWindowIndex"] != "0" { return true }
+        if readState()["selectedWindowIndex"] != selectedWindowIndexBeforeNext { return true }
         wait(0.1)
     }
-    let idx = readState()["selectedWindowIndex"] ?? "0"
-    info("  selectedWindowIndex = \(idx)")
-    return idx != "0"
+    let idx = readState()["selectedWindowIndex"] ?? "nil"
+    info("  selectedWindowIndex stayed at \(idx)")
+    return false
 }
 
 test("Command hint usage follows real command dispatch") {
