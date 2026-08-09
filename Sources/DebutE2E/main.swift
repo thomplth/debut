@@ -129,16 +129,12 @@ func postMouseClick(at point: CGPoint) {
 }
 
 func postMouseDrag(from start: CGPoint, to end: CGPoint) {
-    guard let source = CGEventSource(stateID: .hidSystemState) else { return }
-    source.localEventsSuppressionInterval = 0
-
     guard let down = CGEvent(
-        mouseEventSource: source,
+        mouseEventSource: nil,
         mouseType: .leftMouseDown,
         mouseCursorPosition: start,
         mouseButton: .left
     ) else { return }
-    down.flags = [.maskNonCoalesced]
     down.post(tap: .cghidEventTap)
     wait(0.25)
 
@@ -149,12 +145,11 @@ func postMouseDrag(from start: CGPoint, to end: CGPoint) {
             y: start.y + (end.y - start.y) * progress
         )
         guard let dragged = CGEvent(
-            mouseEventSource: source,
+            mouseEventSource: nil,
             mouseType: .leftMouseDragged,
             mouseCursorPosition: point,
             mouseButton: .left
         ) else { continue }
-        dragged.flags = [.maskNonCoalesced]
         dragged.post(tap: .cghidEventTap)
         wait(0.06)
     }
@@ -162,12 +157,11 @@ func postMouseDrag(from start: CGPoint, to end: CGPoint) {
     wait(0.15)
 
     guard let up = CGEvent(
-        mouseEventSource: source,
+        mouseEventSource: nil,
         mouseType: .leftMouseUp,
         mouseCursorPosition: end,
         mouseButton: .left
     ) else { return }
-    up.flags = [.maskNonCoalesced]
     up.post(tap: .cghidEventTap)
 }
 
