@@ -336,6 +336,58 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdOptionTabHold])
     }
 
+    @Test("Cmd+Q passes through while the overlay is visible")
+    func commandQPassesThroughVisibleOverlay() {
+        let service = EventTapKeyboardService()
+
+        let tabDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        tabDown.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: tabDown) == nil)
+        service.overlayVisible = true
+
+        let qDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Q),
+            keyDown: true
+        )!
+        qDown.flags = .maskCommand
+        let qUp = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Q),
+            keyDown: false
+        )!
+        qUp.flags = .maskCommand
+
+        #expect(service.handleCGEvent(type: .keyDown, event: qDown) === qDown)
+        #expect(service.handleCGEvent(type: .keyUp, event: qUp) === qUp)
+    }
+
+    @Test("Plain Q remains consumed while the overlay is visible")
+    func plainQRemainsConsumedVisibleOverlay() {
+        let service = EventTapKeyboardService()
+        let tabDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        tabDown.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: tabDown) == nil)
+        service.overlayVisible = true
+
+        let qDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Q),
+            keyDown: true
+        )!
+        qDown.flags = []
+
+        #expect(service.handleCGEvent(type: .keyDown, event: qDown) == nil)
+    }
+
     @Test("Events recorded in mock")
     func eventsRecorded() {
         let svc = MockKeyboardService()
