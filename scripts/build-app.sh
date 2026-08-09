@@ -34,7 +34,7 @@ for size in 32 64 128 256 512 1024; do
 done
 iconutil -c icns "$ICON_DIR" -o "$RESOURCES/AppIcon.icns" 2>/dev/null && echo "Icon created." || echo "Icon creation skipped (using system default)."
 
-SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Debut Dev" | head -1 | awk '{print $2}')
+SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Debut Dev" | head -1 | awk '{print $2}' || true)
 if [ -n "$SIGN_IDENTITY" ]; then
     echo "Code signing with 'Debut Dev' certificate ($SIGN_IDENTITY)..."
     codesign --force --deep --sign "$SIGN_IDENTITY" --entitlements "$PROJECT_DIR/Resources/Debut.entitlements" "$APP_BUNDLE"
