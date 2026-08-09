@@ -217,10 +217,13 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
                 cmdHeld = true
             }
             stageManagerActive = true
-            deliver(
-                shift ? .cmdShiftTabHold : .cmdTabHold,
-                asynchronously: deliverAsynchronously
-            )
+            let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            let keyEvent: DebutKeyEvent = if isAutoRepeat && !shift {
+                .nextWindowRepeat
+            } else {
+                shift ? .cmdShiftTabHold : .cmdTabHold
+            }
+            deliver(keyEvent, asynchronously: deliverAsynchronously)
             return nil
         }
 
