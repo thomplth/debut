@@ -16,7 +16,8 @@ export DEVELOPER_DIR="$xcode_path"
 export TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault
 
 app_path="/Applications/Debut.app"
-tcc_db="/Library/Application Support/com.apple.TCC/TCC.db"
+system_tcc_db="/Library/Application Support/com.apple.TCC/TCC.db"
+user_tcc_db="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
 fixture_dir="${RUNNER_TEMP}/debut-e2e-fixtures"
 screen_capture_approvals="$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
 
@@ -46,8 +47,10 @@ echo "Granting Accessibility access inside the disposable runner..."
 requirement=$(codesign -d -r- "$app_path" 2>&1 | awk -F ' => ' '/designated/{print $2}')
 csreq_hex=$(printf '%s' "$requirement" | csreq -r- -b /dev/stdout | xxd -p | tr -d '\n')
 timestamp=$(date +%s)
-sudo sqlite3 "$tcc_db" "INSERT OR REPLACE INTO access VALUES(\
+sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceAccessibility','com.thomplth.Debut',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+sudo sqlite3 "$user_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
+'kTCCServiceScreenCapture','com.thomplth.Debut',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sudo killall tccd 2>/dev/null || true
 
 echo "Preparing deterministic fixture windows..."
