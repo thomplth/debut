@@ -129,7 +129,11 @@ func postMouseClick(at point: CGPoint) {
 }
 
 func postMouseDrag(from start: CGPoint, to end: CGPoint) {
-    guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+    guard let processIdentifier = NSRunningApplication.runningApplications(
+        withBundleIdentifier: "com.thomplth.Debut"
+    ).first?.processIdentifier,
+    let source = CGEventSource(stateID: .hidSystemState)
+    else { return }
     source.localEventsSuppressionInterval = 0
 
     guard let down = CGEvent(
@@ -139,7 +143,7 @@ func postMouseDrag(from start: CGPoint, to end: CGPoint) {
         mouseButton: .left
     ) else { return }
     down.flags = [.maskNonCoalesced]
-    down.post(tap: .cgSessionEventTap)
+    down.postToPid(processIdentifier)
     wait(0.25)
 
     for step in 1...16 {
@@ -155,7 +159,7 @@ func postMouseDrag(from start: CGPoint, to end: CGPoint) {
             mouseButton: .left
         ) else { continue }
         dragged.flags = [.maskNonCoalesced]
-        dragged.post(tap: .cgSessionEventTap)
+        dragged.postToPid(processIdentifier)
         wait(0.06)
     }
 
@@ -168,7 +172,7 @@ func postMouseDrag(from start: CGPoint, to end: CGPoint) {
         mouseButton: .left
     ) else { return }
     up.flags = [.maskNonCoalesced]
-    up.post(tap: .cgSessionEventTap)
+    up.postToPid(processIdentifier)
 }
 
 func stageWindowCounts(in state: [String: String]) -> [Int] {
