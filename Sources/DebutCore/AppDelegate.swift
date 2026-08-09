@@ -6,11 +6,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var stageController: StageController?
     private var overlayWindow: OverlayWindow?
     private var settingsWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
+    private var onboardingViewModel: OnboardingViewModel?
+    private var coachmarkPopover: NSPopover?
     private var statusItem: NSStatusItem?
     private var stateStore: StateStore?
-    private var accessibilityTimer: Timer?
+    private var observingAccessibilityChanges = false
     private var windowDiscovery: WindowDiscoveryService?
     private let diag = DiagnosticReporter.shared
+    private let onboardingPermissionClient = SystemOnboardingPermissionClient()
 
     private var windowService: AccessibilityWindowService?
     private var keyboardService: EventTapKeyboardService?
@@ -40,17 +44,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         overlayWindow = OverlayWindow()
         setupMenuBar()
 
-        if AXIsProcessTrusted() {
+        let forceOnboarding = ProcessInfo.processInfo.arguments.contains("--show-onboarding")
+        let shouldShowOnboarding = OnboardingLaunchPolicy.shouldPresent(force: forceOnboarding)
+
+        if onboardingPermissionClient.currentState().accessibilityGranted {
             diag.report("accessibility_already_granted")
             setupController()
         } else {
-            diag.report("accessibility_not_granted_prompting")
-            promptForAccessibility()
-            startAccessibilityPolling()
+            startAccessibilityObservation()
+            if shouldShowOnboarding {
+                diag.report("accessibility_not_granted_waiting_for_onboarding")
+            } else {
+                diag.report("accessibility_not_granted_prompting")
+                onboardingPermissionClient.requestAccessibility()
+            }
         }
 
-        if isFirstLaunch() {
-            showSettings(settings: currentSettings)
+        if shouldShowOnboarding {
+            showOnboarding()
         }
 
         diag.report("app_ready")
@@ -209,16 +220,53 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         ])
     }
 
-    private func startAccessibilityPolling() {
-        accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
-            if AXIsProcessTrusted() {
-                timer.invalidate()
-                Task { @MainActor in
-                    self?.diag.report("accessibility_granted_via_poll")
-                    self?.setupController()
-                }
-            }
+    private func startAccessibilityObservation() {
+        guard !observingAccessibilityChanges else { return }
+        observingAccessibilityChanges = true
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceApplicationActivated(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+    }
+
+    private func stopAccessibilityObservation() {
+        guard observingAccessibilityChanges else { return }
+        NSWorkspace.shared.notificationCenter.removeObserver(
+            self,
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        observingAccessibilityChanges = false
+    }
+
+    @objc private func workspaceApplicationActivated(_ notification: Notification) {
+        onboardingViewModel?.refreshPermissions()
+        handlePermissionStateChange(
+            onboardingPermissionClient.currentState(),
+            source: "app_activation"
+        )
+    }
+
+    public func applicationDidBecomeActive(_ notification: Notification) {
+        onboardingViewModel?.refreshPermissions()
+        handlePermissionStateChange(
+            onboardingPermissionClient.currentState(),
+            source: "debut_activation"
+        )
+    }
+
+    private func handlePermissionStateChange(
+        _ state: OnboardingPermissionState,
+        source: String
+    ) {
+        guard state.accessibilityGranted else { return }
+        if stageController == nil {
+            diag.report("accessibility_granted", details: ["source": source])
+            setupController()
         }
+        stopAccessibilityObservation()
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -346,6 +394,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: "Tutorial...", action: #selector(openTutorial), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Debut", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
@@ -354,6 +403,78 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     @objc private func openSettings() {
         let settings = (try? stateStore?.loadSettings()) ?? AppSettings()
         showSettings(settings: settings)
+    }
+
+    @objc private func openTutorial() {
+        showOnboarding()
+    }
+
+    private func showOnboarding() {
+        if let onboardingWindow, onboardingWindow.isVisible {
+            onboardingWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        if let onboardingWindow {
+            onboardingWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let viewModel = OnboardingViewModel(
+            permissionClient: onboardingPermissionClient,
+            onPermissionStateChanged: { [weak self] state in
+                self?.handlePermissionStateChange(state, source: "onboarding")
+            },
+            onCompleted: { [weak self] in
+                self?.completeOnboarding()
+            }
+        )
+        let view = OnboardingView(viewModel: viewModel)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 560),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Welcome to Debut"
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: view)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        onboardingViewModel = viewModel
+        onboardingWindow = window
+        diag.report("onboarding_shown", details: [
+            "forced": "\(ProcessInfo.processInfo.arguments.contains("--show-onboarding"))",
+        ])
+    }
+
+    private func completeOnboarding() {
+        OnboardingLaunchPolicy.markCompleted()
+        onboardingWindow?.close()
+        onboardingWindow = nil
+        onboardingViewModel = nil
+        diag.report("onboarding_completed")
+        showMenuBarCoachmark()
+    }
+
+    private func showMenuBarCoachmark() {
+        guard let button = statusItem?.button else { return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentSize = NSSize(width: 300, height: 150)
+        popover.contentViewController = NSHostingController(
+            rootView: MenuBarCoachmarkView { [weak self] in
+                self?.coachmarkPopover?.close()
+                self?.coachmarkPopover = nil
+            }
+        )
+        coachmarkPopover = popover
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        diag.report("onboarding_coachmark_shown")
     }
 
     private func showSettings(settings: AppSettings) {
@@ -403,17 +524,4 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         self.settingsWindow = window
     }
 
-    // MARK: - Helpers
-
-    private nonisolated func promptForAccessibility() {
-        let opts = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(opts)
-    }
-
-    private func isFirstLaunch() -> Bool {
-        let key = "hasLaunchedBefore"
-        if UserDefaults.standard.bool(forKey: key) { return false }
-        UserDefaults.standard.set(true, forKey: key)
-        return true
-    }
 }
