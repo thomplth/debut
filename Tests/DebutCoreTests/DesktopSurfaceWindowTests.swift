@@ -50,6 +50,20 @@ struct DesktopSurfaceWindowTests {
         #expect(provider.loadCount == 2)
     }
 
+    @Test("Desktop surface yields to Mission Control and App Exposé")
+    func surfaceIsTransientInSystemWindowOverviews() {
+        let window = DesktopSurfaceWindow(
+            screen: NSScreen.main ?? NSScreen.screens[0],
+            wallpaperProvider: TestWallpaperProvider(
+                image: NSImage(size: CGSize(width: 10, height: 10))
+            ),
+            wallpaperChangeObserver: TestWallpaperChangeObserver()
+        )
+
+        #expect(window.collectionBehavior.contains(.transient))
+        #expect(!window.collectionBehavior.contains(.canJoinAllSpaces))
+    }
+
     @Test("Wallpaper store selects the most recently used desktop choice")
     func wallpaperStoreSelectsCurrentDesktop() throws {
         let older = try storedDesktop(
