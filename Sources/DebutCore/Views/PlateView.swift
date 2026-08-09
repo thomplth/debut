@@ -204,6 +204,28 @@ public struct PlateConstants {
     public static func plateWidths(forWindowCounts counts: [Int], thumbnailWidth: CGFloat) -> [CGFloat] {
         counts.map { plateWidth(forWindowCount: $0, thumbnailWidth: thumbnailWidth) }
     }
+
+    public static func plateCenterY(
+        stageIndex: Int,
+        stageCount: Int,
+        activeStageIndex: Int,
+        plateHeight: CGFloat,
+        inactiveScale: CGFloat,
+        containerHeight: CGFloat
+    ) -> CGFloat? {
+        guard (0..<stageCount).contains(stageIndex),
+              (0..<stageCount).contains(activeStageIndex)
+        else { return nil }
+
+        let scale: (Int) -> CGFloat = { $0 == activeStageIndex ? 1 : inactiveScale }
+        let top: (Int) -> CGFloat = { index in
+            (0..<index).reduce(0) { partial, precedingIndex in
+                partial + plateHeight * scale(precedingIndex) + stageSpacing
+            }
+        }
+        let yOffset = containerHeight / 2 - top(activeStageIndex) - plateHeight / 2
+        return yOffset + top(stageIndex) + plateHeight * scale(stageIndex) / 2
+    }
 }
 
 public struct OverlaySwiftUIView: View {
