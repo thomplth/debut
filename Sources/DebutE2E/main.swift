@@ -182,12 +182,12 @@ func plateCenter(
     let scale: (Int) -> CGFloat = { $0 == activeStageIndex ? 1 : inactiveScale }
     let topWithinStack: (Int) -> CGFloat = { index in
         (0..<index).reduce(0) { partial, precedingIndex in
-            partial + plateHeight * scale(precedingIndex) + 14
+            partial + plateHeight * scale(precedingIndex) + PlateConstants.stageSpacing
         }
     }
     let stackHeight = windowCounts.indices.reduce(0) { partial, index in
         partial + plateHeight * scale(index)
-    } + CGFloat(max(0, windowCounts.count - 1)) * 14
+    } + CGFloat(max(0, windowCounts.count - 1)) * PlateConstants.stageSpacing
     let stackTop = screen.midY - stackHeight / 2
     let activeCenterWithinStack = topWithinStack(activeStageIndex) + plateHeight / 2
     let yOffset = screen.midY - activeCenterWithinStack
@@ -222,7 +222,7 @@ func windowCenter(
     let layoutScale: (Int) -> CGFloat = { $0 == activeStageIndex ? 1 : inactiveScale }
     let topWithinLayout: (Int) -> CGFloat = { index in
         (0..<index).reduce(0) { partial, precedingIndex in
-            partial + plateHeight * layoutScale(precedingIndex) + 14
+            partial + plateHeight * layoutScale(precedingIndex) + PlateConstants.stageSpacing
         }
     }
     let layoutOffset = screen.midY
@@ -894,6 +894,7 @@ let stoppedBeforeCustomization = terminateDebutAndWait()
 let originalSettingsData = try? Data(contentsOf: settingsFile)
 let settingsStore = StateStore()
 var customizedSettings = (try? settingsStore.loadSettings()) ?? AppSettings()
+customizedSettings.commandHintVisibility = .always
 customizedSettings.keyBindings.bindings[.activateNextWindow] = KeyCombo(
     keyCode: kVK_ANSI_B,
     command: true
@@ -918,6 +919,19 @@ test("A persisted custom shortcut replaces Command-Tab activation") {
         && readEvents().filter {
             $0["event"] == "key_event" && $0["keyEvent"] == "cmdTabHold"
         }.count > customizedActivationCount
+}
+
+test("Command hints use contextual placements and purpose icons") {
+    guard let layout = readEvents().last(where: { $0["event"] == "command_hints_laid_out" }),
+          let footerHintCount = Int(layout["footerHintCount"] ?? ""),
+          let footerIconCount = Int(layout["footerIconCount"] ?? ""),
+          let stageLeadingHintCount = Int(layout["stageLeadingHintCount"] ?? "")
+    else { return false }
+    let windowCount = Int(readState()["windowsInActiveStage"] ?? "0") ?? 0
+    return stageLeadingHintCount > 0
+        && footerHintCount > 0
+        && footerIconCount == footerHintCount
+        && (windowCount < 2 || layout["nextWindowIndex"] != "none")
 }
 
 postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
