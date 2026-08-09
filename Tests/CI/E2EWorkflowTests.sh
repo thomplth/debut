@@ -58,6 +58,8 @@ if [[ -f "$runner" ]]; then
         "CI E2E must suppress the hosted runner's screen capture reminder"
     expect_contains "$runner" 'kTCCServiceScreenCapture' \
         "CI E2E must grant Debut screen capture access in the disposable account"
+    expect_not_contains "$runner" 'sudo sqlite3 "\$user_tcc_db"' \
+        "CI E2E must update the user TCC database as the runner user"
     expect_contains "$runner" '/opt/hca/hosted-compute-agent' \
         "CI E2E must suppress capture reminders for the hosted runner process"
     expect_contains "$runner" 'killall replayd' \
