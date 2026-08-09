@@ -217,6 +217,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             discardOverlay()
         case .nextWindow:
             cycleWindow(forward: true)
+        case .nextWindowRepeat:
+            cycleWindow(forward: true, wraps: false)
         case .previousWindow:
             cycleWindow(forward: false)
         case .nextStage:
@@ -505,14 +507,20 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         // Cmd+` still stage-isolated (intercepted before the overlay gate)
     }
 
-    private func cycleWindow(forward: Bool) {
+    private func cycleWindow(forward: Bool, wraps: Bool = true) {
         guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let stage = stageManager.stages[selectedStageIndex]
         guard !stage.windows.isEmpty else { return }
 
         if forward {
-            selectedWindowIndex = (selectedWindowIndex + 1) % stage.windows.count
+            if wraps {
+                selectedWindowIndex = (selectedWindowIndex + 1) % stage.windows.count
+            } else {
+                let nextIndex = min(selectedWindowIndex + 1, stage.windows.count - 1)
+                guard nextIndex != selectedWindowIndex else { return }
+                selectedWindowIndex = nextIndex
+            }
         } else {
             selectedWindowIndex = (selectedWindowIndex - 1 + stage.windows.count) % stage.windows.count
         }
