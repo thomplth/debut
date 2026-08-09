@@ -121,6 +121,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         )
         controller.delegate = self
         controller.desktopSurface = surface
+        controller.onCommandUsed = { [weak self] action in
+            DispatchQueue.main.async {
+                self?.recordCommandUsage(action)
+            }
+        }
         stageController = controller
 
         keyboardService.keyBindings = currentSettings.keyBindings
@@ -382,6 +387,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             appearance: currentSettings
         )
         overlayWindow.update(viewModel: vm)
+    }
+
+    private func recordCommandUsage(_ action: KeyAction) {
+        let didChange = currentSettings.recordCommandUsage(action)
+        diag.report("command_hint_usage_observed", details: [
+            "action": action.rawValue,
+            "count": "\(currentSettings.commandUsageCounts[action] ?? 0)",
+            "didChange": "\(didChange)",
+        ])
+        guard didChange else { return }
+        try? stateStore?.saveSettings(currentSettings)
+        if stageController?.isStageManagerVisible == true {
+            updateOverlay()
+        }
     }
 
     // MARK: - Menu Bar

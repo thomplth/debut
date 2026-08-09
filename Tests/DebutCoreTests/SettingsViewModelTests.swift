@@ -13,6 +13,8 @@ struct SettingsViewModelTests {
         #expect(vm.settings.confirmStageDeletion == true)
         #expect(vm.settings.overlayPresentationDelay == 0.1)
         #expect(vm.settings.quickSwitchExcludedBundleIDs.isEmpty)
+        #expect(vm.settings.commandHintVisibility == .automatic)
+        #expect(vm.settings.commandUsageCounts.isEmpty)
     }
 
     @Test("Update settings")

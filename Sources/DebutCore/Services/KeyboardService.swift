@@ -32,6 +32,42 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case cmdShiftBacktick       // Cmd+Shift+` — previous same-app window in stage
 
     case escape
+
+    public var commandHintAction: KeyAction? {
+        switch self {
+        case .cmdTabHold, .nextWindow:
+            .nextWindow
+        case .cmdShiftTabHold, .previousWindow:
+            .previousWindow
+        case .cmdOptionTabHold, .nextStage:
+            .nextStage
+        case .cmdOptionShiftTabHold, .previousStage:
+            .previousStage
+        case .jumpToStage(let position):
+            KeyAction.jumpAction(forStageIndex: position - 1)
+        case .jumpToLastStage:
+            .jumpToStage9
+        case .newStageBelow:
+            .newStageBelow
+        case .newStageAbove:
+            .newStageAbove
+        case .deleteStage:
+            .deleteStage
+        case .saveAsTemplate:
+            .saveAsTemplate
+        case .moveWindowUp:
+            .moveWindowUp
+        case .moveWindowDown:
+            .moveWindowDown
+        case .swapStageUp:
+            .swapStageUp
+        case .swapStageDown:
+            .swapStageDown
+        case .cmdTabTap, .cmdRelease, .nextWindowRepeat, .switchToStage,
+             .cmdBacktick, .cmdShiftBacktick, .escape:
+            nil
+        }
+    }
 }
 
 public protocol KeyboardEventDelegate: AnyObject, Sendable {

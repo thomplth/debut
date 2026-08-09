@@ -273,6 +273,10 @@ test("Overlay is visible") {
 // --- 3. Navigate: Tab to next window ---
 header("3. Navigate windows with Tab")
 info("Pressing Tab (next window)...")
+let nextWindowHintUsageCount = readEvents().filter {
+    $0["event"] == "command_hint_usage_observed"
+        && $0["action"] == "nextWindow"
+}.count
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
 wait(0.5)
 
@@ -286,6 +290,13 @@ test("Selection moved") {
     let idx = readState()["selectedWindowIndex"] ?? "0"
     info("  selectedWindowIndex = \(idx)")
     return idx != "0"
+}
+
+test("Command hint usage follows real command dispatch") {
+    readEvents().filter {
+        $0["event"] == "command_hint_usage_observed"
+            && $0["action"] == "nextWindow"
+    }.count > nextWindowHintUsageCount
 }
 
 // --- 4. Navigate: Shift+Tab back ---
