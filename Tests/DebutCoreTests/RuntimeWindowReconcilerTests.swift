@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import DebutCore
 
@@ -642,5 +643,157 @@ struct RuntimeWindowReconcilerTests {
         )
 
         #expect(result.events.map(\.reason) == [.recoveredBundle])
+    }
+
+    // MARK: - Dia regression
+    //
+    // Reproduces a real session. Debut held five Dia assignments while the
+    // window server had four windows: 60760 had been closed without a destroy
+    // notification, so its assignment could never be removed. Titles are the
+    // observed ones, which drift on every tab switch and defeat exact matching.
+
+    private enum Dia {
+        static let bundleID = "company.thebrowser.dia"
+        static let pid: pid_t = 33141
+    }
+
+    private func diaWindow(_ windowID: CGWindowID, _ title: String) -> WindowInfo {
+        liveWindow(windowID, bundleID: Dia.bundleID, ownerName: "Dia", ownerPID: Dia.pid, title: title)
+    }
+
+    private func diaAssignment(_ windowID: CGWindowID, _ title: String) -> StageWindow {
+        StageWindow(
+            windowID: windowID,
+            ownerBundleID: Dia.bundleID,
+            ownerName: "Dia",
+            windowTitle: title,
+            ownerPID: Dia.pid
+        )
+    }
+
+    /// Three stages holding the incident's assignments, active stage 0.
+    private func makeDiaIncidentState() -> (StageManager, [UUID]) {
+        var manager = StageManager()
+        manager.createStage(position: .below)
+        manager.createStage(position: .below)
+        let ids = manager.stages.map(\.id)
+
+        manager.addWindow(diaAssignment(22358, "Goodnotes: Goodnotes"), toStageID: ids[1])
+        manager.addWindow(diaAssignment(57414, "Develop: (1) thompson (@…"), toStageID: ids[1])
+        manager.addWindow(diaAssignment(22357, "Leisure: 「劇場版 魔法少女…"), toStageID: ids[2])
+        // Closed without a destroy notification; no live window will ever match.
+        manager.addWindow(diaAssignment(60760, "Goodnotes: New Tab"), toStageID: ids[2])
+        manager.addWindow(diaAssignment(22359, "Develop: nexu-io/open-de…"), toStageID: ids[2])
+
+        manager.activateStage(id: ids[0])
+        return (manager, ids)
+    }
+
+    @Test("A replaced Dia window returns to its own stage, not the active stage")
+    func replacedDiaWindowKeepsItsStage() {
+        var (manager, stageIDs) = makeDiaIncidentState()
+        var reconciler = RuntimeWindowReconciler()
+
+        // 22359 is recreated as 61000 with a drifted title, as Dia does on
+        // navigation. 60760 stays absent because it no longer exists.
+        let live = [
+            diaWindow(22358, "Goodnotes: Goodnotes"),
+            diaWindow(57414, "Develop: Search results…"),
+            diaWindow(22357, "Leisure: (1) XユーザーのＩｘｙ…"),
+            diaWindow(61000, "Develop: nexu-io/open-decision"),
+        ]
+
+        _ = reconciler.reconcile(
+            RuntimeWindowSnapshot(liveWindows: live, allWindowIDs: [22358, 57414, 22357, 61000]),
+            stageManager: &manager
+        )
+
+        #expect(manager.stageContainingWindow(windowID: 61000) == stageIDs[2])
+        #expect(manager.stageContainingWindow(windowID: 61000) != stageIDs[0])
+    }
+
+    @Test("Repeated reconciles never drift a settled Dia window between stages")
+    func settledDiaWindowDoesNotFlap() {
+        var (manager, stageIDs) = makeDiaIncidentState()
+        var reconciler = RuntimeWindowReconciler()
+
+        let live = [
+            diaWindow(22358, "Goodnotes: Goodnotes"),
+            diaWindow(57414, "Develop: Search results…"),
+            diaWindow(22357, "Leisure: (1) XユーザーのＩｘｙ…"),
+            diaWindow(61000, "Develop: nexu-io/open-decision"),
+        ]
+        let snapshot = RuntimeWindowSnapshot(
+            liveWindows: live,
+            allWindowIDs: [22358, 57414, 22357, 61000]
+        )
+
+        _ = reconciler.reconcile(snapshot, stageManager: &manager)
+        let settled = manager.stageContainingWindow(windowID: 61000)
+
+        for _ in 0..<5 {
+            _ = reconciler.reconcile(snapshot, stageManager: &manager)
+            #expect(manager.stageContainingWindow(windowID: 61000) == settled)
+        }
+        #expect(settled == stageIDs[2])
+    }
+
+    @Test("A stale assignment does not strand every other Dia window in the active stage")
+    func staleAssignmentDoesNotCollapseRemainingWindows() {
+        var (manager, stageIDs) = makeDiaIncidentState()
+        var reconciler = RuntimeWindowReconciler()
+
+        // Every window keeps its identity except the one that was already
+        // closed. Nothing should move.
+        let live = [
+            diaWindow(22358, "Goodnotes: drifted"),
+            diaWindow(57414, "Develop: drifted"),
+            diaWindow(22357, "Leisure: drifted"),
+            diaWindow(22359, "Develop: drifted"),
+        ]
+
+        _ = reconciler.reconcile(
+            RuntimeWindowSnapshot(liveWindows: live, allWindowIDs: [22358, 57414, 22357, 22359]),
+            stageManager: &manager
+        )
+
+        #expect(manager.stageContainingWindow(windowID: 22358) == stageIDs[1])
+        #expect(manager.stageContainingWindow(windowID: 57414) == stageIDs[1])
+        #expect(manager.stageContainingWindow(windowID: 22357) == stageIDs[2])
+        #expect(manager.stageContainingWindow(windowID: 22359) == stageIDs[2])
+    }
+
+    @Test("An ambiguously placed window is reclaimed once the stale assignment goes")
+    func ambiguousPlacementIsReclaimedAfterStaleAssignmentRemoved() {
+        var (manager, stageIDs) = makeDiaIncidentState()
+        var reconciler = RuntimeWindowReconciler()
+
+        // Stranded assignments in two different stages: 60760 in stage 2 and
+        // 57414 in stage 1. Neither stage can claim the replacement, so it
+        // falls back to the active stage.
+        let live = [
+            diaWindow(22358, "Goodnotes: drifted"),
+            diaWindow(22357, "Leisure: drifted"),
+            diaWindow(22359, "Develop: drifted"),
+            diaWindow(61000, "Develop: replacement"),
+        ]
+        let ids: Set<CGWindowID> = [22358, 22357, 22359, 61000]
+
+        _ = reconciler.reconcile(
+            RuntimeWindowSnapshot(liveWindows: live, allWindowIDs: ids),
+            stageManager: &manager
+        )
+        #expect(manager.stageContainingWindow(windowID: 61000) == stageIDs[0])
+
+        // The closed window finally emits its destroy notification, leaving a
+        // single stranded assignment. 61000 must now be claimed by stage 1.
+        manager.removeWindow(windowID: 60760, fromStageID: stageIDs[2])
+
+        _ = reconciler.reconcile(
+            RuntimeWindowSnapshot(liveWindows: live, allWindowIDs: ids),
+            stageManager: &manager
+        )
+
+        #expect(manager.stageContainingWindow(windowID: 61000) == stageIDs[1])
     }
 }
