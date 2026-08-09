@@ -50,9 +50,9 @@ timestamp=$(date +%s)
 sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceAccessibility','com.thomplth.Debut',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
-'kTCCServiceScreenCapture','com.thomplth.Debut',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+'kTCCServiceScreenCapture','com.thomplth.Debut',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sqlite3 "$user_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
-'kTCCServiceScreenCapture','com.thomplth.Debut',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+'kTCCServiceScreenCapture','com.thomplth.Debut',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sudo killall tccd 2>/dev/null || true
 
 echo "Preparing deterministic fixture windows..."
