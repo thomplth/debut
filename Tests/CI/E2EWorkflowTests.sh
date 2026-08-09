@@ -61,6 +61,9 @@ if [[ -f "$runner" ]]; then
     if (( $(grep -c 'kTCCServiceScreenCapture' "$runner") < 2 )); then
         fail "CI E2E must grant Debut screen capture access in both TCC databases"
     fi
+    if grep 'kTCCServiceScreenCapture.*X'"'" "$runner" >/dev/null; then
+        fail "CI screen capture grants must not pin the disposable ad-hoc signature"
+    fi
     expect_not_contains "$runner" 'sudo sqlite3 "\$user_tcc_db"' \
         "CI E2E must update the user TCC database as the runner user"
     expect_contains "$runner" '/opt/hca/hosted-compute-agent' \
