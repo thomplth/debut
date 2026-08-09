@@ -161,6 +161,7 @@ struct StageControllerTests {
         let (controller, _, keyboardService) = makeController()
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
+        controller.overlayPresentationDelay = 0.2
 
         keyboardService.simulateEvent(.cmdTabHold)
 
