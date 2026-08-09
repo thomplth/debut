@@ -138,6 +138,54 @@ func firstWindowCenter(in state: [String: String]) -> CGPoint? {
     return CGPoint(x: cardCenterX, y: thumbnailCenterY)
 }
 
+final class LockedApplicationResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var application: NSRunningApplication?
+
+    func store(_ application: NSRunningApplication?) {
+        lock.lock()
+        self.application = application
+        lock.unlock()
+    }
+
+    func load() -> NSRunningApplication? {
+        lock.lock()
+        defer { lock.unlock() }
+        return application
+    }
+}
+
+func launchDebut(arguments: [String] = []) -> NSRunningApplication? {
+    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.thomplth.Debut") else {
+        return nil
+    }
+    let semaphore = DispatchSemaphore(value: 0)
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.arguments = arguments
+    configuration.createsNewApplicationInstance = true
+    let result = LockedApplicationResult()
+    NSWorkspace.shared.openApplication(at: url, configuration: configuration) { application, _ in
+        result.store(application)
+        semaphore.signal()
+    }
+    _ = semaphore.wait(timeout: .now() + 10)
+    return result.load()
+}
+
+func visibleWindowTitles(for processIdentifier: pid_t) -> [String] {
+    guard let rawWindows = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements],
+        kCGNullWindowID
+    ) as? [[String: Any]] else { return [] }
+
+    return rawWindows.compactMap { window in
+        guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processIdentifier else {
+            return nil
+        }
+        return window[kCGWindowName as String] as? String
+    }
+}
+
 func wait(_ seconds: Double) {
     Thread.sleep(forTimeInterval: seconds)
 }
@@ -387,6 +435,34 @@ test("Clicking a window card commits the pointer selection") {
     return pointerEvents.count > pointerSelectionCount
         && pointerEvents.last?["windowIndex"] == "0"
         && readState()["overlayVisible"] == "false"
+}
+
+// --- 10. First-launch onboarding (forced, without changing user defaults) ---
+header("10. First-launch onboarding")
+for application in NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.Debut") {
+    _ = application.terminate()
+}
+wait(1.0)
+
+let onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
+wait(1.5)
+let onboardingWindowTitles = onboardingApplication.map {
+    visibleWindowTitles(for: $0.processIdentifier)
+} ?? []
+info("Visible Debut windows: \(onboardingWindowTitles)")
+let _ = takeScreenshot("11_onboarding_welcome")
+
+test("Forced first launch presents the onboarding window") {
+    onboardingWindowTitles.contains("Welcome to Debut")
+}
+
+_ = onboardingApplication?.terminate()
+wait(1.0)
+let restoredApplication = launchDebut()
+wait(1.5)
+
+test("Debut relaunches normally after the onboarding check") {
+    restoredApplication != nil
 }
 
 // --- Summary ---

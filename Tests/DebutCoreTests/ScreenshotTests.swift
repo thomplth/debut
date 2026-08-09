@@ -97,4 +97,67 @@ struct ScreenshotTests {
         try saveImage(img, name: "05_selection_state")
         #expect(vm.selectedWindowIndex == 2)
     }
+
+    @Test("Onboarding welcome screen")
+    func onboardingWelcome() throws {
+        let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())
+        guard let img = renderSwiftUI(
+            OnboardingView(viewModel: vm),
+            size: NSSize(width: 760, height: 560)
+        ) else {
+            throw ScreenshotError.renderFailed
+        }
+        try saveImage(img, name: "07_onboarding_welcome")
+        #expect(vm.page == .welcome)
+    }
+
+    @Test("Onboarding permission screen")
+    func onboardingPermissions() throws {
+        let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())
+        vm.continueFromWelcome()
+        guard let img = renderSwiftUI(
+            OnboardingView(viewModel: vm),
+            size: NSSize(width: 760, height: 560)
+        ) else {
+            throw ScreenshotError.renderFailed
+        }
+        try saveImage(img, name: "08_onboarding_permissions")
+        #expect(vm.page == .permissions)
+    }
+
+    @Test("Onboarding tutorial screen")
+    func onboardingTutorial() throws {
+        let vm = OnboardingViewModel(
+            permissionClient: PreviewOnboardingPermissionClient(accessibilityGranted: true)
+        )
+        vm.continueFromWelcome()
+        vm.startTutorial()
+        guard let img = renderSwiftUI(
+            OnboardingView(viewModel: vm),
+            size: NSSize(width: 760, height: 560)
+        ) else {
+            throw ScreenshotError.renderFailed
+        }
+        try saveImage(img, name: "09_onboarding_tutorial")
+        #expect(vm.page == .tutorial)
+    }
+}
+
+@MainActor
+private final class PreviewOnboardingPermissionClient: OnboardingPermissionClient {
+    let accessibilityGranted: Bool
+
+    init(accessibilityGranted: Bool = false) {
+        self.accessibilityGranted = accessibilityGranted
+    }
+
+    func currentState() -> OnboardingPermissionState {
+        OnboardingPermissionState(
+            accessibilityGranted: accessibilityGranted,
+            screenRecordingGranted: false
+        )
+    }
+
+    func requestAccessibility() {}
+    func requestScreenRecording() {}
 }
