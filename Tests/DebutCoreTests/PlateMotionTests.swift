@@ -47,6 +47,22 @@ struct PlateMotionTests {
         #expect(!PlateInteraction.shouldMoveWindow(fromStageIndex: 1, toStageIndex: nil))
     }
 
+    @Test("Finishing a window drop clears drag state before requesting the move")
+    func windowDropClearsDragBeforeMoveRequest() {
+        var drag: WindowDragState? = WindowDragState(
+            windowID: 42,
+            sourceStageIndex: 1,
+            sourceWindowIndex: 0,
+            location: CGPoint(x: 100, y: 200),
+            dropTargetStageIndex: 2
+        )
+
+        let request = PlateInteraction.finishWindowDrag(&drag)
+
+        #expect(drag == nil)
+        #expect(request == WindowMoveRequest(windowID: 42, fromStageIndex: 1, toStageIndex: 2))
+    }
+
     @Test("Stage drag translation maps to a clamped destination")
     func stageDragDestination() {
         #expect(PlateInteraction.stageDestination(

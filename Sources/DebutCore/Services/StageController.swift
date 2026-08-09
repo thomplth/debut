@@ -70,6 +70,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 "eventTapStarted": "\(self.keyboardServiceStarted)",
                 "windowsInActiveStage": "\(self.stageManager.activeStage.windows.count)",
                 "maxWindowsInStage": "\(self.stageManager.stages.map(\.windows.count).max() ?? 0)",
+                "windowCountsByStage": self.stageManager.stages
+                    .map { String($0.windows.count) }
+                    .joined(separator: ","),
             ]
         }
     }
