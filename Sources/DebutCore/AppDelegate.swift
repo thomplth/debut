@@ -369,6 +369,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             self.updateOverlay()
         }
 
+        overlayWindow.onStageHandleVisibilityChanged = { [weak self] stageIndex, isRevealed in
+            self?.diag.report("stage_drag_handle_visibility_changed", details: [
+                "stageIndex": "\(stageIndex)",
+                "isRevealed": "\(isRevealed)",
+            ])
+        }
+
         overlayWindow.onPointerSelectionChanged = { [weak self] stageIndex, windowIndex in
             self?.diag.report("overlay_pointer_selection_changed", details: [
                 "stageIndex": stageIndex.map(String.init) ?? "none",

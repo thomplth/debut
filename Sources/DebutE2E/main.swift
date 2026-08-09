@@ -201,6 +201,39 @@ func plateCenter(
     )
 }
 
+func platePoint(
+    stageIndex: Int,
+    windowCounts: [Int],
+    activeStageIndex: Int,
+    inactiveScale: CGFloat,
+    relativeX: CGFloat,
+    xOffset: CGFloat = 0
+) -> CGPoint? {
+    guard windowCounts.indices.contains(stageIndex),
+          let center = plateCenter(
+            stageIndex: stageIndex,
+            windowCounts: windowCounts,
+            activeStageIndex: activeStageIndex,
+            inactiveScale: inactiveScale
+          )
+    else { return nil }
+
+    let screen = CGDisplayBounds(CGMainDisplayID())
+    let thumbnail = PlateConstants.thumbnailSize(
+        forWindowCount: windowCounts.max() ?? 0,
+        screenWidth: screen.width
+    )
+    let width = PlateConstants.plateWidth(
+        forWindowCount: windowCounts[stageIndex],
+        thumbnailWidth: thumbnail.width
+    )
+    let scale: CGFloat = stageIndex == activeStageIndex ? 1 : inactiveScale
+    return CGPoint(
+        x: center.x + ((relativeX - 0.5) * width + xOffset) * scale,
+        y: center.y
+    )
+}
+
 func windowCenter(
     stageIndex: Int,
     windowIndex: Int,
@@ -807,6 +840,148 @@ test("E2E prepared an empty destination stage without losing source windows") {
         && preparedWindowCounts[destinationStageIndex] == 0
         && preparedWindowCounts.count == originalStageCount + 1
 }
+
+// Reordering is deliberately handle-only: dragging elsewhere on a plate must
+// not mutate stage order, while hovering the leading edge reveals the handle.
+let reorderEventCount = readEvents().filter { $0["event"] == "stage_reordered_by_drag" }.count
+let handleRevealEventCount = readEvents().filter {
+    $0["event"] == "stage_drag_handle_visibility_changed"
+        && $0["isRevealed"] == "true"
+}.count
+
+if preparedWindowCounts.indices.contains(sourceStageIndex),
+   preparedWindowCounts.indices.contains(destinationStageIndex),
+   let sourceBodyPoint = platePoint(
+        stageIndex: sourceStageIndex,
+        windowCounts: preparedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
+        relativeX: 1,
+        xOffset: -10
+   ),
+   let destinationCenter = plateCenter(
+        stageIndex: destinationStageIndex,
+        windowCounts: preparedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
+   ),
+   let handleHotspot = platePoint(
+        stageIndex: sourceStageIndex,
+        windowCounts: preparedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
+        relativeX: 0,
+        xOffset: 12
+   ),
+   let revealedHandleCenter = platePoint(
+        stageIndex: sourceStageIndex,
+        windowCounts: preparedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
+        relativeX: 0,
+        xOffset: -PlateConstants.stageHandleRevealWidth / 2
+   ) {
+    postMouseDrag(
+        from: sourceBodyPoint,
+        to: CGPoint(x: sourceBodyPoint.x, y: destinationCenter.y)
+    )
+    wait(0.5)
+    test("Dragging the plate body does not reorder stages") {
+        readEvents().filter { $0["event"] == "stage_reordered_by_drag" }.count
+            == reorderEventCount
+    }
+
+    postMouseMove(to: handleHotspot)
+    for _ in 0..<20 {
+        if readEvents().filter({
+            $0["event"] == "stage_drag_handle_visibility_changed"
+                && $0["isRevealed"] == "true"
+        }).count > handleRevealEventCount {
+            break
+        }
+        wait(0.1)
+    }
+    let _ = takeScreenshot("11_stage_drag_handle_revealed")
+    test("Hovering the leading edge reveals the stage drag handle") {
+        let reveals = readEvents().filter {
+            $0["event"] == "stage_drag_handle_visibility_changed"
+                && $0["isRevealed"] == "true"
+        }
+        return reveals.count > handleRevealEventCount
+            && reveals.last?["stageIndex"] == "\(sourceStageIndex)"
+    }
+
+    postMouseDrag(
+        from: revealedHandleCenter,
+        to: CGPoint(x: revealedHandleCenter.x, y: destinationCenter.y)
+    )
+    for _ in 0..<30 {
+        if readEvents().filter({ $0["event"] == "stage_reordered_by_drag" }).count
+            > reorderEventCount {
+            break
+        }
+        wait(0.1)
+    }
+    test("Dragging the revealed handle reorders the stage") {
+        readEvents().filter { $0["event"] == "stage_reordered_by_drag" }.count
+            > reorderEventCount
+    }
+
+    postMouseMove(to: neutralPointerLocation)
+    wait(0.3)
+    let reorderedState = readState()
+    let reorderedWindowCounts = stageWindowCounts(in: reorderedState)
+    let reorderedActiveStageIndex = Int(reorderedState["activeStageIndex"] ?? "") ?? -1
+    if reorderedWindowCounts.indices.contains(destinationStageIndex),
+       let reverseHotspot = platePoint(
+            stageIndex: destinationStageIndex,
+            windowCounts: reorderedWindowCounts,
+            activeStageIndex: reorderedActiveStageIndex,
+            inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
+            relativeX: 0,
+            xOffset: 12
+       ),
+       let reverseHandleCenter = platePoint(
+            stageIndex: destinationStageIndex,
+            windowCounts: reorderedWindowCounts,
+            activeStageIndex: reorderedActiveStageIndex,
+            inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
+            relativeX: 0,
+            xOffset: -PlateConstants.stageHandleRevealWidth / 2
+       ),
+       let reverseDestination = plateCenter(
+            stageIndex: sourceStageIndex,
+            windowCounts: reorderedWindowCounts,
+            activeStageIndex: reorderedActiveStageIndex,
+            inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
+       ) {
+        postMouseMove(to: reverseHotspot)
+        wait(0.4)
+        postMouseDrag(
+            from: reverseHandleCenter,
+            to: CGPoint(x: reverseHandleCenter.x, y: reverseDestination.y)
+        )
+        for _ in 0..<30 {
+            if readEvents().filter({ $0["event"] == "stage_reordered_by_drag" }).count
+                > reorderEventCount + 1 {
+                break
+            }
+            wait(0.1)
+        }
+        test("A reverse handle drag restores the original stage order") {
+            readEvents().filter { $0["event"] == "stage_reordered_by_drag" }.count
+                > reorderEventCount + 1
+                && stageWindowCounts(in: readState()) == preparedWindowCounts
+        }
+    } else {
+        fail("Could not calculate the reverse stage-handle drag path")
+    }
+} else {
+    fail("Could not calculate the stage-handle drag path")
+}
+
+postMouseMove(to: neutralPointerLocation)
+wait(0.3)
 
 if preparedWindowCounts.indices.contains(sourceStageIndex),
    preparedWindowCounts.indices.contains(destinationStageIndex),

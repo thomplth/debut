@@ -50,6 +50,23 @@ struct PlateMotionTests {
         #expect(PlateMotion.plateLayoutScale(isSelected: true, inactiveScale: 0.72) == 1)
     }
 
+    @Test("Stage drag handle expands only the visual leading edge")
+    func stageDragHandleExpansion() {
+        #expect(PlateMotion.stageHandleExpansion(isRevealed: false) == 0)
+        #expect(
+            PlateMotion.stageHandleExpansion(isRevealed: true)
+                == PlateConstants.stageHandleRevealWidth
+        )
+    }
+
+    @Test("Stage drag handle hotspot uses hysteresis while revealed")
+    func stageDragHandleHotspot() {
+        #expect(PlateInteraction.isStageHandleHotspot(locationX: 12, isRevealed: false))
+        #expect(!PlateInteraction.isStageHandleHotspot(locationX: 40, isRevealed: false))
+        #expect(PlateInteraction.isStageHandleHotspot(locationX: 58, isRevealed: true))
+        #expect(!PlateInteraction.isStageHandleHotspot(locationX: 80, isRevealed: true))
+    }
+
     @Test("Selected windows magnify instead of using a selection indicator")
     func selectedWindowScale() {
         #expect(PlateMotion.windowScale(isSelected: false, isDragging: false) == 1)
