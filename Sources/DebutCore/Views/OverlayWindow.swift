@@ -3,6 +3,7 @@ import SwiftUI
 
 public final class OverlayWindow: NSWindow, @unchecked Sendable {
     private var hostingView: NSHostingView<OverlaySwiftUIView>?
+    public var onWindowSelected: ((Int, Int) -> Void)?
     public var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
     public var onStageReordered: ((Int, Int) -> Void)?
 
@@ -24,7 +25,12 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     }
 
     public func update(viewModel: OverlayViewModel) {
-        let view = OverlaySwiftUIView(viewModel: viewModel, onWindowMoved: onWindowMoved, onStageReordered: onStageReordered)
+        let view = OverlaySwiftUIView(
+            viewModel: viewModel,
+            onWindowSelected: onWindowSelected,
+            onWindowMoved: onWindowMoved,
+            onStageReordered: onStageReordered
+        )
         if let hostingView {
             hostingView.rootView = view
         } else {
