@@ -15,6 +15,3 @@ cp -R .build/Debut.app /Applications/Debut.app
 echo "Launching..."
 open /Applications/Debut.app
 sleep 3
-
-echo "Running E2E tests..."
-./scripts/e2e-test.sh

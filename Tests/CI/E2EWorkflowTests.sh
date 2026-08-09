@@ -1,0 +1,66 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+
+workflow=".github/workflows/e2e.yml"
+runner="scripts/ci-e2e.sh"
+failures=0
+
+fail() {
+    echo "FAIL: $1" >&2
+    failures=$((failures + 1))
+}
+
+expect_file() {
+    local path="$1"
+    [[ -f "$path" ]] || fail "missing $path"
+}
+
+expect_contains() {
+    local path="$1"
+    local pattern="$2"
+    local message="$3"
+    grep -Eq -- "$pattern" "$path" || fail "$message"
+}
+
+expect_not_contains() {
+    local path="$1"
+    local pattern="$2"
+    local message="$3"
+    if grep -Eq -- "$pattern" "$path"; then
+        fail "$message"
+    fi
+}
+
+expect_file "$workflow"
+expect_file "$runner"
+
+if [[ -f "$workflow" ]]; then
+    expect_contains "$workflow" '^  pull_request:' "E2E must run for pull requests"
+    expect_contains "$workflow" '^  push:' "E2E must run for pushes to main"
+    expect_contains "$workflow" '^  workflow_dispatch:' "E2E must support manual runs"
+    expect_contains "$workflow" 'runs-on: macos-15$' "E2E must use the free standard macOS 15 runner"
+    expect_not_contains "$workflow" 'runs-on: .*-(large|xlarge)|runs-on: self-hosted' \
+        "E2E must not use a paid or developer-hosted runner"
+    expect_contains "$workflow" 'timeout-minutes:' "E2E must have a runaway cost guard"
+    expect_contains "$workflow" 'run: ./scripts/ci-e2e.sh' "workflow must use the CI E2E entry point"
+    expect_contains "$workflow" 'if: always\(\)' "E2E artifacts must upload after failures"
+    expect_contains "$workflow" '/tmp/debut-e2e-screenshots' "workflow must upload E2E screenshots"
+fi
+
+if [[ -f "$runner" ]]; then
+    expect_contains "$runner" 'GITHUB_ACTIONS' "CI E2E entry point must reject accidental local runs"
+    expect_contains "$runner" './scripts/build-app.sh' "CI E2E entry point must build the app"
+    expect_contains "$runner" '/Applications/Debut.app' "CI E2E entry point must install the app"
+    expect_contains "$runner" './scripts/e2e-test.sh' "CI E2E entry point must run the full suite"
+fi
+
+expect_not_contains "scripts/rebuild.sh" 'e2e-test\.sh' \
+    "local rebuilds must no longer launch the disruptive E2E suite"
+
+if (( failures > 0 )); then
+    exit 1
+fi
+
+echo "PASS: E2E workflow contract"
