@@ -30,30 +30,10 @@ echo "Suppressing the disposable runner's screen capture reminder..."
 mkdir -p "$(dirname "$screen_capture_approvals")"
 defaults write "$screen_capture_approvals" "/bin/bash" -date "3024-01-01 00:00:00 +0000"
 killall cfprefsd 2>/dev/null || true
+killall replayd 2>/dev/null || true
+sleep 1
 /usr/sbin/screencapture -x "$RUNNER_TEMP/screen-capture-preflight.png" || true
-for _ in {1..20}; do
-    result=$(/usr/bin/osascript <<'APPLESCRIPT'
-tell application "System Events"
-    repeat with candidateProcess in application processes
-        repeat with candidateWindow in windows of candidateProcess
-            try
-                if exists button "Allow" of candidateWindow then
-                    click button "Allow" of candidateWindow
-                    return "clicked"
-                end if
-            end try
-        end repeat
-    end repeat
-end tell
-return "not-found"
-APPLESCRIPT
-)
-    if [[ "$result" == "clicked" ]]; then
-        echo "Dismissed the screen capture reminder."
-        break
-    fi
-    sleep 0.25
-done
+plutil -p "$screen_capture_approvals"
 rm -f "$RUNNER_TEMP/screen-capture-preflight.png"
 
 echo "Building and installing Debut..."
