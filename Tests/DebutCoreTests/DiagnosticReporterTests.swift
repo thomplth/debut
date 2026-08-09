@@ -106,6 +106,18 @@ struct DiagnosticReporterTests {
         #expect(object["updatedAt"] as? String != nil)
     }
 
+    @Test("Shared reporter never writes into the real support directory under test")
+    func sharedReporterIsSandboxedDuringTests() {
+        let appSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Debut")
+
+        // Suites that exercise StageController report through the shared
+        // instance. Without redirection those events corrupt the very log a
+        // real session gets diagnosed from.
+        #expect(!DiagnosticReporter.diagnosticFile.path.hasPrefix(appSupport.path))
+    }
+
     @Test("Transient events still appear in the in-memory snapshot")
     func transientEventsInSnapshot() throws {
         let dir = try makeTempDirectory()
