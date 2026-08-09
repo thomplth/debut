@@ -5,14 +5,15 @@
 For every task:
 
 1. Always work in a clean, isolated Git worktree. Do not make task changes directly in the primary checkout.
-2. Always use test-driven development:
+2. Use one task per worktree. Keep commits scoped and write imperative commit messages. Do not prescribe issue IDs in branch or commit names.
+3. Always use test-driven development:
    - Add or update the tests first.
    - Run them and confirm they fail for the expected reason.
    - Implement the change.
    - Continue running and fixing the tests until they pass.
-3. After finishing the work, commit it and merge the task branch back into `main`.
-4. From `main`, install the completed local build and replace the existing `/Applications/Debut.app`. The installed app must match the completed source.
-5. Push the completed `main` branch to the remote.
+4. After verification, commit the task, merge the task branch into `main`, then remove the worktree and task branch.
+5. From `main`, install the completed local build and replace the existing `/Applications/Debut.app`. The installed app must match the completed source.
+6. Push the completed `main` branch to `origin`.
 
 ## Build & Test Workflow
 
@@ -105,16 +106,3 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 - **Dormant assignments are persistent state** — Preserve them across Debut restarts and deliberate app quits as well as updater relaunches; macOS does not reliably distinguish those termination reasons. Purge them only through explicit window destruction, exclusion/reset, or stage deletion.
 - **Prune only truly empty stages on restore** — Keep stages that have dormant assignments even when they currently have no live windows.
 - **Focus-based starting stage** — On launch, query AX for the currently focused window, find its owning stage, and activate that stage instead of always stage 0.
-
-## Wrap Process
-
-When the user asks to "wrap", perform the following steps:
-
-1. **Review all changes** since the last wrap/commit — `git diff`, `git status`, `git log`
-2. **Update spec docs** (`spec/`) to reflect any new or changed requirements, and update task tracker checkboxes
-3. **Update AGENTS.md** with any architecture rules or learnings discovered during the session
-4. **Commit all changes** to the GitHub repo with a descriptive commit message
-5. **Push to remote**
-6. **Create a GitHub release** with:
-   - Release notes summarizing changes
-   - DMG built via `./scripts/build-app.sh` and packaged with `hdiutil`
