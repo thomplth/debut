@@ -41,6 +41,8 @@ expect_file "$e2e_source"
 if [[ -f "$workflow" ]]; then
     expect_contains "$workflow" '^  pull_request:' "E2E must run for pull requests"
     expect_contains "$workflow" '^  push:' "E2E must run for pushes to main"
+    expect_contains "$workflow" '^    branches: \[main\]$' \
+        "E2E push runs must be limited to main"
     expect_contains "$workflow" '^  workflow_dispatch:' "E2E must support manual runs"
     expect_contains "$workflow" 'runs-on: macos-15$' "E2E must use the free standard macOS 15 runner"
     expect_not_contains "$workflow" 'runs-on: .*-(large|xlarge)|runs-on: self-hosted' \
