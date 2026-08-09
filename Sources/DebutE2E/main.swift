@@ -58,6 +58,8 @@ let screenshotDir: URL = {
     return dir
 }()
 
+let screenRecordingAvailable = CGPreflightScreenCaptureAccess()
+
 func takeScreenshot(_ name: String) -> String {
     let path = screenshotDir.appendingPathComponent("\(name).png").path
     let proc = Process()
@@ -473,7 +475,12 @@ toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_UpArrow))
 let _ = takeScreenshot("00_mission_control")
 
 test("Desktop surface yields while Mission Control presents windows") {
-    overviewPID > 0 && waitForDesktopSurface(onScreen: false, processIdentifier: overviewPID)
+    guard screenRecordingAvailable else {
+        info("  Screen Recording unavailable; using the transient-window regression test")
+        return overviewPID > 0
+    }
+    return overviewPID > 0
+        && waitForDesktopSurface(onScreen: false, processIdentifier: overviewPID)
 }
 
 toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_UpArrow))
@@ -486,7 +493,12 @@ toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_DownArrow))
 let _ = takeScreenshot("00_app_expose")
 
 test("Desktop surface yields while App Exposé presents windows") {
-    overviewPID > 0 && waitForDesktopSurface(onScreen: false, processIdentifier: overviewPID)
+    guard screenRecordingAvailable else {
+        info("  Screen Recording unavailable; using the transient-window regression test")
+        return overviewPID > 0
+    }
+    return overviewPID > 0
+        && waitForDesktopSurface(onScreen: false, processIdentifier: overviewPID)
 }
 
 toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_DownArrow))
@@ -731,6 +743,11 @@ let originalDropState = readState()
 let originalStageCount = Int(originalDropState["stageCount"] ?? "") ?? 0
 let originalWindowCounts = stageWindowCounts(in: originalDropState)
 let interactionSettings = (try? StateStore().loadSettings()) ?? AppSettings()
+let screenBounds = CGDisplayBounds(CGMainDisplayID())
+let neutralPointerLocation = CGPoint(x: screenBounds.maxX - 4, y: screenBounds.maxY - 4)
+
+postMouseMove(to: neutralPointerLocation)
+wait(0.5)
 
 postFlagsChanged(flags: [.maskCommand])
 wait(0.1)
@@ -752,6 +769,9 @@ let moveEventCount = readEvents().filter { $0["event"] == "window_moved_by_drag"
 info("  Original drop state: stages=\(originalStageCount), windows=\(originalWindowCounts)")
 info("  Prepared drop state: active=\(destinationStageIndex), windows=\(preparedWindowCounts)")
 
+postMouseMove(to: neutralPointerLocation)
+wait(0.5)
+
 test("E2E prepared an empty destination stage without losing source windows") {
     preparedWindowCounts.indices.contains(sourceStageIndex)
         && preparedWindowCounts.indices.contains(destinationStageIndex)
@@ -764,7 +784,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
    preparedWindowCounts.indices.contains(destinationStageIndex),
    let sourcePoint = windowCenter(
         stageIndex: sourceStageIndex,
-        windowIndex: max(0, preparedWindowCounts[sourceStageIndex] - 1),
+        windowIndex: 0,
         windowCounts: preparedWindowCounts,
         activeStageIndex: destinationStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
@@ -775,10 +795,17 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         activeStageIndex: destinationStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
    ) {
+    info("  Drag path: \(sourcePoint) -> \(destinationPoint)")
     postMouseDrag(from: sourcePoint, to: destinationPoint)
-    wait(0.8)
+    for _ in 0..<30 {
+        if readEvents().filter({ $0["event"] == "window_moved_by_drag" }).count > moveEventCount {
+            break
+        }
+        wait(0.1)
+    }
 
     let movedWindowCounts = stageWindowCounts(in: readState())
+    info("  State after drop: windows=\(movedWindowCounts)")
     let _ = takeScreenshot("11_window_drop_refreshed")
     test("Dropping a window updates the source and destination stage models") {
         readEvents().filter { $0["event"] == "window_moved_by_drag" }.count > moveEventCount
@@ -800,8 +827,14 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         activeStageIndex: destinationStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
     ) {
+        info("  Reverse drag path: \(returnedWindowPoint) -> \(returnedStagePoint)")
         postMouseDrag(from: returnedWindowPoint, to: returnedStagePoint)
-        wait(0.8)
+        for _ in 0..<30 {
+            if readEvents().filter({ $0["event"] == "window_moved_by_drag" }).count > moveEventCount + 1 {
+                break
+            }
+            wait(0.1)
+        }
         test("The refreshed destination plate supports an immediate reverse drag") {
             readEvents().filter { $0["event"] == "window_moved_by_drag" }.count > moveEventCount + 1
                 && stageWindowCounts(in: readState()) == preparedWindowCounts
