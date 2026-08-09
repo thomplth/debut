@@ -225,6 +225,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             cycleStage(forward: false)
         case .jumpToStage(let index):
             jumpToStage(index: index - 1)
+        case .jumpToLastStage:
+            jumpToStage(index: stageManager.stages.count - 1)
         case .switchToStage(let position):
             quickSwitchToStage(index: position - 1)
         case .newStageBelow:
