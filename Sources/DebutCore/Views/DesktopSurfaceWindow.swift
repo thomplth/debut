@@ -9,6 +9,105 @@ struct DesktopWallpaper {
 }
 
 @MainActor
+struct StoredWallpaperChoice {
+    let url: URL?
+    let fillColor: NSColor
+}
+
+@MainActor
+enum WallpaperStoreResolver {
+    static func choice(from data: Data) -> StoredWallpaperChoice? {
+        guard let root = try? PropertyListSerialization.propertyList(
+            from: data,
+            options: [],
+            format: nil
+        ) else { return nil }
+
+        var desktops: [(Date, [String: Any])] = []
+        collectDesktops(in: root, into: &desktops)
+        guard let desktop = desktops.max(by: { $0.0 < $1.0 })?.1,
+              let content = desktop["Content"] as? [String: Any]
+        else { return nil }
+
+        let url = ((content["Choices"] as? [[String: Any]])?.first)
+            .flatMap(choiceURL)
+        let fillColor = (content["EncodedOptionValues"] as? Data)
+            .flatMap(colorFromOptions) ?? .black
+        return StoredWallpaperChoice(url: url, fillColor: fillColor)
+    }
+
+    private static func collectDesktops(
+        in value: Any,
+        into results: inout [(Date, [String: Any])]
+    ) {
+        if let dictionary = value as? [String: Any] {
+            if let desktop = dictionary["Desktop"] as? [String: Any] {
+                results.append((desktop["LastUse"] as? Date ?? .distantPast, desktop))
+            }
+            for child in dictionary.values {
+                collectDesktops(in: child, into: &results)
+            }
+        } else if let array = value as? [Any] {
+            for child in array {
+                collectDesktops(in: child, into: &results)
+            }
+        }
+    }
+
+    private static func choiceURL(_ choice: [String: Any]) -> URL? {
+        if let files = choice["Files"] as? [String],
+           let file = files.first {
+            return wallpaperURL(from: file)
+        }
+        guard let configurationData = choice["Configuration"] as? Data,
+              let configuration = try? PropertyListSerialization.propertyList(
+                from: configurationData,
+                options: [],
+                format: nil
+              ) as? [String: Any],
+              let urlContainer = configuration["url"] as? [String: Any],
+              let relative = urlContainer["relative"] as? String
+        else { return nil }
+        return wallpaperURL(from: relative)
+    }
+
+    private static func wallpaperURL(from value: String) -> URL {
+        if let url = URL(string: value), url.scheme != nil {
+            return url
+        }
+        return URL(fileURLWithPath: value)
+    }
+
+    private static func colorFromOptions(_ data: Data) -> NSColor? {
+        guard let options = try? PropertyListSerialization.propertyList(
+            from: data,
+            options: [],
+            format: nil
+        ) as? [String: Any],
+        let values = options["values"] as? [String: Any],
+        let customColor = values["customColor"] as? [String: Any],
+        let color = customColor["color"] as? [String: Any],
+        let zero = color["_0"] as? [String: Any],
+        let innerColor = zero["color"] as? [String: Any],
+        let rawComponents = innerColor["components"] as? [Any]
+        else { return nil }
+
+        let components = rawComponents.compactMap { value -> Double? in
+            if let number = value as? NSNumber { return number.doubleValue }
+            if let string = value as? String { return Double(string) }
+            return nil
+        }
+        guard components.count >= 3 else { return nil }
+        return NSColor(
+            deviceRed: components[0],
+            green: components[1],
+            blue: components[2],
+            alpha: components.count > 3 ? components[3] : 1
+        )
+    }
+}
+
+@MainActor
 protocol DesktopWallpaperProviding: AnyObject {
     func wallpaper(for screen: NSScreen) -> DesktopWallpaper?
 }
@@ -21,29 +120,56 @@ protocol DesktopWallpaperChangeObserving: AnyObject {
 @MainActor
 final class SystemDesktopWallpaperProvider: DesktopWallpaperProviding {
     private let workspace: NSWorkspace
+    private let wallpaperStoreURL: URL
 
-    init(workspace: NSWorkspace = .shared) {
+    init(
+        workspace: NSWorkspace = .shared,
+        wallpaperStoreURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.apple.wallpaper/Store/Index.plist")
+    ) {
         self.workspace = workspace
+        self.wallpaperStoreURL = wallpaperStoreURL
     }
 
     func wallpaper(for screen: NSScreen) -> DesktopWallpaper? {
-        guard let url = workspace.desktopImageURL(for: screen),
-              let image = NSImage(contentsOf: url)
-        else { return nil }
-
         let options = workspace.desktopImageOptions(for: screen) ?? [:]
         let scaling = (options[.imageScaling] as? NSNumber)
             .flatMap { NSImageScaling(rawValue: $0.uintValue) }
             ?? .scaleProportionallyUpOrDown
         let allowsClipping = (options[.allowClipping] as? NSNumber)?.boolValue ?? false
-        let fillColor = options[.fillColor] as? NSColor ?? .black
+        let workspaceFillColor = options[.fillColor] as? NSColor ?? .black
+
+        if let data = try? Data(contentsOf: wallpaperStoreURL),
+           let choice = WallpaperStoreResolver.choice(from: data) {
+            let image = choice.url.flatMap(NSImage.init(contentsOf:))
+                ?? Self.solidImage(color: choice.fillColor)
+            return DesktopWallpaper(
+                image: image,
+                scaling: scaling,
+                allowsClipping: allowsClipping,
+                fillColor: choice.fillColor
+            )
+        }
+
+        guard let url = workspace.desktopImageURL(for: screen),
+              let image = NSImage(contentsOf: url)
+        else { return nil }
 
         return DesktopWallpaper(
             image: image,
             scaling: scaling,
             allowsClipping: allowsClipping,
-            fillColor: fillColor
+            fillColor: workspaceFillColor
         )
+    }
+
+    private static func solidImage(color: NSColor) -> NSImage {
+        let image = NSImage(size: NSSize(width: 1, height: 1))
+        image.lockFocus()
+        color.setFill()
+        NSRect(x: 0, y: 0, width: 1, height: 1).fill()
+        image.unlockFocus()
+        return image
     }
 }
 
