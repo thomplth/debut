@@ -142,6 +142,8 @@ final class KeyRecorderNSView: NSView {
 
         let combo = KeyCombo(
             keyCode: keyCode,
+            command: event.modifierFlags.contains(.command),
+            control: event.modifierFlags.contains(.control),
             shift: event.modifierFlags.contains(.shift),
             option: event.modifierFlags.contains(.option)
         )
