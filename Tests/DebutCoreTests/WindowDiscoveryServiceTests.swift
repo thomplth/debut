@@ -473,6 +473,32 @@ struct WindowDiscoveryServiceTests {
         #expect(attempts == 1)
     }
 
+    @Test("Reset clears tracking caches and allows live windows to be armed again")
+    func resetWindowTracking() {
+        let processExitMonitor = MockProcessExitMonitor()
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: processExitMonitor
+        )
+        var attempts = 0
+        service.armingOverride = { _, _ in
+            attempts += 1
+            return .armed
+        }
+        service.registerTracking(windowID: 1, pid: 10)
+
+        service.resetWindowTracking()
+
+        #expect(service.diagnosticTrackingSnapshot.knownWindowIDs.isEmpty)
+        #expect(service.diagnosticTrackingSnapshot.armedWindowIDs.isEmpty)
+        #expect(service.diagnosticTrackingSnapshot.windowOwners.isEmpty)
+        #expect(processExitMonitor.monitoredPIDs.isEmpty)
+
+        service.registerTracking(windowID: 1, pid: 10)
+        #expect(attempts == 2)
+        #expect(service.armedWindowIDs == [1])
+    }
+
     @Test("An unresolvable window element is recorded as unarmed, not silently dropped")
     func unresolvableElementIsRecordedUnarmed() {
         let service = WindowDiscoveryService(
