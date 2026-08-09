@@ -224,6 +224,20 @@ struct StageControllerTests {
         #expect(controller.selectedStageIndex == 1)
     }
 
+    @Test("Overlay last-stage shortcut selects the final plate")
+    func overlayLastStageShortcut() {
+        let (controller, _, keyboardSvc) = makeController()
+        for _ in 0..<3 {
+            controller.stageManager.createStage(position: .below)
+        }
+
+        keyboardSvc.simulateEvent(.cmdOptionTabHold)
+        keyboardSvc.simulateEvent(.jumpToLastStage)
+
+        #expect(controller.isStageManagerVisible)
+        #expect(controller.selectedStageIndex == controller.stageManager.stages.count - 1)
+    }
+
     @Test("Escape discards")
     func escape() {
         let (controller, _, keyboardSvc) = makeController()

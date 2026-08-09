@@ -32,7 +32,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .jumpToStage6: "Jump to stage 6"
         case .jumpToStage7: "Jump to stage 7"
         case .jumpToStage8: "Jump to stage 8"
-        case .jumpToStage9: "Jump to stage 9"
+        case .jumpToStage9: "Jump to last stage"
         case .newStageBelow: "New stage below"
         case .newStageAbove: "New stage above"
         case .deleteStage: "Delete stage"
@@ -58,7 +58,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .jumpToStage6: .jumpToStage(6)
         case .jumpToStage7: .jumpToStage(7)
         case .jumpToStage8: .jumpToStage(8)
-        case .jumpToStage9: .jumpToStage(9)
+        case .jumpToStage9: .jumpToLastStage
         case .newStageBelow: .newStageBelow
         case .newStageAbove: .newStageAbove
         case .deleteStage: .deleteStage

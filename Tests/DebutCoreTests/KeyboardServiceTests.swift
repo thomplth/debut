@@ -70,6 +70,51 @@ struct KeyboardServiceTests {
         ])
     }
 
+    @Test("Overlay 9 targets the last stage and 0 has no default binding")
+    func lastStageKeyMapping() {
+        let bindings = KeyBindings()
+
+        #expect(KeyAction.jumpToStage9.displayName == "Jump to last stage")
+        #expect(KeyAction.jumpToStage9.toKeyEvent() == .jumpToLastStage)
+        #expect(bindings.action(for: KeyCombo(keyCode: kVK_ANSI_9)) == .jumpToStage9)
+        #expect(bindings.action(for: KeyCombo(keyCode: kVK_ANSI_0)) == nil)
+    }
+
+    @Test("Visible overlay dispatches Command-9 and ignores Command-0")
+    func visibleOverlayDigitDispatch() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let stageModeEvent = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        stageModeEvent.flags = [.maskCommand, .maskAlternate]
+        #expect(service.handleCGEvent(type: .keyDown, event: stageModeEvent) == nil)
+        service.overlayVisible = true
+
+        let nineEvent = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_9),
+            keyDown: true
+        )!
+        nineEvent.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: nineEvent) == nil)
+
+        let zeroEvent = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_0),
+            keyDown: true
+        )!
+        zeroEvent.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: zeroEvent) == nil)
+
+        #expect(delegate.receivedEvents == [.cmdOptionTabHold, .jumpToLastStage])
+    }
+
     @Test("Stage management events")
     func stageManagement() {
         let svc = MockKeyboardService()
