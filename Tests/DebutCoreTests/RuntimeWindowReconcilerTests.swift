@@ -569,4 +569,78 @@ struct RuntimeWindowReconcilerTests {
         #expect(manager.dormantWindowAssignments.count == 1)
         #expect(manager.stageContainingWindow(windowID: 101) == activeStage)
     }
+
+    // MARK: - Assignment events
+
+    @Test("Adding a new window reports which window landed in which stage")
+    func reportsAddedWindowEvent() {
+        var manager = StageManager()
+        manager.createStage(position: .below)
+        manager.activateStage(id: manager.stages[1].id)
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(7, bundleID: "company.thebrowser.dia", ownerName: "Dia", title: "Develop: repo")],
+                allWindowIDs: [7]
+            ),
+            stageManager: &manager
+        )
+
+        #expect(result.events.count == 1)
+        let event = result.events[0]
+        #expect(event.kind == .assigned)
+        #expect(event.windowID == 7)
+        #expect(event.bundleID == "company.thebrowser.dia")
+        #expect(event.windowTitle == "Develop: repo")
+        #expect(event.toStage == 1)
+        #expect(event.fromStage == nil)
+        #expect(event.reason == .new)
+    }
+
+    @Test("Recovering a replaced window reports the stage it was restored into")
+    func reportsRecoveredWindowEvent() {
+        var manager = StageManager()
+        manager.createStage(position: .below)
+        let secondStage = manager.stages[1].id
+        manager.addWindow(
+            StageWindow(windowID: 22359, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Develop: repo", ownerPID: 10),
+            toStageID: secondStage
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(61000, bundleID: "company.thebrowser.dia", ownerName: "Dia", title: "Develop: repo")],
+                allWindowIDs: [61000]
+            ),
+            stageManager: &manager
+        )
+
+        let recovered = result.events.filter { $0.reason == .recoveredExact }
+        #expect(recovered.count == 1)
+        #expect(recovered.first?.windowID == 61000)
+        #expect(recovered.first?.toStage == 1)
+        #expect(result.events.contains { $0.reason == .new } == false)
+    }
+
+    @Test("Bundle-only recovery is reported with its own reason")
+    func reportsBundleRecoveryReason() {
+        var manager = StageManager()
+        manager.addWindow(
+            StageWindow(windowID: 22359, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Develop: old tab", ownerPID: 10),
+            toStageID: manager.activeStageID
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(61000, bundleID: "company.thebrowser.dia", ownerName: "Dia", title: "Develop: new tab")],
+                allWindowIDs: [61000]
+            ),
+            stageManager: &manager
+        )
+
+        #expect(result.events.map(\.reason) == [.recoveredBundle])
+    }
 }

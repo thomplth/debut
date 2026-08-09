@@ -158,6 +158,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             "reassigned": "\(result.reassignedCount)",
             "dormant": "\(stageManager.dormantWindowAssignments.count)",
         ])
+        for event in result.events {
+            var details = event.diagnosticDetails
+            details["trigger"] = "startup_reconcile"
+            DiagnosticReporter.shared.report("window_\(event.kind.rawValue)", details: details)
+        }
     }
 
     public func startObserving() {
@@ -217,15 +222,40 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private func trackWindow(windowID: CGWindowID, pid: pid_t) {
         // Already tracking this window
         if perAppObservers[pid]?.trackedWindows[windowID] != nil { return }
-        guard let observer = getOrCreateObserver(for: pid),
-              let axElement = axWindowElement(for: windowID, pid: pid)
-        else { return }
+        guard let observer = getOrCreateObserver(for: pid) else {
+            reportTrackingFailure(windowID: windowID, pid: pid, step: "observer_create", error: nil)
+            return
+        }
+        guard let axElement = axWindowElement(for: windowID, pid: pid) else {
+            reportTrackingFailure(windowID: windowID, pid: pid, step: "element_lookup", error: nil)
+            return
+        }
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         // Register destroy + title notifications on this specific window element
-        AXObserverAddNotification(observer, axElement, kAXUIElementDestroyedNotification as CFString, selfPtr)
-        AXObserverAddNotification(observer, axElement, kAXTitleChangedNotification as CFString, selfPtr)
+        let destroyed = AXObserverAddNotification(observer, axElement, kAXUIElementDestroyedNotification as CFString, selfPtr)
+        let titled = AXObserverAddNotification(observer, axElement, kAXTitleChangedNotification as CFString, selfPtr)
+        if destroyed != .success && destroyed != .notificationAlreadyRegistered {
+            reportTrackingFailure(windowID: windowID, pid: pid, step: "add_destroy_notification", error: destroyed)
+        }
+        if titled != .success && titled != .notificationAlreadyRegistered {
+            reportTrackingFailure(windowID: windowID, pid: pid, step: "add_title_notification", error: titled)
+        }
         perAppObservers[pid]?.trackedWindows[windowID] = axElement
+    }
+
+    private func reportTrackingFailure(
+        windowID: CGWindowID,
+        pid: pid_t,
+        step: String,
+        error: AXError?
+    ) {
+        DiagnosticReporter.shared.report("tracking_failed", details: [
+            "windowID": "\(windowID)",
+            "pid": "\(pid)",
+            "step": step,
+            "axError": error.map { "\($0.rawValue)" } ?? "none",
+        ])
     }
 
     private func getOrCreateObserver(for pid: pid_t) -> AXObserver? {

@@ -182,7 +182,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     // MARK: - KeyboardEventDelegate
 
     public func handleKeyEvent(_ event: DebutKeyEvent) {
-        diag.report("key_event", details: ["keyEvent": "\(event)"])
+        diag.report("key_event", level: .transient, details: ["keyEvent": "\(event)"])
         if let action = event.commandHintAction {
             onCommandUsed?(action)
         }

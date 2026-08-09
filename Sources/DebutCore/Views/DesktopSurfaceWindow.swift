@@ -289,7 +289,7 @@ public final class DesktopSurfaceWindow: NSWindow {
             wallpaperProvider: SystemDesktopWallpaperProvider(),
             wallpaperChangeObserver: SystemDesktopWallpaperChangeObserver(),
             onWallpaperRefreshed: { loaded in
-                DiagnosticReporter.shared.report("desktop_wallpaper_refreshed", details: [
+                DiagnosticReporter.shared.report("desktop_wallpaper_refreshed", level: .transient, details: [
                     "loaded": "\(loaded)",
                 ])
             }
