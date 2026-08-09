@@ -5,6 +5,7 @@ cd "$(dirname "$0")/../.."
 
 workflow=".github/workflows/e2e.yml"
 runner="scripts/ci-e2e.sh"
+e2e_source="Sources/DebutE2E/main.swift"
 failures=0
 
 fail() {
@@ -35,6 +36,7 @@ expect_not_contains() {
 
 expect_file "$workflow"
 expect_file "$runner"
+expect_file "$e2e_source"
 
 if [[ -f "$workflow" ]]; then
     expect_contains "$workflow" '^  pull_request:' "E2E must run for pull requests"
@@ -56,12 +58,25 @@ if [[ -f "$runner" ]]; then
         "CI E2E must suppress the hosted runner's screen capture reminder"
     expect_contains "$runner" '/opt/hca/hosted-compute-agent' \
         "CI E2E must suppress capture reminders for the hosted runner process"
+    expect_contains "$runner" 'com\.apple\.symbolichotkeys' \
+        "CI E2E must configure system overview shortcuts in the disposable account"
+    expect_contains "$runner" 'AppleSymbolicHotKeys.*32' \
+        "CI E2E must enable the Mission Control shortcut"
+    expect_contains "$runner" 'AppleSymbolicHotKeys.*33' \
+        "CI E2E must enable the App Expose shortcut"
     expect_contains "$runner" 'killall replayd' \
         "CI E2E must reload replayd after changing its capture approval"
     expect_contains "$runner" './scripts/build-app.sh' "CI E2E entry point must build the app"
     expect_contains "$runner" '/Applications/Debut.app' "CI E2E entry point must install the app"
     expect_contains "$runner" '\.build/release/DebutE2E' \
         "CI E2E entry point must reuse the release suite built with the app"
+fi
+
+if [[ -f "$e2e_source" ]]; then
+    expect_contains "$e2e_source" 'postMouseHover\(to: handleHotspot\)' \
+        "E2E must generate continuous movement inside the stage handle hotspot"
+    expect_contains "$e2e_source" 'postMouseHover\(to: reverseHotspot\)' \
+        "E2E must generate continuous movement inside the reverse handle hotspot"
 fi
 
 expect_not_contains "scripts/rebuild.sh" 'e2e-test\.sh' \
