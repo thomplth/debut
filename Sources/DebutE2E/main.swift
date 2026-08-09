@@ -432,18 +432,44 @@ header("9. Hover and click a window card")
 let pointerSelectionCount = readEvents().filter {
     $0["event"] == "overlay_window_selected_by_pointer"
 }.count
+let pointerHoverCount = readEvents().filter {
+    $0["event"] == "overlay_pointer_selection_changed"
+}.count
+let pointerTarget = firstWindowCenter(in: readState())
+
+if let pointerTarget {
+    info("Placing pointer over the first window before opening the overlay at \(pointerTarget)")
+    postMouseMove(to: pointerTarget)
+    wait(0.3)
+} else {
+    fail("Could not calculate a stationary window-card target")
+}
 
 postFlagsChanged(flags: [.maskCommand])
 wait(0.1)
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
 wait(0.8)
 
-if let point = firstWindowCenter(in: readState()) {
-    info("Moving pointer to first window at \(point)")
-    postMouseMove(to: point)
+test("A stationary pointer does not select or magnify a window") {
+    readEvents().filter {
+        $0["event"] == "overlay_pointer_selection_changed"
+    }.count == pointerHoverCount
+}
+
+if let pointerTarget {
+    let movedPoint = CGPoint(x: pointerTarget.x + 8, y: pointerTarget.y)
+    info("Moving pointer within the first window to \(movedPoint)")
+    postMouseMove(to: movedPoint)
     wait(0.5)
     let _ = takeScreenshot("10_pointer_hover")
-    postMouseClick(at: point)
+    test("Moving the pointer enables hover selection") {
+        let hoverEvents = readEvents().filter {
+            $0["event"] == "overlay_pointer_selection_changed"
+        }
+        return hoverEvents.count > pointerHoverCount
+            && hoverEvents.last?["windowIndex"] == "0"
+    }
+    postMouseClick(at: movedPoint)
 } else {
     fail("Could not calculate a window-card click target")
 }
