@@ -68,6 +68,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 "eventTapRunning": "\(self.keyboardService.isRunning)",
                 "eventTapStarted": "\(self.keyboardServiceStarted)",
                 "windowsInActiveStage": "\(self.stageManager.activeStage.windows.count)",
+                "maxWindowsInStage": "\(self.stageManager.stages.map(\.windows.count).max() ?? 0)",
             ]
         }
     }
@@ -490,6 +491,18 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             "windowIndex": "\(selectedWindowIndex)",
             "targetStage": stageLabel(forID: targetStage.id),
         ])
+    }
+
+    /// Commit a window chosen with the pointer without waiting for Command release.
+    public func commitOverlaySelection(stageIndex: Int, windowIndex: Int) {
+        guard isStageManagerVisible,
+              stageManager.stages.indices.contains(stageIndex),
+              stageManager.stages[stageIndex].windows.indices.contains(windowIndex)
+        else { return }
+
+        selectedStageIndex = stageIndex
+        selectedWindowIndex = windowIndex
+        commitSelection()
     }
 
     /// Close the overlay but keep the Cmd session alive.

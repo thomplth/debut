@@ -5,7 +5,7 @@ struct WindowDragState: Equatable {
     let windowID: CGWindowID
     let sourceStageIndex: Int
     let sourceWindowIndex: Int
-    var offset: CGSize
+    var location: CGPoint
     var dropTargetStageIndex: Int?
 }
 
@@ -13,7 +13,12 @@ struct StageDragState: Equatable {
     let stageIndex: Int
     let stageID: UUID
     var offset: CGSize
-    var insertionIndex: Int?
+    var destinationIndex: Int?
+}
+
+struct PointerSelection: Equatable {
+    let stageIndex: Int
+    let windowIndex: Int
 }
 
 struct PlateFramePreferenceKey: PreferenceKey {

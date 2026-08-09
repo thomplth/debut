@@ -38,9 +38,12 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     }
 
     private func writeDiagnosticFile() {
-        queue.async { [self] in
-            let state = stateProvider?() ?? [:]
-            let log = eventLog
+        // Snapshot controller state before returning to its caller. Evaluating the
+        // provider later on this queue can race the controller's next mutation.
+        let (state, log) = queue.sync {
+            (stateProvider?() ?? [:], eventLog)
+        }
+        queue.async {
             let output: [String: Any] = [
                 "state": state,
                 "events": log,
