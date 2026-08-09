@@ -209,13 +209,8 @@ func windowCenter(
     inactiveScale: CGFloat
 ) -> CGPoint? {
     guard windowCounts.indices.contains(stageIndex),
-          (0..<windowCounts[stageIndex]).contains(windowIndex),
-          let center = plateCenter(
-            stageIndex: stageIndex,
-            windowCounts: windowCounts,
-            activeStageIndex: activeStageIndex,
-            inactiveScale: inactiveScale
-          )
+          windowCounts.indices.contains(activeStageIndex),
+          (0..<windowCounts[stageIndex]).contains(windowIndex)
     else { return nil }
 
     let screen = CGDisplayBounds(CGMainDisplayID())
@@ -224,6 +219,23 @@ func windowCenter(
         screenWidth: screen.width
     )
     let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
+    let layoutScale: (Int) -> CGFloat = { $0 == activeStageIndex ? 1 : inactiveScale }
+    let topWithinLayout: (Int) -> CGFloat = { index in
+        (0..<index).reduce(0) { partial, precedingIndex in
+            partial + plateHeight * layoutScale(precedingIndex) + 14
+        }
+    }
+    let layoutOffset = screen.midY
+        - topWithinLayout(activeStageIndex)
+        - plateHeight / 2
+    // Window hit testing is expressed in the overlay window's screen space,
+    // unlike drag destinations, which use the named SwiftUI coordinate space.
+    let center = CGPoint(
+        x: screen.midX,
+        y: layoutOffset
+            + topWithinLayout(stageIndex)
+            + plateHeight * layoutScale(stageIndex) / 2
+    )
     let plateWidth = PlateConstants.plateWidth(
         forWindowCount: windowCounts[stageIndex],
         thumbnailWidth: thumbnail.width
@@ -241,7 +253,7 @@ func windowCenter(
         + thumbnail.height / 2
     return CGPoint(
         x: center.x + (unscaledX - plateWidth / 2) * scale,
-        y: center.y - (unscaledY - plateHeight / 2) * scale
+        y: center.y + (unscaledY - plateHeight / 2) * scale
     )
 }
 
