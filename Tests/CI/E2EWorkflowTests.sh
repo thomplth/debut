@@ -68,6 +68,8 @@ if [[ -f "$runner" ]]; then
         "CI E2E must grant the ad-hoc executable path screen capture access"
     expect_contains "$runner" 'launchctl setenv DEBUT_DISABLE_WINDOW_PREVIEWS 1' \
         "CI E2E must avoid live preview capture in the disposable app"
+    expect_contains "$runner" 'kTCCServicePostEvent' \
+        "CI E2E must authorize the compiled suite to inject HID drag events"
     expect_not_contains "$runner" 'sudo sqlite3 "\$user_tcc_db"' \
         "CI E2E must update the user TCC database as the runner user"
     expect_contains "$runner" '/opt/hca/hosted-compute-agent' \
