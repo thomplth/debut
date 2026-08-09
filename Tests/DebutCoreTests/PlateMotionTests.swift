@@ -33,6 +33,23 @@ struct PlateMotionTests {
         #expect(PlateMotion.plateScale(isSelected: true, isInteractionTarget: false, inactiveScale: 0.72) == 1)
     }
 
+    @Test("Magnifying a drag target does not expand its layout slot")
+    func interactionTargetKeepsInactiveLayoutScale() {
+        let visualScale = PlateMotion.plateScale(
+            isSelected: false,
+            isInteractionTarget: true,
+            inactiveScale: 0.72
+        )
+        let layoutScale = PlateMotion.plateLayoutScale(
+            isSelected: false,
+            inactiveScale: 0.72
+        )
+
+        #expect(visualScale == 1)
+        #expect(layoutScale == 0.72)
+        #expect(PlateMotion.plateLayoutScale(isSelected: true, inactiveScale: 0.72) == 1)
+    }
+
     @Test("Selected windows magnify instead of using a selection indicator")
     func selectedWindowScale() {
         #expect(PlateMotion.windowScale(isSelected: false, isDragging: false) == 1)

@@ -50,6 +50,13 @@ enum PlateMotion {
         isSelected || isInteractionTarget ? 1 : inactiveScale
     }
 
+    static func plateLayoutScale(
+        isSelected: Bool,
+        inactiveScale: CGFloat
+    ) -> CGFloat {
+        isSelected ? 1 : inactiveScale
+    }
+
     static func windowScale(isSelected: Bool, isDragging: Bool) -> CGFloat {
         if isDragging { return 0.96 }
         return isSelected ? 1.06 : 1
@@ -243,6 +250,10 @@ public struct OverlaySwiftUIView: View {
                             isInteractionTarget: isInteractionTarget,
                             inactiveScale: inactiveScale
                         )
+                        let layoutScale = PlateMotion.plateLayoutScale(
+                            isSelected: isActive,
+                            inactiveScale: inactiveScale
+                        )
                         let lift = PlateMotion.lift(isActive: isActive || isInteractionTarget)
                         let selectedWindowIndex = pointerSelection?.stageIndex == index
                             ? pointerSelection?.windowIndex
@@ -284,7 +295,10 @@ public struct OverlaySwiftUIView: View {
                         )
                         .frame(width: plateWidth, height: pHeight)
                         .scaleEffect(scale)
-                        .frame(width: plateWidth * scale, height: pHeight * scale)
+                        .frame(
+                            width: plateWidth * layoutScale,
+                            height: pHeight * layoutScale
+                        )
                         .shadow(
                             color: .black.opacity(lift.shadowOpacity),
                             radius: lift.shadowRadius,
