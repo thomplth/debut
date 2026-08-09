@@ -29,6 +29,7 @@ trap cleanup EXIT
 echo "Suppressing the disposable runner's screen capture reminder..."
 mkdir -p "$(dirname "$screen_capture_approvals")"
 defaults write "$screen_capture_approvals" "/bin/bash" -date "3024-01-01 00:00:00 +0000"
+defaults write "$screen_capture_approvals" "/opt/hca/hosted-compute-agent" -date "3024-01-01 00:00:00 +0000"
 killall cfprefsd 2>/dev/null || true
 killall replayd 2>/dev/null || true
 sleep 1
