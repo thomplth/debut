@@ -149,6 +149,16 @@ public struct StageManager: Codable, Sendable {
 
     // MARK: - Window management
 
+    /// Discards every cached window assignment and stage while keeping reusable
+    /// templates. The caller repopulates the new default stage from a fresh AX
+    /// discovery so ephemeral IDs and dormant ghosts cannot survive the reset.
+    public mutating func resetWindowCache() {
+        let initial = Stage()
+        stages = [initial]
+        activeStageID = initial.id
+        dormantWindowAssignments.removeAll()
+    }
+
     public mutating func addWindow(_ window: StageWindow, toStageID stageID: UUID) {
         guard let index = stages.firstIndex(where: { $0.id == stageID }) else { return }
         stages[index].addWindow(window)

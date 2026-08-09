@@ -25,12 +25,34 @@ public final class SettingsWindow: NSWindow {
 public struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
     @State private var selectedSection: SettingsSection = .templates
+    @State private var showingResetConfirmation = false
 
     public init(viewModel: SettingsViewModel = SettingsViewModel()) {
         self._viewModel = State(initialValue: viewModel)
     }
 
     public var body: some View {
+        settingsNavigation
+            .frame(minWidth: 600, minHeight: 400)
+            .onChange(of: viewModel.settings.excludedBundleIDs) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.quickSwitchExcludedBundleIDs) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.launchAtLogin) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.showInMenuBar) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.confirmStageDeletion) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.animationsEnabled) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.glassStyle) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.plateCornerRadius) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.selectionOpacity) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.selectionBorderWidth) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.selectionBorderOpacity) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.inactivePlateScale) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.overlayPresentationDelay) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.keyBindings) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.commandHintVisibility) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings.commandUsageCounts) { _, _ in saveSettings() }
+    }
+
+    private var settingsNavigation: some View {
         NavigationSplitView {
             List(SettingsSection.allCases, id: \.self, selection: $selectedSection) { section in
                 Label(section.rawValue, systemImage: sectionIcon(section))
@@ -51,6 +73,8 @@ public struct SettingsView: View {
                             .id(SettingsSection.app)
                         keyboardShortcutsSection
                             .id(SettingsSection.keyboardShortcuts)
+                        troubleshootingSection
+                            .id(SettingsSection.troubleshooting)
                         aboutSection
                             .id(SettingsSection.about)
                     }
@@ -64,23 +88,14 @@ public struct SettingsView: View {
                 }
             }
         }
-        .frame(minWidth: 600, minHeight: 400)
-        .onChange(of: viewModel.settings.excludedBundleIDs) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.quickSwitchExcludedBundleIDs) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.launchAtLogin) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.showInMenuBar) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.confirmStageDeletion) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.animationsEnabled) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.glassStyle) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.plateCornerRadius) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.selectionOpacity) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.selectionBorderWidth) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.selectionBorderOpacity) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.inactivePlateScale) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.overlayPresentationDelay) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.keyBindings) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.commandHintVisibility) { _, _ in saveSettings() }
-        .onChange(of: viewModel.settings.commandUsageCounts) { _, _ in saveSettings() }
+        .alert("Reset Window Cache?", isPresented: $showingResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset Cache", role: .destructive) {
+                viewModel.resetWindowCache()
+            }
+        } message: {
+            Text("This removes all stage window assignments, including dormant windows, and rebuilds one stage from windows Debut can currently discover. Settings and saved templates are preserved.")
+        }
     }
 
     // MARK: - Helpers
@@ -508,6 +523,46 @@ public struct SettingsView: View {
         }
     }
 
+    private var troubleshootingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Troubleshooting")
+                .font(.title2.bold())
+
+            Text("Export a snapshot before resetting so window assignments, Accessibility tracking, lifecycle events, and persisted state can be investigated.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Diagnostic data")
+                    Text("Includes app and window names and window titles.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Export Diagnostic Data…") {
+                    viewModel.exportDiagnosticData()
+                }
+            }
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Window cache")
+                    Text("Use this when closed or duplicate windows remain in Debut.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Reset Window Cache…", role: .destructive) {
+                    showingResetConfirmation = true
+                }
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func settingsToggle(_ label: String, isOn: Binding<Bool>) -> some View {
@@ -535,6 +590,7 @@ public struct SettingsView: View {
         case .excludedApps: "eye.slash"
         case .app: "gearshape"
         case .keyboardShortcuts: "keyboard"
+        case .troubleshooting: "stethoscope"
         case .about: "info.circle"
         }
     }

@@ -29,7 +29,33 @@ struct SettingsViewModelTests {
     @Test("Sections list")
     func sections() {
         let vm = SettingsViewModel()
-        #expect(vm.sections == [.appearance, .templates, .excludedApps, .app, .keyboardShortcuts, .about])
+        #expect(vm.sections == [
+            .appearance,
+            .templates,
+            .excludedApps,
+            .app,
+            .keyboardShortcuts,
+            .troubleshooting,
+            .about,
+        ])
+    }
+
+    @Test("Troubleshooting actions are forwarded to the app")
+    func troubleshootingActions() {
+        final class Calls: @unchecked Sendable {
+            var reset = 0
+            var export = 0
+        }
+        let calls = Calls()
+        var vm = SettingsViewModel()
+        vm.onResetWindowCache = { calls.reset += 1 }
+        vm.onExportDiagnosticData = { calls.export += 1 }
+
+        vm.resetWindowCache()
+        vm.exportDiagnosticData()
+
+        #expect(calls.reset == 1)
+        #expect(calls.export == 1)
     }
 
     @Test("Template from StageManager")
