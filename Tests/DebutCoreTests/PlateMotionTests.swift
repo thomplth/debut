@@ -1,4 +1,5 @@
 import Testing
+import CoreGraphics
 @testable import DebutCore
 
 @Suite("Plate motion")
@@ -111,5 +112,21 @@ struct PlateMotionTests {
         #expect(PlateInteraction.pointerSelection(current: first, target: second, isHovering: true) == second)
         #expect(PlateInteraction.pointerSelection(current: second, target: first, isHovering: false) == second)
         #expect(PlateInteraction.pointerSelection(current: second, target: second, isHovering: false) == nil)
+    }
+
+    @Test("A stationary pointer is ignored until it moves after the overlay appears")
+    func stationaryPointerDoesNotSelect() {
+        var gate = PointerMovementGate()
+        let initialLocation = CGPoint(x: 400, y: 300)
+
+        gate.reset(at: initialLocation)
+
+        let acceptedWithoutMovement = gate.observe(at: initialLocation)
+        let acceptedAfterMovement = gate.observe(at: CGPoint(x: 401, y: 300))
+        let remainedEnabled = gate.observe(at: initialLocation)
+
+        #expect(!acceptedWithoutMovement)
+        #expect(acceptedAfterMovement)
+        #expect(remainedEnabled)
     }
 }

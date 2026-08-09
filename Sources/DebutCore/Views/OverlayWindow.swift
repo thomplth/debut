@@ -6,6 +6,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     public var onWindowSelected: ((Int, Int) -> Void)?
     public var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
     public var onStageReordered: ((Int, Int) -> Void)?
+    public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
 
     public init() {
         let screen = NSScreen.main ?? NSScreen.screens[0]
@@ -29,7 +30,8 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
             viewModel: viewModel,
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
-            onStageReordered: onStageReordered
+            onStageReordered: onStageReordered,
+            onPointerSelectionChanged: onPointerSelectionChanged
         )
         if let hostingView {
             hostingView.rootView = view

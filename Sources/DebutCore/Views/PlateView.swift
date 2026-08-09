@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import CoreGraphics
 
@@ -86,6 +87,30 @@ enum PlateInteraction {
     }
 }
 
+struct PointerMovementGate {
+    private var initialLocation: CGPoint?
+    private(set) var hasMoved = false
+
+    init(initialLocation: CGPoint? = nil) {
+        self.initialLocation = initialLocation
+    }
+
+    mutating func reset(at location: CGPoint) {
+        initialLocation = location
+        hasMoved = false
+    }
+
+    mutating func observe(at location: CGPoint) -> Bool {
+        if hasMoved { return true }
+        guard let initialLocation else {
+            reset(at: location)
+            return false
+        }
+        hasMoved = initialLocation != location
+        return hasMoved
+    }
+}
+
 public struct PlateConstants {
     public static let thumbnailWidth: CGFloat = 160
     public static let thumbnailHeight: CGFloat = 100
@@ -136,10 +161,12 @@ public struct OverlaySwiftUIView: View {
     public var onWindowSelected: ((Int, Int) -> Void)?
     public var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
     public var onStageReordered: ((Int, Int) -> Void)?
+    public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
 
     @State private var windowDrag: WindowDragState?
     @State private var stageDrag: StageDragState?
     @State private var pointerSelection: PointerSelection?
+    @State private var pointerMovementGate: PointerMovementGate
     @State private var plateFrames: [Int: CGRect] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -147,12 +174,17 @@ public struct OverlaySwiftUIView: View {
         viewModel: OverlayViewModel,
         onWindowSelected: ((Int, Int) -> Void)? = nil,
         onWindowMoved: ((CGWindowID, Int, Int) -> Void)? = nil,
-        onStageReordered: ((Int, Int) -> Void)? = nil
+        onStageReordered: ((Int, Int) -> Void)? = nil,
+        onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil
     ) {
         self.viewModel = viewModel
         self.onWindowSelected = onWindowSelected
         self.onWindowMoved = onWindowMoved
         self.onStageReordered = onStageReordered
+        self.onPointerSelectionChanged = onPointerSelectionChanged
+        _pointerMovementGate = State(
+            initialValue: PointerMovementGate(initialLocation: NSEvent.mouseLocation)
+        )
     }
 
     public var body: some View {
@@ -214,11 +246,20 @@ public struct OverlaySwiftUIView: View {
                             windowDrag: $windowDrag,
                             plateFrames: $plateFrames,
                             stageIndex: index,
-                            onPointerSelectionChanged: { selection, isHovering in
-                                pointerSelection = PlateInteraction.pointerSelection(
+                            onPointerSelectionChanged: { selection, isHovering, location in
+                                if isHovering && !pointerMovementGate.observe(at: location) {
+                                    return
+                                }
+                                let nextSelection = PlateInteraction.pointerSelection(
                                     current: pointerSelection,
                                     target: selection,
                                     isHovering: isHovering
+                                )
+                                guard nextSelection != pointerSelection else { return }
+                                pointerSelection = nextSelection
+                                onPointerSelectionChanged?(
+                                    nextSelection?.stageIndex,
+                                    nextSelection?.windowIndex
                                 )
                             },
                             onWindowSelected: onWindowSelected,
@@ -326,7 +367,7 @@ struct PlateSwiftUIView: View {
     @Binding var windowDrag: WindowDragState?
     @Binding var plateFrames: [Int: CGRect]
     let stageIndex: Int
-    var onPointerSelectionChanged: ((PointerSelection, Bool) -> Void)?
+    var onPointerSelectionChanged: ((PointerSelection, Bool, CGPoint) -> Void)?
     var onWindowSelected: ((Int, Int) -> Void)?
     var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
 
@@ -355,11 +396,25 @@ struct PlateSwiftUIView: View {
                             )
                         )
                         .opacity(isDragging ? 0.3 : 1.0)
-                        .onHover { isHovering in
-                            onPointerSelectionChanged?(
-                                PointerSelection(stageIndex: stageIndex, windowIndex: index),
-                                isHovering
+                        .onContinuousHover { phase in
+                            let selection = PointerSelection(
+                                stageIndex: stageIndex,
+                                windowIndex: index
                             )
+                            switch phase {
+                            case .active:
+                                onPointerSelectionChanged?(
+                                    selection,
+                                    true,
+                                    NSEvent.mouseLocation
+                                )
+                            case .ended:
+                                onPointerSelectionChanged?(
+                                    selection,
+                                    false,
+                                    NSEvent.mouseLocation
+                                )
+                            }
                         }
                         .onTapGesture {
                             onWindowSelected?(stageIndex, index)

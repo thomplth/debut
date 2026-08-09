@@ -360,6 +360,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             self.updateOverlay()
         }
 
+        overlayWindow.onPointerSelectionChanged = { [weak self] stageIndex, windowIndex in
+            self?.diag.report("overlay_pointer_selection_changed", details: [
+                "stageIndex": stageIndex.map(String.init) ?? "none",
+                "windowIndex": windowIndex.map(String.init) ?? "none",
+            ])
+        }
+
         let vm = OverlayViewModel(
             stageManager: stageController.stageManager,
             activeStageIndex: stageController.selectedStageIndex,
