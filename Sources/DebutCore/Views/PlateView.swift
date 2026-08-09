@@ -156,6 +156,8 @@ public struct PlateConstants {
     public static let bottomPadding: CGFloat = 24
     public static let screenMargin: CGFloat = 80
     public static let badgeSize: CGFloat = 40
+    public static let stageSpacing: CGFloat = 34
+    public static let commandHintFooterOffset: CGFloat = 24
 
     public static func thumbnailSize(forWindowCount count: Int, screenWidth: CGFloat) -> (width: CGFloat, height: CGFloat) {
         let maxWidth = screenWidth - screenMargin * 2
@@ -233,7 +235,7 @@ public struct OverlaySwiftUIView: View {
             )
 
             let inactiveScale = CGFloat(viewModel.appearance.inactivePlateScale)
-            let spacing: CGFloat = 14
+            let spacing = PlateConstants.stageSpacing
             let focusTransition = PlateMotion.focusTransition(reduceMotion: reduceMotion)
 
             let totalBefore = CGFloat(viewModel.activeStageIndex) * (pHeight * inactiveScale + spacing)
@@ -267,9 +269,15 @@ public struct OverlaySwiftUIView: View {
                         let selectedWindowIndex = pointerSelection?.stageIndex == index
                             ? pointerSelection?.windowIndex
                             : (isActive ? viewModel.selectedWindowIndex : nil)
-                        let commandHints = CommandHintCatalog.stageHints(
+                        let stageNumberHint = CommandHintCatalog.stageNumberHint(
+                            stageIndex: index,
+                            settings: viewModel.appearance
+                        )
+                        let footerHints = CommandHintCatalog.plateFooterHints(
                             stageIndex: index,
                             isActive: isActive,
+                            hasSelectedWindow: selectedWindowIndex != nil
+                                && !plate.windows.isEmpty,
                             settings: viewModel.appearance
                         )
 
@@ -279,7 +287,8 @@ public struct OverlaySwiftUIView: View {
                             thumbnailWidth: tSize.width,
                             thumbnailHeight: tSize.height,
                             appearance: viewModel.appearance,
-                            commandHints: commandHints,
+                            stageNumberHint: stageNumberHint,
+                            footerHints: footerHints,
                             windowDrag: $windowDrag,
                             plateFrames: $plateFrames,
                             stageIndex: index,
@@ -403,7 +412,8 @@ struct PlateSwiftUIView: View {
     let thumbnailWidth: CGFloat
     let thumbnailHeight: CGFloat
     let appearance: AppSettings
-    let commandHints: [CommandHintPresentation]
+    let stageNumberHint: CommandHintPresentation?
+    let footerHints: [CommandHintPresentation]
     @Binding var windowDrag: WindowDragState?
     @Binding var plateFrames: [Int: CGRect]
     let stageIndex: Int
@@ -431,7 +441,9 @@ struct PlateSwiftUIView: View {
                             thumbnailHeight: thumbnailHeight,
                             appearance: appearance,
                             commandHints: CommandHintCatalog.windowHints(
-                                isSelected: selectedWindowIndex == index,
+                                windowIndex: index,
+                                selectedWindowIndex: selectedWindowIndex ?? -1,
+                                windowCount: plate.windows.count,
                                 settings: appearance
                             )
                         )
@@ -470,11 +482,16 @@ struct PlateSwiftUIView: View {
             cornerRadius: CGFloat(appearance.plateCornerRadius),
             appearance: appearance
         ))
+        .overlay(alignment: .leading) {
+            if let stageNumberHint {
+                CommandHintStrip(hints: [stageNumberHint])
+                    .offset(x: -18)
+            }
+        }
         .overlay(alignment: .bottom) {
-            if !commandHints.isEmpty {
-                CommandHintStrip(hints: commandHints)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 5)
+            if !footerHints.isEmpty {
+                CommandHintStrip(hints: footerHints)
+                    .offset(y: PlateConstants.commandHintFooterOffset)
             }
         }
     }
@@ -592,8 +609,14 @@ struct CommandHintStrip: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(hints) { hint in
-                Text(hint.shortcut)
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                HStack(spacing: 3) {
+                    if let iconSystemName = hint.iconSystemName {
+                        Image(systemName: iconSystemName)
+                            .font(.system(size: 8, weight: .semibold))
+                    }
+                    Text(hint.shortcut)
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                }
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)

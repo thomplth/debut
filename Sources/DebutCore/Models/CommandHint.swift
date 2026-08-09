@@ -1,9 +1,17 @@
 import Foundation
 
+public enum CommandHintPlacement: Equatable, Sendable {
+    case stageLeading
+    case nextWindow
+    case plateFooter
+}
+
 public struct CommandHintPresentation: Identifiable, Equatable, Sendable {
     public let actions: [KeyAction]
     public let label: String
     public let shortcut: String
+    public let placement: CommandHintPlacement
+    public let iconSystemName: String?
 
     public var id: String {
         actions.map(\.rawValue).joined(separator: ":")
@@ -11,49 +19,76 @@ public struct CommandHintPresentation: Identifiable, Equatable, Sendable {
 }
 
 public enum CommandHintCatalog {
-    public static func stageHints(
+    public static func stageNumberHint(
+        stageIndex: Int,
+        settings: AppSettings
+    ) -> CommandHintPresentation? {
+        guard let jumpAction = KeyAction.jumpAction(forStageIndex: stageIndex) else {
+            return nil
+        }
+        return hint(
+            label: "Jump to stage",
+            actions: [jumpAction],
+            placement: .stageLeading,
+            iconSystemName: nil,
+            settings: settings
+        )
+    }
+
+    public static func plateFooterHints(
         stageIndex: Int,
         isActive: Bool,
+        hasSelectedWindow: Bool,
         settings: AppSettings
     ) -> [CommandHintPresentation] {
-        var hints: [CommandHintPresentation] = []
-        if let jumpAction = KeyAction.jumpAction(forStageIndex: stageIndex),
-           let jumpHint = hint(label: "Jump to stage", actions: [jumpAction], settings: settings) {
-            hints.append(jumpHint)
-        }
+        guard isActive else { return [] }
 
-        guard isActive else { return hints }
-
-        let groups: [(String, [KeyAction])] = [
-            ("Select stage", [.nextStage, .previousStage]),
-            ("New stage", [.newStageBelow, .newStageAbove]),
-            ("Delete stage", [.deleteStage]),
-            ("Save template", [.saveAsTemplate]),
-            ("Reorder stage", [.swapStageUp, .swapStageDown]),
+        var groups: [(String, [KeyAction], String)] = [
+            ("Select stage", [.nextStage, .previousStage], "rectangle.stack"),
+            ("New stage", [.newStageBelow, .newStageAbove], "plus"),
+            ("Delete stage", [.deleteStage], "trash"),
+            ("Save template", [.saveAsTemplate], "square.and.arrow.down"),
+            ("Reorder stage", [.swapStageUp, .swapStageDown], "arrow.up.arrow.down"),
         ]
-        hints.append(contentsOf: groups.compactMap { label, actions in
-            hint(label: label, actions: actions, settings: settings)
-        })
-        return hints
+        if hasSelectedWindow {
+            groups.append(("Move window", [.moveWindowUp, .moveWindowDown], "arrow.up.and.down"))
+        }
+        return groups.compactMap { label, actions, iconSystemName in
+            hint(
+                label: label,
+                actions: actions,
+                placement: .plateFooter,
+                iconSystemName: iconSystemName,
+                settings: settings
+            )
+        }
     }
 
     public static func windowHints(
-        isSelected: Bool,
+        windowIndex: Int,
+        selectedWindowIndex: Int,
+        windowCount: Int,
         settings: AppSettings
     ) -> [CommandHintPresentation] {
-        guard isSelected else { return [] }
-        let groups: [(String, [KeyAction])] = [
-            ("Select window", [.nextWindow, .previousWindow]),
-            ("Move window", [.moveWindowUp, .moveWindowDown]),
-        ]
-        return groups.compactMap { label, actions in
-            hint(label: label, actions: actions, settings: settings)
-        }
+        guard windowCount > 1,
+              (0..<windowCount).contains(selectedWindowIndex),
+              windowIndex == (selectedWindowIndex + 1) % windowCount,
+              let navigationHint = hint(
+                label: "Select window",
+                actions: [.nextWindow, .previousWindow],
+                placement: .nextWindow,
+                iconSystemName: nil,
+                settings: settings
+              )
+        else { return [] }
+        return [navigationHint]
     }
 
     private static func hint(
         label: String,
         actions: [KeyAction],
+        placement: CommandHintPlacement,
+        iconSystemName: String?,
         settings: AppSettings
     ) -> CommandHintPresentation? {
         let visibleActions = actions.filter(settings.shouldShowCommandHint(for:))
@@ -64,7 +99,9 @@ public enum CommandHintCatalog {
         return CommandHintPresentation(
             actions: visibleActions,
             label: label,
-            shortcut: shortcuts.joined(separator: " / ")
+            shortcut: shortcuts.joined(separator: " / "),
+            placement: placement,
+            iconSystemName: iconSystemName
         )
     }
 }
