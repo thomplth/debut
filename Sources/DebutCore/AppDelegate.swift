@@ -313,7 +313,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     nonisolated public func stageControllerDidMutateState(_ controller: StageController) {
         DispatchQueue.main.async { [weak self] in
-            self?.debouncedSaver?.scheduleSave(controller.stageManager)
+            guard let self else { return }
+            self.debouncedSaver?.scheduleSave(controller.stageManager)
+            self.diag.report("stage_state_mutated")
         }
     }
 
@@ -346,7 +348,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 "fromStageIndex": "\(fromIndex)",
                 "toStageIndex": "\(toIndex)",
             ])
-            self.updateOverlay()
+            // Let SwiftUI finish the drag transaction before replacing its root view.
+            DispatchQueue.main.async { [weak self] in
+                self?.updateOverlay()
+            }
         }
 
         overlayWindow.onStageReordered = { [weak self] fromIndex, toIndex in

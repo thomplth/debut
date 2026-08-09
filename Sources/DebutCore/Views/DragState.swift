@@ -9,6 +9,12 @@ struct WindowDragState: Equatable {
     var dropTargetStageIndex: Int?
 }
 
+struct WindowMoveRequest: Equatable {
+    let windowID: CGWindowID
+    let fromStageIndex: Int
+    let toStageIndex: Int
+}
+
 struct StageDragState: Equatable {
     let stageIndex: Int
     let stageID: UUID

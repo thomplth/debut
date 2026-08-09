@@ -120,6 +120,120 @@ func postMouseClick(at point: CGPoint) {
     }
 }
 
+func postMouseDrag(from start: CGPoint, to end: CGPoint) {
+    guard let down = CGEvent(
+        mouseEventSource: nil,
+        mouseType: .leftMouseDown,
+        mouseCursorPosition: start,
+        mouseButton: .left
+    ) else { return }
+    down.post(tap: .cgSessionEventTap)
+    wait(0.1)
+
+    for step in 1...8 {
+        let progress = CGFloat(step) / 8
+        let point = CGPoint(
+            x: start.x + (end.x - start.x) * progress,
+            y: start.y + (end.y - start.y) * progress
+        )
+        guard let dragged = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .leftMouseDragged,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) else { continue }
+        dragged.post(tap: .cgSessionEventTap)
+        wait(0.04)
+    }
+
+    guard let up = CGEvent(
+        mouseEventSource: nil,
+        mouseType: .leftMouseUp,
+        mouseCursorPosition: end,
+        mouseButton: .left
+    ) else { return }
+    up.post(tap: .cgSessionEventTap)
+}
+
+func stageWindowCounts(in state: [String: String]) -> [Int] {
+    (state["windowCountsByStage"] ?? "")
+        .split(separator: ",")
+        .compactMap { Int($0) }
+}
+
+func plateCenter(
+    stageIndex: Int,
+    windowCounts: [Int],
+    activeStageIndex: Int,
+    inactiveScale: CGFloat
+) -> CGPoint? {
+    guard windowCounts.indices.contains(stageIndex),
+          windowCounts.indices.contains(activeStageIndex)
+    else { return nil }
+
+    let screen = CGDisplayBounds(CGMainDisplayID())
+    let thumbnail = PlateConstants.thumbnailSize(
+        forWindowCount: windowCounts.max() ?? 0,
+        screenWidth: screen.width
+    )
+    let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
+    let scale: (Int) -> CGFloat = { $0 == activeStageIndex ? 1 : inactiveScale }
+    let top: (Int) -> CGFloat = { index in
+        (0..<index).reduce(0) { partial, precedingIndex in
+            partial + plateHeight * scale(precedingIndex) + 14
+        }
+    }
+    let yOffset = screen.midY - top(activeStageIndex) - plateHeight / 2
+    return CGPoint(
+        x: screen.midX,
+        y: yOffset + top(stageIndex) + plateHeight * scale(stageIndex) / 2
+    )
+}
+
+func windowCenter(
+    stageIndex: Int,
+    windowIndex: Int,
+    windowCounts: [Int],
+    activeStageIndex: Int,
+    inactiveScale: CGFloat
+) -> CGPoint? {
+    guard windowCounts.indices.contains(stageIndex),
+          (0..<windowCounts[stageIndex]).contains(windowIndex),
+          let center = plateCenter(
+            stageIndex: stageIndex,
+            windowCounts: windowCounts,
+            activeStageIndex: activeStageIndex,
+            inactiveScale: inactiveScale
+          )
+    else { return nil }
+
+    let screen = CGDisplayBounds(CGMainDisplayID())
+    let thumbnail = PlateConstants.thumbnailSize(
+        forWindowCount: windowCounts.max() ?? 0,
+        screenWidth: screen.width
+    )
+    let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
+    let plateWidth = PlateConstants.plateWidth(
+        forWindowCount: windowCounts[stageIndex],
+        thumbnailWidth: thumbnail.width
+    )
+    let scale: CGFloat = stageIndex == activeStageIndex ? 1 : inactiveScale
+    let windowStride = thumbnail.width
+        + PlateConstants.windowCardExtraWidth
+        + PlateConstants.windowSpacing
+    let unscaledX = PlateConstants.padding
+        + PlateConstants.windowCardPadding
+        + thumbnail.width / 2
+        + CGFloat(windowIndex) * windowStride
+    let unscaledY = PlateConstants.topPadding
+        + PlateConstants.windowCardPadding
+        + thumbnail.height / 2
+    return CGPoint(
+        x: center.x + (unscaledX - plateWidth / 2) * scale,
+        y: center.y + (unscaledY - plateHeight / 2) * scale
+    )
+}
+
 func firstWindowCenter(in state: [String: String]) -> CGPoint? {
     guard let maxWindows = Int(state["maxWindowsInStage"] ?? ""), maxWindows > 0,
           let activeWindows = Int(state["windowsInActiveStage"] ?? ""), activeWindows > 0
@@ -485,8 +599,102 @@ test("Clicking a window card commits the pointer selection") {
         && readState()["overlayVisible"] == "false"
 }
 
-// --- 10. Customized global activation ---
-header("10. Customized global activation")
+// --- 10. Window-drop plate refresh ---
+header("10. Window drop refreshes both plates immediately")
+let originalDropState = readState()
+let originalStageCount = Int(originalDropState["stageCount"] ?? "") ?? 0
+let originalWindowCounts = stageWindowCounts(in: originalDropState)
+let interactionSettings = (try? StateStore().loadSettings()) ?? AppSettings()
+
+postFlagsChanged(flags: [.maskCommand])
+wait(0.1)
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+wait(0.8)
+postKeyDown(keyCode: CGKeyCode(kVK_ANSI_N), flags: [.maskCommand])
+wait(0.8)
+
+let preparedDropState = readState()
+let preparedWindowCounts = stageWindowCounts(in: preparedDropState)
+let destinationStageIndex = Int(preparedDropState["activeStageIndex"] ?? "") ?? -1
+let sourceStageIndex = destinationStageIndex - 1
+let moveEventCount = readEvents().filter { $0["event"] == "window_moved_by_drag" }.count
+
+test("E2E prepared an empty destination stage without losing source windows") {
+    preparedWindowCounts.indices.contains(sourceStageIndex)
+        && preparedWindowCounts.indices.contains(destinationStageIndex)
+        && preparedWindowCounts[sourceStageIndex] > 0
+        && preparedWindowCounts[destinationStageIndex] == 0
+        && preparedWindowCounts.count == originalStageCount + 1
+}
+
+if preparedWindowCounts.indices.contains(sourceStageIndex),
+   preparedWindowCounts.indices.contains(destinationStageIndex),
+   let sourcePoint = windowCenter(
+        stageIndex: sourceStageIndex,
+        windowIndex: max(0, preparedWindowCounts[sourceStageIndex] - 1),
+        windowCounts: preparedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
+   ),
+   let destinationPoint = plateCenter(
+        stageIndex: destinationStageIndex,
+        windowCounts: preparedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
+   ) {
+    postMouseDrag(from: sourcePoint, to: destinationPoint)
+    wait(0.8)
+
+    let movedWindowCounts = stageWindowCounts(in: readState())
+    let _ = takeScreenshot("11_window_drop_refreshed")
+    test("Dropping a window updates the source and destination stage models") {
+        readEvents().filter { $0["event"] == "window_moved_by_drag" }.count > moveEventCount
+            && movedWindowCounts.indices.contains(sourceStageIndex)
+            && movedWindowCounts.indices.contains(destinationStageIndex)
+            && movedWindowCounts[sourceStageIndex] == preparedWindowCounts[sourceStageIndex] - 1
+            && movedWindowCounts[destinationStageIndex] == 1
+    }
+
+    if let returnedWindowPoint = windowCenter(
+        stageIndex: destinationStageIndex,
+        windowIndex: 0,
+        windowCounts: movedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
+    ), let returnedStagePoint = plateCenter(
+        stageIndex: sourceStageIndex,
+        windowCounts: movedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
+    ) {
+        postMouseDrag(from: returnedWindowPoint, to: returnedStagePoint)
+        wait(0.8)
+        test("The refreshed destination plate supports an immediate reverse drag") {
+            readEvents().filter { $0["event"] == "window_moved_by_drag" }.count > moveEventCount + 1
+                && stageWindowCounts(in: readState()) == preparedWindowCounts
+        }
+    } else {
+        fail("Could not calculate the reverse window-drop path")
+    }
+} else {
+    fail("Could not calculate the window-drop path")
+}
+
+if stageWindowCounts(in: readState()).count == originalStageCount + 1 {
+    postKeyDown(keyCode: CGKeyCode(kVK_Delete), flags: [.maskCommand])
+    wait(0.5)
+}
+postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+postFlagsChanged(flags: [])
+wait(0.5)
+
+test("Window-drop E2E cleanup restores the original stages") {
+    readState()["stageCount"] == "\(originalStageCount)"
+        && stageWindowCounts(in: readState()) == originalWindowCounts
+}
+
+// --- 11. Customized global activation ---
+header("11. Customized global activation")
 for application in NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.Debut") {
     _ = application.terminate()
 }
@@ -530,8 +738,8 @@ if let originalSettingsData {
     try? FileManager.default.removeItem(at: settingsFile)
 }
 
-// --- 11. First-launch onboarding (forced, without changing user defaults) ---
-header("11. First-launch onboarding")
+// --- 12. First-launch onboarding (forced, without changing user defaults) ---
+header("12. First-launch onboarding")
 
 let onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
 wait(1.5)
@@ -566,8 +774,8 @@ test("Debut relaunches normally after the onboarding check") {
 _ = restoredApplication?.terminate()
 wait(1.0)
 
-// --- 12. Settings window chrome ---
-header("12. Settings window chrome")
+// --- 13. Settings window chrome ---
+header("13. Settings window chrome")
 
 let settingsApplication = launchDebut(arguments: ["--show-settings"])
 wait(1.5)
@@ -575,7 +783,7 @@ let settingsWindowTitles = settingsApplication.map {
     visibleWindowTitles(for: $0.processIdentifier)
 } ?? []
 info("Visible Debut windows: \(settingsWindowTitles)")
-let _ = takeScreenshot("12_settings_window")
+let _ = takeScreenshot("13_settings_window")
 
 test("Settings integrates its controls into hidden transparent titlebar chrome") {
     readEvents().contains {
