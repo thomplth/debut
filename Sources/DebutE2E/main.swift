@@ -308,6 +308,34 @@ func visibleWindowTitles(for processIdentifier: pid_t) -> [String] {
     }
 }
 
+func desktopSurfaceIsOnScreen(for processIdentifier: pid_t) -> Bool {
+    guard let rawWindows = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements],
+        kCGNullWindowID
+    ) as? [[String: Any]] else { return false }
+
+    let screen = CGDisplayBounds(CGMainDisplayID())
+    return rawWindows.contains { window in
+        guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processIdentifier,
+              (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+              let boundsDictionary = window[kCGWindowBounds as String] as? NSDictionary,
+              let bounds = CGRect(dictionaryRepresentation: boundsDictionary),
+              (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0 > 0
+        else { return false }
+        return abs(bounds.width - screen.width) < 2
+            && abs(bounds.height - screen.height) < 2
+    }
+}
+
+func toggleSystemWindowOverview(keyCode: CGKeyCode) {
+    postFlagsChanged(flags: [.maskControl])
+    wait(0.1)
+    postKeyDown(keyCode: keyCode, flags: [.maskControl])
+    postKeyUp(keyCode: keyCode, flags: [.maskControl])
+    postFlagsChanged(flags: [])
+    wait(1.5)
+}
+
 func wait(_ seconds: Double) {
     Thread.sleep(forTimeInterval: seconds)
 }
@@ -372,6 +400,43 @@ test("Wallpaper notification refreshes the desktop surface") {
         info("  Wallpaper source is unavailable; fallback surface refreshed")
     }
     return refreshEvents.count > wallpaperRefreshCount
+}
+
+// --- 1c. System window overviews ---
+header("1c. Mission Control and App Exposé")
+let overviewApplication = NSRunningApplication.runningApplications(
+    withBundleIdentifier: "com.thomplth.Debut"
+).first
+let overviewPID = overviewApplication?.processIdentifier ?? 0
+
+test("Desktop surface is visible during normal stage management") {
+    overviewPID > 0 && desktopSurfaceIsOnScreen(for: overviewPID)
+}
+
+info("Opening Mission Control with Control-Up...")
+toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_UpArrow))
+let _ = takeScreenshot("00_mission_control")
+
+test("Desktop surface yields while Mission Control presents windows") {
+    overviewPID > 0 && !desktopSurfaceIsOnScreen(for: overviewPID)
+}
+
+toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_UpArrow))
+test("Desktop surface returns after Mission Control closes") {
+    overviewPID > 0 && desktopSurfaceIsOnScreen(for: overviewPID)
+}
+
+info("Opening App Exposé with Control-Down...")
+toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_DownArrow))
+let _ = takeScreenshot("00_app_expose")
+
+test("Desktop surface yields while App Exposé presents windows") {
+    overviewPID > 0 && !desktopSurfaceIsOnScreen(for: overviewPID)
+}
+
+toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_DownArrow))
+test("Desktop surface returns after App Exposé closes") {
+    overviewPID > 0 && desktopSurfaceIsOnScreen(for: overviewPID)
 }
 
 // --- 2. Open overlay with Cmd+Tab ---
