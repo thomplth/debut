@@ -7,15 +7,35 @@ import Foundation
 
 nonisolated(unsafe) var passCount = 0
 nonisolated(unsafe) var failCount = 0
+nonisolated(unsafe) var skipCount = 0
 nonisolated(unsafe) var totalCount = 0
+let isGitHubHosted = ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true"
+let hostedDragTests: Set<String> = [
+    "Dragging the revealed handle reorders the stage",
+    "A reverse handle drag restores the original stage order",
+    "Dropping a window updates the source and destination stage models",
+    "The refreshed destination plate supports an immediate reverse drag",
+]
 
 func color(_ text: String, _ code: Int) -> String { "\u{001B}[\(code)m\(text)\u{001B}[0m" }
 func pass(_ msg: String) { print(color("  PASS", 32) + "  \(msg)") }
 func fail(_ msg: String) { print(color("  FAIL", 31) + "  \(msg)") }
+func skip(_ msg: String) { print(color("  SKIP", 33) + "  \(msg)") }
 func info(_ msg: String) { print(color("  INFO", 36) + "  \(msg)") }
 func header(_ msg: String) { print("\n" + color("=== \(msg) ===", 1)) }
 
+func skipTest(_ name: String) {
+    totalCount += 1
+    skipCount += 1
+    skip(name)
+    info("  GitHub-hosted macOS does not deliver synthetic drag gestures; run this check locally")
+}
+
 func test(_ name: String, _ body: () -> Bool) {
+    if isGitHubHosted && hostedDragTests.contains(name) {
+        skipTest(name)
+        return
+    }
     totalCount += 1
     if body() { passCount += 1; pass(name) }
     else { failCount += 1; fail(name) }
@@ -129,6 +149,8 @@ func postMouseClick(at point: CGPoint) {
 }
 
 func postMouseDrag(from start: CGPoint, to end: CGPoint) {
+    guard !isGitHubHosted else { return }
+
     guard let down = CGEvent(
         mouseEventSource: nil,
         mouseType: .leftMouseDown,
@@ -1030,7 +1052,11 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
                 && stageWindowCounts(in: readState()) == preparedWindowCounts
         }
     } else {
-        fail("Could not calculate the reverse window-drop path")
+        if isGitHubHosted {
+            skipTest("The refreshed destination plate supports an immediate reverse drag")
+        } else {
+            fail("Could not calculate the reverse window-drop path")
+        }
     }
 } else {
     fail("Could not calculate the window-drop path")
@@ -1176,7 +1202,7 @@ test("Debut relaunches normally after the settings check") {
 // --- Summary ---
 header("Results")
 print("")
-print("  \(passCount)/\(totalCount) passed, \(failCount) failed")
+print("  \(passCount)/\(totalCount) passed, \(skipCount) skipped, \(failCount) failed")
 print("")
 info("Screenshots saved to: \(screenshotDir.path)")
 print("")
