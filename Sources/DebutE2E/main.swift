@@ -563,6 +563,39 @@ test("Debut relaunches normally after the onboarding check") {
     restoredApplication != nil
 }
 
+_ = restoredApplication?.terminate()
+wait(1.0)
+
+// --- 12. Settings window chrome ---
+header("12. Settings window chrome")
+
+let settingsApplication = launchDebut(arguments: ["--show-settings"])
+wait(1.5)
+let settingsWindowTitles = settingsApplication.map {
+    visibleWindowTitles(for: $0.processIdentifier)
+} ?? []
+info("Visible Debut windows: \(settingsWindowTitles)")
+let _ = takeScreenshot("12_settings_window")
+
+test("Settings integrates its controls into hidden transparent titlebar chrome") {
+    readEvents().contains {
+        $0["event"] == "settings_shown"
+            && $0["fullSizeContentView"] == "true"
+            && $0["titleHidden"] == "true"
+            && $0["titlebarTransparent"] == "true"
+            && $0["titlebarSeparatorHidden"] == "true"
+    }
+}
+
+_ = settingsApplication?.terminate()
+wait(1.0)
+let finalApplication = launchDebut()
+wait(1.5)
+
+test("Debut relaunches normally after the settings check") {
+    finalApplication != nil
+}
+
 // --- Summary ---
 header("Results")
 print("")

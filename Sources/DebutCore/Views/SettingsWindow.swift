@@ -1,4 +1,26 @@
+import AppKit
 import SwiftUI
+
+@MainActor
+public final class SettingsWindow: NSWindow {
+    public init<Content: View>(rootView: Content) {
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+
+        title = "Debut Settings"
+        titleVisibility = .hidden
+        titlebarAppearsTransparent = true
+        titlebarSeparatorStyle = .none
+        toolbarStyle = .unified
+        isReleasedWhenClosed = false
+        isMovableByWindowBackground = true
+        contentView = NSHostingView(rootView: rootView)
+    }
+}
 
 public struct SettingsView: View {
     @State private var viewModel: SettingsViewModel

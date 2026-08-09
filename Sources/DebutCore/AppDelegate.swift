@@ -64,6 +64,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             showOnboarding()
         }
 
+        if ProcessInfo.processInfo.arguments.contains("--show-settings") {
+            showSettings(settings: currentSettings)
+        }
+
         diag.report("app_ready")
     }
 
@@ -534,18 +538,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             }
         }
         let view = SettingsView(viewModel: vm)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Debut Settings"
-        window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: view)
+        let window = SettingsWindow(rootView: view)
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        diag.report("settings_shown", details: [
+            "fullSizeContentView": "\(window.styleMask.contains(.fullSizeContentView))",
+            "titleHidden": "\(window.titleVisibility == .hidden)",
+            "titlebarTransparent": "\(window.titlebarAppearsTransparent)",
+            "titlebarSeparatorHidden": "\(window.titlebarSeparatorStyle == .none)",
+        ])
 
         self.settingsWindow = window
     }
