@@ -59,6 +59,8 @@ fi
 
 expect_not_contains "scripts/rebuild.sh" 'e2e-test\.sh' \
     "local rebuilds must no longer launch the disruptive E2E suite"
+expect_contains "scripts/build-app.sh" 'SIGN_IDENTITY=.*\|\| true' \
+    "CI builds must fall back to ad-hoc signing when Debut Dev is absent"
 
 if (( failures > 0 )); then
     exit 1
