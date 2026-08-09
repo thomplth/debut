@@ -135,6 +135,22 @@ test("Windows discovered") {
     return (Int(windowCount) ?? 0) > 0
 }
 
+// --- 1b. Wallpaper notification integration ---
+header("1b. Desktop wallpaper notification integration")
+let wallpaperRefreshCount = readEvents().filter { $0["event"] == "desktop_wallpaper_refreshed" }.count
+DistributedNotificationCenter.default().postNotificationName(
+    Notification.Name("com.apple.desktop"),
+    object: nil,
+    userInfo: nil,
+    deliverImmediately: true
+)
+wait(0.5)
+
+test("Wallpaper notification refreshes the desktop surface") {
+    let refreshEvents = readEvents().filter { $0["event"] == "desktop_wallpaper_refreshed" }
+    return refreshEvents.count > wallpaperRefreshCount && refreshEvents.last?["loaded"] == "true"
+}
+
 // --- 2. Open overlay with Cmd+Tab ---
 header("2. Open Stage Manager overlay (window mode)")
 info("Posting Cmd (flagsChanged)...")
