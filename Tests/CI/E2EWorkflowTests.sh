@@ -56,6 +56,8 @@ if [[ -f "$runner" ]]; then
     expect_contains "$runner" 'Xcode_26\.3\.app' "CI E2E must select an installed macOS 26 SDK"
     expect_contains "$runner" 'ScreenCaptureApprovals\.plist' \
         "CI E2E must suppress the hosted runner's screen capture reminder"
+    expect_contains "$runner" 'kTCCServiceScreenCapture' \
+        "CI E2E must grant Debut screen capture access in the disposable account"
     expect_contains "$runner" '/opt/hca/hosted-compute-agent' \
         "CI E2E must suppress capture reminders for the hosted runner process"
     expect_contains "$runner" 'killall replayd' \
