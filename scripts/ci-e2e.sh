@@ -7,6 +7,12 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
     exit 1
 fi
 
+xcode_path="/Applications/Xcode_26.3.app/Contents/Developer"
+if [[ ! -d "$xcode_path" ]]; then
+    echo "Required hosted toolchain is missing: $xcode_path" >&2
+    exit 1
+fi
+export DEVELOPER_DIR="$xcode_path"
 export TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault
 
 app_path="/Applications/Debut.app"
