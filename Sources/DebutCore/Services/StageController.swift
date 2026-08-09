@@ -15,6 +15,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public let windowService: any WindowService
     public let keyboardService: any KeyboardService
     public weak var delegate: StageControllerDelegate?
+    public var onCommandUsed: (@Sendable (KeyAction) -> Void)?
 
     public private(set) var isStageManagerVisible: Bool = false
     public var selectedStageIndex: Int = 0
@@ -179,6 +180,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     public func handleKeyEvent(_ event: DebutKeyEvent) {
         diag.report("key_event", details: ["event": "\(event)"])
+        if let action = event.commandHintAction {
+            onCommandUsed?(action)
+        }
 
         switch event {
         case .cmdTabTap:

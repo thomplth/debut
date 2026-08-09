@@ -69,6 +69,21 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .swapStageDown: .swapStageDown
         }
     }
+
+    public static func jumpAction(forStageIndex index: Int) -> KeyAction? {
+        switch index {
+        case 0: .jumpToStage1
+        case 1: .jumpToStage2
+        case 2: .jumpToStage3
+        case 3: .jumpToStage4
+        case 4: .jumpToStage5
+        case 5: .jumpToStage6
+        case 6: .jumpToStage7
+        case 7: .jumpToStage8
+        case 8: .jumpToStage9
+        default: nil
+        }
+    }
 }
 
 public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
