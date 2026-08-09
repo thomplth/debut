@@ -67,6 +67,29 @@ struct PlateMotionTests {
         #expect(!PlateInteraction.isStageHandleHotspot(locationX: 80, isRevealed: true))
     }
 
+    @Test("Plate centers keep the active stage centered")
+    func plateCentersFollowOverlayLayout() {
+        let activeCenter = PlateConstants.plateCenterY(
+            stageIndex: 1,
+            stageCount: 3,
+            activeStageIndex: 1,
+            plateHeight: 164,
+            inactiveScale: 0.8,
+            containerHeight: 768
+        )
+        let precedingCenter = PlateConstants.plateCenterY(
+            stageIndex: 0,
+            stageCount: 3,
+            activeStageIndex: 1,
+            plateHeight: 164,
+            inactiveScale: 0.8,
+            containerHeight: 768
+        )
+
+        #expect(activeCenter == 384)
+        #expect(abs((precedingCenter ?? 0) - 202.4) < 0.001)
+    }
+
     @Test("Selected windows magnify instead of using a selection indicator")
     func selectedWindowScale() {
         #expect(PlateMotion.windowScale(isSelected: false, isDragging: false) == 1)

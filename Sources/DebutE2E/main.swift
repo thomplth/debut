@@ -185,22 +185,14 @@ func plateCenter(
         screenWidth: screen.width
     )
     let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
-    let scale: (Int) -> CGFloat = { $0 == activeStageIndex ? 1 : inactiveScale }
-    let topWithinStack: (Int) -> CGFloat = { index in
-        (0..<index).reduce(0) { partial, precedingIndex in
-            partial + plateHeight * scale(precedingIndex) + PlateConstants.stageSpacing
-        }
-    }
-    let stackHeight = windowCounts.indices.reduce(0) { partial, index in
-        partial + plateHeight * scale(index)
-    } + CGFloat(max(0, windowCounts.count - 1)) * PlateConstants.stageSpacing
-    let stackTop = screen.midY - stackHeight / 2
-    let activeCenterWithinStack = topWithinStack(activeStageIndex) + plateHeight / 2
-    let yOffset = screen.midY - activeCenterWithinStack
-    let visualCenterY = stackTop
-        + topWithinStack(stageIndex)
-        + plateHeight * scale(stageIndex) / 2
-        + yOffset
+    guard let visualCenterY = PlateConstants.plateCenterY(
+        stageIndex: stageIndex,
+        stageCount: windowCounts.count,
+        activeStageIndex: activeStageIndex,
+        plateHeight: plateHeight,
+        inactiveScale: inactiveScale,
+        containerHeight: screen.height
+    ) else { return nil }
     return CGPoint(
         x: screen.midX,
         y: visualCenterY
