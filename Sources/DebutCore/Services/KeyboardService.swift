@@ -10,6 +10,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case cmdRelease             // Cmd key lifted while overlay open
 
     case nextWindow             // Tab
+    case nextWindowRepeat       // Held Tab auto-repeat (stops at the last window)
     case previousWindow         // Shift+Tab
     case nextStage              // Option+Tab
     case previousStage          // Shift+Option+Tab

@@ -66,9 +66,12 @@ func takeScreenshot(_ name: String) -> String {
 
 // MARK: - Keyboard simulation
 
-func postKeyDown(keyCode: CGKeyCode, flags: CGEventFlags = []) {
+func postKeyDown(keyCode: CGKeyCode, flags: CGEventFlags = [], isAutoRepeat: Bool = false) {
     guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) else { return }
     event.flags = flags
+    if isAutoRepeat {
+        event.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+    }
     event.post(tap: .cgSessionEventTap)
 }
 
@@ -203,8 +206,38 @@ test("Overlay closed") {
     return readState()["overlayVisible"] == "false"
 }
 
-// --- 6. Full commit cycle ---
-header("6. Full Cmd+Tab → Tab → Release Cmd (commit)")
+// --- 6. Held Tab stops at the final window ---
+header("6. Held Tab stops at the final window")
+postFlagsChanged(flags: [.maskCommand])
+wait(0.1)
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+wait(0.5)
+
+let heldTabWindowCount = Int(readState()["windowsInActiveStage"] ?? "0") ?? 0
+for _ in 0..<(heldTabWindowCount + 2) {
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand], isAutoRepeat: true)
+}
+wait(0.3)
+
+test("Held Tab remains on the last window") {
+    heldTabWindowCount > 1
+        && readState()["selectedWindowIndex"] == "\(heldTabWindowCount - 1)"
+}
+
+postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+wait(0.3)
+
+test("A fresh Tab press wraps to the first window") {
+    readState()["selectedWindowIndex"] == "0"
+}
+
+postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+postFlagsChanged(flags: [])
+wait(0.3)
+
+// --- 7. Full commit cycle ---
+header("7. Full Cmd+Tab → Tab → Release Cmd (commit)")
 info("Step 1: Cmd+Tab hold...")
 postFlagsChanged(flags: [.maskCommand])
 wait(0.1)
@@ -229,8 +262,8 @@ test("Overlay closed after commit") {
     return readState()["overlayVisible"] == "false"
 }
 
-// --- 7. Stage mode with Cmd+Option+Tab ---
-header("7. Open Stage Manager overlay (stage mode) with Cmd+Option+Tab")
+// --- 8. Stage mode with Cmd+Option+Tab ---
+header("8. Open Stage Manager overlay (stage mode) with Cmd+Option+Tab")
 info("Posting Cmd+Option+Tab...")
 postFlagsChanged(flags: [.maskCommand, .maskAlternate])
 wait(0.1)

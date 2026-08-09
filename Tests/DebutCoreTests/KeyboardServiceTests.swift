@@ -325,6 +325,25 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdTabTap])
     }
 
+    @Test("Cmd+Tab auto-repeat is distinguished from a fresh press")
+    func cmdTabAutoRepeat() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let repeatedTab = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        repeatedTab.flags = .maskCommand
+        repeatedTab.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+
+        #expect(service.handleCGEvent(type: .keyDown, event: repeatedTab) == nil)
+        #expect(delegate.receivedEvents == [.nextWindowRepeat])
+    }
+
     @Test("Cmd+Option+Tab event")
     func cmdOptionTab() {
         let svc = MockKeyboardService()

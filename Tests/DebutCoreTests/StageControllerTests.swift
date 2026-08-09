@@ -248,7 +248,7 @@ struct StageControllerTests {
         #expect(controller.stageManager.activeStageID == originalStageID)
     }
 
-    @Test("Tab cycles windows, initial selection at index 1")
+    @Test("Held Tab stops at the last window and a fresh press wraps")
     func tabCycle() {
         let (controller, _, keyboardSvc) = makeController()
         let stageID = controller.stageManager.stages[0].id
@@ -258,10 +258,12 @@ struct StageControllerTests {
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(controller.selectedWindowIndex == 1) // starts at second window like native
-        keyboardSvc.simulateEvent(.nextWindow)
+        keyboardSvc.simulateEvent(.nextWindowRepeat)
         #expect(controller.selectedWindowIndex == 2)
-        keyboardSvc.simulateEvent(.nextWindow)
-        #expect(controller.selectedWindowIndex == 0) // wraps
+        keyboardSvc.simulateEvent(.nextWindowRepeat)
+        #expect(controller.selectedWindowIndex == 2) // held Tab stops at the end
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(controller.selectedWindowIndex == 0) // release and press Tab again
     }
 
     @Test("MRU: recordWindowActivation brings to front")
