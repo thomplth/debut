@@ -52,9 +52,12 @@ fi
 if [[ -f "$runner" ]]; then
     expect_contains "$runner" 'GITHUB_ACTIONS' "CI E2E entry point must reject accidental local runs"
     expect_contains "$runner" 'Xcode_26\.3\.app' "CI E2E must select an installed macOS 26 SDK"
+    expect_contains "$runner" 'ScreenCaptureApprovals\.plist' \
+        "CI E2E must suppress the hosted runner's screen capture reminder"
     expect_contains "$runner" './scripts/build-app.sh' "CI E2E entry point must build the app"
     expect_contains "$runner" '/Applications/Debut.app' "CI E2E entry point must install the app"
-    expect_contains "$runner" './scripts/e2e-test.sh' "CI E2E entry point must run the full suite"
+    expect_contains "$runner" '\.build/release/DebutE2E' \
+        "CI E2E entry point must reuse the release suite built with the app"
 fi
 
 expect_not_contains "scripts/rebuild.sh" 'e2e-test\.sh' \
