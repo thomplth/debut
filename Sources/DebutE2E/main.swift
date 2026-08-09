@@ -880,7 +880,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         activeStageIndex: destinationStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
         relativeX: 0,
-        xOffset: -PlateConstants.stageHandleRevealWidth / 2
+        xOffset: 0
    ) {
     postMouseDrag(
         from: sourceBodyPoint,
@@ -948,7 +948,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
             activeStageIndex: reorderedActiveStageIndex,
             inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
             relativeX: 0,
-            xOffset: -PlateConstants.stageHandleRevealWidth / 2
+            xOffset: 0
        ),
        let reverseDestination = plateCenter(
             stageIndex: sourceStageIndex,
