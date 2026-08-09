@@ -197,7 +197,7 @@ func plateCenter(
         + yOffset
     return CGPoint(
         x: screen.midX,
-        y: screen.maxY - visualCenterY
+        y: visualCenterY
     )
 }
 
