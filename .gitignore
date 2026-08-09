@@ -6,6 +6,7 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .swiftpm/xcode/xcuserdata
 .claude/
+.linear
 *.xcodeproj
 Package.resolved
 Tests/DebutCoreTests/Screenshots/*.png
