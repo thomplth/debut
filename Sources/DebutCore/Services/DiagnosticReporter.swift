@@ -13,11 +13,27 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     public static let diagnosticFile: URL = defaultDirectory.appendingPathComponent("diagnostic.json")
 
     private static let defaultDirectory: URL = {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Debut")
+        // Suites that exercise StageController report through `shared`. Writing
+        // those events into the real support directory corrupts the log a live
+        // session is diagnosed from, and has already produced false evidence.
+        let dir: URL
+        if isHostedByDebutApp {
+            dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                .appendingPathComponent("Debut")
+        } else {
+            dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DebutDiagnostics-\(ProcessInfo.processInfo.processIdentifier)")
+        }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
+
+    /// Identifies the shipped app positively. Test runners expose neither an
+    /// `.xctest` bundle nor `XCTestConfigurationFilePath` under swift-testing,
+    /// so detecting them by absence is unreliable.
+    private static var isHostedByDebutApp: Bool {
+        Bundle.main.bundleIdentifier == "com.thomplth.Debut"
+    }
 
     private let logger = Logger(subsystem: "com.thomplth.Debut", category: "diagnostic")
     private let directory: URL
@@ -42,7 +58,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         self.directory = directory
         self.rotationByteLimit = rotationByteLimit
         super.init()
-        NSLog("[Debut] DiagnosticReporter initialized")
+        NSLog("[Debut] DiagnosticReporter initialized at %@", directory.path)
     }
 
     public func report(
