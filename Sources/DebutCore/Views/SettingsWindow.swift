@@ -293,14 +293,42 @@ public struct SettingsView: View {
             Text("Keyboard Shortcuts")
                 .font(.title2.bold())
 
-            Text("Stage Manager shortcuts (while Cmd is held)")
+            Text("Click any shortcut to record a replacement. Modifier-free global shortcuts show a warning because they intercept ordinary typing.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            shortcutRow("Switch windows (hold)", shortcut: "Cmd+Tab", configurable: false)
-            shortcutRow("Quick switch last window", shortcut: "Cmd+Tab (tap)", configurable: false)
-            shortcutRow("Switch stages (hold)", shortcut: "Cmd+Opt+Tab", configurable: false)
-            shortcutRow("Quick switch stages", shortcut: "Ctrl+1…9 / Ctrl+0", configurable: false)
+            Text("Global activation")
+                .font(.headline)
+                .padding(.top, 4)
+
+            ForEach(KeyAction.activationActions, id: \.self) { action in
+                ShortcutRecorderRow(
+                    action: action,
+                    keyBindings: $viewModel.settings.keyBindings
+                )
+            }
+
+            Text("Same-app window cycling")
+                .font(.headline)
+                .padding(.top, 4)
+
+            ForEach(KeyAction.sameAppActions, id: \.self) { action in
+                ShortcutRecorderRow(
+                    action: action,
+                    keyBindings: $viewModel.settings.keyBindings
+                )
+            }
+
+            Text("Quick switch")
+                .font(.headline)
+                .padding(.top, 4)
+
+            ForEach(KeyAction.quickSwitchActions, id: \.self) { action in
+                ShortcutRecorderRow(
+                    action: action,
+                    keyBindings: $viewModel.settings.keyBindings
+                )
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -351,7 +379,7 @@ public struct SettingsView: View {
                 .font(.headline)
                 .padding(.top, 8)
 
-            Text("Apps in this list keep their own Ctrl+number shortcuts while frontmost. Debut quick switching remains active in other apps.")
+            Text("Apps in this list keep shortcuts that overlap Debut's configured quick-switch keys while frontmost. Debut quick switching remains active in other apps.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -407,20 +435,26 @@ public struct SettingsView: View {
                 }
             }
 
-            Text("Click a shortcut to rebind it")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .padding(.top, 4)
+            Text("Stage Manager session")
+                .font(.headline)
+                .padding(.top, 8)
 
-            ForEach(KeyAction.allCases, id: \.self) { action in
+            Text("These keys are pressed while the modifier from the activation shortcut remains held.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(KeyAction.sessionActions, id: \.self) { action in
                 ShortcutRecorderRow(
                     action: action,
                     keyBindings: $viewModel.settings.keyBindings
                 )
             }
 
-            shortcutRow("Commit selection", shortcut: "Release Cmd", configurable: false)
-            shortcutRow("Discard selection", shortcut: "Esc", configurable: false)
+            shortcutRow(
+                "Commit selection",
+                shortcut: "Release activation modifier",
+                configurable: false
+            )
 
             Button("Restore Defaults") {
                 viewModel.settings.keyBindings.restoreDefaults()
