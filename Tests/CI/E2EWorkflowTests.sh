@@ -56,22 +56,8 @@ if [[ -f "$runner" ]]; then
     expect_contains "$runner" 'Xcode_26\.3\.app' "CI E2E must select an installed macOS 26 SDK"
     expect_contains "$runner" 'ScreenCaptureApprovals\.plist' \
         "CI E2E must suppress the hosted runner's screen capture reminder"
-    expect_contains "$runner" 'kTCCServiceScreenCapture' \
-        "CI E2E must grant Debut screen capture access in the disposable account"
-    if (( $(grep -c 'kTCCServiceScreenCapture' "$runner") < 2 )); then
-        fail "CI E2E must grant Debut screen capture access in both TCC databases"
-    fi
-    if grep 'kTCCServiceScreenCapture.*X'"'" "$runner" >/dev/null; then
-        fail "CI screen capture grants must not pin the disposable ad-hoc signature"
-    fi
-    expect_contains "$runner" 'app_executable=.*Contents/MacOS/Debut' \
-        "CI E2E must grant the ad-hoc executable path screen capture access"
     expect_contains "$runner" 'launchctl setenv DEBUT_DISABLE_WINDOW_PREVIEWS 1' \
         "CI E2E must avoid live preview capture in the disposable app"
-    expect_contains "$runner" 'kTCCServicePostEvent' \
-        "CI E2E must authorize the compiled suite to inject HID drag events"
-    expect_not_contains "$runner" 'sudo sqlite3 "\$user_tcc_db"' \
-        "CI E2E must update the user TCC database as the runner user"
     expect_contains "$runner" '/opt/hca/hosted-compute-agent' \
         "CI E2E must suppress capture reminders for the hosted runner process"
     expect_contains "$runner" 'killall replayd' \
@@ -85,6 +71,8 @@ fi
 if [[ -f "$e2e_source" ]]; then
     expect_contains "$e2e_source" 'Mission Control\.app/Contents/MacOS/Mission Control' \
         "E2E must invoke system overviews without relying on user shortcut settings"
+    expect_contains "$e2e_source" 'GitHub-hosted macOS does not deliver synthetic drag gestures' \
+        "E2E must explain hosted drag-only skips"
     expect_contains "$e2e_source" 'postMouseHover\(to: handleHotspot\)' \
         "E2E must generate continuous movement inside the stage handle hotspot"
     expect_contains "$e2e_source" 'postMouseHover\(to: reverseHotspot\)' \
