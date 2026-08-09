@@ -64,6 +64,8 @@ if [[ -f "$runner" ]]; then
     if grep 'kTCCServiceScreenCapture.*X'"'" "$runner" >/dev/null; then
         fail "CI screen capture grants must not pin the disposable ad-hoc signature"
     fi
+    expect_contains "$runner" 'app_executable=.*Contents/MacOS/Debut' \
+        "CI E2E must grant the ad-hoc executable path screen capture access"
     expect_not_contains "$runner" 'sudo sqlite3 "\$user_tcc_db"' \
         "CI E2E must update the user TCC database as the runner user"
     expect_contains "$runner" '/opt/hca/hosted-compute-agent' \
