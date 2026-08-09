@@ -1,0 +1,39 @@
+name: E2E
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify workflow contract
+        run: Tests/CI/E2EWorkflowTests.sh
+
+      - name: Run E2E suite
+        run: ./scripts/ci-e2e.sh
+
+      - name: Upload E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debut-e2e-evidence
+          path: |
+            /tmp/debut-e2e-screenshots
+            ~/Library/Application Support/Debut/diagnostic.json
+          if-no-files-found: warn
+          retention-days: 7
