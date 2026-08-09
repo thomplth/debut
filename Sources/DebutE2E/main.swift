@@ -111,7 +111,7 @@ func postMouseMove(to point: CGPoint) {
 
 func postMouseHover(to point: CGPoint) {
     postMouseMove(to: CGPoint(x: point.x + 4, y: point.y))
-    wait(0.08)
+    wait(0.35)
     postMouseMove(to: point)
 }
 
@@ -404,12 +404,14 @@ func waitForDesktopSurface(
     return false
 }
 
-func toggleSystemWindowOverview(keyCode: CGKeyCode) {
-    postFlagsChanged(flags: [.maskControl])
-    wait(0.1)
-    postKeyDown(keyCode: keyCode, flags: [.maskControl])
-    postKeyUp(keyCode: keyCode, flags: [.maskControl])
-    postFlagsChanged(flags: [])
+func toggleSystemWindowOverview(mode: Int) {
+    let process = Process()
+    process.executableURL = URL(
+        fileURLWithPath: "/System/Applications/Mission Control.app/Contents/MacOS/Mission Control"
+    )
+    process.arguments = ["\(mode)"]
+    try? process.run()
+    process.waitUntilExit()
     wait(1.5)
 }
 
@@ -538,7 +540,7 @@ test("Desktop surface is visible during normal stage management") {
 }
 
 info("Opening Mission Control with Control-Up...")
-toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_UpArrow))
+toggleSystemWindowOverview(mode: 0)
 let _ = takeScreenshot("00_mission_control")
 
 test("Desktop surface yields while Mission Control presents windows") {
@@ -550,13 +552,13 @@ test("Desktop surface yields while Mission Control presents windows") {
         && waitForDesktopSurface(onScreen: false, processIdentifier: overviewPID)
 }
 
-toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_UpArrow))
+toggleSystemWindowOverview(mode: 0)
 test("Desktop surface returns after Mission Control closes") {
     overviewPID > 0 && waitForDesktopSurface(onScreen: true, processIdentifier: overviewPID)
 }
 
 info("Opening App Exposé with Control-Down...")
-toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_DownArrow))
+toggleSystemWindowOverview(mode: 2)
 let _ = takeScreenshot("00_app_expose")
 
 test("Desktop surface yields while App Exposé presents windows") {
@@ -568,7 +570,7 @@ test("Desktop surface yields while App Exposé presents windows") {
         && waitForDesktopSurface(onScreen: false, processIdentifier: overviewPID)
 }
 
-toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_DownArrow))
+toggleSystemWindowOverview(mode: 2)
 test("Desktop surface returns after App Exposé closes") {
     overviewPID > 0 && waitForDesktopSurface(onScreen: true, processIdentifier: overviewPID)
 }
