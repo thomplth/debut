@@ -417,4 +417,109 @@ struct WindowDiscoveryServiceTests {
         #expect(stageManager.stages.flatMap(\.windows).map(\.windowID) == [201])
         #expect(processExitMonitor.monitoredPIDs == [newPID])
     }
+
+    // MARK: - Lifecycle notification arming
+
+    @Test("A window whose notifications were rejected is not treated as tracked")
+    func rejectedArmingLeavesWindowUnarmed() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.armingOverride = { _, _ in .notificationRejected(-25204) }
+
+        service.registerTracking(windowID: 1, pid: 10)
+
+        #expect(service.unarmedWindowIDs == [1])
+        #expect(service.armedWindowIDs.isEmpty)
+    }
+
+    @Test("Arming is retried after a rejection instead of being blocked forever")
+    func armingIsRetriedAfterRejection() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var attempts = 0
+        service.armingOverride = { _, _ in
+            attempts += 1
+            return attempts == 1 ? .notificationRejected(-25204) : .armed
+        }
+
+        service.registerTracking(windowID: 1, pid: 10)
+        service.registerTracking(windowID: 1, pid: 10)
+
+        #expect(attempts == 2)
+        #expect(service.armedWindowIDs == [1])
+        #expect(service.unarmedWindowIDs.isEmpty)
+    }
+
+    @Test("An armed window is not re-armed on every activation")
+    func armedWindowIsNotRearmed() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var attempts = 0
+        service.armingOverride = { _, _ in
+            attempts += 1
+            return .armed
+        }
+
+        service.registerTracking(windowID: 1, pid: 10)
+        service.registerTracking(windowID: 1, pid: 10)
+        service.registerTracking(windowID: 1, pid: 10)
+
+        #expect(attempts == 1)
+    }
+
+    @Test("An unresolvable window element is recorded as unarmed, not silently dropped")
+    func unresolvableElementIsRecordedUnarmed() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.armingOverride = { _, _ in .elementUnavailable }
+
+        service.registerTracking(windowID: 7, pid: 10)
+
+        #expect(service.unarmedWindowIDs == [7])
+    }
+
+    @Test("Process exit clears both armed and unarmed records for that app")
+    func processExitClearsArmingRecords() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.armingOverride = { windowID, _ in windowID == 1 ? .armed : .elementUnavailable }
+        service.registerTracking(windowID: 1, pid: 10)
+        service.registerTracking(windowID: 2, pid: 10)
+        service.registerTracking(windowID: 3, pid: 20)
+
+        service.handleProcessExit(pid: 10)
+
+        #expect(service.armedWindowIDs == [])
+        #expect(service.unarmedWindowIDs == [3])
+    }
+
+    @Test("Unarmed windows reach the reconciler through the activation snapshot")
+    func unarmedWindowsSurfaceInSnapshot() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1), liveWindow(2)]
+        windowService.allWindowIDList = [1, 2]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 1 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.armingOverride = { windowID, _ in windowID == 2 ? .elementUnavailable : .armed }
+        var snapshotUnarmed: Set<CGWindowID> = []
+        service.onAppActivated = { snapshotUnarmed = $0.unarmedWindowIDs }
+
+        service.handleAppActivation(AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false))
+
+        #expect(snapshotUnarmed == [2])
+    }
 }

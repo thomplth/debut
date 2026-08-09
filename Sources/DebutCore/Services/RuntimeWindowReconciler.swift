@@ -5,15 +5,20 @@ public struct RuntimeWindowSnapshot: Sendable {
     public let liveWindows: [WindowInfo]
     public let allWindowIDs: Set<CGWindowID>?
     public let focusedWindowID: CGWindowID?
+    /// Windows currently assigned without an armed destroy notification, so
+    /// nothing can ever prove they closed.
+    public let unarmedWindowIDs: Set<CGWindowID>
 
     public init(
         liveWindows: [WindowInfo],
         allWindowIDs: Set<CGWindowID>?,
-        focusedWindowID: CGWindowID? = nil
+        focusedWindowID: CGWindowID? = nil,
+        unarmedWindowIDs: Set<CGWindowID> = []
     ) {
         self.liveWindows = liveWindows
         self.allWindowIDs = allWindowIDs
         self.focusedWindowID = focusedWindowID
+        self.unarmedWindowIDs = unarmedWindowIDs
     }
 }
 
