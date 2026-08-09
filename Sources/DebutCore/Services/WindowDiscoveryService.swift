@@ -3,6 +3,15 @@ import ApplicationServices
 import AXPrivate
 import CoreGraphics
 
+/// Result of trying to arm a window's lifecycle notifications. An assignment
+/// may only be trusted to be removable while its destroy notification is armed.
+public enum WindowArmingOutcome: Equatable, Sendable {
+    case armed
+    case observerUnavailable
+    case elementUnavailable
+    case notificationRejected(Int32)
+}
+
 public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private let windowService: any WindowService
     public var onWindowsDiscovered: (([WindowInfo]) -> Void)?
@@ -22,6 +31,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private var knownWindowIDs: Set<CGWindowID> = []
     private var monitoredProcessIDs: Set<pid_t> = []
     private var handledExitedProcessIDs: Set<pid_t> = []
+
+    /// Windows confirmed to have a destroy notification armed, and those whose
+    /// arming failed. Runtime-only: every window re-arms from scratch on launch,
+    /// so this never reaches state.json.
+    public private(set) var armedWindowIDs: Set<CGWindowID> = []
+    public private(set) var unarmedWindowIDs: Set<CGWindowID> = []
+    private var windowOwnerPIDs: [CGWindowID: pid_t] = [:]
+
+    /// Replaces the AX arming step in tests. Production leaves this nil.
+    var armingOverride: ((CGWindowID, pid_t) -> WindowArmingOutcome)?
 
     // AXObserver for tracking focused window changes within the frontmost app
     private var focusObserver: AXObserver?
@@ -199,9 +218,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     // MARK: - Per-window lifecycle tracking
 
-    /// Combined insert into knownWindowIDs + register AX notifications
+    /// Registers process-exit monitoring and arms window lifecycle notifications.
+    /// PID monitoring must not depend on per-window AX success.
     private func trackAndRegister(windowID: CGWindowID, pid: pid_t) {
-        knownWindowIDs.insert(windowID)
         registerProcessExitMonitoring(for: pid)
         trackWindow(windowID: windowID, pid: pid)
     }
@@ -220,41 +239,65 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     private func trackWindow(windowID: CGWindowID, pid: pid_t) {
-        // Already tracking this window
-        if perAppObservers[pid]?.trackedWindows[windowID] != nil { return }
-        guard let observer = getOrCreateObserver(for: pid) else {
-            reportTrackingFailure(windowID: windowID, pid: pid, step: "observer_create", error: nil)
+        if armedWindowIDs.contains(windowID) { return }
+
+        windowOwnerPIDs[windowID] = pid
+        let outcome = armingOverride?(windowID, pid) ?? armWindow(windowID: windowID, pid: pid)
+        guard outcome == .armed else {
+            // Leaving the window out of armedWindowIDs is what allows the next
+            // activation to retry. Recording it as tracked regardless is what
+            // previously made a transient AX failure permanent.
+            unarmedWindowIDs.insert(windowID)
+            knownWindowIDs.remove(windowID)
+            reportTrackingFailure(windowID: windowID, pid: pid, outcome: outcome)
             return
         }
-        guard let axElement = axWindowElement(for: windowID, pid: pid) else {
-            reportTrackingFailure(windowID: windowID, pid: pid, step: "element_lookup", error: nil)
-            return
-        }
+        armedWindowIDs.insert(windowID)
+        unarmedWindowIDs.remove(windowID)
+        knownWindowIDs.insert(windowID)
+    }
+
+    private func armWindow(windowID: CGWindowID, pid: pid_t) -> WindowArmingOutcome {
+        guard let observer = getOrCreateObserver(for: pid) else { return .observerUnavailable }
+        guard let axElement = axWindowElement(for: windowID, pid: pid) else { return .elementUnavailable }
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        // Register destroy + title notifications on this specific window element
-        let destroyed = AXObserverAddNotification(observer, axElement, kAXUIElementDestroyedNotification as CFString, selfPtr)
-        let titled = AXObserverAddNotification(observer, axElement, kAXTitleChangedNotification as CFString, selfPtr)
-        if destroyed != .success && destroyed != .notificationAlreadyRegistered {
-            reportTrackingFailure(windowID: windowID, pid: pid, step: "add_destroy_notification", error: destroyed)
+        let destroyed = AXObserverAddNotification(
+            observer, axElement, kAXUIElementDestroyedNotification as CFString, selfPtr
+        )
+        // A retry after a partial failure reports the notification as already
+        // registered, which is success.
+        guard destroyed == .success || destroyed == .notificationAlreadyRegistered else {
+            return .notificationRejected(destroyed.rawValue)
         }
-        if titled != .success && titled != .notificationAlreadyRegistered {
-            reportTrackingFailure(windowID: windowID, pid: pid, step: "add_title_notification", error: titled)
-        }
+        // A stale title is cosmetic, so it never gates tracking.
+        _ = AXObserverAddNotification(
+            observer, axElement, kAXTitleChangedNotification as CFString, selfPtr
+        )
         perAppObservers[pid]?.trackedWindows[windowID] = axElement
+        return .armed
     }
 
     private func reportTrackingFailure(
         windowID: CGWindowID,
         pid: pid_t,
-        step: String,
-        error: AXError?
+        outcome: WindowArmingOutcome
     ) {
+        let step: String
+        var axError = "none"
+        switch outcome {
+        case .armed: return
+        case .observerUnavailable: step = "observer_create"
+        case .elementUnavailable: step = "element_lookup"
+        case .notificationRejected(let error):
+            step = "add_destroy_notification"
+            axError = "\(error)"
+        }
         DiagnosticReporter.shared.report("tracking_failed", details: [
             "windowID": "\(windowID)",
             "pid": "\(pid)",
             "step": step,
-            "axError": error.map { "\($0.rawValue)" } ?? "none",
+            "axError": axError,
         ])
     }
 
@@ -271,6 +314,14 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     private func removeAppObserver(for pid: pid_t) {
+        // Arming records are keyed by window, not by observer, so they must be
+        // cleared even when no observer was ever created for this app.
+        let ownedWindowIDs = Set(windowOwnerPIDs.filter { $0.value == pid }.keys)
+        knownWindowIDs.subtract(ownedWindowIDs)
+        armedWindowIDs.subtract(ownedWindowIDs)
+        unarmedWindowIDs.subtract(ownedWindowIDs)
+        for windowID in ownedWindowIDs { windowOwnerPIDs.removeValue(forKey: windowID) }
+
         guard let state = perAppObservers.removeValue(forKey: pid) else { return }
         knownWindowIDs.subtract(state.trackedWindows.keys)
         CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(state.observer), .defaultMode)
@@ -307,6 +358,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     state.trackedWindows.removeValue(forKey: windowID)
                     perAppObservers[pid] = state
                     knownWindowIDs.remove(windowID)
+                    armedWindowIDs.remove(windowID)
+                    unarmedWindowIDs.remove(windowID)
+                    windowOwnerPIDs.removeValue(forKey: windowID)
                     onWindowClosed?(windowID)
                     return
                 }
@@ -488,7 +542,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         onAppActivated?(RuntimeWindowSnapshot(
             liveWindows: liveWindows,
             allWindowIDs: windowService.listAllWindowIDs(),
-            focusedWindowID: focusedWindowID
+            focusedWindowID: focusedWindowID,
+            unarmedWindowIDs: unarmedWindowIDs
         ))
         if let focusedWindowID {
             onWindowActivated?(focusedWindowID)

@@ -5,15 +5,20 @@ public struct RuntimeWindowSnapshot: Sendable {
     public let liveWindows: [WindowInfo]
     public let allWindowIDs: Set<CGWindowID>?
     public let focusedWindowID: CGWindowID?
+    /// Windows currently assigned without an armed destroy notification, so
+    /// nothing can ever prove they closed.
+    public let unarmedWindowIDs: Set<CGWindowID>
 
     public init(
         liveWindows: [WindowInfo],
         allWindowIDs: Set<CGWindowID>?,
-        focusedWindowID: CGWindowID? = nil
+        focusedWindowID: CGWindowID? = nil,
+        unarmedWindowIDs: Set<CGWindowID> = []
     ) {
         self.liveWindows = liveWindows
         self.allWindowIDs = allWindowIDs
         self.focusedWindowID = focusedWindowID
+        self.unarmedWindowIDs = unarmedWindowIDs
     }
 }
 
@@ -30,6 +35,7 @@ public struct WindowAssignmentEvent: Equatable, Sendable {
         case recoveredExact = "recovered_exact"
         case recoveredBundle = "recovered_bundle"
         case dormantRestored = "dormant_restored"
+        case strandedStageRecovered = "stranded_stage_recovered"
     }
 
     public let kind: Kind
@@ -101,6 +107,11 @@ public struct RuntimeWindowReconciler: Sendable {
             stageManager.stageContainingWindow(windowID: $0) != nil
         }
 
+        // Stages still holding an assignment whose window vanished and could not
+        // be recovered, keyed by bundle. A replacement belongs with them rather
+        // than wherever the user happens to be standing.
+        var strandedStageIDs: [String: Set<UUID>] = [:]
+
         // CG absence is evidence that an ID may have been replaced, never evidence
         // that a window was destroyed. Only AX lifecycle events remove assignments.
         if let allWindowIDs = snapshot.allWindowIDs {
@@ -113,9 +124,21 @@ public struct RuntimeWindowReconciler: Sendable {
             let directMatches = recoveryMatches(
                 assignments: missingAssignments,
                 liveWindows: snapshot.liveWindows,
-                stageManager: stageManager
+                stageManager: stageManager,
+                allowedAssignedWindowIDs: provisionalWindowIDs
             )
+            let matchedAssignmentIDs = Set(directMatches.map(\.assignment.window.id))
+            for assignment in missingAssignments
+            where !matchedAssignmentIDs.contains(assignment.window.id) {
+                strandedStageIDs[assignment.window.ownerBundleID, default: []]
+                    .insert(assignment.stageID)
+            }
             for match in directMatches {
+                // A provisional window already occupies a guessed slot. Drop it
+                // before rebinding, or it ends up assigned to two stages.
+                if provisionalWindowIDs.contains(match.info.windowID) {
+                    stageManager.removeLiveWindowFromAllStages(windowID: match.info.windowID)
+                }
                 guard let location = location(
                     of: match.assignment.window.windowID,
                     in: stageManager
@@ -189,6 +212,11 @@ public struct RuntimeWindowReconciler: Sendable {
         for info in snapshot.liveWindows where
             !consumedLiveWindowIDs.contains(info.windowID) &&
             stageManager.stageContainingWindow(windowID: info.windowID) == nil {
+            let strandedStageID = unambiguousStrandedStageID(
+                forBundleID: info.ownerBundleID,
+                strandedStageIDs: strandedStageIDs,
+                stageManager: stageManager
+            )
             stageManager.addWindow(
                 StageWindow(
                     windowID: info.windowID,
@@ -197,11 +225,14 @@ public struct RuntimeWindowReconciler: Sendable {
                     windowTitle: info.title,
                     ownerPID: info.ownerPID
                 ),
-                toStageID: targetStageID
+                toStageID: strandedStageID ?? targetStageID
             )
-            if stageManager.dormantWindowAssignments.contains(where: {
-                $0.window.ownerBundleID == info.ownerBundleID
-            }) {
+            // Placement was a guess while the bundle has unresolved assignments,
+            // so leave it reclaimable once the counts settle.
+            if strandedStageIDs[info.ownerBundleID] != nil ||
+                stageManager.dormantWindowAssignments.contains(where: {
+                    $0.window.ownerBundleID == info.ownerBundleID
+                }) {
                 provisionalWindowIDs.insert(info.windowID)
             }
             addedWindowIDs.insert(info.windowID)
@@ -212,16 +243,17 @@ public struct RuntimeWindowReconciler: Sendable {
                 bundleID: info.ownerBundleID,
                 windowTitle: info.title,
                 fromStage: nil,
-                toStage: stageManager.stages.firstIndex(where: { $0.id == targetStageID }),
-                reason: .new
+                toStage: stageManager.stages.firstIndex(where: { $0.id == (strandedStageID ?? targetStageID) }),
+                reason: strandedStageID == nil ? .new : .strandedStageRecovered
             ))
         }
 
         if let focusedWindowID = snapshot.focusedWindowID,
-           addedWindowIDs.contains(focusedWindowID) {
+           addedWindowIDs.contains(focusedWindowID),
+           let focusedStageID = stageManager.stageContainingWindow(windowID: focusedWindowID) {
             stageManager.bringWindowToFront(
                 windowID: focusedWindowID,
-                inStageID: targetStageID
+                inStageID: focusedStageID
             )
         }
 
@@ -230,6 +262,22 @@ public struct RuntimeWindowReconciler: Sendable {
             reassignedCount: reassignedCount,
             events: events
         )
+    }
+
+    /// The stage a replacement window should join. Only answerable when every
+    /// stranded assignment for the bundle sits in one stage; spread across
+    /// several, choosing one would be the same guess `zip` already makes.
+    private func unambiguousStrandedStageID(
+        forBundleID bundleID: String,
+        strandedStageIDs: [String: Set<UUID>],
+        stageManager: StageManager
+    ) -> UUID? {
+        guard let stageIDs = strandedStageIDs[bundleID],
+              stageIDs.count == 1,
+              let stageID = stageIDs.first,
+              stageManager.stages.contains(where: { $0.id == stageID })
+        else { return nil }
+        return stageID
     }
 
     private func assignments(in stageManager: StageManager) -> [WindowAssignment] {
