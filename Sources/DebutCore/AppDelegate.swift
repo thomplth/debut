@@ -156,6 +156,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                         "reassigned": "\(result.reassignedCount)",
                         "trigger": "app_launch",
                     ])
+                    self.reportAssignmentEvents(result.events, trigger: "app_launch")
                     self.debouncedSaver?.scheduleSave(controller.stageManager)
                 }
             }
@@ -163,9 +164,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         discovery.onWindowClosed = { [weak self] windowID in
             DispatchQueue.main.async {
                 guard let self else { return }
+                let window = self.stageController?.stageManager.stages
+                    .flatMap(\.windows)
+                    .first { $0.windowID == windowID }
                 for stage in self.stageController?.stageManager.stages ?? [] {
                     self.stageController?.stageManager.removeWindow(windowID: windowID, fromStageID: stage.id)
                 }
+                self.diag.report("window_retired", details: [
+                    "windowID": "\(windowID)",
+                    "bundleID": window?.ownerBundleID ?? "unknown",
+                    "windowTitle": window?.windowTitle ?? "unknown",
+                    "reason": "destroyed",
+                ])
                 if let sm = self.stageController?.stageManager {
                     self.debouncedSaver?.scheduleSave(sm)
                 }
@@ -202,6 +212,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                         "reassigned": "\(result.reassignedCount)",
                         "trigger": "app_activation",
                     ])
+                    self.reportAssignmentEvents(result.events, trigger: "app_activation")
                     self.debouncedSaver?.scheduleSave(controller.stageManager)
                 }
             }
@@ -311,6 +322,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     nonisolated public func stageControllerDidSwitchStage(_ controller: StageController) {}
 
+    private func reportAssignmentEvents(_ events: [WindowAssignmentEvent], trigger: String) {
+        for event in events {
+            var details = event.diagnosticDetails
+            details["trigger"] = trigger
+            diag.report("window_\(event.kind.rawValue)", details: details)
+        }
+    }
+
     nonisolated public func stageControllerDidMutateState(_ controller: StageController) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -323,7 +342,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         guard let stageController, let overlayWindow else { return }
 
         overlayWindow.onWindowSelected = { [weak self] stageIndex, windowIndex in
-            self?.diag.report("overlay_window_selected_by_pointer", details: [
+            self?.diag.report("overlay_window_selected_by_pointer", level: .transient, details: [
                 "stageIndex": "\(stageIndex)",
                 "windowIndex": "\(windowIndex)",
             ])
@@ -370,14 +389,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
 
         overlayWindow.onStageHandleVisibilityChanged = { [weak self] stageIndex, isRevealed in
-            self?.diag.report("stage_drag_handle_visibility_changed", details: [
+            self?.diag.report("stage_drag_handle_visibility_changed", level: .transient, details: [
                 "stageIndex": "\(stageIndex)",
                 "isRevealed": "\(isRevealed)",
             ])
         }
 
         overlayWindow.onPointerSelectionChanged = { [weak self] stageIndex, windowIndex in
-            self?.diag.report("overlay_pointer_selection_changed", details: [
+            self?.diag.report("overlay_pointer_selection_changed", level: .transient, details: [
                 "stageIndex": stageIndex.map(String.init) ?? "none",
                 "windowIndex": windowIndex.map(String.init) ?? "none",
             ])
