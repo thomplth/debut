@@ -241,6 +241,16 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
             return event
         }
 
+        // Keep the standard app-quit shortcut available during a stage-manager
+        // session, including while the overlay is visible. Passing both keyDown
+        // and keyUp avoids leaving a partial shortcut sequence in the target app.
+        let shortcutFlags = flags.intersection([
+            .maskCommand, .maskAlternate, .maskControl, .maskShift,
+        ])
+        if keyCode == Int64(kVK_ANSI_Q), shortcutFlags == .maskCommand {
+            return event
+        }
+
         // Session active but overlay closed (after Esc): only intercept Tab to reopen.
         // Cmd+` is already handled above; pass everything else through.
         if !overlayVisible {
