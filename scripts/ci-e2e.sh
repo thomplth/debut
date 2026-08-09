@@ -16,6 +16,7 @@ export DEVELOPER_DIR="$xcode_path"
 export TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault
 
 app_path="/Applications/Debut.app"
+app_executable="$app_path/Contents/MacOS/Debut"
 system_tcc_db="/Library/Application Support/com.apple.TCC/TCC.db"
 user_tcc_db="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
 fixture_dir="${RUNNER_TEMP}/debut-e2e-fixtures"
@@ -51,8 +52,12 @@ sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceAccessibility','com.thomplth.Debut',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceScreenCapture','com.thomplth.Debut',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
+'kTCCServiceScreenCapture','$app_executable',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sqlite3 "$user_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceScreenCapture','com.thomplth.Debut',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+sqlite3 "$user_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
+'kTCCServiceScreenCapture','$app_executable',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sudo killall tccd 2>/dev/null || true
 
 echo "Preparing deterministic fixture windows..."
