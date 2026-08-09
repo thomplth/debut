@@ -58,12 +58,6 @@ if [[ -f "$runner" ]]; then
         "CI E2E must suppress the hosted runner's screen capture reminder"
     expect_contains "$runner" '/opt/hca/hosted-compute-agent' \
         "CI E2E must suppress capture reminders for the hosted runner process"
-    expect_contains "$runner" 'com\.apple\.symbolichotkeys' \
-        "CI E2E must configure system overview shortcuts in the disposable account"
-    expect_contains "$runner" 'AppleSymbolicHotKeys.*32' \
-        "CI E2E must enable the Mission Control shortcut"
-    expect_contains "$runner" 'AppleSymbolicHotKeys.*33' \
-        "CI E2E must enable the App Expose shortcut"
     expect_contains "$runner" 'killall replayd' \
         "CI E2E must reload replayd after changing its capture approval"
     expect_contains "$runner" './scripts/build-app.sh' "CI E2E entry point must build the app"
@@ -73,6 +67,8 @@ if [[ -f "$runner" ]]; then
 fi
 
 if [[ -f "$e2e_source" ]]; then
+    expect_contains "$e2e_source" 'Mission Control\.app/Contents/MacOS/Mission Control' \
+        "E2E must invoke system overviews without relying on user shortcut settings"
     expect_contains "$e2e_source" 'postMouseHover\(to: handleHotspot\)' \
         "E2E must generate continuous movement inside the stage handle hotspot"
     expect_contains "$e2e_source" 'postMouseHover\(to: reverseHotspot\)' \
