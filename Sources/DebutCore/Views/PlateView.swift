@@ -62,6 +62,23 @@ enum PlateInteraction {
         return fromStageIndex != toStageIndex
     }
 
+    static func finishWindowDrag(
+        _ windowDrag: inout WindowDragState?
+    ) -> WindowMoveRequest? {
+        guard let completedDrag = windowDrag else { return nil }
+        windowDrag = nil
+        guard shouldMoveWindow(
+            fromStageIndex: completedDrag.sourceStageIndex,
+            toStageIndex: completedDrag.dropTargetStageIndex
+        ), let targetStageIndex = completedDrag.dropTargetStageIndex
+        else { return nil }
+        return WindowMoveRequest(
+            windowID: completedDrag.windowID,
+            fromStageIndex: completedDrag.sourceStageIndex,
+            toStageIndex: targetStageIndex
+        )
+    }
+
     static func stageDestination(
         from sourceIndex: Int,
         translation: CGFloat,
@@ -459,14 +476,14 @@ struct PlateSwiftUIView: View {
                 }
             }
             .onEnded { _ in
-                guard let drag = windowDrag else { return }
-                if PlateInteraction.shouldMoveWindow(
-                    fromStageIndex: drag.sourceStageIndex,
-                    toStageIndex: drag.dropTargetStageIndex
-                ), let target = drag.dropTargetStageIndex {
-                    onWindowMoved?(drag.windowID, drag.sourceStageIndex, target)
+                guard let request = PlateInteraction.finishWindowDrag(&windowDrag) else {
+                    return
                 }
-                windowDrag = nil
+                onWindowMoved?(
+                    request.windowID,
+                    request.fromStageIndex,
+                    request.toStageIndex
+                )
             }
     }
 
