@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate, StageControllerDelegate {
@@ -597,6 +598,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 )
             }
         }
+        vm.onResetWindowCache = { [weak self] in
+            DispatchQueue.main.async {
+                self?.resetWindowCache()
+            }
+        }
+        vm.onExportDiagnosticData = { [weak self] in
+            DispatchQueue.main.async {
+                self?.exportDiagnosticData()
+            }
+        }
         let view = SettingsView(viewModel: vm)
         let window = SettingsWindow(rootView: view)
         window.center()
@@ -611,6 +622,131 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         ])
 
         self.settingsWindow = window
+    }
+
+    private func resetWindowCache() {
+        let previousManager = stageController?.stageManager
+            ?? pendingStageManager
+            ?? (try? stateStore?.load())
+            ?? StageManager()
+        let previousLiveCount = previousManager.stages.reduce(0) { $0 + $1.windows.count }
+        let previousDormantCount = previousManager.dormantWindowAssignments.count
+
+        diag.report("window_cache_reset_started", details: [
+            "liveAssignments": "\(previousLiveCount)",
+            "dormantAssignments": "\(previousDormantCount)",
+            "stageCount": "\(previousManager.stages.count)",
+        ])
+
+        if let controller = stageController, let discovery = windowDiscovery {
+            discovery.resetWindowTracking()
+            controller.stageManager.resetWindowCache()
+            discovery.populateDefaultStage(&controller.stageManager)
+            controller.selectedStageIndex = 0
+            controller.selectedWindowIndex = 0
+
+            // Rebuild the z-order as well as the model so windows that were on
+            // an inactive stage become visible immediately after the reset.
+            desktopSurface?.orderToFront()
+            for window in controller.stageManager.activeStage.windows {
+                _ = controller.windowService.raiseWindow(windowID: window.windowID)
+            }
+            if let firstWindow = controller.stageManager.activeStage.windows.first {
+                _ = controller.windowService.activateApp(bundleID: firstWindow.ownerBundleID)
+            }
+
+            debouncedSaver?.flushNow(controller.stageManager)
+            diag.report("window_cache_reset_completed", details: [
+                "discoveredAssignments": "\(controller.stageManager.activeStage.windows.count)",
+                "templatesPreserved": "\(controller.stageManager.templates.count)",
+            ])
+        } else {
+            var resetManager = previousManager
+            resetManager.resetWindowCache()
+            pendingStageManager = resetManager
+            debouncedSaver?.flushNow(resetManager)
+            diag.report("window_cache_reset_completed", details: [
+                "discoveredAssignments": "0",
+                "templatesPreserved": "\(resetManager.templates.count)",
+                "controllerAvailable": "false",
+            ])
+        }
+    }
+
+    private func exportDiagnosticData() {
+        let panel = NSSavePanel()
+        panel.title = "Export Debut Diagnostic Data"
+        panel.prompt = "Export"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = diagnosticExportFilename()
+
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .OK, let destination = panel.url, let self else { return }
+            self.writeDiagnosticExport(to: destination)
+        }
+        if let settingsWindow {
+            panel.beginSheetModal(for: settingsWindow, completionHandler: completion)
+        } else {
+            completion(panel.runModal())
+        }
+    }
+
+    private func writeDiagnosticExport(to destination: URL) {
+        let manager = stageController?.stageManager
+            ?? pendingStageManager
+            ?? (try? stateStore?.load())
+            ?? StageManager()
+        let liveWindows = windowService?.listWindows() ?? []
+        let runningApps = windowService?.listRunningApps() ?? []
+        let snapshot = DiagnosticExportSnapshot(
+            stageManager: manager,
+            settings: currentSettings,
+            liveWindows: liveWindows,
+            runningApps: runningApps,
+            allWindowIDs: windowService?.listAllWindowIDs(),
+            untrackableWindowIDs: windowService?.listUntrackableWindowIDs() ?? [],
+            tracking: windowDiscovery?.diagnosticTrackingSnapshot ?? .empty,
+            frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            accessibilityEnabled: windowService?.isAccessibilityEnabled() ?? false,
+            screens: NSScreen.screens.map {
+                DiagnosticScreenSnapshot(
+                    frame: $0.frame,
+                    visibleFrame: $0.visibleFrame,
+                    backingScaleFactor: $0.backingScaleFactor
+                )
+            }
+        )
+
+        diag.report("diagnostic_export_requested", details: [
+            "liveWindowCount": "\(liveWindows.count)",
+            "runningAppCount": "\(runningApps.count)",
+            "destinationExtension": destination.pathExtension,
+        ])
+        diag.flush()
+
+        do {
+            try DiagnosticExporter().export(snapshot, to: destination)
+            diag.report("diagnostic_export_completed", details: [
+                "filename": destination.lastPathComponent,
+            ])
+        } catch {
+            diag.report("diagnostic_export_failed", details: [
+                "error": String(describing: error),
+            ])
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "Diagnostic Export Failed"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    private func diagnosticExportFilename() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        return "Debut-Diagnostics-\(formatter.string(from: Date())).json"
     }
 
 }

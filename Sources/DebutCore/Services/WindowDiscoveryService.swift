@@ -39,6 +39,23 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public private(set) var unarmedWindowIDs: Set<CGWindowID> = []
     private var windowOwnerPIDs: [CGWindowID: pid_t] = [:]
 
+    public var diagnosticTrackingSnapshot: WindowTrackingDiagnosticSnapshot {
+        WindowTrackingDiagnosticSnapshot(
+            knownWindowIDs: knownWindowIDs,
+            armedWindowIDs: armedWindowIDs,
+            unarmedWindowIDs: unarmedWindowIDs,
+            monitoredProcessIDs: monitoredProcessIDs,
+            observedPID: observedPID,
+            observerProcessIDs: Set(perAppObservers.keys),
+            windowOwners: windowOwnerPIDs.map {
+                WindowTrackingDiagnosticSnapshot.WindowOwner(
+                    windowID: $0.key,
+                    ownerPID: $0.value
+                )
+            }
+        )
+    }
+
     /// Replaces the AX arming step in tests. Production leaves this nil.
     var armingOverride: ((CGWindowID, pid_t) -> WindowArmingOutcome)?
 
@@ -209,11 +226,28 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public func stopObserving() {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         removeFocusObserver()
-        for pid in perAppObservers.keys {
+        for pid in Array(perAppObservers.keys) {
             removeAppObserver(for: pid)
         }
         processExitMonitor.stopMonitoringAll()
         monitoredProcessIDs.removeAll()
+    }
+
+    /// Clears runtime-only observer and process caches without unregistering
+    /// workspace notifications. A cache reset can then re-arm every freshly
+    /// discovered window as if Debut had just launched.
+    public func resetWindowTracking() {
+        removeFocusObserver()
+        for pid in Array(perAppObservers.keys) {
+            removeAppObserver(for: pid)
+        }
+        processExitMonitor.stopMonitoringAll()
+        knownWindowIDs.removeAll()
+        armedWindowIDs.removeAll()
+        unarmedWindowIDs.removeAll()
+        windowOwnerPIDs.removeAll()
+        monitoredProcessIDs.removeAll()
+        handledExitedProcessIDs.removeAll()
     }
 
     // MARK: - Per-window lifecycle tracking
