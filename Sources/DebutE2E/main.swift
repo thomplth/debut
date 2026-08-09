@@ -180,15 +180,24 @@ func plateCenter(
     )
     let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
     let scale: (Int) -> CGFloat = { $0 == activeStageIndex ? 1 : inactiveScale }
-    let top: (Int) -> CGFloat = { index in
+    let topWithinStack: (Int) -> CGFloat = { index in
         (0..<index).reduce(0) { partial, precedingIndex in
             partial + plateHeight * scale(precedingIndex) + 14
         }
     }
-    let yOffset = screen.midY - top(activeStageIndex) - plateHeight / 2
+    let stackHeight = windowCounts.indices.reduce(0) { partial, index in
+        partial + plateHeight * scale(index)
+    } + CGFloat(max(0, windowCounts.count - 1)) * 14
+    let stackTop = screen.midY - stackHeight / 2
+    let activeCenterWithinStack = topWithinStack(activeStageIndex) + plateHeight / 2
+    let yOffset = screen.midY - activeCenterWithinStack
+    let visualCenterY = stackTop
+        + topWithinStack(stageIndex)
+        + plateHeight * scale(stageIndex) / 2
+        + yOffset
     return CGPoint(
         x: screen.midX,
-        y: yOffset + top(stageIndex) + plateHeight * scale(stageIndex) / 2
+        y: screen.maxY - visualCenterY
     )
 }
 
@@ -232,7 +241,7 @@ func windowCenter(
         + thumbnail.height / 2
     return CGPoint(
         x: center.x + (unscaledX - plateWidth / 2) * scale,
-        y: center.y + (unscaledY - plateHeight / 2) * scale
+        y: center.y - (unscaledY - plateHeight / 2) * scale
     )
 }
 
@@ -417,6 +426,13 @@ if running.isEmpty {
     info("Debut running (PID \(running[0].processIdentifier))")
 }
 wait(1)
+
+// A prior interrupted run can leave the event-tap session or overlay active.
+// Normalize both before the baseline so the first activation is deterministic.
+postKeyDown(keyCode: CGKeyCode(kVK_Escape))
+postKeyUp(keyCode: CGKeyCode(kVK_Escape))
+postFlagsChanged(flags: [])
+wait(0.5)
 
 // --- 1. Baseline ---
 header("1. Baseline")
