@@ -873,14 +873,6 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
         relativeX: 0,
         xOffset: 12
-   ),
-   let revealedHandleCenter = platePoint(
-        stageIndex: sourceStageIndex,
-        windowCounts: preparedWindowCounts,
-        activeStageIndex: destinationStageIndex,
-        inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
-        relativeX: 0,
-        xOffset: 0
    ) {
     postMouseDrag(
         from: sourceBodyPoint,
@@ -913,8 +905,8 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
     }
 
     postMouseDrag(
-        from: revealedHandleCenter,
-        to: CGPoint(x: revealedHandleCenter.x, y: destinationCenter.y)
+        from: handleHotspot,
+        to: CGPoint(x: handleHotspot.x, y: destinationCenter.y)
     )
     for _ in 0..<30 {
         if readEvents().filter({ $0["event"] == "stage_reordered_by_drag" }).count
@@ -942,14 +934,6 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
             relativeX: 0,
             xOffset: 12
        ),
-       let reverseHandleCenter = platePoint(
-            stageIndex: destinationStageIndex,
-            windowCounts: reorderedWindowCounts,
-            activeStageIndex: reorderedActiveStageIndex,
-            inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
-            relativeX: 0,
-            xOffset: 0
-       ),
        let reverseDestination = plateCenter(
             stageIndex: sourceStageIndex,
             windowCounts: reorderedWindowCounts,
@@ -959,8 +943,8 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         postMouseHover(to: reverseHotspot)
         wait(0.4)
         postMouseDrag(
-            from: reverseHandleCenter,
-            to: CGPoint(x: reverseHandleCenter.x, y: reverseDestination.y)
+            from: reverseHotspot,
+            to: CGPoint(x: reverseHotspot.x, y: reverseDestination.y)
         )
         for _ in 0..<30 {
             if readEvents().filter({ $0["event"] == "stage_reordered_by_drag" }).count
