@@ -31,15 +31,11 @@ Never leave code changes uninstalled — the installed app must always match the
 
 ### Full E2E
 
-Do not run the full E2E suite by default. Full E2E is optional and should only be run when the change is risky, such as changes to global keyboard handling, Accessibility integration, window discovery or lifecycle, stage switching, overlay presentation, persistence reconciliation, app installation, or code signing.
+The full E2E suite runs on the free GitHub-hosted macOS runner through `.github/workflows/e2e.yml`. It runs for pull requests and pushes to `main`, and can be started manually from GitHub Actions.
 
-The full E2E suite is interactive: it launches Debut, displays its overlay, injects global keyboard events into the active macOS session, and captures the live desktop. Warn the user before running it when it could disrupt their session.
+Do not run the full E2E suite on a developer machine by default. It launches Debut, displays its overlay, injects global keyboard events, and captures the live desktop. The hosted workflow is the source of truth because it supplies a clean, repeatable GUI session and does not disturb development.
 
-For risky changes, run the full cycle:
-```bash
-./scripts/rebuild.sh
-```
-This kills the running app, builds, installs to `/Applications`, launches, and runs E2E tests.
+`./scripts/rebuild.sh` only builds, installs, and launches the app locally. For risky changes such as global keyboard handling, Accessibility integration, window discovery or lifecycle, stage switching, overlay presentation, persistence reconciliation, app installation, or code signing, require the hosted E2E result before considering verification complete.
 
 ## Toolchain
 
@@ -66,8 +62,8 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 ## Tests
 
 - Unit + screenshot tests: `TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test`
-- Interactive E2E only, for risky changes: `./scripts/e2e-test.sh`
-- Full build, install, launch, and interactive E2E cycle, for risky changes: `./scripts/rebuild.sh`
+- Hosted E2E: `.github/workflows/e2e.yml`
+- Local build, install, and launch without E2E: `./scripts/rebuild.sh`
 
 ## Architecture Rules
 
