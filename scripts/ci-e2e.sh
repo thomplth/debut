@@ -25,6 +25,7 @@ screen_capture_approvals="$HOME/Library/Group Containers/group.com.apple.replayd
 cleanup() {
     pkill -f "Debut.app" 2>/dev/null || true
     pkill -x TextEdit 2>/dev/null || true
+    launchctl unsetenv DEBUT_DISABLE_WINDOW_PREVIEWS 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -59,6 +60,8 @@ sqlite3 "$user_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
 sqlite3 "$user_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceScreenCapture','$app_executable',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sudo killall tccd 2>/dev/null || true
+
+launchctl setenv DEBUT_DISABLE_WINDOW_PREVIEWS 1
 
 echo "Preparing deterministic fixture windows..."
 rm -rf "$HOME/Library/Application Support/Debut"
