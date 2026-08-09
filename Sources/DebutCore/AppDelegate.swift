@@ -383,9 +383,38 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings
         )
+        reportCommandHintLayout(viewModel: vm)
         overlayWindow.update(viewModel: vm)
         overlayWindow.showOverlay()
         diag.report("overlay_shown")
+    }
+
+    private func reportCommandHintLayout(viewModel: OverlayViewModel) {
+        let leadingHintCount = viewModel.plates.indices.compactMap { index in
+            CommandHintCatalog.stageNumberHint(stageIndex: index, settings: currentSettings)
+        }.count
+        guard viewModel.plates.indices.contains(viewModel.activeStageIndex) else { return }
+        let activePlate = viewModel.plates[viewModel.activeStageIndex]
+        let footerHints = CommandHintCatalog.plateFooterHints(
+            stageIndex: viewModel.activeStageIndex,
+            isActive: true,
+            hasSelectedWindow: activePlate.windows.indices.contains(viewModel.selectedWindowIndex),
+            settings: currentSettings
+        )
+        let nextWindowIndex = activePlate.windows.indices.first { index in
+            !CommandHintCatalog.windowHints(
+                windowIndex: index,
+                selectedWindowIndex: viewModel.selectedWindowIndex,
+                windowCount: activePlate.windows.count,
+                settings: currentSettings
+            ).isEmpty
+        }
+        diag.report("command_hints_laid_out", details: [
+            "footerHintCount": "\(footerHints.count)",
+            "footerIconCount": "\(footerHints.compactMap(\.iconSystemName).count)",
+            "nextWindowIndex": nextWindowIndex.map(String.init) ?? "none",
+            "stageLeadingHintCount": "\(leadingHintCount)",
+        ])
     }
 
     private func hideStageManagerOverlay() {

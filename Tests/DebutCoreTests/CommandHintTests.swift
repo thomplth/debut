@@ -48,38 +48,75 @@ struct CommandHintTests {
         #expect(settings.shouldShowCommandHint(for: .newStageBelow))
     }
 
-    @Test("Stage hints are contextual and use configured shortcuts")
+    @Test("Stage number hints sit left of every plate without an icon")
     func stageHintCatalog() {
         var settings = AppSettings()
         settings.keyBindings.bindings[.newStageBelow] = KeyCombo(keyCode: kVK_ANSI_B)
 
-        let inactiveHints = CommandHintCatalog.stageHints(
+        let numberHint = CommandHintCatalog.stageNumberHint(
             stageIndex: 0,
-            isActive: false,
-            settings: settings
-        )
-        let activeHints = CommandHintCatalog.stageHints(
-            stageIndex: 0,
-            isActive: true,
             settings: settings
         )
 
-        #expect(inactiveHints.count == 1)
-        #expect(inactiveHints[0].actions == [.jumpToStage1])
-        #expect(activeHints.flatMap(\.actions).contains(.newStageBelow))
-        #expect(activeHints.first(where: { $0.actions.contains(.newStageBelow) })?.shortcut.contains("B") == true)
+        #expect(numberHint?.actions == [.jumpToStage1])
+        #expect(numberHint?.placement == .stageLeading)
+        #expect(numberHint?.iconSystemName == nil)
     }
 
-    @Test("Selected window hints include navigation and cross-stage movement")
+    @Test("Active plate actions sit below the plate and use purpose icons")
+    func plateFooterCatalog() {
+        var settings = AppSettings()
+        settings.keyBindings.bindings[.newStageBelow] = KeyCombo(keyCode: kVK_ANSI_B)
+
+        let inactiveHints = CommandHintCatalog.plateFooterHints(
+            stageIndex: 0,
+            isActive: false,
+            hasSelectedWindow: false,
+            settings: settings
+        )
+        let activeHints = CommandHintCatalog.plateFooterHints(
+            stageIndex: 0,
+            isActive: true,
+            hasSelectedWindow: true,
+            settings: settings
+        )
+
+        #expect(inactiveHints.isEmpty)
+        #expect(activeHints.flatMap(\.actions).contains(.newStageBelow))
+        #expect(activeHints.flatMap(\.actions).contains(.moveWindowUp))
+        #expect(activeHints.first(where: { $0.actions.contains(.newStageBelow) })?.shortcut.contains("B") == true)
+        #expect(activeHints.allSatisfy { $0.placement == .plateFooter })
+        #expect(activeHints.allSatisfy { $0.iconSystemName != nil })
+    }
+
+    @Test("Tab hint appears on the next selectable window")
     func windowHintCatalog() {
         let settings = AppSettings()
 
-        #expect(CommandHintCatalog.windowHints(isSelected: false, settings: settings).isEmpty)
-        let hints = CommandHintCatalog.windowHints(isSelected: true, settings: settings)
-        let actions = hints.flatMap(\.actions)
-        #expect(actions.contains(.nextWindow))
-        #expect(actions.contains(.moveWindowUp))
-        #expect(actions.contains(.moveWindowDown))
+        let currentHints = CommandHintCatalog.windowHints(
+            windowIndex: 1,
+            selectedWindowIndex: 1,
+            windowCount: 3,
+            settings: settings
+        )
+        let nextHints = CommandHintCatalog.windowHints(
+            windowIndex: 2,
+            selectedWindowIndex: 1,
+            windowCount: 3,
+            settings: settings
+        )
+        let wrappedHints = CommandHintCatalog.windowHints(
+            windowIndex: 0,
+            selectedWindowIndex: 2,
+            windowCount: 3,
+            settings: settings
+        )
+
+        #expect(currentHints.isEmpty)
+        #expect(nextHints.flatMap(\.actions).contains(.nextWindow))
+        #expect(nextHints.allSatisfy { $0.placement == .nextWindow })
+        #expect(nextHints.allSatisfy { $0.iconSystemName == nil })
+        #expect(!wrappedHints.isEmpty)
     }
 
     @Test("A hidden action is omitted from its contextual group")
@@ -87,7 +124,12 @@ struct CommandHintTests {
         var settings = AppSettings()
         settings.commandUsageCounts[.moveWindowUp] = 4
 
-        let hints = CommandHintCatalog.windowHints(isSelected: true, settings: settings)
+        let hints = CommandHintCatalog.plateFooterHints(
+            stageIndex: 0,
+            isActive: true,
+            hasSelectedWindow: true,
+            settings: settings
+        )
         let moveHint = hints.first(where: { $0.label == "Move window" })
 
         #expect(moveHint?.actions == [.moveWindowDown])
