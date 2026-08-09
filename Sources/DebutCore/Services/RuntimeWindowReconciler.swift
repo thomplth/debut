@@ -17,13 +17,55 @@ public struct RuntimeWindowSnapshot: Sendable {
     }
 }
 
+/// A single assignment change, carrying enough identity to diagnose a
+/// misplacement after the fact. Aggregate counts cannot show which window moved.
+public struct WindowAssignmentEvent: Equatable, Sendable {
+    public enum Kind: String, Sendable {
+        case assigned
+        case reassigned
+    }
+
+    public enum Reason: String, Sendable {
+        case new
+        case recoveredExact = "recovered_exact"
+        case recoveredBundle = "recovered_bundle"
+        case dormantRestored = "dormant_restored"
+    }
+
+    public let kind: Kind
+    public let windowID: CGWindowID
+    public let bundleID: String
+    public let windowTitle: String
+    public let fromStage: Int?
+    public let toStage: Int?
+    public let reason: Reason
+
+    public var diagnosticDetails: [String: String] {
+        var details: [String: String] = [
+            "windowID": "\(windowID)",
+            "bundleID": bundleID,
+            "windowTitle": windowTitle,
+            "reason": reason.rawValue,
+        ]
+        if let fromStage { details["fromStage"] = "\(fromStage)" }
+        if let toStage { details["toStage"] = "\(toStage)" }
+        return details
+    }
+}
+
 public struct RuntimeWindowReconciliationResult: Equatable, Sendable {
     public let addedCount: Int
     public let reassignedCount: Int
+    public let events: [WindowAssignmentEvent]
 
-    public init(addedCount: Int = 0, reassignedCount: Int = 0) {
+    public init(
+        addedCount: Int = 0,
+        reassignedCount: Int = 0,
+        events: [WindowAssignmentEvent] = []
+    ) {
         self.addedCount = addedCount
         self.reassignedCount = reassignedCount
+        self.events = events
     }
 
     public var didMutate: Bool { addedCount > 0 || reassignedCount > 0 }
@@ -34,6 +76,12 @@ public struct RuntimeWindowReconciler: Sendable {
         let stageID: UUID
         let windowIndex: Int
         let window: StageWindow
+    }
+
+    private struct RecoveryMatch: Sendable {
+        let assignment: WindowAssignment
+        let info: WindowInfo
+        let reason: WindowAssignmentEvent.Reason
     }
 
     private var provisionalWindowIDs = Set<CGWindowID>()
@@ -47,6 +95,7 @@ public struct RuntimeWindowReconciler: Sendable {
     ) -> RuntimeWindowReconciliationResult {
         var addedCount = 0
         var reassignedCount = 0
+        var events: [WindowAssignmentEvent] = []
         var consumedLiveWindowIDs = Set<CGWindowID>()
         provisionalWindowIDs = provisionalWindowIDs.filter {
             stageManager.stageContainingWindow(windowID: $0) != nil
@@ -66,22 +115,31 @@ public struct RuntimeWindowReconciler: Sendable {
                 liveWindows: snapshot.liveWindows,
                 stageManager: stageManager
             )
-            for (assignment, info) in directMatches {
+            for match in directMatches {
                 guard let location = location(
-                    of: assignment.window.windowID,
+                    of: match.assignment.window.windowID,
                     in: stageManager
                 ) else { continue }
 
                 stageManager.updateWindowIDs(
                     stageIndex: location.stageIndex,
                     windowIndex: location.windowIndex,
-                    windowID: info.windowID,
-                    ownerPID: info.ownerPID,
-                    windowTitle: info.title
+                    windowID: match.info.windowID,
+                    ownerPID: match.info.ownerPID,
+                    windowTitle: match.info.title
                 )
-                consumedLiveWindowIDs.insert(info.windowID)
-                provisionalWindowIDs.remove(info.windowID)
+                consumedLiveWindowIDs.insert(match.info.windowID)
+                provisionalWindowIDs.remove(match.info.windowID)
                 reassignedCount += 1
+                events.append(WindowAssignmentEvent(
+                    kind: .reassigned,
+                    windowID: match.info.windowID,
+                    bundleID: match.info.ownerBundleID,
+                    windowTitle: match.info.title,
+                    fromStage: location.stageIndex,
+                    toStage: location.stageIndex,
+                    reason: match.reason
+                ))
             }
         }
 
@@ -98,17 +156,28 @@ public struct RuntimeWindowReconciler: Sendable {
             stageManager: stageManager,
             allowedAssignedWindowIDs: provisionalWindowIDs
         )
-        for (assignment, info) in sortedByStagePosition(dormantMatches, stageManager: stageManager) {
-            stageManager.removeLiveWindowFromAllStages(windowID: info.windowID)
+        for match in sortedByStagePosition(dormantMatches, stageManager: stageManager) {
+            let previousStage = stageManager.stageContainingWindow(windowID: match.info.windowID)
+                .flatMap { id in stageManager.stages.firstIndex(where: { $0.id == id }) }
+            stageManager.removeLiveWindowFromAllStages(windowID: match.info.windowID)
             guard stageManager.restoreDormantWindow(
-                assignmentID: assignment.window.id,
-                windowID: info.windowID,
-                ownerPID: info.ownerPID,
-                windowTitle: info.title
+                assignmentID: match.assignment.window.id,
+                windowID: match.info.windowID,
+                ownerPID: match.info.ownerPID,
+                windowTitle: match.info.title
             ) else { continue }
-            consumedLiveWindowIDs.insert(info.windowID)
-            provisionalWindowIDs.remove(info.windowID)
+            consumedLiveWindowIDs.insert(match.info.windowID)
+            provisionalWindowIDs.remove(match.info.windowID)
             reassignedCount += 1
+            events.append(WindowAssignmentEvent(
+                kind: .reassigned,
+                windowID: match.info.windowID,
+                bundleID: match.info.ownerBundleID,
+                windowTitle: match.info.title,
+                fromStage: previousStage,
+                toStage: stageManager.stages.firstIndex(where: { $0.id == match.assignment.stageID }),
+                reason: .dormantRestored
+            ))
         }
 
         // AX metadata is still useful for additions, but never for destructive
@@ -137,6 +206,15 @@ public struct RuntimeWindowReconciler: Sendable {
             }
             addedWindowIDs.insert(info.windowID)
             addedCount += 1
+            events.append(WindowAssignmentEvent(
+                kind: .assigned,
+                windowID: info.windowID,
+                bundleID: info.ownerBundleID,
+                windowTitle: info.title,
+                fromStage: nil,
+                toStage: stageManager.stages.firstIndex(where: { $0.id == targetStageID }),
+                reason: .new
+            ))
         }
 
         if let focusedWindowID = snapshot.focusedWindowID,
@@ -149,7 +227,8 @@ public struct RuntimeWindowReconciler: Sendable {
 
         return RuntimeWindowReconciliationResult(
             addedCount: addedCount,
-            reassignedCount: reassignedCount
+            reassignedCount: reassignedCount,
+            events: events
         )
     }
 
@@ -166,8 +245,8 @@ public struct RuntimeWindowReconciler: Sendable {
         liveWindows: [WindowInfo],
         stageManager: StageManager,
         allowedAssignedWindowIDs: Set<CGWindowID> = []
-    ) -> [(WindowAssignment, WindowInfo)] {
-        var matches: [(WindowAssignment, WindowInfo)] = []
+    ) -> [RecoveryMatch] {
+        var matches: [RecoveryMatch] = []
         var usedAssignmentIDs = Set<UUID>()
         var usedLiveWindowIDs = Set<CGWindowID>()
 
@@ -182,7 +261,7 @@ public struct RuntimeWindowReconciler: Sendable {
                     (stageManager.stageContainingWindow(windowID: info.windowID) == nil ||
                         allowedAssignedWindowIDs.contains(info.windowID))
             }) else { continue }
-            matches.append((assignment, info))
+            matches.append(RecoveryMatch(assignment: assignment, info: info, reason: .recoveredExact))
             usedAssignmentIDs.insert(assignment.window.id)
             usedLiveWindowIDs.insert(info.windowID)
         }
@@ -203,24 +282,26 @@ public struct RuntimeWindowReconciler: Sendable {
             guard !bundleAssignments.isEmpty,
                   bundleAssignments.count == bundleWindows.count
             else { continue }
-            matches.append(contentsOf: zip(bundleAssignments, bundleWindows))
+            matches.append(contentsOf: zip(bundleAssignments, bundleWindows).map {
+                RecoveryMatch(assignment: $0.0, info: $0.1, reason: .recoveredBundle)
+            })
         }
 
         return matches
     }
 
     private func sortedByStagePosition(
-        _ matches: [(WindowAssignment, WindowInfo)],
+        _ matches: [RecoveryMatch],
         stageManager: StageManager
-    ) -> [(WindowAssignment, WindowInfo)] {
+    ) -> [RecoveryMatch] {
         let stageOrder = Dictionary(
             uniqueKeysWithValues: stageManager.stages.enumerated().map { ($0.element.id, $0.offset) }
         )
         return matches.sorted {
-            let lhsStage = stageOrder[$0.0.stageID, default: .max]
-            let rhsStage = stageOrder[$1.0.stageID, default: .max]
+            let lhsStage = stageOrder[$0.assignment.stageID, default: .max]
+            let rhsStage = stageOrder[$1.assignment.stageID, default: .max]
             return lhsStage == rhsStage
-                ? $0.0.windowIndex < $1.0.windowIndex
+                ? $0.assignment.windowIndex < $1.assignment.windowIndex
                 : lhsStage < rhsStage
         }
     }

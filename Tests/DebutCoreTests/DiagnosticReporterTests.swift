@@ -1,0 +1,123 @@
+import Foundation
+import Testing
+@testable import DebutCore
+
+@Suite("DiagnosticReporter")
+struct DiagnosticReporterTests {
+
+    private func makeTempDirectory() throws -> URL {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DebutTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        return tmp
+    }
+
+    private func durableLines(in directory: URL) -> [[String: String]] {
+        let url = directory.appendingPathComponent("diagnostic.jsonl")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        return text
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .compactMap { line in
+                guard let data = line.data(using: .utf8),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: String]
+                else { return nil }
+                return object
+            }
+    }
+
+    @Test("Lifecycle events append one parseable JSONL line each")
+    func lifecycleEventsAppend() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir)
+        reporter.report("window_assigned", level: .lifecycle, details: ["windowID": "1"])
+        reporter.report("window_assigned", level: .lifecycle, details: ["windowID": "2"])
+        reporter.report("window_retired", level: .lifecycle, details: ["windowID": "1"])
+        reporter.flush()
+
+        let lines = durableLines(in: dir)
+        #expect(lines.count == 3)
+        #expect(lines.map { $0["event"] } == ["window_assigned", "window_assigned", "window_retired"])
+        #expect(lines[1]["windowID"] == "2")
+        #expect(lines.allSatisfy { $0["timestamp"]?.isEmpty == false })
+    }
+
+    @Test("Transient events never reach the durable log")
+    func transientEventsStayInMemory() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir)
+        for _ in 0..<200 {
+            reporter.report("key_event", level: .transient, details: ["keyEvent": "tab"])
+        }
+        reporter.report("window_assigned", level: .lifecycle, details: ["windowID": "9"])
+        reporter.flush()
+
+        let lines = durableLines(in: dir)
+        #expect(lines.count == 1)
+        #expect(lines.first?["event"] == "window_assigned")
+    }
+
+    @Test("Durable log rotates and keeps exactly one previous generation")
+    func durableLogRotates() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir, rotationByteLimit: 512)
+        let padding = String(repeating: "x", count: 120)
+        for index in 0..<40 {
+            reporter.report("window_assigned", level: .lifecycle, details: [
+                "windowID": "\(index)",
+                "padding": padding,
+            ])
+        }
+        reporter.flush()
+
+        let current = dir.appendingPathComponent("diagnostic.jsonl")
+        let rotated = dir.appendingPathComponent("diagnostic.jsonl.1")
+        #expect(FileManager.default.fileExists(atPath: current.path))
+        #expect(FileManager.default.fileExists(atPath: rotated.path))
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("diagnostic.jsonl.2").path))
+
+        let size = (try FileManager.default.attributesOfItem(atPath: current.path)[.size] as? NSNumber)?.intValue ?? 0
+        #expect(size <= 512)
+    }
+
+    @Test("Snapshot file keeps its existing shape for E2E consumers")
+    func snapshotFileShapeUnchanged() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir)
+        reporter.setStateProvider { ["stageCount": "3"] }
+        reporter.report("app_launched", level: .lifecycle)
+        reporter.flush()
+
+        let url = dir.appendingPathComponent("diagnostic.json")
+        let data = try Data(contentsOf: url)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        let state = try #require(object["state"] as? [String: String])
+        #expect(state["stageCount"] == "3")
+        let events = try #require(object["events"] as? [[String: String]])
+        #expect(events.last?["event"] == "app_launched")
+        #expect(object["updatedAt"] as? String != nil)
+    }
+
+    @Test("Transient events still appear in the in-memory snapshot")
+    func transientEventsInSnapshot() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir)
+        reporter.report("key_event", level: .transient, details: ["keyEvent": "tab"])
+        reporter.flush()
+
+        let data = try Data(contentsOf: dir.appendingPathComponent("diagnostic.json"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let events = try #require(object["events"] as? [[String: String]])
+        #expect(events.contains { $0["event"] == "key_event" })
+    }
+}
