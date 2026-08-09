@@ -64,6 +64,15 @@ enum PlateMotion {
 }
 
 enum PlateInteraction {
+    static let minimumWindowDragDistance: CGFloat = 6
+
+    static func isWindowClick(
+        translation: CGSize,
+        minimumDragDistance: CGFloat = minimumWindowDragDistance
+    ) -> Bool {
+        hypot(translation.width, translation.height) < minimumDragDistance
+    }
+
     static func shouldMoveWindow(fromStageIndex: Int, toStageIndex: Int?) -> Bool {
         guard let toStageIndex else { return false }
         return fromStageIndex != toStageIndex
@@ -447,9 +456,6 @@ struct PlateSwiftUIView: View {
                                 )
                             }
                         }
-                        .onTapGesture {
-                            onWindowSelected?(stageIndex, index)
-                        }
                         .highPriorityGesture(windowDragGesture(window: window, windowIndex: index))
                     }
                 }
@@ -474,8 +480,14 @@ struct PlateSwiftUIView: View {
     }
 
     private func windowDragGesture(window: PlateWindowData, windowIndex: Int) -> some Gesture {
-        DragGesture(coordinateSpace: .named("overlay"))
+        DragGesture(
+            minimumDistance: 0,
+            coordinateSpace: .named("overlay")
+        )
             .onChanged { value in
+                guard !PlateInteraction.isWindowClick(translation: value.translation) else {
+                    return
+                }
                 if windowDrag == nil {
                     windowDrag = WindowDragState(
                         windowID: window.windowID,
@@ -489,7 +501,11 @@ struct PlateSwiftUIView: View {
                     windowDrag?.dropTargetStageIndex = dropTargetIndex(at: value.location)
                 }
             }
-            .onEnded { _ in
+            .onEnded { value in
+                if PlateInteraction.isWindowClick(translation: value.translation) {
+                    onWindowSelected?(stageIndex, windowIndex)
+                    return
+                }
                 guard let request = PlateInteraction.finishWindowDrag(&windowDrag) else {
                     return
                 }
