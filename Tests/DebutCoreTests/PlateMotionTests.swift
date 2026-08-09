@@ -64,6 +64,14 @@ struct PlateMotionTests {
         #expect(!PlateInteraction.shouldMoveWindow(fromStageIndex: 1, toStageIndex: nil))
     }
 
+    @Test("A press without meaningful movement selects instead of starting a drag")
+    func clickAndDragThreshold() {
+        #expect(PlateInteraction.isWindowClick(translation: .zero))
+        #expect(PlateInteraction.isWindowClick(translation: CGSize(width: 3, height: 4)))
+        #expect(!PlateInteraction.isWindowClick(translation: CGSize(width: 6, height: 0)))
+        #expect(!PlateInteraction.isWindowClick(translation: CGSize(width: 5, height: 5)))
+    }
+
     @Test("Finishing a window drop clears drag state before requesting the move")
     func windowDropClearsDragBeforeMoveRequest() {
         var drag: WindowDragState? = WindowDragState(

@@ -61,6 +61,7 @@ struct DesktopSurfaceWindowTests {
         )
 
         #expect(window.collectionBehavior.contains(.transient))
+        #expect(!window.collectionBehavior.contains(.stationary))
         #expect(!window.collectionBehavior.contains(.canJoinAllSpaces))
     }
 
