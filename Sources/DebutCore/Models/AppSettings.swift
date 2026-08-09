@@ -5,6 +5,12 @@ public enum GlassStyle: String, Codable, Sendable, CaseIterable {
     case regular = "Regular"
 }
 
+public enum CommandHintVisibility: String, Codable, Sendable, CaseIterable {
+    case automatic = "Automatic"
+    case never = "Never"
+    case always = "Always"
+}
+
 public struct AppSettings: Codable, Sendable {
     public static let defaultOverlayPresentationDelay: TimeInterval = 0.1
 
@@ -28,6 +34,10 @@ public struct AppSettings: Codable, Sendable {
     public var keyBindings: KeyBindings
     public var quickSwitchExcludedBundleIDs: [String]
 
+    // Command hints
+    public var commandHintVisibility: CommandHintVisibility
+    public var commandUsageCounts: [KeyAction: Int]
+
     public init() {
         self.launchAtLogin = false
         self.showInMenuBar = true
@@ -46,6 +56,8 @@ public struct AppSettings: Codable, Sendable {
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
         self.keyBindings = KeyBindings()
         self.quickSwitchExcludedBundleIDs = []
+        self.commandHintVisibility = .automatic
+        self.commandUsageCounts = [:]
     }
 
     public init(from decoder: Decoder) throws {
@@ -71,6 +83,14 @@ public struct AppSettings: Codable, Sendable {
             [String].self,
             forKey: .quickSwitchExcludedBundleIDs
         ) ?? []
+        commandHintVisibility = try container.decodeIfPresent(
+            CommandHintVisibility.self,
+            forKey: .commandHintVisibility
+        ) ?? .automatic
+        commandUsageCounts = try container.decodeIfPresent(
+            [KeyAction: Int].self,
+            forKey: .commandUsageCounts
+        ) ?? [:]
     }
 
     public func isExcluded(bundleID: String) -> Bool {
@@ -79,5 +99,29 @@ public struct AppSettings: Codable, Sendable {
 
     public func isQuickSwitchExcluded(bundleID: String) -> Bool {
         quickSwitchExcludedBundleIDs.contains(bundleID)
+    }
+
+    public func shouldShowCommandHint(for action: KeyAction) -> Bool {
+        switch commandHintVisibility {
+        case .automatic:
+            (commandUsageCounts[action] ?? 0) <= 3
+        case .never:
+            false
+        case .always:
+            true
+        }
+    }
+
+    /// Records only the four uses needed by automatic mode. Returns whether state changed.
+    @discardableResult
+    public mutating func recordCommandUsage(_ action: KeyAction) -> Bool {
+        let currentCount = commandUsageCounts[action] ?? 0
+        guard currentCount < 4 else { return false }
+        commandUsageCounts[action] = currentCount + 1
+        return true
+    }
+
+    public mutating func resetCommandHintUsage() {
+        commandUsageCounts.removeAll()
     }
 }

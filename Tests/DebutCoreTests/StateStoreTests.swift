@@ -66,6 +66,8 @@ struct StateStoreTests {
         settings.confirmStageDeletion = false
         settings.overlayPresentationDelay = 0.25
         settings.quickSwitchExcludedBundleIDs = ["com.tinyspeck.slackmacgap"]
+        settings.commandHintVisibility = .always
+        _ = settings.recordCommandUsage(.newStageBelow)
 
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
@@ -73,6 +75,8 @@ struct StateStoreTests {
         #expect(loaded.confirmStageDeletion == false)
         #expect(loaded.overlayPresentationDelay == 0.25)
         #expect(loaded.quickSwitchExcludedBundleIDs == ["com.tinyspeck.slackmacgap"])
+        #expect(loaded.commandHintVisibility == .always)
+        #expect(loaded.commandUsageCounts[.newStageBelow] == 1)
     }
 
     @Test("Older settings default quick switch exclusions to empty")
@@ -101,6 +105,22 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.overlayPresentationDelay == 0.1)
+    }
+
+    @Test("Older settings default command hints to automatic with no usage")
+    func legacySettingsDefaultCommandHints() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "commandHintVisibility")
+        object.removeValue(forKey: "commandUsageCounts")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+
+        #expect(decoded.commandHintVisibility == .automatic)
+        #expect(decoded.commandUsageCounts.isEmpty)
     }
 
     @Test("Settings defaults when no file")

@@ -57,6 +57,8 @@ public struct SettingsView: View {
         .onChange(of: viewModel.settings.inactivePlateScale) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.overlayPresentationDelay) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.keyBindings) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.commandHintVisibility) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.commandUsageCounts) { _, _ in saveSettings() }
     }
 
     // MARK: - Helpers
@@ -313,6 +315,36 @@ public struct SettingsView: View {
                     in: 0...0.5,
                     step: 0.025
                 )
+            }
+
+            Text("Command hints")
+                .font(.headline)
+                .padding(.top, 8)
+
+            HStack {
+                Text("Show hints")
+                Spacer()
+                Picker("", selection: $viewModel.settings.commandHintVisibility) {
+                    ForEach(CommandHintVisibility.allCases, id: \.self) { visibility in
+                        Text(visibility.rawValue).tag(visibility)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 250)
+            }
+
+            Text("Automatic hides each hint after its command is used more than three times. Never hides every hint; Always keeps them visible.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Text("Learned command usage")
+                Spacer()
+                Button("Reset Hint Usage") {
+                    viewModel.settings.resetCommandHintUsage()
+                }
+                .disabled(viewModel.settings.commandUsageCounts.isEmpty)
             }
 
             Text("Quick switch exclusions")

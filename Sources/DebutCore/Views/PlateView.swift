@@ -198,6 +198,11 @@ public struct OverlaySwiftUIView: View {
                         let selectedWindowIndex = pointerSelection?.stageIndex == index
                             ? pointerSelection?.windowIndex
                             : (isActive ? viewModel.selectedWindowIndex : nil)
+                        let commandHints = CommandHintCatalog.stageHints(
+                            stageIndex: index,
+                            isActive: isActive,
+                            settings: viewModel.appearance
+                        )
 
                         PlateSwiftUIView(
                             plate: plate,
@@ -205,6 +210,7 @@ public struct OverlaySwiftUIView: View {
                             thumbnailWidth: tSize.width,
                             thumbnailHeight: tSize.height,
                             appearance: viewModel.appearance,
+                            commandHints: commandHints,
                             windowDrag: $windowDrag,
                             plateFrames: $plateFrames,
                             stageIndex: index,
@@ -316,6 +322,7 @@ struct PlateSwiftUIView: View {
     let thumbnailWidth: CGFloat
     let thumbnailHeight: CGFloat
     let appearance: AppSettings
+    let commandHints: [CommandHintPresentation]
     @Binding var windowDrag: WindowDragState?
     @Binding var plateFrames: [Int: CGRect]
     let stageIndex: Int
@@ -341,7 +348,11 @@ struct PlateSwiftUIView: View {
                             isDragging: isDragging,
                             thumbnailWidth: thumbnailWidth,
                             thumbnailHeight: thumbnailHeight,
-                            appearance: appearance
+                            appearance: appearance,
+                            commandHints: CommandHintCatalog.windowHints(
+                                isSelected: selectedWindowIndex == index,
+                                settings: appearance
+                            )
                         )
                         .opacity(isDragging ? 0.3 : 1.0)
                         .onHover { isHovering in
@@ -367,6 +378,13 @@ struct PlateSwiftUIView: View {
             cornerRadius: CGFloat(appearance.plateCornerRadius),
             appearance: appearance
         ))
+        .overlay(alignment: .bottom) {
+            if !commandHints.isEmpty {
+                CommandHintStrip(hints: commandHints)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 5)
+            }
+        }
     }
 
     private func windowDragGesture(window: PlateWindowData, windowIndex: Int) -> some Gesture {
@@ -414,6 +432,7 @@ struct WindowPreviewView: View {
     let thumbnailWidth: CGFloat
     let thumbnailHeight: CGFloat
     let appearance: AppSettings
+    var commandHints: [CommandHintPresentation] = []
 
     var body: some View {
         VStack(spacing: 4) {
@@ -434,6 +453,12 @@ struct WindowPreviewView: View {
                     }
                 }
                 .frame(width: thumbnailWidth, height: thumbnailHeight)
+                .overlay(alignment: .bottomTrailing) {
+                    if !commandHints.isEmpty {
+                        CommandHintStrip(hints: commandHints)
+                            .padding(6)
+                    }
+                }
 
                 AppIconImage(bundleID: window.ownerBundleID, name: window.ownerName, iconSize: PlateConstants.badgeSize)
                     .frame(width: PlateConstants.badgeSize, height: PlateConstants.badgeSize)
@@ -456,6 +481,34 @@ struct WindowPreviewView: View {
         )
         .animation(.spring(duration: 0.18, bounce: 0.08), value: isWindowSelected)
         .animation(.easeOut(duration: 0.12), value: isDragging)
+    }
+}
+
+struct CommandHintStrip: View {
+    let hints: [CommandHintPresentation]
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(hints) { hint in
+                Text(hint.shortcut)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.55), in: Capsule())
+                    .overlay {
+                        Capsule().stroke(.white.opacity(0.14), lineWidth: 0.5)
+                    }
+                    .help("\(hint.label): \(hint.shortcut)")
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            hints.map { "\($0.label), \($0.shortcut)" }.joined(separator: "; ")
+        )
     }
 }
 
