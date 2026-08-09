@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import DebutCore
 import Foundation
 
 // MARK: - Output
@@ -86,6 +87,55 @@ func postFlagsChanged(flags: CGEventFlags) {
     event.type = .flagsChanged
     event.flags = flags
     event.post(tap: .cgSessionEventTap)
+}
+
+func postMouseMove(to point: CGPoint) {
+    guard let event = CGEvent(
+        mouseEventSource: nil,
+        mouseType: .mouseMoved,
+        mouseCursorPosition: point,
+        mouseButton: .left
+    ) else { return }
+    event.post(tap: .cgSessionEventTap)
+}
+
+func postMouseClick(at point: CGPoint) {
+    for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+        guard let event = CGEvent(
+            mouseEventSource: nil,
+            mouseType: type,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) else { continue }
+        event.post(tap: .cgSessionEventTap)
+        wait(0.08)
+    }
+}
+
+func firstWindowCenter(in state: [String: String]) -> CGPoint? {
+    guard let maxWindows = Int(state["maxWindowsInStage"] ?? ""), maxWindows > 0,
+          let activeWindows = Int(state["windowsInActiveStage"] ?? ""), activeWindows > 0
+    else { return nil }
+
+    let screen = CGDisplayBounds(CGMainDisplayID())
+    let thumbnail = PlateConstants.thumbnailSize(
+        forWindowCount: maxWindows,
+        screenWidth: screen.width
+    )
+    let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
+    let plateWidth = PlateConstants.plateWidth(
+        forWindowCount: activeWindows,
+        thumbnailWidth: thumbnail.width
+    )
+    let cardCenterX = screen.midX - plateWidth / 2
+        + PlateConstants.padding
+        + PlateConstants.windowCardPadding
+        + thumbnail.width / 2
+    let thumbnailCenterY = screen.midY - plateHeight / 2
+        + PlateConstants.topPadding
+        + PlateConstants.windowCardPadding
+        + thumbnail.height / 2
+    return CGPoint(x: cardCenterX, y: thumbnailCenterY)
 }
 
 func wait(_ seconds: Double) {
@@ -305,6 +355,38 @@ let _ = takeScreenshot("09_after_stage_switch")
 
 test("Overlay closed after stage commit") {
     return readState()["overlayVisible"] == "false"
+}
+
+// --- 9. Pointer hover and click ---
+header("9. Hover and click a window card")
+let pointerSelectionCount = readEvents().filter {
+    $0["event"] == "overlay_window_selected_by_pointer"
+}.count
+
+postFlagsChanged(flags: [.maskCommand])
+wait(0.1)
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+wait(0.8)
+
+if let point = firstWindowCenter(in: readState()) {
+    info("Moving pointer to first window at \(point)")
+    postMouseMove(to: point)
+    wait(0.5)
+    let _ = takeScreenshot("10_pointer_hover")
+    postMouseClick(at: point)
+} else {
+    fail("Could not calculate a window-card click target")
+}
+wait(0.8)
+postFlagsChanged(flags: [])
+
+test("Clicking a window card commits the pointer selection") {
+    let pointerEvents = readEvents().filter {
+        $0["event"] == "overlay_window_selected_by_pointer"
+    }
+    return pointerEvents.count > pointerSelectionCount
+        && pointerEvents.last?["windowIndex"] == "0"
+        && readState()["overlayVisible"] == "false"
 }
 
 // --- Summary ---

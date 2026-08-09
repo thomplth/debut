@@ -100,6 +100,31 @@ struct StageControllerTests {
         #expect(windowSvc.raisedWindowID == 202)
     }
 
+    @Test("Clicking a window immediately switches to its stage and window")
+    func mouseSelectionCommitsImmediately() {
+        let (controller, windowSvc, keyboardSvc) = makeController()
+        let firstStageID = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        let secondStageID = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: firstStageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toStageID: secondStageID
+        )
+        controller.stageManager.activateStage(id: firstStageID)
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        controller.commitOverlaySelection(stageIndex: 1, windowIndex: 0)
+
+        #expect(!controller.isStageManagerVisible)
+        #expect(controller.stageManager.activeStageID == secondStageID)
+        #expect(windowSvc.raisedWindowID == 202)
+        #expect(windowSvc.activatedBundleID == "com.b")
+    }
+
     @Test("Cmd+Tab hold opens overlay")
     func cmdTabHold() {
         let (controller, _, keyboardSvc) = makeController()

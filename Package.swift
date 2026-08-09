@@ -31,6 +31,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "DebutE2E",
+            dependencies: ["DebutCore"],
             path: "Sources/DebutE2E",
             linkerSettings: [
                 .linkedFramework("ApplicationServices"),

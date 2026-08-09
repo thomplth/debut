@@ -59,6 +59,23 @@ struct StageManagerTests {
         #expect(sm.stages[0].id == secondID)
     }
 
+    @Test("Move a stage to a drag destination")
+    func moveStage() {
+        var sm = StageManager()
+        let firstID = sm.stages[0].id
+        sm.createStage(position: .below)
+        let secondID = sm.stages[1].id
+        sm.createStage(position: .below)
+        let thirdID = sm.stages[2].id
+
+        sm.moveStage(fromIndex: 0, toIndex: 2)
+        #expect(sm.stages.map(\.id) == [secondID, thirdID, firstID])
+        #expect(sm.activeStageID == thirdID)
+
+        sm.moveStage(fromIndex: 2, toIndex: 0)
+        #expect(sm.stages.map(\.id) == [firstID, secondID, thirdID])
+    }
+
     @Test("Add and move window")
     func moveWindow() {
         var sm = StageManager()

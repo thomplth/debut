@@ -263,6 +263,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private func showStageManagerOverlay() {
         guard let stageController, let overlayWindow else { return }
 
+        overlayWindow.onWindowSelected = { [weak self] stageIndex, windowIndex in
+            self?.diag.report("overlay_window_selected_by_pointer", details: [
+                "stageIndex": "\(stageIndex)",
+                "windowIndex": "\(windowIndex)",
+            ])
+            self?.stageController?.commitOverlaySelection(
+                stageIndex: stageIndex,
+                windowIndex: windowIndex
+            )
+        }
+
         overlayWindow.onWindowMoved = { [weak self] windowID, fromIndex, toIndex in
             guard let self, let ctrl = self.stageController else { return }
             let stages = ctrl.stageManager.stages
@@ -272,6 +283,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 fromStageID: stages[fromIndex].id,
                 toStageID: stages[toIndex].id
             )
+            self.debouncedSaver?.scheduleSave(ctrl.stageManager)
+            self.diag.report("window_moved_by_drag", details: [
+                "windowID": "\(windowID)",
+                "fromStageIndex": "\(fromIndex)",
+                "toStageIndex": "\(toIndex)",
+            ])
             self.updateOverlay()
         }
 
@@ -282,6 +299,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             if let activeID, let newIndex = ctrl.stageManager.stages.firstIndex(where: { $0.id == activeID }) {
                 ctrl.selectedStageIndex = newIndex
             }
+            self.debouncedSaver?.scheduleSave(ctrl.stageManager)
+            self.diag.report("stage_reordered_by_drag", details: [
+                "fromStageIndex": "\(fromIndex)",
+                "toStageIndex": "\(toIndex)",
+            ])
             self.updateOverlay()
         }
 
