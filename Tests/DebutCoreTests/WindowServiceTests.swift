@@ -30,6 +30,13 @@ struct WindowServiceTests {
         ))
     }
 
+    @Test("Disabled live previews do not request screen capture")
+    func disabledLivePreviewsAvoidCapture() {
+        let service = AccessibilityWindowService(windowCaptureEnabled: false)
+
+        #expect(service.captureWindowImage(windowID: kCGNullWindowID) == nil)
+    }
+
     @Test("List running apps")
     func listApps() {
         let svc = MockWindowService()

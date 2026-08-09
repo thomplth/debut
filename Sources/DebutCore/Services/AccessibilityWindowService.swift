@@ -4,7 +4,13 @@ import AXPrivate
 import CoreGraphics
 
 public final class AccessibilityWindowService: WindowService, @unchecked Sendable {
-    public init() {}
+    private let windowCaptureEnabled: Bool
+
+    public init(
+        windowCaptureEnabled: Bool = ProcessInfo.processInfo.environment["DEBUT_DISABLE_WINDOW_PREVIEWS"] != "1"
+    ) {
+        self.windowCaptureEnabled = windowCaptureEnabled
+    }
 
     // MARK: - App-level
 
@@ -162,7 +168,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     // MARK: - Window capture
 
     public func captureWindowImage(windowID: CGWindowID) -> CGImage? {
-        CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, .boundsIgnoreFraming)
+        guard windowCaptureEnabled else { return nil }
+        return CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, .boundsIgnoreFraming)
     }
 
     // MARK: - Window raise
