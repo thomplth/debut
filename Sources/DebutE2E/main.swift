@@ -29,6 +29,10 @@ let diagnosticFile: URL = {
     return dir.appendingPathComponent("diagnostic.json")
 }()
 
+let settingsFile: URL = diagnosticFile
+    .deletingLastPathComponent()
+    .appendingPathComponent("settings.json")
+
 func readState() -> [String: String] {
     guard let data = try? Data(contentsOf: diagnosticFile),
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -448,12 +452,53 @@ test("Clicking a window card commits the pointer selection") {
         && readState()["overlayVisible"] == "false"
 }
 
-// --- 10. First-launch onboarding (forced, without changing user defaults) ---
-header("10. First-launch onboarding")
+// --- 10. Customized global activation ---
+header("10. Customized global activation")
 for application in NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.Debut") {
     _ = application.terminate()
 }
 wait(1.0)
+
+let originalSettingsData = try? Data(contentsOf: settingsFile)
+let settingsStore = StateStore()
+var customizedSettings = (try? settingsStore.loadSettings()) ?? AppSettings()
+customizedSettings.keyBindings.bindings[.activateNextWindow] = KeyCombo(
+    keyCode: kVK_ANSI_B,
+    command: true
+)
+try? settingsStore.saveSettings(customizedSettings)
+
+let customizedApplication = launchDebut()
+wait(1.5)
+let customizedActivationCount = readEvents().filter {
+    $0["event"] == "key_event" && $0["keyEvent"] == "cmdTabHold"
+}.count
+postFlagsChanged(flags: [.maskCommand])
+wait(0.1)
+postKeyDown(keyCode: CGKeyCode(kVK_ANSI_B), flags: [.maskCommand])
+wait(0.8)
+
+test("A persisted custom shortcut replaces Command-Tab activation") {
+    customizedApplication != nil
+        && readState()["overlayVisible"] == "true"
+        && readEvents().filter {
+            $0["event"] == "key_event" && $0["keyEvent"] == "cmdTabHold"
+        }.count > customizedActivationCount
+}
+
+postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+postFlagsChanged(flags: [])
+wait(0.3)
+_ = customizedApplication?.terminate()
+wait(1.0)
+if let originalSettingsData {
+    try? originalSettingsData.write(to: settingsFile, options: .atomic)
+} else {
+    try? FileManager.default.removeItem(at: settingsFile)
+}
+
+// --- 11. First-launch onboarding (forced, without changing user defaults) ---
+header("11. First-launch onboarding")
 
 let onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
 wait(1.5)

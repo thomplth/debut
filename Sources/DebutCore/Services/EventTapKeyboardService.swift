@@ -16,8 +16,9 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     private var runLoopSource: CFRunLoopSource?
     private var eventTapRunLoop: CFRunLoop?
     private var eventTapThread: Thread?
-    private var cmdHeld: Bool = false
     private var stageManagerActive: Bool = false
+    private var sessionPrimaryModifier: CGEventFlags?
+    private var sessionTriggerKeyCode: Int64?
     private var quickSwitchKeysDown: Set<Int64> = []
     private let configurationLock = NSLock()
     private var cachedFrontmostAppBundleIdentifier: String?
@@ -156,147 +157,159 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
-        // Ctrl+<0-9> — immediate switch unless the frontmost app is excluded.
-        // Once Debut captures a key-down, consume its repeats and key-up too so a
-        // stage switch cannot leak the remainder of the key sequence to another app.
-        if type == .keyDown,
-           let stagePosition = Self.quickSwitchStagePosition(keyCode: keyCode, flags: flags) {
-            if quickSwitchKeysDown.contains(keyCode) {
-                return nil
-            }
-            let quickSwitchConfiguration = configurationLock.withLock {
-                (storedQuickSwitchExcludedBundleIDs, cachedFrontmostAppBundleIdentifier)
-            }
-            if !quickSwitchConfiguration.0.isEmpty,
-               let bundleID = quickSwitchConfiguration.1,
-               quickSwitchConfiguration.0.contains(bundleID) {
-                return event
-            }
-            if quickSwitchKeysDown.insert(keyCode).inserted {
-                deliver(.switchToStage(stagePosition), asynchronously: deliverAsynchronously)
-            }
-            return nil
-        }
         if type == .keyUp, quickSwitchKeysDown.remove(keyCode) != nil {
             return nil
         }
+        if type == .keyUp,
+           stageManagerActive,
+           sessionPrimaryModifier == nil,
+           sessionTriggerKeyCode == keyCode {
+            stageManagerActive = false
+            sessionTriggerKeyCode = nil
+            deliver(.cmdRelease, asynchronously: deliverAsynchronously)
+            return nil
+        }
 
-        // Track Cmd key state
+        // A Stage Manager session commits when its activation modifier is released.
         if type == .flagsChanged {
-            let cmdDown = flags.contains(.maskCommand)
-            if cmdHeld && !cmdDown {
-                cmdHeld = false
-                if stageManagerActive {
-                    stageManagerActive = false
-                    deliver(.cmdRelease, asynchronously: deliverAsynchronously)
-                    return nil
-                }
+            if stageManagerActive,
+               let primaryModifier = sessionPrimaryModifier,
+               !flags.contains(primaryModifier) {
+                stageManagerActive = false
+                sessionPrimaryModifier = nil
+                sessionTriggerKeyCode = nil
+                deliver(.cmdRelease, asynchronously: deliverAsynchronously)
+                return nil
             }
-            cmdHeld = cmdDown
             return event
         }
 
-        let shift = flags.contains(.maskShift)
+        if type == .keyDown,
+           let globalAction = configuredAction(keyCode: keyCode, flags: flags, scope: .global) {
+            if let stagePosition = globalAction.quickSwitchPosition {
+                if quickSwitchKeysDown.contains(keyCode) {
+                    return nil
+                }
+                let quickSwitchConfiguration = configurationLock.withLock {
+                    (storedQuickSwitchExcludedBundleIDs, cachedFrontmostAppBundleIdentifier)
+                }
+                if !quickSwitchConfiguration.0.isEmpty,
+                   let bundleID = quickSwitchConfiguration.1,
+                   quickSwitchConfiguration.0.contains(bundleID) {
+                    return event
+                }
+                if quickSwitchKeysDown.insert(keyCode).inserted {
+                    deliver(.switchToStage(stagePosition), asynchronously: deliverAsynchronously)
+                }
+                return nil
+            }
 
-        // Cmd+Option+Tab — open/reopen overlay in stage mode, or cycle stages
-        if type == .keyDown && flags.contains(.maskCommand) && flags.contains(.maskAlternate) && keyCode == Int64(kVK_Tab) {
-            if !stageManagerActive {
-                cmdHeld = true
+            if globalAction.isOverlayActivation {
+                beginSession(using: globalAction)
+                let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                let keyEvent: DebutKeyEvent = if isAutoRepeat && globalAction == .activateNextWindow {
+                    .nextWindowRepeat
+                } else {
+                    globalAction.toKeyEvent()
+                }
+                deliver(keyEvent, asynchronously: deliverAsynchronously)
+                return nil
             }
-            stageManagerActive = true
-            deliver(
-                shift ? .cmdOptionShiftTabHold : .cmdOptionTabHold,
-                asynchronously: deliverAsynchronously
-            )
-            return nil
-        }
 
-        // Cmd+Tab (without Option) — open/reopen overlay in window mode, or cycle windows
-        if type == .keyDown && flags.contains(.maskCommand) && !flags.contains(.maskAlternate) && keyCode == Int64(kVK_Tab) {
-            if !stageManagerActive {
-                cmdHeld = true
+            if globalAction.isSameAppCycle && !overlayVisible {
+                beginSession(using: globalAction)
+                deliver(globalAction.toKeyEvent(), asynchronously: deliverAsynchronously)
+                return nil
             }
-            stageManagerActive = true
-            let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-            let keyEvent: DebutKeyEvent = if isAutoRepeat && !shift {
-                .nextWindowRepeat
-            } else {
-                shift ? .cmdShiftTabHold : .cmdTabHold
-            }
-            deliver(keyEvent, asynchronously: deliverAsynchronously)
-            return nil
-        }
-
-        // Cmd+` (without Option, overlay closed) — stage-isolated same-app window cycling
-        if type == .keyDown && flags.contains(.maskCommand) && !flags.contains(.maskAlternate) && keyCode == Int64(kVK_ANSI_Grave) && !overlayVisible {
-            if !stageManagerActive {
-                cmdHeld = true
-            }
-            stageManagerActive = true
-            deliver(
-                shift ? .cmdShiftBacktick : .cmdBacktick,
-                asynchronously: deliverAsynchronously
-            )
-            return nil
         }
 
         guard stageManagerActive else {
             return event
         }
 
-        // Keep the standard app-quit shortcut available during a stage-manager
-        // session, including while the overlay is visible. Passing both keyDown
-        // and keyUp avoids leaving a partial shortcut sequence in the target app.
+        // Session active but overlay closed (after Esc): configured global activation
+        // shortcuts above can reopen it; everything else passes through.
+        guard overlayVisible else {
+            return event
+        }
+
+        let sessionAction = configuredSessionAction(keyCode: keyCode, flags: flags)
+
+        // Keep the standard app-quit shortcut available unless the user explicitly
+        // assigns that physical key combination to a Stage Manager command.
         let shortcutFlags = flags.intersection([
             .maskCommand, .maskAlternate, .maskControl, .maskShift,
         ])
-        if keyCode == Int64(kVK_ANSI_Q), shortcutFlags == .maskCommand {
+        if keyCode == Int64(kVK_ANSI_Q),
+           shortcutFlags == .maskCommand,
+           sessionAction == nil {
             return event
         }
 
-        // Session active but overlay closed (after Esc): only intercept Tab to reopen.
-        // Cmd+` is already handled above; pass everything else through.
-        if !overlayVisible {
-            if type == .keyDown && keyCode == Int64(kVK_Tab) {
-                // Tab/Shift+Tab/Option+Tab will reopen — already handled above
-            }
-            return event
-        }
-
-        // Overlay is visible — consume ALL keyboard events
+        // Overlay visible — consume both key-down and key-up, dispatching configured
+        // commands only for key-down.
         guard type == .keyDown else {
-            return nil // Consume keyUp events too
-        }
-
-        // Escape is always hardcoded
-        if Int(keyCode) == kVK_Escape {
-            deliver(.escape, asynchronously: deliverAsynchronously)
             return nil
         }
 
-        // Backtick always maps to previousWindow (Cmd+` equivalent)
-        if Int(keyCode) == kVK_ANSI_Grave {
-            deliver(.previousWindow, asynchronously: deliverAsynchronously)
-            return nil
-        }
-
-        // Forward delete also maps to deleteStage (in addition to regular delete)
-        if Int(keyCode) == kVK_ForwardDelete {
-            deliver(.deleteStage, asynchronously: deliverAsynchronously)
-            return nil
-        }
-
-        // Look up configurable bindings
-        let combo = KeyCombo(
-            keyCode: Int(keyCode),
-            shift: shift,
-            option: flags.contains(.maskAlternate)
-        )
-        if let action = keyBindings.action(for: combo) {
-            deliver(action.toKeyEvent(), asynchronously: deliverAsynchronously)
+        if let sessionAction {
+            let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            let keyEvent: DebutKeyEvent = if isAutoRepeat && sessionAction == .nextWindow {
+                .nextWindowRepeat
+            } else {
+                sessionAction.toKeyEvent()
+            }
+            deliver(keyEvent, asynchronously: deliverAsynchronously)
         }
 
         // Always consume — never let keyboard events leak to the active app
+        return nil
+    }
+
+    private func beginSession(using action: KeyAction) {
+        guard !stageManagerActive,
+              let combo = keyBindings.combo(for: action)
+        else { return }
+        stageManagerActive = true
+        sessionPrimaryModifier = Self.primaryModifier(for: combo)
+        sessionTriggerKeyCode = sessionPrimaryModifier == nil ? Int64(combo.keyCode) : nil
+    }
+
+    private func configuredAction(
+        keyCode: Int64,
+        flags: CGEventFlags,
+        scope: ShortcutScope
+    ) -> KeyAction? {
+        let combo = Self.keyCombo(keyCode: keyCode, flags: flags)
+        return keyBindings.action(for: combo, scope: scope)
+    }
+
+    private func configuredSessionAction(
+        keyCode: Int64,
+        flags: CGEventFlags
+    ) -> KeyAction? {
+        var relativeFlags = flags
+        if let primaryModifier = sessionPrimaryModifier {
+            relativeFlags.remove(primaryModifier)
+        }
+        return configuredAction(keyCode: keyCode, flags: relativeFlags, scope: .session)
+    }
+
+    private static func keyCombo(keyCode: Int64, flags: CGEventFlags) -> KeyCombo {
+        KeyCombo(
+            keyCode: Int(keyCode),
+            command: flags.contains(.maskCommand),
+            control: flags.contains(.maskControl),
+            shift: flags.contains(.maskShift),
+            option: flags.contains(.maskAlternate)
+        )
+    }
+
+    private static func primaryModifier(for combo: KeyCombo) -> CGEventFlags? {
+        if combo.command { return .maskCommand }
+        if combo.control { return .maskControl }
+        if combo.option { return .maskAlternate }
+        if combo.shift { return .maskShift }
         return nil
     }
 

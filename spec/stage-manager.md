@@ -142,6 +142,10 @@ All navigation wraps cyclically. Session persists until Cmd is released. Esc clo
 
 ## Summary: All Keyboard Shortcuts
 
+Every shortcut below is configurable in Settings. Global activation shortcuts
+define the modifier held for the session; Stage Manager shortcuts are recorded
+relative to that held modifier.
+
 | Shortcut | Context | Action | Status |
 |---|---|---|---|
 | Cmd+Tab (tap) | Global | Switch to last-used window in active stage | [x] |
