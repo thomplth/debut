@@ -37,6 +37,15 @@ sleep 1
 plutil -p "$screen_capture_approvals"
 rm -f "$RUNNER_TEMP/screen-capture-preflight.png"
 
+echo "Configuring system overview shortcuts in the disposable runner account..."
+defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 32 \
+    '{ enabled = 1; value = { parameters = (65535, 126, 8650752); type = standard; }; }'
+defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 33 \
+    '{ enabled = 1; value = { parameters = (65535, 125, 8650752); type = standard; }; }'
+killall cfprefsd 2>/dev/null || true
+killall Dock 2>/dev/null || true
+sleep 2
+
 echo "Building and installing Debut..."
 ./scripts/build-app.sh
 sudo rm -rf "$app_path"

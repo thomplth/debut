@@ -109,6 +109,12 @@ func postMouseMove(to point: CGPoint) {
     event.post(tap: .cgSessionEventTap)
 }
 
+func postMouseHover(to point: CGPoint) {
+    postMouseMove(to: CGPoint(x: point.x + 4, y: point.y))
+    wait(0.08)
+    postMouseMove(to: point)
+}
+
 func postMouseClick(at point: CGPoint) {
     for type in [CGEventType.leftMouseDown, .leftMouseUp] {
         guard let event = CGEvent(
@@ -892,7 +898,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
             == reorderEventCount
     }
 
-    postMouseMove(to: handleHotspot)
+    postMouseHover(to: handleHotspot)
     for _ in 0..<20 {
         if readEvents().filter({
             $0["event"] == "stage_drag_handle_visibility_changed"
@@ -956,7 +962,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
             activeStageIndex: reorderedActiveStageIndex,
             inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
        ) {
-        postMouseMove(to: reverseHotspot)
+        postMouseHover(to: reverseHotspot)
         wait(0.4)
         postMouseDrag(
             from: reverseHandleCenter,
