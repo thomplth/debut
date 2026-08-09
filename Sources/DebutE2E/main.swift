@@ -135,11 +135,12 @@ func postMouseDrag(from start: CGPoint, to end: CGPoint) {
         mouseCursorPosition: start,
         mouseButton: .left
     ) else { return }
+    down.flags = [.maskNonCoalesced]
     down.post(tap: .cgSessionEventTap)
-    wait(0.1)
+    wait(0.25)
 
-    for step in 1...8 {
-        let progress = CGFloat(step) / 8
+    for step in 1...16 {
+        let progress = CGFloat(step) / 16
         let point = CGPoint(
             x: start.x + (end.x - start.x) * progress,
             y: start.y + (end.y - start.y) * progress
@@ -150,9 +151,12 @@ func postMouseDrag(from start: CGPoint, to end: CGPoint) {
             mouseCursorPosition: point,
             mouseButton: .left
         ) else { continue }
+        dragged.flags = [.maskNonCoalesced]
         dragged.post(tap: .cgSessionEventTap)
-        wait(0.04)
+        wait(0.06)
     }
+
+    wait(0.15)
 
     guard let up = CGEvent(
         mouseEventSource: nil,
@@ -160,6 +164,7 @@ func postMouseDrag(from start: CGPoint, to end: CGPoint) {
         mouseCursorPosition: end,
         mouseButton: .left
     ) else { return }
+    up.flags = [.maskNonCoalesced]
     up.post(tap: .cgSessionEventTap)
 }
 
