@@ -327,6 +327,21 @@ func desktopSurfaceIsOnScreen(for processIdentifier: pid_t) -> Bool {
     }
 }
 
+func waitForDesktopSurface(
+    onScreen expected: Bool,
+    processIdentifier: pid_t,
+    timeout: TimeInterval = 5
+) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    repeat {
+        if desktopSurfaceIsOnScreen(for: processIdentifier) == expected {
+            return true
+        }
+        wait(0.1)
+    } while Date() < deadline
+    return false
+}
+
 func toggleSystemWindowOverview(keyCode: CGKeyCode) {
     postFlagsChanged(flags: [.maskControl])
     wait(0.1)
@@ -338,6 +353,46 @@ func toggleSystemWindowOverview(keyCode: CGKeyCode) {
 
 func wait(_ seconds: Double) {
     Thread.sleep(forTimeInterval: seconds)
+}
+
+@discardableResult
+func terminateDebutAndWait(timeout: TimeInterval = 10) -> Bool {
+    for application in NSRunningApplication.runningApplications(
+        withBundleIdentifier: "com.thomplth.Debut"
+    ) {
+        _ = application.terminate()
+    }
+
+    let deadline = Date().addingTimeInterval(timeout)
+    repeat {
+        if NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.thomplth.Debut"
+        ).isEmpty {
+            return true
+        }
+        wait(0.1)
+    } while Date() < deadline
+    return false
+}
+
+func waitForDebutReady(
+    _ application: NSRunningApplication?,
+    timeout: TimeInterval = 10
+) -> Bool {
+    guard let application else { return false }
+    let deadline = Date().addingTimeInterval(timeout)
+    repeat {
+        if !application.isTerminated,
+           readEvents().contains(where: { $0["event"] == "app_ready" }) {
+            return true
+        }
+        wait(0.1)
+    } while Date() < deadline
+    return false
+}
+
+func clearDiagnosticFile() {
+    try? FileManager.default.removeItem(at: diagnosticFile)
 }
 
 // MARK: - Main
@@ -418,12 +473,12 @@ toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_UpArrow))
 let _ = takeScreenshot("00_mission_control")
 
 test("Desktop surface yields while Mission Control presents windows") {
-    overviewPID > 0 && !desktopSurfaceIsOnScreen(for: overviewPID)
+    overviewPID > 0 && waitForDesktopSurface(onScreen: false, processIdentifier: overviewPID)
 }
 
 toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_UpArrow))
 test("Desktop surface returns after Mission Control closes") {
-    overviewPID > 0 && desktopSurfaceIsOnScreen(for: overviewPID)
+    overviewPID > 0 && waitForDesktopSurface(onScreen: true, processIdentifier: overviewPID)
 }
 
 info("Opening App Exposé with Control-Down...")
@@ -431,12 +486,12 @@ toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_DownArrow))
 let _ = takeScreenshot("00_app_expose")
 
 test("Desktop surface yields while App Exposé presents windows") {
-    overviewPID > 0 && !desktopSurfaceIsOnScreen(for: overviewPID)
+    overviewPID > 0 && waitForDesktopSurface(onScreen: false, processIdentifier: overviewPID)
 }
 
 toggleSystemWindowOverview(keyCode: CGKeyCode(kVK_DownArrow))
 test("Desktop surface returns after App Exposé closes") {
-    overviewPID > 0 && desktopSurfaceIsOnScreen(for: overviewPID)
+    overviewPID > 0 && waitForDesktopSurface(onScreen: true, processIdentifier: overviewPID)
 }
 
 // --- 2. Open overlay with Cmd+Tab ---
@@ -656,12 +711,18 @@ wait(0.8)
 postFlagsChanged(flags: [])
 
 test("Clicking a window card commits the pointer selection") {
-    let pointerEvents = readEvents().filter {
-        $0["event"] == "overlay_window_selected_by_pointer"
+    for _ in 0..<20 {
+        let pointerEvents = readEvents().filter {
+            $0["event"] == "overlay_window_selected_by_pointer"
+        }
+        if pointerEvents.count > pointerSelectionCount,
+           pointerEvents.last?["windowIndex"] == "0",
+           readState()["overlayVisible"] == "false" {
+            return true
+        }
+        wait(0.1)
     }
-    return pointerEvents.count > pointerSelectionCount
-        && pointerEvents.last?["windowIndex"] == "0"
-        && readState()["overlayVisible"] == "false"
+    return false
 }
 
 // --- 10. Window-drop plate refresh ---
@@ -676,13 +737,20 @@ wait(0.1)
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
 wait(0.8)
 postKeyDown(keyCode: CGKeyCode(kVK_ANSI_N), flags: [.maskCommand])
-wait(0.8)
+for _ in 0..<30 {
+    if (Int(readState()["stageCount"] ?? "") ?? 0) == originalStageCount + 1 {
+        break
+    }
+    wait(0.1)
+}
 
 let preparedDropState = readState()
 let preparedWindowCounts = stageWindowCounts(in: preparedDropState)
 let destinationStageIndex = Int(preparedDropState["activeStageIndex"] ?? "") ?? -1
 let sourceStageIndex = destinationStageIndex - 1
 let moveEventCount = readEvents().filter { $0["event"] == "window_moved_by_drag" }.count
+info("  Original drop state: stages=\(originalStageCount), windows=\(originalWindowCounts)")
+info("  Prepared drop state: active=\(destinationStageIndex), windows=\(preparedWindowCounts)")
 
 test("E2E prepared an empty destination stage without losing source windows") {
     preparedWindowCounts.indices.contains(sourceStageIndex)
@@ -760,10 +828,7 @@ test("Window-drop E2E cleanup restores the original stages") {
 
 // --- 11. Customized global activation ---
 header("11. Customized global activation")
-for application in NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.Debut") {
-    _ = application.terminate()
-}
-wait(1.0)
+let stoppedBeforeCustomization = terminateDebutAndWait()
 
 let originalSettingsData = try? Data(contentsOf: settingsFile)
 let settingsStore = StateStore()
@@ -774,8 +839,9 @@ customizedSettings.keyBindings.bindings[.activateNextWindow] = KeyCombo(
 )
 try? settingsStore.saveSettings(customizedSettings)
 
+clearDiagnosticFile()
 let customizedApplication = launchDebut()
-wait(1.5)
+let customizedApplicationReady = waitForDebutReady(customizedApplication)
 let customizedActivationCount = readEvents().filter {
     $0["event"] == "key_event" && $0["keyEvent"] == "cmdTabHold"
 }.count
@@ -785,7 +851,8 @@ postKeyDown(keyCode: CGKeyCode(kVK_ANSI_B), flags: [.maskCommand])
 wait(0.8)
 
 test("A persisted custom shortcut replaces Command-Tab activation") {
-    customizedApplication != nil
+    stoppedBeforeCustomization
+        && customizedApplicationReady
         && readState()["overlayVisible"] == "true"
         && readEvents().filter {
             $0["event"] == "key_event" && $0["keyEvent"] == "cmdTabHold"
@@ -794,9 +861,7 @@ test("A persisted custom shortcut replaces Command-Tab activation") {
 
 postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
 postFlagsChanged(flags: [])
-wait(0.3)
-_ = customizedApplication?.terminate()
-wait(1.0)
+_ = terminateDebutAndWait()
 if let originalSettingsData {
     try? originalSettingsData.write(to: settingsFile, options: .atomic)
 } else {
@@ -806,8 +871,9 @@ if let originalSettingsData {
 // --- 12. First-launch onboarding (forced, without changing user defaults) ---
 header("12. First-launch onboarding")
 
+clearDiagnosticFile()
 let onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
-wait(1.5)
+let onboardingApplicationReady = waitForDebutReady(onboardingApplication)
 let onboardingWindowTitles = onboardingApplication.map {
     visibleWindowTitles(for: $0.processIdentifier)
 } ?? []
@@ -815,6 +881,7 @@ info("Visible Debut windows: \(onboardingWindowTitles)")
 let _ = takeScreenshot("11_onboarding_welcome")
 
 test("Forced first launch presents the onboarding window") {
+    guard onboardingApplicationReady else { return false }
     for _ in 0..<20 {
         let onboardingShown = readEvents().contains {
             $0["event"] == "onboarding_shown" && $0["forced"] == "true"
@@ -827,23 +894,23 @@ test("Forced first launch presents the onboarding window") {
     return false
 }
 
-_ = onboardingApplication?.terminate()
-wait(1.0)
+_ = terminateDebutAndWait()
+clearDiagnosticFile()
 let restoredApplication = launchDebut()
-wait(1.5)
+let restoredApplicationReady = waitForDebutReady(restoredApplication)
 
 test("Debut relaunches normally after the onboarding check") {
-    restoredApplication != nil
+    restoredApplicationReady
 }
 
-_ = restoredApplication?.terminate()
-wait(1.0)
+_ = terminateDebutAndWait()
 
 // --- 13. Settings window chrome ---
 header("13. Settings window chrome")
 
+clearDiagnosticFile()
 let settingsApplication = launchDebut(arguments: ["--show-settings"])
-wait(1.5)
+let settingsApplicationReady = waitForDebutReady(settingsApplication)
 let settingsWindowTitles = settingsApplication.map {
     visibleWindowTitles(for: $0.processIdentifier)
 } ?? []
@@ -851,7 +918,7 @@ info("Visible Debut windows: \(settingsWindowTitles)")
 let _ = takeScreenshot("13_settings_window")
 
 test("Settings integrates its controls into hidden transparent titlebar chrome") {
-    readEvents().contains {
+    settingsApplicationReady && readEvents().contains {
         $0["event"] == "settings_shown"
             && $0["fullSizeContentView"] == "true"
             && $0["titleHidden"] == "true"
@@ -860,13 +927,13 @@ test("Settings integrates its controls into hidden transparent titlebar chrome")
     }
 }
 
-_ = settingsApplication?.terminate()
-wait(1.0)
+_ = terminateDebutAndWait()
+clearDiagnosticFile()
 let finalApplication = launchDebut()
-wait(1.5)
+let finalApplicationReady = waitForDebutReady(finalApplication)
 
 test("Debut relaunches normally after the settings check") {
-    finalApplication != nil
+    finalApplicationReady
 }
 
 // --- Summary ---
