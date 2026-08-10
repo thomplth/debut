@@ -31,11 +31,23 @@ Never leave code changes uninstalled — the installed app must always match the
 
 ### Full E2E
 
-The full E2E suite runs on the free GitHub-hosted macOS runner through `.github/workflows/e2e.yml`. It runs for pull requests and pushes to `main`, and can be started manually from GitHub Actions.
+Only run E2E for high-risk changes. Routine model, settings, copy, styling, and localized UI changes should use the relevant unit and screenshot tests instead.
 
-Do not run the full E2E suite on a developer machine by default. It launches Debut, displays its overlay, injects global keyboard events, and captures the live desktop. The hosted workflow is the source of truth because it supplies a clean, repeatable GUI session and does not disturb development.
+High-risk changes include global keyboard handling, Accessibility integration, window discovery or lifecycle, stage switching, overlay presentation, persistence reconciliation, app installation, and code signing.
 
-`./scripts/rebuild.sh` only builds, installs, and launches the app locally. For risky changes such as global keyboard handling, Accessibility integration, window discovery or lifecycle, stage switching, overlay presentation, persistence reconciliation, app installation, or code signing, require the hosted E2E result before considering verification complete.
+When E2E is justified, prioritize the headless Tart VM first:
+
+```bash
+./scripts/tart-e2e.sh run
+```
+
+This runs the stable virtualized suite without taking over the foreground developer session. It currently passes 32 scenarios and explicitly skips four synthetic drag gestures that neither Tart nor GitHub-hosted macOS delivers. Setup and evidence locations are documented in `docs/local-e2e.md`.
+
+Use `./scripts/tart-e2e.sh run-all` only when diagnosing those virtualized drag checks. If Tart is unavailable, use the free GitHub-hosted macOS 26 workflow in `.github/workflows/e2e.yml` as the fallback or remote confirmation. Do not manually trigger or wait for E2E on routine changes merely because the hosted workflow exists.
+
+`./scripts/e2e-test.sh` runs against the foreground developer session and is a last resort for validating physical drag delivery. Warn the user before running it because it displays the overlay, injects global input, and captures the live desktop.
+
+`./scripts/rebuild.sh` only builds, installs, and launches the app locally; it never runs E2E.
 
 ## Toolchain
 
@@ -62,7 +74,10 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 ## Tests
 
 - Unit + screenshot tests: `TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test`
-- Hosted E2E: `.github/workflows/e2e.yml`
+- Preferred headless E2E for high-risk changes: `./scripts/tart-e2e.sh run`
+- Virtualized drag diagnostic: `./scripts/tart-e2e.sh run-all`
+- Hosted E2E fallback/remote confirmation: `.github/workflows/e2e.yml`
+- Foreground E2E, disruptive and only after warning the user: `./scripts/e2e-test.sh`
 - Local build, install, and launch without E2E: `./scripts/rebuild.sh`
 
 ## Architecture Rules

@@ -5,6 +5,19 @@ stay inside the guest, so the suite does not take over the developer's desktop.
 Building remains on the host for fast incremental iterations; only compressed,
 cache-busted app and `DebutE2E` artifacts are shared with the guest.
 
+## High-risk changes only
+
+Do not use E2E for routine changes. Unit and screenshot tests are the normal
+verification path. E2E is reserved for high-risk work involving global keyboard
+handling, Accessibility, window discovery or lifecycle, stage switching,
+overlay presentation, persistence reconciliation, installation, or code
+signing.
+
+When E2E is warranted, the preferred headless path is Tart because it keeps the
+developer desktop undisturbed and provides a warm local iteration loop. The
+GitHub-hosted macOS 26 workflow is the fallback when Tart is unavailable and a
+remote confirmation when the change is already being pushed.
+
 ## One-time setup
 
 Tart requires an Apple Silicon Mac. The official Cirrus Labs installation and
@@ -19,7 +32,7 @@ The prepared `debut-e2e-tahoe` VM uses six CPUs, 8 GB RAM, and a 1440×900
 display. Cirrus Labs' image supplies an auto-login user, SSH, and the Tart guest
 agent; Xcode is intentionally not installed in the VM.
 
-## Run
+## Preferred headless run
 
 ```bash
 ./scripts/tart-e2e.sh run
@@ -29,7 +42,7 @@ The default command is the fast, stable iteration loop: 32 assertions pass and
 the four synthetic drags unsupported by virtualized macOS are reported as
 explicit skips. It exits successfully when those supported scenarios pass.
 
-Use the diagnostic mode to attempt the gestures as well:
+Use the diagnostic mode only when investigating the virtualized drag limitation:
 
 ```bash
 ./scripts/tart-e2e.sh run-all
@@ -44,8 +57,18 @@ Use `./scripts/tart-e2e.sh stop` when the warm VM is no longer needed, and
 `./scripts/tart-e2e.sh status` to inspect it. `DEBUT_TART_VM` and
 `DEBUT_TART_SHARE` override the default VM and shared-directory names.
 
-This is an optional fast local loop. The GitHub-hosted workflow remains the
-required E2E result for changes merged to `main`.
+Do not manually trigger or wait for E2E on routine changes. When a high-risk
+change reaches a pull request or `main`, the GitHub-hosted workflow provides an
+additional remote result, but the headless Tart run remains the preferred first
+check.
+
+## Foreground last resort
+
+`./scripts/e2e-test.sh` runs against the foreground developer session and is the
+only local option for checking physical drag delivery. It opens the overlay,
+injects global keyboard and mouse events, and captures the live desktop. Warn
+the user before running it, and use it only when the four drag scenarios are
+material to the high-risk change.
 
 ## Current drag limitation
 
