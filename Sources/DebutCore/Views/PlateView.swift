@@ -29,6 +29,12 @@ struct PlateLift: Equatable {
     let shadowY: CGFloat
 }
 
+struct WindowLift: Equatable {
+    let shadowOpacity: Double
+    let shadowRadius: CGFloat
+    let shadowY: CGFloat
+}
+
 enum PlateMotion {
     static func focusTransition(reduceMotion: Bool) -> PlateFocusTransition {
         reduceMotion
@@ -64,6 +70,30 @@ enum PlateMotion {
     static func windowScale(isSelected: Bool, isDragging: Bool) -> CGFloat {
         if isDragging { return 0.96 }
         return isSelected ? 1.06 : 1
+    }
+
+    // A black shadow over the dark plate behind it needs more density and spread to
+    // read as depth than it does in light mode. macOS scales the shadow this way rather
+    // than inverting it to white.
+    static func windowLift(
+        isSelected: Bool,
+        isDragging: Bool,
+        isDarkMode: Bool
+    ) -> WindowLift {
+        guard isSelected else {
+            return WindowLift(shadowOpacity: 0, shadowRadius: 0, shadowY: 0)
+        }
+        let lifted = isDarkMode
+            ? WindowLift(shadowOpacity: 0.5, shadowRadius: 14, shadowY: 6)
+            : WindowLift(shadowOpacity: 0.24, shadowRadius: 8, shadowY: 4)
+        guard !isDragging else {
+            return WindowLift(
+                shadowOpacity: 0,
+                shadowRadius: lifted.shadowRadius,
+                shadowY: lifted.shadowY
+            )
+        }
+        return lifted
     }
 }
 
@@ -689,9 +719,15 @@ struct WindowPreviewView: View {
     let thumbnailHeight: CGFloat
     let appearance: AppSettings
     var commandHints: [CommandHintPresentation] = []
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(spacing: 4) {
+        let lift = PlateMotion.windowLift(
+            isSelected: isWindowSelected,
+            isDragging: isDragging,
+            isDarkMode: colorScheme == .dark
+        )
+        return VStack(spacing: 4) {
             ZStack(alignment: .topLeading) {
                 Group {
                     if let cgImage = window.previewImage {
@@ -731,9 +767,9 @@ struct WindowPreviewView: View {
         .padding(PlateConstants.windowCardPadding)
         .scaleEffect(PlateMotion.windowScale(isSelected: isWindowSelected, isDragging: isDragging))
         .shadow(
-            color: .black.opacity(isWindowSelected && !isDragging ? 0.24 : 0),
-            radius: isWindowSelected ? 8 : 0,
-            y: isWindowSelected ? 4 : 0
+            color: .black.opacity(lift.shadowOpacity),
+            radius: lift.shadowRadius,
+            y: lift.shadowY
         )
         .animation(.spring(duration: 0.18, bounce: 0.08), value: isWindowSelected)
         .animation(.easeOut(duration: 0.12), value: isDragging)
