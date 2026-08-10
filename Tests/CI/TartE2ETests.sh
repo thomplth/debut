@@ -5,6 +5,7 @@ cd "$(dirname "$0")/../.."
 
 host_runner="scripts/tart-e2e.sh"
 guest_runner="scripts/tart-e2e-guest.sh"
+e2e_source="Sources/DebutE2E/main.swift"
 failures=0
 
 fail() {
@@ -30,6 +31,7 @@ expect_not_contains() {
 
 [[ -x "$host_runner" ]] || fail "missing executable $host_runner"
 [[ -x "$guest_runner" ]] || fail "missing executable $guest_runner"
+[[ -f "$e2e_source" ]] || fail "missing $e2e_source"
 
 if [[ -f "$host_runner" ]]; then
     expect_contains "$host_runner" 'ghcr\.io/cirruslabs/macos-tahoe-base:latest' \
@@ -54,6 +56,12 @@ if [[ -f "$host_runner" ]]; then
         "the app must cross VirtioFS as one cache-safe archive"
     expect_contains "$host_runner" 'e2e-latest\.log' \
         "the host must retain guest output when E2E fails"
+    expect_contains "$host_runner" 'run-all' \
+        "Tart E2E must expose an all-gesture diagnostic mode"
+    expect_contains "$host_runner" 'run\) run_e2e virtualized' \
+        "the default Tart loop must select virtualized skips"
+    expect_contains "$host_runner" 'run-all\) run_e2e all' \
+        "run-all must attempt every synthetic drag"
 fi
 
 if [[ -f "$guest_runner" ]]; then
@@ -63,10 +71,31 @@ if [[ -f "$guest_runner" ]]; then
         "the guest E2E driver must be authorized to inject HID events"
     expect_contains "$guest_runner" 'unset GITHUB_ACTIONS' \
         "the isolated local guest must run hosted-skipped gesture checks"
+    expect_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
+        "the default guest mode must identify unsupported virtualized drags"
     expect_contains "$guest_runner" 'TextEdit' \
         "the guest must create deterministic E2E fixture windows"
+    expect_contains "$guest_runner" 'wait_for_fixture_apps' \
+        "the guest must wait for both fixture apps before launching Debut"
+    expect_contains "$guest_runner" 'pgrep -x TextEdit' \
+        "fixture readiness must observe the TextEdit processes"
     expect_contains "$guest_runner" 'E2E_SOURCE' \
         "the guest must run the genuine E2E executable"
+    expect_contains "$guest_runner" 'wait_for_debut_ready' \
+        "the guest must gate E2E on Debut readiness"
+    expect_contains "$guest_runner" 'app_ready' \
+        "guest readiness must require the app-ready diagnostic event"
+    expect_contains "$guest_runner" 'state\.eventTapRunning' \
+        "guest readiness must require the keyboard event tap"
+    expect_contains "$guest_runner" 'state\.windowsInActiveStage' \
+        "guest readiness must require discovered fixture windows"
+fi
+
+if [[ -f "$e2e_source" ]]; then
+    expect_contains "$e2e_source" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
+        "DebutE2E must recognize the virtualized drag skip flag"
+    expect_contains "$e2e_source" 'Virtualized macOS does not deliver synthetic drag gestures' \
+        "virtualized skips must explain why the check did not run"
 fi
 
 if (( failures > 0 )); then

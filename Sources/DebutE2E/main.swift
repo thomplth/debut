@@ -9,7 +9,10 @@ nonisolated(unsafe) var passCount = 0
 nonisolated(unsafe) var failCount = 0
 nonisolated(unsafe) var skipCount = 0
 nonisolated(unsafe) var totalCount = 0
-let isGitHubHosted = ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true"
+let environment = ProcessInfo.processInfo.environment
+let isGitHubHosted = environment["GITHUB_ACTIONS"] == "true"
+let skipsVirtualizedDrags = environment["DEBUT_SKIP_VIRTUALIZED_DRAGS"] == "1"
+let skipsSyntheticDrags = isGitHubHosted || skipsVirtualizedDrags
 let hostedDragTests: Set<String> = [
     "Dragging the revealed handle reorders the stage",
     "A reverse handle drag restores the original stage order",
@@ -28,11 +31,15 @@ func skipTest(_ name: String) {
     totalCount += 1
     skipCount += 1
     skip(name)
-    info("  GitHub-hosted macOS does not deliver synthetic drag gestures; run this check locally")
+    if isGitHubHosted {
+        info("  GitHub-hosted macOS does not deliver synthetic drag gestures; run this check locally")
+    } else {
+        info("  Virtualized macOS does not deliver synthetic drag gestures; use Tart run-all to diagnose")
+    }
 }
 
 func test(_ name: String, _ body: () -> Bool) {
-    if isGitHubHosted && hostedDragTests.contains(name) {
+    if skipsSyntheticDrags && hostedDragTests.contains(name) {
         skipTest(name)
         return
     }
@@ -149,7 +156,7 @@ func postMouseClick(at point: CGPoint) {
 }
 
 func postMouseDrag(from start: CGPoint, to end: CGPoint) {
-    guard !isGitHubHosted else { return }
+    guard !skipsSyntheticDrags else { return }
 
     guard let down = CGEvent(
         mouseEventSource: nil,
@@ -932,7 +939,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         from: handleHotspot,
         to: CGPoint(x: handleHotspot.x, y: destinationCenter.y)
     )
-    for _ in 0..<30 {
+    for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
         if readEvents().filter({ $0["event"] == "stage_reordered_by_drag" }).count
             > reorderEventCount {
             break
@@ -970,7 +977,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
             from: reverseHotspot,
             to: CGPoint(x: reverseHotspot.x, y: reverseDestination.y)
         )
-        for _ in 0..<30 {
+        for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
             if readEvents().filter({ $0["event"] == "stage_reordered_by_drag" }).count
                 > reorderEventCount + 1 {
                 break
@@ -1009,7 +1016,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
    ) {
     info("  Drag path: \(sourcePoint) -> \(destinationPoint)")
     postMouseDrag(from: sourcePoint, to: destinationPoint)
-    for _ in 0..<30 {
+    for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
         if readEvents().filter({ $0["event"] == "window_moved_by_drag" }).count > moveEventCount {
             break
         }
@@ -1041,7 +1048,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
     ) {
         info("  Reverse drag path: \(returnedWindowPoint) -> \(returnedStagePoint)")
         postMouseDrag(from: returnedWindowPoint, to: returnedStagePoint)
-        for _ in 0..<30 {
+        for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
             if readEvents().filter({ $0["event"] == "window_moved_by_drag" }).count > moveEventCount + 1 {
                 break
             }
@@ -1052,7 +1059,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
                 && stageWindowCounts(in: readState()) == preparedWindowCounts
         }
     } else {
-        if isGitHubHosted {
+        if skipsSyntheticDrags {
             skipTest("The refreshed destination plate supports an immediate reverse drag")
         } else {
             fail("Could not calculate the reverse window-drop path")
