@@ -1116,7 +1116,7 @@ test("A persisted custom shortcut replaces Command-Tab activation") {
         }.count > customizedActivationCount
 }
 
-test("Command hints use contextual placements and purpose icons") {
+func hintLayoutIsContextual() -> Bool {
     guard let layout = readEvents().last(where: { $0["event"] == "command_hints_laid_out" }),
           let footerHintCount = Int(layout["footerHintCount"] ?? ""),
           let footerIconCount = Int(layout["footerIconCount"] ?? ""),
@@ -1127,6 +1127,20 @@ test("Command hints use contextual placements and purpose icons") {
         && footerHintCount > 0
         && footerIconCount == footerHintCount
         && (windowCount < 2 || layout["nextWindowIndex"] != "none")
+}
+
+// The overlay flushes its layout diagnostics asynchronously, so poll instead of
+// reading once after a fixed wait.
+test("Command hints use contextual placements and purpose icons") {
+    for _ in 0..<30 where !hintLayoutIsContextual() {
+        wait(0.1)
+    }
+    if !hintLayoutIsContextual() {
+        info("  Hint layout: \(readEvents().last(where: { $0["event"] == "command_hints_laid_out" }) ?? [:])")
+        info("  Hint layout state: \(readState())")
+        return false
+    }
+    return true
 }
 
 postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
