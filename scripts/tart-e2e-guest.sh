@@ -10,6 +10,22 @@ APP_PATH="/Applications/Debut.app"
 SYSTEM_TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
 FIXTURE_DIR="/tmp/debut-e2e-fixtures"
 
+case "$E2E_MODE" in
+    virtualized) DRAG_SKIP="1" ;;
+    all) DRAG_SKIP="0" ;;
+    *)
+        echo "Unknown E2E mode: $E2E_MODE" >&2
+        exit 2
+        ;;
+esac
+
+# This script replaces /Applications/Debut.app and rewrites TCC, so refuse to
+# run anywhere the host has not staged artifacts through VirtioFS.
+if [[ ! -f "$APP_ARCHIVE" || ! -x "$E2E_SOURCE" ]]; then
+    echo "The staged E2E artifacts are missing; run scripts/tart-e2e.sh from the host." >&2
+    exit 1
+fi
+
 console_user="$(stat -f %Su /dev/console)"
 if [[ -z "$console_user" || "$console_user" == "root" || "$console_user" == "loginwindow" ]]; then
     echo "A logged-in Aqua user is required; console owner is '$console_user'." >&2
@@ -140,25 +156,17 @@ echo "Launching Debut in the guest Aqua session..."
 as_console open "$APP_PATH"
 wait_for_debut_ready
 
-case "$E2E_MODE" in
-    virtualized)
-        echo "Running the stable virtualized suite; four unsupported synthetic drags are explicit skips..."
-        drag_environment=(DEBUT_SKIP_VIRTUALIZED_DRAGS=1)
-        ;;
-    all)
-        echo "Attempting all checks, including the four diagnostic synthetic drags..."
-        drag_environment=()
-        ;;
-    *)
-        echo "Unknown E2E mode: $E2E_MODE" >&2
-        exit 2
-        ;;
-esac
+if [[ "$DRAG_SKIP" == "1" ]]; then
+    echo "Running the stable virtualized suite; four unsupported synthetic drags are explicit skips..."
+else
+    echo "Attempting all checks, including the four diagnostic synthetic drags..."
+fi
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 unset GITHUB_ACTIONS
 set +e
-as_console env HOME="$console_home" GITHUB_ACTIONS= "${drag_environment[@]}" "$E2E_SOURCE"
+as_console env HOME="$console_home" GITHUB_ACTIONS= \
+    DEBUT_SKIP_VIRTUALIZED_DRAGS="$DRAG_SKIP" "$E2E_SOURCE"
 status=$?
 set -e
 
