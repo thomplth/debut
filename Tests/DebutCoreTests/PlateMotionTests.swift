@@ -97,6 +97,48 @@ struct PlateMotionTests {
         #expect(PlateMotion.windowScale(isSelected: true, isDragging: true) == 0.96)
     }
 
+    @Test("Only the selected window carries a lift")
+    func unselectedWindowHasNoLift() {
+        #expect(
+            PlateMotion.windowLift(isSelected: false, isDragging: false, isDarkMode: false)
+                == .init(shadowOpacity: 0, shadowRadius: 0, shadowY: 0)
+        )
+        #expect(
+            PlateMotion.windowLift(isSelected: false, isDragging: false, isDarkMode: true)
+                == .init(shadowOpacity: 0, shadowRadius: 0, shadowY: 0)
+        )
+    }
+
+    @Test("The selected window keeps its light-mode shadow unchanged")
+    func selectedWindowLiftInLightMode() {
+        #expect(
+            PlateMotion.windowLift(isSelected: true, isDragging: false, isDarkMode: false)
+                == .init(shadowOpacity: 0.24, shadowRadius: 8, shadowY: 4)
+        )
+    }
+
+    @Test("Dark mode deepens the selected window shadow")
+    func selectedWindowLiftInDarkMode() {
+        let dark = PlateMotion.windowLift(isSelected: true, isDragging: false, isDarkMode: true)
+        let light = PlateMotion.windowLift(isSelected: true, isDragging: false, isDarkMode: false)
+
+        #expect(dark.shadowOpacity > light.shadowOpacity)
+        #expect(dark.shadowRadius > light.shadowRadius)
+    }
+
+    @Test("Dragging suppresses the selected window's shadow")
+    func draggingWindowDropsItsLift() {
+        for isDarkMode in [true, false] {
+            #expect(
+                PlateMotion.windowLift(
+                    isSelected: true,
+                    isDragging: true,
+                    isDarkMode: isDarkMode
+                ).shadowOpacity == 0
+            )
+        }
+    }
+
     @Test("Window drops only move across stages")
     func crossStageDropPolicy() {
         #expect(!PlateInteraction.shouldMoveWindow(fromStageIndex: 1, toStageIndex: 1))
