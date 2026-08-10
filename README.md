@@ -60,3 +60,16 @@ A standalone settings window with a sidebar + scrollable main area. Manages temp
 Window-to-stage assignment rules, Cmd+Tab/\` isolation, persistence, and transitive behaviors (what happens when apps launch, stages switch, or stages are deleted).
 
 **[Full spec: spec/behaviors.md](spec/behaviors.md)**
+
+---
+
+## High-risk verification
+
+Unit and screenshot tests are the default development loop. E2E is reserved for
+high-risk changes to global input, Accessibility, window lifecycle, stage or
+overlay behavior, persistence, installation, or code signing.
+
+When E2E is needed, run it in the headless local Tart VM first so testing does
+not take over the developer desktop. GitHub-hosted macOS 26 is the fallback and
+remote confirmation. See **[Isolated local E2E](docs/local-e2e.md)** for setup,
+commands, evidence, and the current synthetic-drag limitation.
