@@ -262,7 +262,11 @@ struct KeyboardServiceTests {
         #expect(result == nil)
         #expect(elapsed < 0.1)
 
-        try await Task.sleep(for: .milliseconds(400))
+        // The delegate finishes on its own thread, and parallel suites can delay
+        // it far past its own sleep, so poll instead of waiting a fixed span.
+        for _ in 0..<200 where delegate.receivedEvents.isEmpty {
+            try await Task.sleep(for: .milliseconds(50))
+        }
         #expect(delegate.receivedEvents == [.cmdTabHold])
     }
 
