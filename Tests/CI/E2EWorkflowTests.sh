@@ -44,7 +44,7 @@ if [[ -f "$workflow" ]]; then
     expect_contains "$workflow" '^    branches: \[main\]$' \
         "E2E push runs must be limited to main"
     expect_contains "$workflow" '^  workflow_dispatch:' "E2E must support manual runs"
-    expect_contains "$workflow" 'runs-on: macos-15$' "E2E must use the free standard macOS 15 runner"
+    expect_contains "$workflow" 'runs-on: macos-26$' "E2E must use the free standard macOS 26 runner"
     expect_not_contains "$workflow" 'runs-on: .*-(large|xlarge)|runs-on: self-hosted' \
         "E2E must not use a paid or developer-hosted runner"
     expect_contains "$workflow" 'timeout-minutes:' "E2E must have a runaway cost guard"
@@ -73,6 +73,8 @@ fi
 if [[ -f "$e2e_source" ]]; then
     expect_contains "$e2e_source" 'Mission Control\.app/Contents/MacOS/Mission Control' \
         "E2E must invoke system overviews without relying on user shortcut settings"
+    expect_contains "$e2e_source" 'hostedDragTests' \
+        "E2E must isolate unsupported hosted drag assertions"
     expect_contains "$e2e_source" 'GitHub-hosted macOS does not deliver synthetic drag gestures' \
         "E2E must explain hosted drag-only skips"
     expect_contains "$e2e_source" 'postMouseHover\(to: handleHotspot\)' \
