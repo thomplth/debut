@@ -639,11 +639,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         ])
 
         if let controller = stageController, let discovery = windowDiscovery {
-            discovery.resetWindowTracking()
-            controller.stageManager.resetWindowCache()
-            discovery.populateDefaultStage(&controller.stageManager)
-            controller.selectedStageIndex = 0
-            controller.selectedWindowIndex = 0
+            controller.rebuildWindowCache(using: discovery)
 
             // Rebuild the z-order as well as the model so windows that were on
             // an inactive stage become visible immediately after the reset.

@@ -355,6 +355,53 @@ struct StageControllerTests {
         #expect(!controller.stageManager.stages[1].windows.contains(where: { $0.windowID == 101 }))
     }
 
+    @Test("Window cache reset can report diagnostics while rebuilding controller state")
+    func windowCacheResetAvoidsExclusiveAccessCrash() {
+        let windowService = MockWindowService()
+        windowService.windowList = [
+            WindowInfo(
+                windowID: 202,
+                ownerBundleID: "com.live",
+                ownerName: "Live",
+                ownerPID: 0,
+                title: "Current",
+                bounds: .zero,
+                isOnScreen: true
+            ),
+        ]
+        let discovery = WindowDiscoveryService(windowService: windowService)
+        discovery.armingOverride = { _, _ in .armed }
+
+        var manager = StageManager()
+        manager.addWindow(
+            StageWindow(
+                windowID: 101,
+                ownerBundleID: "com.ghost",
+                ownerName: "Ghost",
+                windowTitle: "Stale",
+                ownerPID: 10
+            ),
+            toStageID: manager.activeStageID
+        )
+        manager.saveStageAsTemplate(
+            stageID: manager.activeStageID,
+            templateName: "Saved Layout"
+        )
+        let controller = StageController(
+            windowService: windowService,
+            keyboardService: MockKeyboardService(),
+            stageManager: manager
+        )
+
+        controller.rebuildWindowCache(using: discovery)
+
+        #expect(controller.stageManager.stages.count == 1)
+        #expect(controller.stageManager.activeStage.windows.map(\.windowID) == [202])
+        #expect(controller.stageManager.templates.map(\.name) == ["Saved Layout"])
+        #expect(controller.selectedStageIndex == 0)
+        #expect(controller.selectedWindowIndex == 0)
+    }
+
     @Test("Cmd+Tab tap switches to second MRU window")
     func cmdTabTap() {
         let (controller, windowSvc, keyboardSvc) = makeController()

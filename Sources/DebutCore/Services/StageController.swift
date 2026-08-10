@@ -133,6 +133,19 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     // MARK: - Window ownership
 
+    /// Rebuilds assignments in a local value so discovery diagnostics can read
+    /// the controller's current state without overlapping an inout access to
+    /// `stageManager`. Assign only after discovery has completed successfully.
+    func rebuildWindowCache(using discovery: WindowDiscoveryService) {
+        discovery.resetWindowTracking()
+        var rebuiltManager = stageManager
+        rebuiltManager.resetWindowCache()
+        discovery.populateDefaultStage(&rebuiltManager)
+        stageManager = rebuiltManager
+        selectedStageIndex = 0
+        selectedWindowIndex = 0
+    }
+
     public func stageOwningWindow(windowID: CGWindowID) -> UUID? {
         stageManager.stageContainingWindow(windowID: windowID)
     }
