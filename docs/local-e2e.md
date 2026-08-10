@@ -25,6 +25,16 @@ agent; Xcode is intentionally not installed in the VM.
 ./scripts/tart-e2e.sh run
 ```
 
+The default command is the fast, stable iteration loop: 32 assertions pass and
+the four synthetic drags unsupported by virtualized macOS are reported as
+explicit skips. It exits successfully when those supported scenarios pass.
+
+Use the diagnostic mode to attempt the gestures as well:
+
+```bash
+./scripts/tart-e2e.sh run-all
+```
+
 The first run boots the VM headlessly. Later runs reuse the warm guest and its
 GUI session. Results and screenshots are copied to
 `~/Library/Caches/Debut/TartE2E/results`, and the latest console output is kept
@@ -39,13 +49,12 @@ required E2E result for changes merged to `main`.
 
 ## Current drag limitation
 
-On the Tahoe 26.6.1 base image, the suite executes the synthetic drag checks
-instead of skipping them, but Virtualization.framework does not deliver those
-drag sequences to SwiftUI. The validated result is 32 passing assertions, zero
-skips, and the same four drag behaviors unsupported by GitHub-hosted macOS
-(three counted failures plus the dependent reverse-drop path). Ordinary global
-keyboard, hover, click, Accessibility, screenshots, Mission Control, app
-lifecycle, and settings scenarios pass.
+On the Tahoe 26.6.1 base image, Virtualization.framework does not deliver drag
+sequences to SwiftUI. The default `run` result is 32 passing assertions, four
+explicit skips, and zero failures. `run-all` attempts those gestures for
+diagnostics and currently reports the same four unsupported drag behaviors as
+GitHub-hosted macOS. Ordinary global keyboard, hover, click, Accessibility,
+screenshots, Mission Control, app lifecycle, and settings scenarios pass.
 
 Attaching a VNC framebuffer and retaining virtual keyboard/pointer devices were
 also tested; neither enabled drag delivery. VNC additionally opens Screen

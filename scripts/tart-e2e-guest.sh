@@ -4,6 +4,7 @@ set -euo pipefail
 SHARE_DIR="/Volumes/My Shared Files"
 APP_ARCHIVE="$SHARE_DIR/${1:?missing app archive name}"
 E2E_SOURCE="$SHARE_DIR/${2:?missing E2E executable name}"
+E2E_MODE="${3:?missing E2E mode}"
 RESULTS_DIR="$SHARE_DIR/results"
 APP_PATH="/Applications/Debut.app"
 SYSTEM_TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
@@ -65,6 +66,52 @@ grant_post_event() {
 'kTCCServicePostEvent','$escaped_client',1,2,4,1,$csreq_sql,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
+wait_for_debut_ready() {
+    local diagnostic_path="$console_home/Library/Application Support/Debut/diagnostic.json"
+    local deadline=$((SECONDS + 45))
+    local events_json event_tap_running window_count
+
+    while (( SECONDS < deadline )); do
+        if [[ -f "$diagnostic_path" ]]; then
+            events_json="$(/usr/bin/plutil -extract events json -o - "$diagnostic_path" 2>/dev/null || true)"
+            event_tap_running="$(/usr/bin/plutil -extract state.eventTapRunning raw -o - "$diagnostic_path" 2>/dev/null || true)"
+            window_count="$(/usr/bin/plutil -extract state.windowsInActiveStage raw -o - "$diagnostic_path" 2>/dev/null || true)"
+
+            if grep -Eq '"event"[[:space:]]*:[[:space:]]*"app_ready"' <<< "$events_json" \
+                && [[ "$event_tap_running" == "true" ]] \
+                && [[ "$window_count" =~ ^[0-9]+$ ]] \
+                && (( window_count >= 2 )); then
+                echo "Debut is ready: event tap running with $window_count fixture windows discovered."
+                return 0
+            fi
+        fi
+        sleep 1
+    done
+
+    echo "Debut did not become ready within 45 seconds." >&2
+    [[ -f "$diagnostic_path" ]] && /bin/cat "$diagnostic_path" >&2
+    return 1
+}
+
+wait_for_fixture_apps() {
+    local deadline=$((SECONDS + 45))
+    local fixture_count fixture_pids
+
+    while (( SECONDS < deadline )); do
+        fixture_pids="$(as_console pgrep -x TextEdit 2>/dev/null || true)"
+        fixture_count="$(grep -c . <<< "$fixture_pids" || true)"
+        if (( fixture_count >= 2 )); then
+            echo "Both TextEdit fixture processes are running."
+            sleep 2
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo "Both TextEdit fixture processes did not launch within 45 seconds." >&2
+    return 1
+}
+
 echo "Installing the host build in the isolated guest..."
 sudo rm -rf "$APP_PATH"
 sudo ditto -x -k "$APP_ARCHIVE" /Applications
@@ -87,18 +134,31 @@ chown -R "$console_user" "$FIXTURE_DIR"
 as_console launchctl setenv DEBUT_DISABLE_WINDOW_PREVIEWS 1
 as_console open -na TextEdit "$FIXTURE_DIR/one.txt"
 as_console open -na TextEdit "$FIXTURE_DIR/two.txt"
-sleep 2
+wait_for_fixture_apps
 
 echo "Launching Debut in the guest Aqua session..."
 as_console open "$APP_PATH"
-sleep 4
+wait_for_debut_ready
 
-echo "Running all checks, including the four synthetic-drag checks skipped on GitHub-hosted runners..."
+case "$E2E_MODE" in
+    virtualized)
+        echo "Running the stable virtualized suite; four unsupported synthetic drags are explicit skips..."
+        drag_environment=(DEBUT_SKIP_VIRTUALIZED_DRAGS=1)
+        ;;
+    all)
+        echo "Attempting all checks, including the four diagnostic synthetic drags..."
+        drag_environment=()
+        ;;
+    *)
+        echo "Unknown E2E mode: $E2E_MODE" >&2
+        exit 2
+        ;;
+esac
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 unset GITHUB_ACTIONS
 set +e
-as_console env HOME="$console_home" GITHUB_ACTIONS= "$E2E_SOURCE"
+as_console env HOME="$console_home" GITHUB_ACTIONS= "${drag_environment[@]}" "$E2E_SOURCE"
 status=$?
 set -e
 
