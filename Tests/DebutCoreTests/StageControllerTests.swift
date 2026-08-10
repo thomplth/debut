@@ -47,6 +47,11 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
     func stageControllerDidMutateState(_ controller: StageController) {}
 }
 
+// Parallel suites can starve the main queue for seconds, so waits that only
+// assert a callback eventually arrives use a generous ceiling. Waits that
+// assert timing keep an explicit lower bound instead of a tight ceiling.
+private let livenessTimeout: TimeInterval = 10
+
 private final class CommandUsageRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var storedActions: [KeyAction] = []
@@ -178,8 +183,8 @@ struct StageControllerTests {
         let handlingDuration = ContinuousClock.now - start
 
         #expect(handlingDuration < .milliseconds(50))
-        #expect(delegate.overlayOpened.wait(timeout: .now() + 1) == .success)
-        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
     }
 
     @Test("Quick Cmd+Tab release switches without presenting overlay UI")
@@ -216,7 +221,7 @@ struct StageControllerTests {
         keyboardService.simulateEvent(.cmdTabHold)
 
         #expect(delegate.overlayOpened.wait(timeout: .now() + 0.1) == .timedOut)
-        #expect(delegate.overlayOpened.wait(timeout: .now() + 0.4) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         keyboardService.simulateEvent(.escape)
         #expect(delegate.overlayClosed.wait(timeout: .now()) == .success)
     }
@@ -228,7 +233,7 @@ struct StageControllerTests {
         let controller = StageController(
             windowService: windowService,
             keyboardService: keyboardService,
-            overlayPresentationDelay: 0.02,
+            overlayPresentationDelay: 0.5,
             fullscreenAppActiveProvider: { false }
         )
         let delegate = PreviewRefreshDelegate()
@@ -236,7 +241,9 @@ struct StageControllerTests {
 
         keyboardService.simulateEvent(.cmdTabHold)
 
-        #expect(delegate.overlayOpened.wait(timeout: .now() + 0.1) == .success)
+        // The injected delay must outlast the default threshold before opening.
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 0.25) == .timedOut)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
     }
 
     @Test("Visible overlay updates after asynchronous preview capture")
@@ -260,8 +267,8 @@ struct StageControllerTests {
 
         keyboardService.simulateEvent(.cmdTabHold)
 
-        #expect(delegate.overlayOpened.wait(timeout: .now() + 2) == .success)
-        #expect(delegate.overlayUpdated.wait(timeout: .now() + 2) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(controller.windowPreviews[101] != nil)
     }
 
@@ -487,7 +494,7 @@ struct StageControllerTests {
         // First overlay open — both windows capturable
         windowSvc.capturedImages = [101: testImage, 202: testImage]
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayOpened.wait(timeout: .now() + 2) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(controller.windowPreviews[101] != nil)
         #expect(controller.windowPreviews[202] != nil)
         keyboardSvc.simulateEvent(.escape)
@@ -495,7 +502,7 @@ struct StageControllerTests {
         // Second overlay open — window 202 is hidden (capture returns nil)
         windowSvc.capturedImages = [101: testImage]  // 202 no longer capturable
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayOpened.wait(timeout: .now() + 2) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
 
         // Window 202 should still have its previous preview
         #expect(controller.windowPreviews[101] != nil)
@@ -516,7 +523,7 @@ struct StageControllerTests {
 
         // Open overlay to populate previews
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayOpened.wait(timeout: .now() + 2) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(controller.windowPreviews[101] != nil)
         keyboardSvc.simulateEvent(.escape)
 
@@ -525,7 +532,7 @@ struct StageControllerTests {
 
         // Open overlay again — stale preview should be cleaned up
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayOpened.wait(timeout: .now() + 2) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(controller.windowPreviews[101] == nil, "Preview for removed window should be cleaned up")
         keyboardSvc.simulateEvent(.escape)
     }
