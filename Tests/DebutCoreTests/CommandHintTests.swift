@@ -5,6 +5,12 @@ import Testing
 
 @Suite("Command hints")
 struct CommandHintTests {
+    @Test("Stage spacing expands only when a footer hint is visible")
+    func stageSpacing() {
+        #expect(PlateConstants.stageSpacing(hasVisibleFooterHints: false) == 14)
+        #expect(PlateConstants.stageSpacing(hasVisibleFooterHints: true) == 34)
+    }
+
     @Test("Automatic hints retire only after a fourth use")
     func automaticThreshold() {
         var settings = AppSettings()

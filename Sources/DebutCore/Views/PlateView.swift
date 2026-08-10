@@ -169,6 +169,7 @@ public struct PlateConstants {
     public static let bottomPadding: CGFloat = 24
     public static let screenMargin: CGFloat = 80
     public static let badgeSize: CGFloat = 40
+    public static let compactStageSpacing: CGFloat = 14
     public static let stageSpacing: CGFloat = 34
     public static let commandHintFooterOffset: CGFloat = 24
     public static let stageHandleHoverWidth: CGFloat = 24
@@ -203,6 +204,10 @@ public struct PlateConstants {
 
     public static func plateWidths(forWindowCounts counts: [Int], thumbnailWidth: CGFloat) -> [CGFloat] {
         counts.map { plateWidth(forWindowCount: $0, thumbnailWidth: thumbnailWidth) }
+    }
+
+    public static func stageSpacing(hasVisibleFooterHints: Bool) -> CGFloat {
+        hasVisibleFooterHints ? stageSpacing : compactStageSpacing
     }
 
     public static func plateCenterY(
@@ -266,6 +271,20 @@ public struct OverlaySwiftUIView: View {
     public var body: some View {
         let plates = viewModel.plates
         let maxWindows = plates.map(\.windows.count).max() ?? 0
+        let activeStageIndex = viewModel.activeStageIndex
+        let activePlate = plates[safe: activeStageIndex]
+        let activeSelectedWindowIndex = pointerSelection?.stageIndex == activeStageIndex
+            ? pointerSelection?.windowIndex
+            : viewModel.selectedWindowIndex
+        let activeFooterHints = activePlate.map { plate in
+            CommandHintCatalog.plateFooterHints(
+                stageIndex: activeStageIndex,
+                isActive: true,
+                hasSelectedWindow: activeSelectedWindowIndex != nil
+                    && !plate.windows.isEmpty,
+                settings: viewModel.appearance
+            )
+        } ?? []
 
         GeometryReader { geo in
             let tSize = PlateConstants.thumbnailSize(forWindowCount: maxWindows, screenWidth: geo.size.width)
@@ -276,7 +295,9 @@ public struct OverlaySwiftUIView: View {
             )
 
             let inactiveScale = CGFloat(viewModel.appearance.inactivePlateScale)
-            let spacing = PlateConstants.stageSpacing
+            let spacing = PlateConstants.stageSpacing(
+                hasVisibleFooterHints: !activeFooterHints.isEmpty
+            )
             let focusTransition = PlateMotion.focusTransition(reduceMotion: reduceMotion)
 
             let totalBefore = CGFloat(viewModel.activeStageIndex) * (pHeight * inactiveScale + spacing)
@@ -318,13 +339,7 @@ public struct OverlaySwiftUIView: View {
                             stageIndex: index,
                             settings: viewModel.appearance
                         )
-                        let footerHints = CommandHintCatalog.plateFooterHints(
-                            stageIndex: index,
-                            isActive: isActive,
-                            hasSelectedWindow: selectedWindowIndex != nil
-                                && !plate.windows.isEmpty,
-                            settings: viewModel.appearance
-                        )
+                        let footerHints = isActive ? activeFooterHints : []
 
                         PlateSwiftUIView(
                             plate: plate,
