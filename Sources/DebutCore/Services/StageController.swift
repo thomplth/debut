@@ -26,8 +26,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// Window previews captured when overlay opens
     public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
 
-    /// Desktop surface window — sits between active and inactive stage windows
-    public var desktopSurface: DesktopSurfaceWindow?
+    /// Desktop surfaces — one per display, sitting between active and inactive stage windows
+    public var desktopSurfaces: DesktopSurfaceCoordinator?
 
     private var preOverlayStageID: UUID?
     private var previousStageID: UUID?
@@ -99,8 +99,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             self.previousStageID = previousID
             stageManager.activateStage(id: targetID)
 
-            // 1. Bring desktop surface to front — covers all inactive windows
-            desktopSurface?.orderToFront()
+            // 1. Bring desktop surfaces to front — covers all inactive windows
+            desktopSurfaces?.orderToFront()
 
             // 2. Raise all windows in the target stage above the surface (no app activation yet)
             if let targetStage {
@@ -395,6 +395,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             selectedStageIndex = index
         }
         preOverlayStageID = stageManager.activeStageID
+        // The surface may already be on screen from an earlier stage switch, so opening the
+        // overlay is its own reason to recapture.
+        desktopSurfaces?.refreshWallpaper()
         scheduleOverlayPresentation()
         refreshWindowPreviews()
     }
