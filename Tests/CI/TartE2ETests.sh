@@ -89,6 +89,32 @@ if [[ -f "$guest_runner" ]]; then
         "guest readiness must require the keyboard event tap"
     expect_contains "$guest_runner" 'state\.windowsInActiveStage' \
         "guest readiness must require discovered fixture windows"
+    expect_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS="\$' \
+        "the drag flag must be a scalar; bash 3.2 rejects empty array expansion under set -u"
+
+    expect_mode_dispatch() {
+        local mode="$1"
+        local expected_status="$2"
+        local expected_pattern="$3"
+        local output status
+
+        set +e
+        output="$("$guest_runner" missing-app.zip missing-e2e "$mode" 2>&1)"
+        status=$?
+        set -e
+
+        if (( status != expected_status )); then
+            fail "guest mode '$mode' exited $status, expected $expected_status: $output"
+        fi
+        grep -Eq -- "$expected_pattern" <<< "$output" \
+            || fail "guest mode '$mode' did not report '$expected_pattern': $output"
+    }
+
+    # Every mode must resolve before the guest is mutated, so an unusable mode
+    # cannot leave a half-provisioned guest behind.
+    expect_mode_dispatch bogus 2 'Unknown E2E mode'
+    expect_mode_dispatch virtualized 1 'staged E2E artifacts are missing'
+    expect_mode_dispatch all 1 'staged E2E artifacts are missing'
 fi
 
 if [[ -f "$e2e_source" ]]; then
