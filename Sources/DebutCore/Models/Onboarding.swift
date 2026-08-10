@@ -1,6 +1,16 @@
 import Foundation
 import Observation
 
+public struct OnboardingPermissionRequirement: Sendable {
+    public let isRequired: Bool
+    public let detail: String
+
+    public init(isRequired: Bool, detail: String) {
+        self.isRequired = isRequired
+        self.detail = detail
+    }
+}
+
 public enum OnboardingPage: Int, CaseIterable, Sendable {
     case welcome
     case permissions
@@ -35,6 +45,11 @@ public protocol OnboardingPermissionClient: AnyObject {
 public final class OnboardingViewModel {
     public let introduction = "Debut replaces the system Command–Tab switcher with a visual way to move through your windows and stages."
 
+    public let screenRecordingRequirement = OnboardingPermissionRequirement(
+        isRequired: true,
+        detail: "Required to read your desktop wallpaper, so stages sit on it instead of a black rectangle, and to draw live window previews. Debut reads the screen on your Mac and never records, stores, or transmits it."
+    )
+
     public private(set) var page: OnboardingPage = .welcome
     public private(set) var tutorialStep: OnboardingTutorialStep = .switchWindows
     public private(set) var permissions: OnboardingPermissionState
@@ -56,7 +71,7 @@ public final class OnboardingViewModel {
     }
 
     public var canStartTutorial: Bool {
-        permissions.accessibilityGranted
+        permissions.accessibilityGranted && permissions.screenRecordingGranted
     }
 
     public func continueFromWelcome() {

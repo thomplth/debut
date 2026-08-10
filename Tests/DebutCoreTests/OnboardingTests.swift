@@ -36,7 +36,7 @@ struct OnboardingTests {
         #expect(viewModel.introduction.contains("windows and stages"))
     }
 
-    @Test("Accessibility is required while screen recording remains optional")
+    @Test("Accessibility and screen recording are both required")
     func permissionGate() {
         let permissions = MockOnboardingPermissionClient()
         let viewModel = OnboardingViewModel(permissionClient: permissions)
@@ -47,15 +47,36 @@ struct OnboardingTests {
         viewModel.startTutorial()
         #expect(viewModel.page == .permissions)
 
+        // Accessibility alone is not enough: without screen recording the desktop
+        // surface cannot read the wallpaper and renders as a black rectangle.
         permissions.state = OnboardingPermissionState(
             accessibilityGranted: true,
             screenRecordingGranted: false
         )
         viewModel.refreshPermissions()
 
+        #expect(!viewModel.canStartTutorial)
+        viewModel.startTutorial()
+        #expect(viewModel.page == .permissions)
+
+        permissions.state = OnboardingPermissionState(
+            accessibilityGranted: true,
+            screenRecordingGranted: true
+        )
+        viewModel.refreshPermissions()
+
         #expect(viewModel.canStartTutorial)
         viewModel.startTutorial()
         #expect(viewModel.page == .tutorial)
+    }
+
+    @Test("Screen recording is presented as required and explains the wallpaper")
+    func screenRecordingIsRequired() {
+        let viewModel = OnboardingViewModel(permissionClient: MockOnboardingPermissionClient())
+
+        #expect(viewModel.screenRecordingRequirement.isRequired)
+        #expect(viewModel.screenRecordingRequirement.detail.contains("wallpaper"))
+        #expect(viewModel.screenRecordingRequirement.detail.contains("never"))
     }
 
     @Test("Permission requests are explicit user actions")
@@ -93,7 +114,7 @@ struct OnboardingTests {
         let permissions = MockOnboardingPermissionClient()
         permissions.state = OnboardingPermissionState(
             accessibilityGranted: true,
-            screenRecordingGranted: false
+            screenRecordingGranted: true
         )
         var completionCount = 0
         let viewModel = OnboardingViewModel(

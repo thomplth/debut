@@ -19,7 +19,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     private var windowService: AccessibilityWindowService?
     private var keyboardService: EventTapKeyboardService?
-    private var desktopSurface: DesktopSurfaceWindow?
+    private var desktopSurfaces: DesktopSurfaceCoordinator?
     private var currentSettings: AppSettings = AppSettings()
     private var pendingStageManager: StageManager?
     private var debouncedSaver: DebouncedSaver?
@@ -113,10 +113,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
         stageManager.activateStage(id: startStageID)
 
-        // Create desktop surface — sits between active and inactive stage windows
-        let surface = DesktopSurfaceWindow()
-        surface.orderFront(nil)
-        self.desktopSurface = surface
+        // Create desktop surfaces — one per display, sitting between active and inactive
+        // stage windows
+        let surfaces = DesktopSurfaceCoordinator()
+        surfaces.orderToFront()
+        self.desktopSurfaces = surfaces
 
         let controller = StageController(
             windowService: windowService,
@@ -125,7 +126,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             overlayPresentationDelay: currentSettings.overlayPresentationDelay
         )
         controller.delegate = self
-        controller.desktopSurface = surface
+        controller.desktopSurfaces = surfaces
         controller.onCommandUsed = { [weak self] action in
             DispatchQueue.main.async {
                 self?.recordCommandUsage(action)
@@ -643,7 +644,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
             // Rebuild the z-order as well as the model so windows that were on
             // an inactive stage become visible immediately after the reset.
-            desktopSurface?.orderToFront()
+            desktopSurfaces?.orderToFront()
             for window in controller.stageManager.activeStage.windows {
                 _ = controller.windowService.raiseWindow(windowID: window.windowID)
             }
