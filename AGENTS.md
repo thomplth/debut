@@ -1,5 +1,10 @@
 # Debut Project Instructions
 
+## Issue Lifecycle
+
+- Completed work moves to Review.
+- Only humans move issues to Done or close them.
+
 ## Task Workflow
 
 For every task:
