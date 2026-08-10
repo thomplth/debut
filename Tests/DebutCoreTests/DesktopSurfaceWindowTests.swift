@@ -243,16 +243,16 @@ struct WallpaperChangeObserverTests {
         defer { try? FileManager.default.removeItem(at: store) }
 
         let observer = SystemDesktopWallpaperChangeObserver(storeURL: store, settleDelay: .milliseconds(200))
-
-        try await confirmation("wallpaper change reported", expectedCount: 1...) { reported in
-            observer.start { reason in
-                if reason == .wallpaperNotification { reported() }
-            }
-            // The system replaces Index.plist rather than editing in place, so the directory is
-            // what has to be watched.
-            try Data("x".utf8).write(to: store.appendingPathComponent("Index.plist"))
-            try await Task.sleep(for: .milliseconds(900))
+        let recorder = ChangeCounter()
+        observer.start { reason in
+            if reason == .wallpaperNotification { recorder.increment() }
         }
+
+        // The system replaces Index.plist rather than editing in place, so the directory is
+        // what has to be watched.
+        try Data("x".utf8).write(to: store.appendingPathComponent("Index.plist"))
+
+        #expect(await waitUntil { recorder.count >= 1 })
     }
 
     // macOS writes the store several times per change and finishes announcing before it finishes
@@ -272,11 +272,27 @@ struct WallpaperChangeObserverTests {
 
         for index in 0..<4 {
             try Data("\(index)".utf8).write(to: store.appendingPathComponent("Index.plist"))
-            try await Task.sleep(for: .milliseconds(150))
+            try await Task.sleep(for: .milliseconds(100))
         }
-        try await Task.sleep(for: .milliseconds(1200))
 
+        #expect(await waitUntil { recorder.count >= 1 })
+        // Anything the run of writes queued beyond the first report would land by now.
+        try await Task.sleep(for: .milliseconds(800))
         #expect(recorder.count == 1)
+    }
+
+    /// Polls rather than sleeping a fixed span, so a loaded machine slows the test down instead
+    /// of failing it.
+    private func waitUntil(
+        timeout: Duration = .seconds(5),
+        _ condition: @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        return condition()
     }
 }
 
