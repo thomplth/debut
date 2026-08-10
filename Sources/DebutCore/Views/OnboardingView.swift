@@ -133,15 +133,15 @@ public struct OnboardingView: View {
                 permissionCard(
                     icon: "rectangle.dashed.badge.record",
                     title: "Screen Recording",
-                    detail: "Optional. Used only to draw live window previews. Without it, Debut shows app icons and placeholders.",
-                    badge: "Optional",
+                    detail: viewModel.screenRecordingRequirement.detail,
+                    badge: viewModel.screenRecordingRequirement.isRequired ? "Required" : "Optional",
                     isGranted: viewModel.permissions.screenRecordingGranted,
                     action: viewModel.requestScreenRecording
                 )
             }
             .frame(maxWidth: 620)
 
-            if !viewModel.permissions.accessibilityGranted {
+            if !viewModel.canStartTutorial {
                 Label(
                     "After allowing access in System Settings, return to Debut to continue.",
                     systemImage: "info.circle"

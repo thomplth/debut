@@ -94,6 +94,11 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 - **Desktop surface approach** — Use a Debut-owned full-screen NSWindow at .normal level between active and inactive windows in z-order. Order surface to front, then AX-raise active windows above it. No position/minimize manipulation needed.
 - **AX raise doesn't activate** — AXUIElementPerformAction(kAXRaiseAction) only reorders the window within its app's stack. Always also call NSRunningApplication.activate() on the target app.
 
+### Screen Capture
+- **The `CGWindowListCreateImage` family is dead** — obsoleted in macOS 15, it returns a non-nil *blank* image rather than failing, and only still compiles because the package targets macOS 14. Never treat a non-nil capture as proof of content; assert on pixels. Use ScreenCaptureKit wherever the result must actually contain screen content.
+- **Wallpaper cannot be resolved from its configuration** — providers such as `com.apple.NeptuneOneExtension` and `com.apple.wallpaper.extension.photos` generate images and expose no file, so the wallpaper store and `desktopImageURL` are both dead ends. Capture the pixels macOS already rendered instead.
+- **`SCShareableContent.excludingDesktopWindows` describes the returned list, not your intent** — pass `true` so desktop windows stay *out* of that list, then hand the list to `SCContentFilter(display:excludingWindows:)` to get wallpaper without UI. Passing `false` puts the wallpaper in the list, and excluding it leaves the filter with nothing to composite: that fails at capture time with `-3811`, not at filter construction.
+
 ### Performance
 - **Never leave NSHostingView attached when overlay is hidden** — SwiftUI continues layout passes on ordered-out windows, consuming 50%+ CPU. Remove the hosting view in hideOverlay() and recreate in showOverlay().
 - **No polling/timers** — Use event-driven architecture only: AXObserver for focus changes, NSWorkspace notifications for app lifecycle.

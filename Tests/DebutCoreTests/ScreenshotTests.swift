@@ -128,7 +128,10 @@ struct ScreenshotTests {
     @Test("Onboarding tutorial screen")
     func onboardingTutorial() throws {
         let vm = OnboardingViewModel(
-            permissionClient: PreviewOnboardingPermissionClient(accessibilityGranted: true)
+            permissionClient: PreviewOnboardingPermissionClient(
+                accessibilityGranted: true,
+                screenRecordingGranted: true
+            )
         )
         vm.continueFromWelcome()
         vm.startTutorial()
@@ -146,15 +149,17 @@ struct ScreenshotTests {
 @MainActor
 private final class PreviewOnboardingPermissionClient: OnboardingPermissionClient {
     let accessibilityGranted: Bool
+    let screenRecordingGranted: Bool
 
-    init(accessibilityGranted: Bool = false) {
+    init(accessibilityGranted: Bool = false, screenRecordingGranted: Bool = false) {
         self.accessibilityGranted = accessibilityGranted
+        self.screenRecordingGranted = screenRecordingGranted
     }
 
     func currentState() -> OnboardingPermissionState {
         OnboardingPermissionState(
             accessibilityGranted: accessibilityGranted,
-            screenRecordingGranted: false
+            screenRecordingGranted: screenRecordingGranted
         )
     }
 
