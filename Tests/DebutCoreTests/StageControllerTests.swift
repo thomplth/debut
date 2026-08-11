@@ -536,4 +536,13 @@ struct StageControllerTests {
         #expect(controller.windowPreviews[101] == nil, "Preview for removed window should be cleaned up")
         keyboardSvc.simulateEvent(.escape)
     }
+
+    @Test("The fullscreen probe timeout stays bounded")
+    func fullscreenProbeTimeoutIsBounded() {
+        // Passing 0 to AXUIElementSetMessagingTimeout means "use the system
+        // default", which is seconds long. That would put an unbounded
+        // cross-process wait back on the overlay-open path.
+        #expect(StageController.fullscreenProbeTimeout > 0)
+        #expect(StageController.fullscreenProbeTimeout <= 0.1)
+    }
 }

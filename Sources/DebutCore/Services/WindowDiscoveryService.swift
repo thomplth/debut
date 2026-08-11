@@ -59,16 +59,22 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Replaces the AX arming step in tests. Production leaves this nil.
     var armingOverride: ((CGWindowID, pid_t) -> WindowArmingOutcome)?
 
+    /// Replaces the AX element lookup in tests. Production leaves this nil.
+    var windowElementOverride: ((CGWindowID, pid_t) -> AXUIElement?)?
+
     // AXObserver for tracking focused window changes within the frontmost app
     private var focusObserver: AXObserver?
     private var observedPID: pid_t?
 
     // Per-app AXObservers for window lifecycle (destroyed, title changed)
-    private struct AppObserverState {
-        let observer: AXObserver
-        var trackedWindows: [CGWindowID: AXUIElement]
-    }
-    private var perAppObservers: [pid_t: AppObserverState] = [:]
+    private var perAppObservers: [pid_t: AXObserver] = [:]
+
+    /// The AX element behind every armed window, keyed by window ID.
+    ///
+    /// Raising a window otherwise costs a walk of every running app's window list, so this
+    /// doubles as the lookup table that `AccessibilityWindowService` raises through. It is
+    /// keyed flat rather than per-app because callers know only the window ID.
+    private var trackedWindowElements: [CGWindowID: AXUIElement] = [:]
 
     public convenience init(
         windowService: any WindowService,
@@ -246,6 +252,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         armedWindowIDs.removeAll()
         unarmedWindowIDs.removeAll()
         windowOwnerPIDs.removeAll()
+        trackedWindowElements.removeAll()
         monitoredProcessIDs.removeAll()
         handledExitedProcessIDs.removeAll()
     }
@@ -276,7 +283,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         if armedWindowIDs.contains(windowID) { return }
 
         windowOwnerPIDs[windowID] = pid
-        let outcome = armingOverride?(windowID, pid) ?? armWindow(windowID: windowID, pid: pid)
+        let element = windowElementOverride?(windowID, pid) ?? axWindowElement(for: windowID, pid: pid)
+        let outcome = armingOverride?(windowID, pid)
+            ?? armWindow(windowID: windowID, pid: pid, element: element)
         guard outcome == .armed else {
             // Leaving the window out of armedWindowIDs is what allows the next
             // activation to retry. Recording it as tracked regardless is what
@@ -286,14 +295,19 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             reportTrackingFailure(windowID: windowID, pid: pid, outcome: outcome)
             return
         }
+        if let element { trackedWindowElements[windowID] = element }
         armedWindowIDs.insert(windowID)
         unarmedWindowIDs.remove(windowID)
         knownWindowIDs.insert(windowID)
     }
 
-    private func armWindow(windowID: CGWindowID, pid: pid_t) -> WindowArmingOutcome {
+    private func armWindow(
+        windowID: CGWindowID,
+        pid: pid_t,
+        element axElement: AXUIElement?
+    ) -> WindowArmingOutcome {
         guard let observer = getOrCreateObserver(for: pid) else { return .observerUnavailable }
-        guard let axElement = axWindowElement(for: windowID, pid: pid) else { return .elementUnavailable }
+        guard let axElement else { return .elementUnavailable }
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         let destroyed = AXObserverAddNotification(
@@ -308,8 +322,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         _ = AXObserverAddNotification(
             observer, axElement, kAXTitleChangedNotification as CFString, selfPtr
         )
-        perAppObservers[pid]?.trackedWindows[windowID] = axElement
         return .armed
+    }
+
+    /// The AX element for an armed window, or nil when it was never armed or has since been
+    /// destroyed. Lets the raise path skip scanning every running app.
+    public func trackedWindowElement(windowID: CGWindowID) -> AXUIElement? {
+        trackedWindowElements[windowID]
     }
 
     private func reportTrackingFailure(
@@ -337,13 +356,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     private func getOrCreateObserver(for pid: pid_t) -> AXObserver? {
         if let existing = perAppObservers[pid] {
-            return existing.observer
+            return existing
         }
         var observer: AXObserver?
         guard AXObserverCreate(pid, windowLifecycleCallback, &observer) == .success,
               let observer else { return nil }
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
-        perAppObservers[pid] = AppObserverState(observer: observer, trackedWindows: [:])
+        perAppObservers[pid] = observer
         return observer
     }
 
@@ -354,11 +373,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         knownWindowIDs.subtract(ownedWindowIDs)
         armedWindowIDs.subtract(ownedWindowIDs)
         unarmedWindowIDs.subtract(ownedWindowIDs)
-        for windowID in ownedWindowIDs { windowOwnerPIDs.removeValue(forKey: windowID) }
+        for windowID in ownedWindowIDs {
+            windowOwnerPIDs.removeValue(forKey: windowID)
+            trackedWindowElements.removeValue(forKey: windowID)
+        }
 
-        guard let state = perAppObservers.removeValue(forKey: pid) else { return }
-        knownWindowIDs.subtract(state.trackedWindows.keys)
-        CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(state.observer), .defaultMode)
+        guard let observer = perAppObservers.removeValue(forKey: pid) else { return }
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
     }
 
     private func pruneTracking(runningPIDs: Set<pid_t>) {
@@ -385,36 +406,22 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         return nil
     }
 
-    fileprivate func handleWindowDestroyed(element: AXUIElement) {
-        for (pid, var state) in perAppObservers {
-            for (windowID, trackedElement) in state.trackedWindows {
-                if CFEqual(element, trackedElement) {
-                    state.trackedWindows.removeValue(forKey: windowID)
-                    perAppObservers[pid] = state
-                    knownWindowIDs.remove(windowID)
-                    armedWindowIDs.remove(windowID)
-                    unarmedWindowIDs.remove(windowID)
-                    windowOwnerPIDs.removeValue(forKey: windowID)
-                    onWindowClosed?(windowID)
-                    return
-                }
-            }
-        }
+    func handleWindowDestroyed(element: AXUIElement) {
+        guard let windowID = trackedWindowID(for: element) else { return }
+        trackedWindowElements.removeValue(forKey: windowID)
+        knownWindowIDs.remove(windowID)
+        armedWindowIDs.remove(windowID)
+        unarmedWindowIDs.remove(windowID)
+        windowOwnerPIDs.removeValue(forKey: windowID)
+        onWindowClosed?(windowID)
+    }
+
+    private func trackedWindowID(for element: AXUIElement) -> CGWindowID? {
+        trackedWindowElements.first { CFEqual(element, $0.value) }?.key
     }
 
     fileprivate func handleWindowTitleChanged(element: AXUIElement) {
-        // Find the windowID for this element
-        var windowID: CGWindowID?
-        for (_, state) in perAppObservers {
-            for (wID, trackedElement) in state.trackedWindows {
-                if CFEqual(element, trackedElement) {
-                    windowID = wID
-                    break
-                }
-            }
-            if windowID != nil { break }
-        }
-        guard let windowID else { return }
+        guard let windowID = trackedWindowID(for: element) else { return }
 
         // Read new title
         var titleRef: CFTypeRef?

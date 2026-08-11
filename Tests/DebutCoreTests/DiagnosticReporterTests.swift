@@ -132,4 +132,32 @@ struct DiagnosticReporterTests {
         let events = try #require(object["events"] as? [[String: String]])
         #expect(events.contains { $0["event"] == "key_event" })
     }
+
+    /// Holds the value the state provider returns so a test can change it between
+    /// reports.
+    private final class MutableState: @unchecked Sendable {
+        var value = "0"
+    }
+
+    @Test("A transient event refreshes the state snapshot")
+    func transientEventsRefreshStateSnapshot() throws {
+        // Held Tab reports nothing but transient events, so reusing the previous
+        // snapshot for them leaves the state block stale for the whole sequence.
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir)
+        let selection = MutableState()
+        reporter.setStateProvider { ["selectedWindowIndex": selection.value] }
+        reporter.report("overlay_opened", level: .lifecycle)
+
+        selection.value = "3"
+        reporter.report("key_event", level: .transient)
+        reporter.flush()
+
+        let data = try Data(contentsOf: dir.appendingPathComponent("diagnostic.json"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let state = try #require(object["state"] as? [String: String])
+        #expect(state["selectedWindowIndex"] == "3")
+    }
 }

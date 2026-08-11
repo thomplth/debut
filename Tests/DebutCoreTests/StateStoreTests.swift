@@ -93,7 +93,7 @@ struct StateStoreTests {
         #expect(decoded.quickSwitchExcludedBundleIDs.isEmpty)
     }
 
-    @Test("Older settings default overlay presentation delay to 100ms")
+    @Test("Older settings default overlay presentation delay to 80ms")
     func legacySettingsDefaultOverlayPresentationDelay() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
@@ -104,7 +104,7 @@ struct StateStoreTests {
 
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
-        #expect(decoded.overlayPresentationDelay == 0.1)
+        #expect(decoded.overlayPresentationDelay == 0.08)
     }
 
     @Test("Older settings default command hints to automatic with no usage")

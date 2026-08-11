@@ -6,6 +6,14 @@ import CoreGraphics
 public final class AccessibilityWindowService: WindowService, @unchecked Sendable {
     private let windowCaptureEnabled: Bool
 
+    /// Supplies the AX element for a window without cross-process lookup. `WindowDiscoveryService`
+    /// already holds one per armed window, so wiring this turns a raise from a walk of every
+    /// running app's window list into a dictionary read.
+    public var windowElementResolver: ((CGWindowID) -> AXUIElement?)?
+
+    /// Replaces the running-app scan in tests. Production leaves this nil.
+    var elementScanOverride: ((CGWindowID) -> AXUIElement?)?
+
     public init(
         windowCaptureEnabled: Bool = ProcessInfo.processInfo.environment["DEBUT_DISABLE_WINDOW_PREVIEWS"] != "1"
     ) {
@@ -175,11 +183,19 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     // MARK: - Window raise
 
     public func raiseWindow(windowID: CGWindowID) -> Bool {
-        guard let axWindow = axWindowElement(for: windowID) else { return false }
+        guard let axWindow = resolveWindowElement(for: windowID) else { return false }
         return AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString) == .success
     }
 
     // MARK: - AX-CG bridge
+
+    /// Windows discovered outside the tracking paths have no cached element, so the scan stays
+    /// as the fallback rather than the default.
+    private func resolveWindowElement(for windowID: CGWindowID) -> AXUIElement? {
+        if let resolved = windowElementResolver?(windowID) { return resolved }
+        if let scanOverride = elementScanOverride { return scanOverride(windowID) }
+        return axWindowElement(for: windowID)
+    }
 
     private func axWindowElement(for targetWindowID: CGWindowID) -> AXUIElement? {
         let runningApps = NSWorkspace.shared.runningApplications

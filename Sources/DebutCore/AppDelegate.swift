@@ -81,6 +81,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
         let discovery = WindowDiscoveryService(windowService: windowService)
         self.windowDiscovery = discovery
+        windowService.windowElementResolver = { [weak discovery] windowID in
+            discovery?.trackedWindowElement(windowID: windowID)
+        }
 
         // Apply exclusion list
         discovery.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)

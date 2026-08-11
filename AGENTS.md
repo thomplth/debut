@@ -114,6 +114,7 @@ security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/log
 ### State Management
 - **Exclusion list must filter at ALL layers** — Discovery, launch, activation, reconciliation, and AXObserver.
 - **Cross-stage activation = stage switch** — Don't duplicate windows. Exception: truly new windows go to active stage.
+- **Every reported event must refresh the diagnostic state block** — `diagnostic.json`'s `state` is the only way E2E observes a running session, and long stretches of a scenario (a held Tab, for example) report nothing but `.transient` events. Skipping `DiagnosticReporter`'s state provider for those levels leaves the block stale and silently breaks E2E while unit tests stay green.
 - **Stage labels are position-derived, not stored** — Stages have no `name` field. The displayed label is the 1-based array index (`stageLabel(forID:)` / `PlateData.name = "\(index + 1)"`), so create/delete/reorder need zero bookkeeping. Rename was removed entirely. Removing `Stage.name`/`AppSettings.defaultStageName` is Codable-forward-safe (JSONDecoder ignores leftover keys in existing state.json/settings.json).
 
 ### Window Lifecycle

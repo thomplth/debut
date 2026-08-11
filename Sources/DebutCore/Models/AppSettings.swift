@@ -12,7 +12,7 @@ public enum CommandHintVisibility: String, Codable, Sendable, CaseIterable {
 }
 
 public struct AppSettings: Codable, Sendable {
-    public static let defaultOverlayPresentationDelay: TimeInterval = 0.1
+    public static let defaultOverlayPresentationDelay: TimeInterval = 0.08
 
     public var launchAtLogin: Bool
     public var showInMenuBar: Bool
