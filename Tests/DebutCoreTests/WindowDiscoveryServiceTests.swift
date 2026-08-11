@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Foundation
 import Testing
@@ -547,5 +548,68 @@ struct WindowDiscoveryServiceTests {
         service.handleAppActivation(AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false))
 
         #expect(snapshotUnarmed == [2])
+    }
+
+    @Test("A tracked window exposes its AX element so raising need not rescan every app")
+    func trackedWindowExposesElement() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+
+        service.registerTracking(windowID: 101, pid: 10)
+
+        #expect(service.trackedWindowElement(windowID: 101) != nil)
+        #expect(service.trackedWindowElement(windowID: 999) == nil)
+    }
+
+    @Test("A window that fails to arm exposes no element")
+    func unarmedWindowExposesNoElement() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .elementUnavailable }
+
+        service.registerTracking(windowID: 101, pid: 10)
+
+        #expect(service.trackedWindowElement(windowID: 101) == nil)
+    }
+
+    @Test("A destroyed window stops exposing its AX element")
+    func destroyedWindowDropsElement() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 101, pid: 10)
+
+        service.handleWindowDestroyed(element: element)
+
+        #expect(service.trackedWindowElement(windowID: 101) == nil)
+    }
+
+    @Test("Resetting window tracking clears exposed AX elements")
+    func resetClearsExposedElements() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 101, pid: 10)
+
+        service.resetWindowTracking()
+
+        #expect(service.trackedWindowElement(windowID: 101) == nil)
     }
 }
