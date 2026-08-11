@@ -44,13 +44,69 @@ struct PlateMotionTests {
         #expect(PlateMotion.plateOpacity(scale: 0.01) == 0.12)
     }
 
-    @Test("Hover scale does not change the plate's layout slot")
-    func hoverScaleDoesNotReflowLayout() {
-        let visualScale = PlateMotion.plateScale(distanceFromFocus: 0, inactiveScale: 0.8)
-        let layoutScale = PlateMotion.plateLayoutScale(distanceFromActive: 3, inactiveScale: 0.8)
+    @Test("Hover layout remains packed around its fixed anchor")
+    func hoverLayoutUsesFixedAnchorAndSpacing() {
+        let baseline = PlateMotion.stackLayout(
+            stageCount: 5,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let hovered = PlateMotion.stackLayout(
+            stageCount: 5,
+            focusIndex: 3,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let anchorY = baseline.centers[3]
+        let offset = PlateMotion.anchoredOffset(
+            layout: hovered,
+            anchorIndex: 3,
+            anchorY: anchorY
+        )
 
-        #expect(visualScale == 1)
-        #expect(abs(layoutScale - 0.512) < 0.001)
+        #expect(abs(hovered.centers[3] + offset - anchorY) < 0.001)
+        for index in 1..<hovered.centers.count {
+            let precedingBottom = hovered.centers[index - 1] + hovered.heights[index - 1] / 2
+            let currentTop = hovered.centers[index] - hovered.heights[index] / 2
+            #expect(abs(currentTop - precedingBottom - 12) < 0.001)
+        }
+    }
+
+    @Test("Hover hit testing uses stable baseline slots")
+    func stableStageHitTesting() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [200, 300, 200]
+
+        #expect(PlateInteraction.stageIndex(
+            at: CGPoint(x: 250, y: layout.centers[1]),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == 1)
+        #expect(PlateInteraction.stageIndex(
+            at: CGPoint(x: 20, y: layout.centers[1]),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == nil)
+        #expect(PlateInteraction.stageIndex(
+            at: CGPoint(x: 250, y: layout.centers[1] + 56),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == nil)
     }
 
     @Test("A pointer or drag target becomes the gradient focus")
@@ -130,14 +186,6 @@ struct PlateMotionTests {
 
         #expect(activeCenter == 384)
         #expect(abs((precedingCenter ?? 0) - 202.4) < 0.001)
-    }
-
-    @Test("A stale plate exit cannot clear the newly hovered plate")
-    func stalePlateExitDoesNotClearFocus() {
-        #expect(PlateInteraction.hoveredStage(current: nil, target: 1, isHovering: true) == 1)
-        #expect(PlateInteraction.hoveredStage(current: 1, target: 2, isHovering: true) == 2)
-        #expect(PlateInteraction.hoveredStage(current: 2, target: 1, isHovering: false) == 2)
-        #expect(PlateInteraction.hoveredStage(current: 2, target: 2, isHovering: false) == nil)
     }
 
     @Test("Selected windows magnify instead of using a selection indicator")
