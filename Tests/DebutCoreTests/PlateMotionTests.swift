@@ -26,28 +26,126 @@ struct PlateMotionTests {
         #expect(PlateMotion.lift(isActive: false) == .init(shadowOpacity: 0.08, shadowRadius: 6, shadowY: 2))
     }
 
-    @Test("Pointer and drag targets magnify to full plate scale")
-    func interactionTargetPlateScale() {
-        #expect(PlateMotion.plateScale(isSelected: false, isInteractionTarget: false, inactiveScale: 0.72) == 0.72)
-        #expect(PlateMotion.plateScale(isSelected: false, isInteractionTarget: true, inactiveScale: 0.72) == 1)
-        #expect(PlateMotion.plateScale(isSelected: true, isInteractionTarget: false, inactiveScale: 0.72) == 1)
+    @Test("Plate scale falls off with distance from focus")
+    func distanceBasedPlateScale() {
+        #expect(PlateMotion.plateScale(distanceFromFocus: 0, inactiveScale: 0.8) == 1)
+        #expect(PlateMotion.plateScale(distanceFromFocus: 1, inactiveScale: 0.8) == 0.8)
+        #expect(abs(PlateMotion.plateScale(distanceFromFocus: 2, inactiveScale: 0.8) - 0.64) < 0.001)
+        #expect(abs(PlateMotion.plateScale(distanceFromFocus: 8, inactiveScale: 0.8) - 0.16777216) < 0.001)
+        #expect(PlateMotion.plateScale(distanceFromFocus: 20, inactiveScale: 0.8) == 0.08)
     }
 
-    @Test("Magnifying a drag target does not expand its layout slot")
-    func interactionTargetKeepsInactiveLayoutScale() {
-        let visualScale = PlateMotion.plateScale(
-            isSelected: false,
-            isInteractionTarget: true,
-            inactiveScale: 0.72
+    @Test("Plate opacity stays solid until scale falls below twenty percent")
+    func scaleThresholdPlateOpacity() {
+        #expect(PlateMotion.plateOpacity(scale: 1) == 1)
+        #expect(PlateMotion.plateOpacity(scale: 0.21) == 1)
+        #expect(PlateMotion.plateOpacity(scale: 0.2) == 1)
+        #expect(PlateMotion.plateOpacity(scale: 0.1) == 0.25)
+        #expect(PlateMotion.plateOpacity(scale: 0.01) == 0.12)
+    }
+
+    @Test("Hover layout remains packed around its fixed anchor")
+    func hoverLayoutUsesFixedAnchorAndSpacing() {
+        let baseline = PlateMotion.stackLayout(
+            stageCount: 5,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
         )
-        let layoutScale = PlateMotion.plateLayoutScale(
-            isSelected: false,
-            inactiveScale: 0.72
+        let hovered = PlateMotion.stackLayout(
+            stageCount: 5,
+            focusIndex: 3,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let anchorY = baseline.centers[3]
+        let offset = PlateMotion.anchoredOffset(
+            layout: hovered,
+            anchorIndex: 3,
+            anchorY: anchorY
         )
 
-        #expect(visualScale == 1)
-        #expect(layoutScale == 0.72)
-        #expect(PlateMotion.plateLayoutScale(isSelected: true, inactiveScale: 0.72) == 1)
+        #expect(abs(hovered.centers[3] + offset - anchorY) < 0.001)
+        for index in 1..<hovered.centers.count {
+            let precedingBottom = hovered.centers[index - 1] + hovered.heights[index - 1] / 2
+            let currentTop = hovered.centers[index] - hovered.heights[index] / 2
+            #expect(abs(currentTop - precedingBottom - 12) < 0.001)
+        }
+    }
+
+    @Test("Hover hit testing uses stable baseline slots")
+    func stableStageHitTesting() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [200, 300, 200]
+
+        #expect(PlateInteraction.stageIndex(
+            at: CGPoint(x: 250, y: layout.centers[1]),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == 1)
+        #expect(PlateInteraction.stageIndex(
+            at: CGPoint(x: 20, y: layout.centers[1]),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == nil)
+        #expect(PlateInteraction.stageIndex(
+            at: CGPoint(x: 250, y: layout.centers[1] + 56),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == nil)
+    }
+
+    @Test("A pointer or drag target becomes the gradient focus")
+    func interactionFocusPriority() {
+        #expect(PlateMotion.focusedStageIndex(active: 2, hovered: nil, dragTarget: nil) == 2)
+        #expect(PlateMotion.focusedStageIndex(active: 2, hovered: 4, dragTarget: nil) == 4)
+        #expect(PlateMotion.focusedStageIndex(active: 2, hovered: 4, dragTarget: 1) == 1)
+    }
+
+    @Test("Edge hover scrolls overflow toward its boundary")
+    func edgeHoverScrollDestination() {
+        #expect(PlateMotion.edgeScrollDestination(
+            pointerY: 20,
+            containerHeight: 600,
+            restingOffset: -300,
+            topLimit: 48,
+            bottomLimit: -948
+        ) == 48)
+        #expect(PlateMotion.edgeScrollDestination(
+            pointerY: 580,
+            containerHeight: 600,
+            restingOffset: -300,
+            topLimit: 48,
+            bottomLimit: -948
+        ) == -948)
+        #expect(PlateMotion.edgeScrollDestination(
+            pointerY: 300,
+            containerHeight: 600,
+            restingOffset: -300,
+            topLimit: 48,
+            bottomLimit: -948
+        ) == -300)
+        #expect(PlateMotion.edgeScrollDestination(
+            pointerY: 20,
+            containerHeight: 600,
+            restingOffset: 50,
+            topLimit: 48,
+            bottomLimit: 52
+        ) == 50)
     }
 
     @Test("Stage drag handle expands only the visual leading edge")
@@ -67,8 +165,8 @@ struct PlateMotionTests {
         #expect(!PlateInteraction.isStageHandleHotspot(locationX: 80, isRevealed: true))
     }
 
-    @Test("Plate centers keep the active stage centered")
-    func plateCentersFollowOverlayLayout() {
+    @Test("Plate centers use the distance-based layout scale")
+    func plateCentersFollowDepthLayout() {
         let activeCenter = PlateConstants.plateCenterY(
             stageIndex: 1,
             stageCount: 3,
