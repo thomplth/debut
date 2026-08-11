@@ -246,19 +246,91 @@ enum PlateInteraction {
     ) -> Int? {
         guard plateWidths.count == layout.centers.count else { return nil }
         for index in layout.centers.indices {
-            let center = CGPoint(
-                x: containerWidth / 2,
-                y: stackOffset + layout.centers[index]
-            )
-            let frame = CGRect(
-                x: center.x - plateWidths[index] * layout.scales[index] / 2,
-                y: center.y - layout.heights[index] / 2,
-                width: plateWidths[index] * layout.scales[index],
-                height: layout.heights[index]
+            let frame = plateFrame(
+                at: index,
+                containerWidth: containerWidth,
+                stackOffset: stackOffset,
+                plateWidths: plateWidths,
+                layout: layout
             )
             if frame.contains(location) { return index }
         }
         return nil
+    }
+
+    static func hoveredStageIndex(
+        previous: Int?,
+        at location: CGPoint,
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        plateWidths: [CGFloat],
+        layout: PlateStackLayout
+    ) -> Int? {
+        guard plateWidths.count == layout.centers.count,
+              layout.scales.count == layout.centers.count,
+              layout.heights.count == layout.centers.count
+        else { return nil }
+
+        if let hit = stageIndex(
+            at: location,
+            containerWidth: containerWidth,
+            stackOffset: stackOffset,
+            plateWidths: plateWidths,
+            layout: layout
+        ) {
+            return hit
+        }
+
+        for upperIndex in layout.centers.indices.dropLast() {
+            let lowerIndex = upperIndex + 1
+            let upperFrame = plateFrame(
+                at: upperIndex,
+                containerWidth: containerWidth,
+                stackOffset: stackOffset,
+                plateWidths: plateWidths,
+                layout: layout
+            )
+            let lowerFrame = plateFrame(
+                at: lowerIndex,
+                containerWidth: containerWidth,
+                stackOffset: stackOffset,
+                plateWidths: plateWidths,
+                layout: layout
+            )
+            let gapHeight = lowerFrame.minY - upperFrame.maxY
+            guard gapHeight > 0,
+                  location.y >= upperFrame.maxY,
+                  location.y <= lowerFrame.minY
+            else { continue }
+
+            let progress = (location.y - upperFrame.maxY) / gapHeight
+            let halfWidth = upperFrame.width / 2
+                + (lowerFrame.width / 2 - upperFrame.width / 2) * progress
+            if abs(location.x - containerWidth / 2) <= halfWidth {
+                return previous
+            }
+        }
+        return nil
+    }
+
+    private static func plateFrame(
+        at index: Int,
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        plateWidths: [CGFloat],
+        layout: PlateStackLayout
+    ) -> CGRect {
+        let width = plateWidths[index] * layout.scales[index]
+        let center = CGPoint(
+            x: containerWidth / 2,
+            y: stackOffset + layout.centers[index]
+        )
+        return CGRect(
+            x: center.x - width / 2,
+            y: center.y - layout.heights[index] / 2,
+            width: width,
+            height: layout.heights[index]
+        )
     }
 }
 
@@ -663,7 +735,8 @@ public struct OverlaySwiftUIView: View {
                     guard pointerMovementGate.observe(at: NSEvent.mouseLocation) else {
                         return
                     }
-                    hoveredStageIndex = PlateInteraction.stageIndex(
+                    hoveredStageIndex = PlateInteraction.hoveredStageIndex(
+                        previous: hoveredStageIndex,
                         at: location,
                         containerWidth: geo.size.width,
                         stackOffset: baselineOffset,
