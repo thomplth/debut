@@ -109,6 +109,132 @@ struct PlateMotionTests {
         ) == nil)
     }
 
+    @Test("Hover focus persists through a transit gap")
+    func hoverFocusPersistsThroughTransitGap() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 20,
+            inactiveScale: 0.8
+        )
+
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: 2,
+            at: CGPoint(x: 250, y: 110),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [300, 240, 180],
+            layout: layout
+        ) == 2)
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: 2,
+            at: CGPoint(x: 250, y: layout.centers[1]),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [300, 240, 180],
+            layout: layout
+        ) == 1)
+    }
+
+    @Test("Hover focus clears outside the horizontal transit corridor")
+    func hoverFocusClearsBesideTransitGap() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 2,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 20,
+            inactiveScale: 0.8
+        )
+
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: 0,
+            at: CGPoint(x: 420, y: 110),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [300, 240],
+            layout: layout
+        ) == nil)
+    }
+
+    @Test("Hover focus clears beyond the vertical stack corridor")
+    func hoverFocusClearsAboveAndBelowStack() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 2,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 20,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [300, 240]
+
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: 0,
+            at: CGPoint(x: 250, y: -1),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == nil)
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: 1,
+            at: CGPoint(x: 250, y: 201),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == nil)
+    }
+
+    @Test("Entering a transit gap without prior focus stays unfocused")
+    func transitGapDoesNotCreateFocus() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 2,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 20,
+            inactiveScale: 0.8
+        )
+
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: nil,
+            at: CGPoint(x: 250, y: 110),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [300, 240],
+            layout: layout
+        ) == nil)
+    }
+
+    @Test("Transit corridor interpolates between unequal plate widths")
+    func unequalWidthTransitCorridor() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 2,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 20,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [400, 100]
+
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: 0,
+            at: CGPoint(x: 390, y: 101),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == 0)
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: 0,
+            at: CGPoint(x: 390, y: 119),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == nil)
+    }
+
     @Test("A pointer or drag target becomes the gradient focus")
     func interactionFocusPriority() {
         #expect(PlateMotion.focusedStageIndex(active: 2, hovered: nil, dragTarget: nil) == 2)
