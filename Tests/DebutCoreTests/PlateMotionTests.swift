@@ -31,15 +31,26 @@ struct PlateMotionTests {
         #expect(PlateMotion.plateScale(distanceFromFocus: 0, inactiveScale: 0.8) == 1)
         #expect(PlateMotion.plateScale(distanceFromFocus: 1, inactiveScale: 0.8) == 0.8)
         #expect(abs(PlateMotion.plateScale(distanceFromFocus: 2, inactiveScale: 0.8) - 0.64) < 0.001)
-        #expect(PlateMotion.plateScale(distanceFromFocus: 20, inactiveScale: 0.8) == 0.46)
+        #expect(abs(PlateMotion.plateScale(distanceFromFocus: 8, inactiveScale: 0.8) - 0.16777216) < 0.001)
+        #expect(PlateMotion.plateScale(distanceFromFocus: 20, inactiveScale: 0.8) == 0.08)
     }
 
-    @Test("Plate opacity fades with distance from focus")
-    func distanceBasedPlateOpacity() {
-        #expect(PlateMotion.plateOpacity(distanceFromFocus: 0) == 1)
-        #expect(PlateMotion.plateOpacity(distanceFromFocus: 1) == 0.72)
-        #expect(abs(PlateMotion.plateOpacity(distanceFromFocus: 2) - 0.5184) < 0.001)
-        #expect(PlateMotion.plateOpacity(distanceFromFocus: 20) == 0.12)
+    @Test("Plate opacity stays solid until scale falls below twenty percent")
+    func scaleThresholdPlateOpacity() {
+        #expect(PlateMotion.plateOpacity(scale: 1) == 1)
+        #expect(PlateMotion.plateOpacity(scale: 0.21) == 1)
+        #expect(PlateMotion.plateOpacity(scale: 0.2) == 1)
+        #expect(PlateMotion.plateOpacity(scale: 0.1) == 0.25)
+        #expect(PlateMotion.plateOpacity(scale: 0.01) == 0.12)
+    }
+
+    @Test("Hover scale does not change the plate's layout slot")
+    func hoverScaleDoesNotReflowLayout() {
+        let visualScale = PlateMotion.plateScale(distanceFromFocus: 0, inactiveScale: 0.8)
+        let layoutScale = PlateMotion.plateLayoutScale(distanceFromActive: 3, inactiveScale: 0.8)
+
+        #expect(visualScale == 1)
+        #expect(abs(layoutScale - 0.512) < 0.001)
     }
 
     @Test("A pointer or drag target becomes the gradient focus")
