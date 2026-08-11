@@ -80,4 +80,50 @@ struct WindowServiceTests {
         #expect(svc.activateApp(bundleID: "com.a"))
         #expect(svc.activatedBundleID == "com.a")
     }
+
+    @Test("A resolved window element skips the running-app scan")
+    func resolvedElementSkipsScan() {
+        let service = AccessibilityWindowService()
+        let element = AXUIElementCreateSystemWide()
+        var scanCount = 0
+        service.windowElementResolver = { _ in element }
+        service.elementScanOverride = { _ in
+            scanCount += 1
+            return nil
+        }
+
+        _ = service.raiseWindow(windowID: 42)
+
+        #expect(scanCount == 0)
+    }
+
+    @Test("An unresolved window element falls back to the running-app scan")
+    func unresolvedElementFallsBackToScan() {
+        let service = AccessibilityWindowService()
+        let element = AXUIElementCreateSystemWide()
+        var scannedWindowIDs: [CGWindowID] = []
+        service.windowElementResolver = { _ in nil }
+        service.elementScanOverride = { windowID in
+            scannedWindowIDs.append(windowID)
+            return element
+        }
+
+        _ = service.raiseWindow(windowID: 42)
+
+        #expect(scannedWindowIDs == [42])
+    }
+
+    @Test("Raising without a resolver still scans, so untracked windows keep working")
+    func missingResolverStillScans() {
+        let service = AccessibilityWindowService()
+        var scanCount = 0
+        service.elementScanOverride = { _ in
+            scanCount += 1
+            return nil
+        }
+
+        _ = service.raiseWindow(windowID: 42)
+
+        #expect(scanCount == 1)
+    }
 }
