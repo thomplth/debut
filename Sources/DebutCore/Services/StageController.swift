@@ -432,6 +432,14 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         delegate?.stageControllerDidUpdateSelection(self)
     }
 
+    /// Caps the blocking cross-process waits on the overlay-open path. An unresponsive app
+    /// would otherwise stall the probe for the seconds-long system default; falling back to
+    /// "not fullscreen" costs nothing.
+    ///
+    /// The bound has to be applied to each element the probe messages: it is scoped to the
+    /// element ref it is set on, not to the app's connection.
+    static let fullscreenProbeTimeout: TimeInterval = 0.05
+
     private func isFullscreenAppActive() -> Bool {
         if let fullscreenAppActiveProvider {
             return fullscreenAppActiveProvider()
@@ -441,11 +449,13 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         else { return false }
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
+        AXUIElementSetMessagingTimeout(axApp, Float(Self.fullscreenProbeTimeout))
         var windowsRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &windowsRef) == .success else {
             return false
         }
         let axWindow = windowsRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(axWindow, Float(Self.fullscreenProbeTimeout))
         var fullscreenRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axWindow, "AXFullScreen" as CFString, &fullscreenRef) == .success else {
             return false

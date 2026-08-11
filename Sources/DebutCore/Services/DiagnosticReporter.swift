@@ -41,6 +41,10 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     private var eventLog: [[String: String]] = []
     private let queue = DispatchQueue(label: "com.thomplth.Debut.diagnostic")
 
+    /// Allocating a formatter per event is measurable on the input path. Only touched on
+    /// `queue`, which serializes the access the type itself does not guarantee.
+    nonisolated(unsafe) private static let timestampFormatter = ISO8601DateFormatter()
+
     // Guarded separately from `queue` so that reading it never waits behind
     // pending file writes. Reporting happens on the main thread.
     private let stateProviderLock = NSLock()
@@ -66,15 +70,19 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         level: DiagnosticLevel = .lifecycle,
         details: [String: String] = [:]
     ) {
-        NSLog("[Debut] %@ %@", event, details.description)
-        var entry = details
-        entry["event"] = event
-        entry["timestamp"] = ISO8601DateFormatter().string(from: Date())
+        let occurredAt = Date()
 
         // Snapshot controller state on the caller's thread. Evaluating the
         // provider later on the queue can race the controller's next mutation.
+        // Transient events must snapshot too: the state block is how a running
+        // session is observed, and skipping them leaves it stale through an
+        // entire held-Tab sequence.
         let state = currentState()
         queue.async {
+            NSLog("[Debut] %@ %@", event, details.description)
+            var entry = details
+            entry["event"] = event
+            entry["timestamp"] = Self.timestampFormatter.string(from: occurredAt)
             self.eventLog.append(entry)
             if self.eventLog.count > 100 {
                 self.eventLog.removeFirst(self.eventLog.count - 100)
@@ -144,7 +152,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         let output: [String: Any] = [
             "state": state,
             "events": eventLog,
-            "updatedAt": ISO8601DateFormatter().string(from: Date()),
+            "updatedAt": Self.timestampFormatter.string(from: Date()),
         ]
         guard let data = try? JSONSerialization.data(
             withJSONObject: output,
