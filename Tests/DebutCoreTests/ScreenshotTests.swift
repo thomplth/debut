@@ -30,6 +30,17 @@ struct ScreenshotTests {
         return img
     }
 
+    private func renderPlateFrames<V: View>(_ view: V, size: NSSize) -> [Int: CGRect] {
+        var frames: [Int: CGRect] = [:]
+        let rootView = view
+            .frame(width: size.width, height: size.height)
+            .onPreferenceChange(PlateFramePreferenceKey.self) { frames = $0 }
+        let hostingView = NSHostingView(rootView: rootView)
+        hostingView.frame = NSRect(origin: .zero, size: size)
+        hostingView.layoutSubtreeIfNeeded()
+        return frames
+    }
+
     private func saveImage(_ image: NSImage, name: String) throws {
         let url = Self.outputDir.appendingPathComponent("\(name).png")
         guard let tiff = image.tiffRepresentation,
@@ -96,6 +107,29 @@ struct ScreenshotTests {
         }
         try saveImage(img, name: "05_selection_state")
         #expect(vm.selectedWindowIndex == 2)
+    }
+
+    @Test("Dragging a window preview does not shift the plate stack")
+    func windowDragPreviewDoesNotShiftPlateStack() throws {
+        let vm = makeSampleViewModel(stageCount: 3, windowsPerStage: [3, 4, 2], activeIndex: 1)
+        let size = NSSize(width: 1200, height: 600)
+        let drag = WindowDragState(
+            windowID: vm.plates[1].windows[0].id,
+            sourceStageIndex: 1,
+            sourceWindowIndex: 0,
+            location: CGPoint(x: 600, y: 300),
+            dropTargetStageIndex: nil
+        )
+        let idleFrames = renderPlateFrames(OverlaySwiftUIView(viewModel: vm), size: size)
+        let draggingFrames = renderPlateFrames(
+            OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag),
+            size: size
+        )
+
+        guard let idleFrame = idleFrames[1], let draggingFrame = draggingFrames[1] else {
+            throw ScreenshotError.renderFailed
+        }
+        #expect(abs(idleFrame.midY - draggingFrame.midY) < 0.5)
     }
 
     @Test("Onboarding welcome screen")

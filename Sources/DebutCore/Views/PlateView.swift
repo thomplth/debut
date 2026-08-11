@@ -287,12 +287,53 @@ public struct OverlaySwiftUIView: View {
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil
     ) {
+        self.init(
+            viewModel: viewModel,
+            initialWindowDrag: nil,
+            onWindowSelected: onWindowSelected,
+            onWindowMoved: onWindowMoved,
+            onStageReordered: onStageReordered,
+            onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
+            onPointerSelectionChanged: onPointerSelectionChanged
+        )
+    }
+
+    init(
+        viewModel: OverlayViewModel,
+        initialWindowDrag: WindowDragState,
+        onWindowSelected: ((Int, Int) -> Void)? = nil,
+        onWindowMoved: ((CGWindowID, Int, Int) -> Void)? = nil,
+        onStageReordered: ((Int, Int) -> Void)? = nil,
+        onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
+        onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil
+    ) {
+        self.init(
+            viewModel: viewModel,
+            initialWindowDrag: WindowDragState?(initialWindowDrag),
+            onWindowSelected: onWindowSelected,
+            onWindowMoved: onWindowMoved,
+            onStageReordered: onStageReordered,
+            onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
+            onPointerSelectionChanged: onPointerSelectionChanged
+        )
+    }
+
+    private init(
+        viewModel: OverlayViewModel,
+        initialWindowDrag: WindowDragState?,
+        onWindowSelected: ((Int, Int) -> Void)?,
+        onWindowMoved: ((CGWindowID, Int, Int) -> Void)?,
+        onStageReordered: ((Int, Int) -> Void)?,
+        onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?,
+        onPointerSelectionChanged: ((Int?, Int?) -> Void)?
+    ) {
         self.viewModel = viewModel
         self.onWindowSelected = onWindowSelected
         self.onWindowMoved = onWindowMoved
         self.onStageReordered = onStageReordered
         self.onStageHandleVisibilityChanged = onStageHandleVisibilityChanged
         self.onPointerSelectionChanged = onPointerSelectionChanged
+        _windowDrag = State(initialValue: initialWindowDrag)
         _pointerMovementGate = State(
             initialValue: PointerMovementGate(initialLocation: NSEvent.mouseLocation)
         )
@@ -334,7 +375,7 @@ public struct OverlaySwiftUIView: View {
             let activeCenter = totalBefore + pHeight / 2
             let yOffset = geo.size.height / 2 - activeCenter
 
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 VStack(spacing: spacing) {
                     ForEach(Array(plates.enumerated()), id: \.element.id) { index, plate in
                         let plateWidth = plateWidths[index]
@@ -456,7 +497,9 @@ public struct OverlaySwiftUIView: View {
                 }
                 .frame(width: geo.size.width, alignment: .center)
                 .offset(y: yOffset)
-
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .overlay(alignment: .topLeading) {
                 if let drag = windowDrag,
                    let plate = plates[safe: drag.sourceStageIndex],
                    let window = plate.windows[safe: drag.sourceWindowIndex] {
