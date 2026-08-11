@@ -36,9 +36,9 @@ struct WindowLift: Equatable {
 }
 
 enum PlateMotion {
-    static let minimumPlateScale: CGFloat = 0.46
+    static let minimumPlateScale: CGFloat = 0.08
     static let minimumPlateOpacity: Double = 0.12
-    static let plateOpacityFalloff = 0.72
+    static let opacityScaleThreshold: CGFloat = 0.2
 
     static func focusTransition(reduceMotion: Bool) -> PlateFocusTransition {
         reduceMotion
@@ -63,11 +63,19 @@ enum PlateMotion {
         )
     }
 
-    static func plateOpacity(distanceFromFocus: Int) -> Double {
-        guard distanceFromFocus > 0 else { return 1 }
-        return max(
-            minimumPlateOpacity,
-            pow(plateOpacityFalloff, Double(distanceFromFocus))
+    static func plateOpacity(scale: CGFloat) -> Double {
+        guard scale < opacityScaleThreshold else { return 1 }
+        let progress = Double(scale / opacityScaleThreshold)
+        return max(minimumPlateOpacity, progress * progress)
+    }
+
+    static func plateLayoutScale(
+        distanceFromActive: Int,
+        inactiveScale: CGFloat
+    ) -> CGFloat {
+        plateScale(
+            distanceFromFocus: distanceFromActive,
+            inactiveScale: inactiveScale
         )
     }
 
@@ -426,19 +434,20 @@ public struct OverlaySwiftUIView: View {
                 hovered: hoveredStageIndex,
                 dragTarget: dragTargetIndex
             )
-            let scales = plates.indices.map {
-                PlateMotion.plateScale(
-                    distanceFromFocus: abs($0 - focusedStageIndex),
+            let layoutScales = plates.indices.map {
+                PlateMotion.plateLayoutScale(
+                    distanceFromActive: abs($0 - viewModel.activeStageIndex),
                     inactiveScale: inactiveScale
                 )
             }
-            let scaledHeights = scales.map { pHeight * $0 }
+            let scaledHeights = layoutScales.map { pHeight * $0 }
             let totalHeight = scaledHeights.reduce(0, +)
                 + CGFloat(max(0, plates.count - 1)) * spacing
-            let totalBeforeFocus = scaledHeights.prefix(focusedStageIndex).reduce(0, +)
-                + CGFloat(focusedStageIndex) * spacing
-            let focusCenter = totalBeforeFocus + scaledHeights[focusedStageIndex] / 2
-            let restingOffset = geo.size.height / 2 - focusCenter
+            let totalBeforeActive = scaledHeights.prefix(viewModel.activeStageIndex).reduce(0, +)
+                + CGFloat(viewModel.activeStageIndex) * spacing
+            let activeCenter = totalBeforeActive
+                + scaledHeights[viewModel.activeStageIndex] / 2
+            let restingOffset = geo.size.height / 2 - activeCenter
             let yOffset = PlateMotion.edgeScrollDestination(
                 pointerY: hoveredStageIndex == nil ? nil : hoverPointerY,
                 containerHeight: geo.size.height,
@@ -462,9 +471,11 @@ public struct OverlaySwiftUIView: View {
                             distanceFromFocus: abs(index - focusedStageIndex),
                             inactiveScale: inactiveScale
                         )
-                        let plateOpacity = PlateMotion.plateOpacity(
-                            distanceFromFocus: abs(index - focusedStageIndex)
+                        let layoutScale = PlateMotion.plateLayoutScale(
+                            distanceFromActive: abs(index - viewModel.activeStageIndex),
+                            inactiveScale: inactiveScale
                         )
+                        let plateOpacity = PlateMotion.plateOpacity(scale: scale)
                         let lift = PlateMotion.lift(isActive: isInteractionTarget)
                         let selectedWindowIndex = pointerSelection?.stageIndex == index
                             ? pointerSelection?.windowIndex
@@ -547,8 +558,8 @@ public struct OverlaySwiftUIView: View {
                         .frame(width: plateWidth, height: pHeight)
                         .scaleEffect(scale)
                         .frame(
-                            width: plateWidth * scale,
-                            height: pHeight * scale
+                            width: plateWidth * layoutScale,
+                            height: pHeight * layoutScale
                         )
                         .shadow(
                             color: .black.opacity(lift.shadowOpacity),
