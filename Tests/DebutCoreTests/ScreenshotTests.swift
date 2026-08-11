@@ -96,6 +96,23 @@ struct ScreenshotTests {
         #expect(vm.plates.count == 3)
     }
 
+    @Test("Many plates render with a depth gradient")
+    func manyPlatesDepthGradient() throws {
+        let vm = makeSampleViewModel(
+            stageCount: 9,
+            windowsPerStage: [2, 3, 1],
+            activeIndex: 4
+        )
+        guard let img = renderSwiftUI(
+            OverlaySwiftUIView(viewModel: vm),
+            size: NSSize(width: 1200, height: 700)
+        ) else {
+            throw ScreenshotError.renderFailed
+        }
+        try saveImage(img, name: "02_many_plates_depth_gradient")
+        #expect(vm.plates.count == 9)
+    }
+
     @Test("Selection on second window")
     func selectionState() throws {
         let vm = OverlayViewModel(
