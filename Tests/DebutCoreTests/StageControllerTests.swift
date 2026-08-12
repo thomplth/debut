@@ -470,6 +470,7 @@ struct StageControllerTests {
     @Test("Quick switch focuses the current app's MRU window in the target stage")
     func quickSwitchKeepsCurrentApp() {
         let (controller, windowSvc, keyboardSvc) = makeController()
+        controller.quickSwitchBehavior = .sameApplication
         let sourceStageID = controller.stageManager.stages[0].id
         controller.stageManager.addWindow(
             StageWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
@@ -494,6 +495,31 @@ struct StageControllerTests {
         #expect(windowSvc.raisedWindowID == 303)
         #expect(windowSvc.activatedBundleID == "com.current")
         #expect(controller.stageManager.activeStage.windows.first?.windowID == 303)
+    }
+
+    @Test("Quick switch defaults to the target stage's MRU window")
+    func quickSwitchDefaultsToTargetMRU() {
+        let (controller, windowService, keyboardService) = makeController()
+        let sourceStageID = controller.stageManager.activeStageID
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
+            toStageID: sourceStageID
+        )
+        controller.stageManager.createStage(position: .below)
+        let targetStageID = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
+            toStageID: targetStageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 303, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Same App"),
+            toStageID: targetStageID
+        )
+
+        keyboardService.simulateEvent(.switchToStage(2))
+
+        #expect(windowService.raisedWindowID == 202)
+        #expect(windowService.activatedBundleID == "com.other")
     }
 
     @Test("Quick switch falls back to the target stage's MRU window when the current app is absent")

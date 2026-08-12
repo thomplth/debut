@@ -241,6 +241,32 @@ struct KeyboardServiceTests {
         ) == nil)
     }
 
+    @Test("Quick switch digit keys use the configured modifier chord")
+    func quickSwitchUsesConfiguredModifiers() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        _ = service.start(delegate: delegate)
+        defer { service.stop() }
+        service.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
+
+        let configured = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_4),
+            keyDown: true
+        )!
+        configured.flags = [.maskControl, .maskAlternate]
+        let oldDefault = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_4),
+            keyDown: true
+        )!
+        oldDefault.flags = .maskControl
+
+        #expect(service.handleCGEvent(type: .keyDown, event: configured) == nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: oldDefault) === oldDefault)
+        #expect(delegate.receivedEvents == [.switchToStage(4)])
+    }
+
     @Test("Quick switch consumes key-up even when Ctrl was released first")
     func quickSwitchConsumesKeyUpAfterControlRelease() {
         let service = EventTapKeyboardService()

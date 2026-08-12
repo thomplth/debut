@@ -25,6 +25,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private var storedOverlayVisible: Bool = false
     private var storedKeyBindings: KeyBindings = KeyBindings()
     private var storedQuickSwitchExcludedBundleIDs: Set<String> = []
+    private var storedQuickSwitchModifiers: ShortcutModifiers = .control
     private var shortcutRecordingHandler: (@MainActor @Sendable (KeyCombo?) -> Void)?
     private var shortcutRecordingKeysDown: Set<Int64> = []
 
@@ -39,6 +40,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     public var quickSwitchExcludedBundleIDs: Set<String> {
         get { configurationLock.withLock { storedQuickSwitchExcludedBundleIDs } }
         set { configurationLock.withLock { storedQuickSwitchExcludedBundleIDs = newValue } }
+    }
+    public var quickSwitchModifiers: ShortcutModifiers {
+        get { configurationLock.withLock { storedQuickSwitchModifiers } }
+        set { configurationLock.withLock { storedQuickSwitchModifiers = newValue } }
     }
 
     public init() {}
@@ -230,18 +235,23 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             return event
         }
 
-        if type == .keyDown,
-           let globalAction = configuredAction(keyCode: keyCode, flags: flags, scope: .global) {
-            if let stagePosition = globalAction.quickSwitchPosition {
-                if quickSwitchKeysDown.contains(keyCode) {
-                    return nil
-                }
-                let quickSwitchConfiguration = configurationLock.withLock {
-                    (storedQuickSwitchExcludedBundleIDs, cachedFrontmostAppBundleIdentifier)
-                }
-                if !quickSwitchConfiguration.0.isEmpty,
-                   let bundleID = quickSwitchConfiguration.1,
-                   quickSwitchConfiguration.0.contains(bundleID) {
+        if type == .keyDown {
+            let quickSwitchConfiguration = configurationLock.withLock {
+                (
+                    storedQuickSwitchModifiers,
+                    storedQuickSwitchExcludedBundleIDs,
+                    cachedFrontmostAppBundleIdentifier
+                )
+            }
+            if let stagePosition = Self.quickSwitchStagePosition(
+                keyCode: keyCode,
+                flags: flags,
+                modifiers: quickSwitchConfiguration.0
+            ) {
+                if quickSwitchKeysDown.contains(keyCode) { return nil }
+                if !quickSwitchConfiguration.1.isEmpty,
+                   let bundleID = quickSwitchConfiguration.2,
+                   quickSwitchConfiguration.1.contains(bundleID) {
                     return event
                 }
                 if quickSwitchKeysDown.insert(keyCode).inserted {
@@ -249,6 +259,11 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                 }
                 return nil
             }
+        }
+
+        if type == .keyDown,
+           let globalAction = configuredAction(keyCode: keyCode, flags: flags, scope: .global) {
+            if globalAction.quickSwitchPosition != nil { return event }
 
             if globalAction.isOverlayActivation {
                 beginSession(using: globalAction)
@@ -377,12 +392,20 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
 
     /// Maps an exact Ctrl+number-row shortcut to its 1-based stage position.
     /// Ctrl+0 targets stage 10.
-    static func quickSwitchStagePosition(keyCode: Int64, flags: CGEventFlags) -> Int? {
-        guard flags.contains(.maskControl),
-              !flags.contains(.maskCommand),
-              !flags.contains(.maskAlternate),
-              !flags.contains(.maskShift)
-        else { return nil }
+    static func quickSwitchStagePosition(
+        keyCode: Int64,
+        flags: CGEventFlags,
+        modifiers: ShortcutModifiers = .control
+    ) -> Int? {
+        let shortcutFlags = flags.intersection([
+            .maskCommand, .maskControl, .maskAlternate, .maskShift,
+        ])
+        var expectedFlags: CGEventFlags = []
+        if modifiers.command { expectedFlags.insert(.maskCommand) }
+        if modifiers.control { expectedFlags.insert(.maskControl) }
+        if modifiers.shift { expectedFlags.insert(.maskShift) }
+        if modifiers.option { expectedFlags.insert(.maskAlternate) }
+        guard shortcutFlags == expectedFlags else { return nil }
 
         switch Int(keyCode) {
         case kVK_ANSI_1: return 1
