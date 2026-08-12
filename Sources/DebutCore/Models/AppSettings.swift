@@ -11,7 +11,7 @@ public enum CommandHintVisibility: String, Codable, Sendable, CaseIterable {
     case always = "Always"
 }
 
-public struct AppSettings: Codable, Sendable {
+public struct AppSettings: Codable, Sendable, Equatable {
     public static let defaultOverlayPresentationDelay: TimeInterval = 0.08
 
     public var launchAtLogin: Bool
@@ -20,6 +20,7 @@ public struct AppSettings: Codable, Sendable {
     public var confirmStageDeletion: Bool
     public var animationsEnabled: Bool
     public var excludedBundleIDs: [String]
+    public var shareAnonymousTelemetry: Bool
 
     // Appearance
     public var glassStyle: GlassStyle
@@ -45,6 +46,7 @@ public struct AppSettings: Codable, Sendable {
         self.confirmStageDeletion = true
         self.animationsEnabled = true
         self.excludedBundleIDs = []
+        self.shareAnonymousTelemetry = true
 
         self.glassStyle = .clear
         self.plateCornerRadius = 22
@@ -68,6 +70,10 @@ public struct AppSettings: Codable, Sendable {
         confirmStageDeletion = try container.decode(Bool.self, forKey: .confirmStageDeletion)
         animationsEnabled = try container.decode(Bool.self, forKey: .animationsEnabled)
         excludedBundleIDs = try container.decode([String].self, forKey: .excludedBundleIDs)
+        shareAnonymousTelemetry = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .shareAnonymousTelemetry
+        ) ?? true
         glassStyle = try container.decode(GlassStyle.self, forKey: .glassStyle)
         plateCornerRadius = try container.decode(Double.self, forKey: .plateCornerRadius)
         selectionOpacity = try container.decode(Double.self, forKey: .selectionOpacity)

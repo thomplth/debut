@@ -38,6 +38,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     private let logger = Logger(subsystem: "com.thomplth.Debut", category: "diagnostic")
     private let directory: URL
     private let rotationByteLimit: Int
+    private let performanceRecorder: PerformanceRecorder
     private var eventLog: [[String: String]] = []
     private let queue = DispatchQueue(label: "com.thomplth.Debut.diagnostic")
 
@@ -58,9 +59,14 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         self.init(directory: Self.defaultDirectory)
     }
 
-    init(directory: URL, rotationByteLimit: Int = 2_000_000) {
+    init(
+        directory: URL,
+        rotationByteLimit: Int = 2_000_000,
+        performanceRecorder: PerformanceRecorder = .shared
+    ) {
         self.directory = directory
         self.rotationByteLimit = rotationByteLimit
+        self.performanceRecorder = performanceRecorder
         super.init()
         NSLog("[Debut] DiagnosticReporter initialized at %@", directory.path)
     }
@@ -78,6 +84,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         // session is observed, and skipping them leaves it stale through an
         // entire held-Tab sequence.
         let state = currentState()
+        let performance = performanceRecorder.snapshot()
         queue.async {
             NSLog("[Debut] %@ %@", event, details.description)
             var entry = details
@@ -88,7 +95,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
                 self.eventLog.removeFirst(self.eventLog.count - 100)
             }
             if level == .lifecycle { self.appendDurableEvent(entry) }
-            self.writeSnapshotFile(state: state)
+            self.writeSnapshotFile(state: state, performance: performance)
         }
     }
 
@@ -97,7 +104,8 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         stateProvider = provider
         stateProviderLock.unlock()
         let state = currentState()
-        queue.async { self.writeSnapshotFile(state: state) }
+        let performance = performanceRecorder.snapshot()
+        queue.async { self.writeSnapshotFile(state: state, performance: performance) }
     }
 
     /// Drains pending writes. Tests need a deterministic point at which the
@@ -148,10 +156,14 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     // MARK: - Current-state snapshot
 
     /// Must be called on `queue`.
-    private func writeSnapshotFile(state: [String: String]) {
+    private func writeSnapshotFile(
+        state: [String: String],
+        performance: PerformanceSnapshot
+    ) {
         let output: [String: Any] = [
             "state": state,
             "events": eventLog,
+            "performance": jsonObject(performance) ?? [:],
             "updatedAt": Self.timestampFormatter.string(from: Date()),
         ]
         guard let data = try? JSONSerialization.data(
@@ -160,5 +172,10 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         ) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try? data.write(to: snapshotFile, options: .atomic)
+    }
+
+    private func jsonObject<T: Encodable>(_ value: T) -> Any? {
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
     }
 }

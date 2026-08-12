@@ -24,6 +24,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var pendingStageManager: StageManager?
     private var debouncedSaver: DebouncedSaver?
     private var runtimeWindowReconciler = RuntimeWindowReconciler()
+    private var telemetryExporter: TelemetryExporter?
+    private var hiddenIdlePerformanceID: UUID?
 
     public override init() {
         super.init()
@@ -38,6 +40,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         debouncedSaver = DebouncedSaver(store: store)
         pendingStageManager = (try? store.load()) ?? StageManager()
         currentSettings = (try? store.loadSettings()) ?? AppSettings()
+        setupTelemetry()
 
         windowService = AccessibilityWindowService()
         keyboardService = EventTapKeyboardService()
@@ -70,6 +73,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
 
         diag.report("app_ready")
+        hiddenIdlePerformanceID = PerformanceRecorder.shared.begin(.hiddenIdle)
     }
 
     private func setupController() {
@@ -89,7 +93,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         discovery.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
 
         // Remove stale window IDs, remap live window IDs from snapshot
+        let reconcileID = PerformanceRecorder.shared.begin(
+            .windowReconciliation,
+            workload: .init(
+                stages: stageManager.stages.count,
+                windows: stageManager.stages.reduce(0) { $0 + $1.windows.count },
+                dormantWindows: stageManager.dormantWindowAssignments.count
+            )
+        )
         discovery.reconcileWindows(&stageManager)
+        _ = PerformanceRecorder.shared.end(reconcileID)
 
         // Remove excluded apps' windows from all stages
         for bundleID in currentSettings.excludedBundleIDs {
@@ -301,8 +314,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     nonisolated public func applicationWillTerminate(_ notification: Notification) {
         let stageController = MainActor.assumeIsolated { self.stageController }
         let debouncedSaver = MainActor.assumeIsolated { self.debouncedSaver }
-        guard let stageController, let debouncedSaver else { return }
-        debouncedSaver.flushNow(stageController.stageManager)
+        if let stageController, let debouncedSaver {
+            debouncedSaver.flushNow(stageController.stageManager)
+        }
+        let exporter = MainActor.assumeIsolated { self.telemetryExporter }
+        let payload = MainActor.assumeIsolated { self.currentTelemetrySummary() }
+        if let exporter {
+            let queued = DispatchSemaphore(value: 0)
+            Task {
+                try? await exporter.enqueue(payload)
+                queued.signal()
+            }
+            _ = queued.wait(timeout: .now() + 0.5)
+        }
     }
 
     // MARK: - StageControllerDelegate
@@ -345,6 +369,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     private func showStageManagerOverlay() {
         guard let stageController, let overlayWindow else { return }
+        if let hiddenIdlePerformanceID {
+            _ = PerformanceRecorder.shared.end(hiddenIdlePerformanceID)
+            self.hiddenIdlePerformanceID = nil
+        }
+        let workload = PerformanceWorkload(
+            stages: stageController.stageManager.stages.count,
+            windows: stageController.stageManager.stages.reduce(0) { $0 + $1.windows.count }
+        )
+        let preparationID = PerformanceRecorder.shared.begin(.overlayPreparation, workload: workload)
 
         overlayWindow.onWindowSelected = { [weak self] stageIndex, windowIndex in
             self?.diag.report("overlay_window_selected_by_pointer", level: .transient, details: [
@@ -418,6 +451,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         reportCommandHintLayout(viewModel: vm)
         overlayWindow.update(viewModel: vm)
         overlayWindow.showOverlay()
+        _ = PerformanceRecorder.shared.end(preparationID)
+        let firstFrameID = PerformanceRecorder.shared.begin(.overlayFirstFrame, workload: workload)
+        DispatchQueue.main.async { [weak overlayWindow] in
+            overlayWindow?.contentView?.displayIfNeeded()
+            _ = PerformanceRecorder.shared.end(firstFrameID)
+        }
         diag.report("overlay_shown")
     }
 
@@ -452,6 +491,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private func hideStageManagerOverlay() {
         overlayWindow?.hideOverlay()
         diag.report("overlay_hidden")
+        if hiddenIdlePerformanceID == nil {
+            hiddenIdlePerformanceID = PerformanceRecorder.shared.begin(.hiddenIdle)
+        }
     }
 
     private func updateOverlay() {
@@ -519,6 +561,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
         let viewModel = OnboardingViewModel(
             permissionClient: onboardingPermissionClient,
+            shareAnonymousTelemetry: currentSettings.shareAnonymousTelemetry,
+            onTelemetryChanged: { [weak self] enabled in
+                guard let self else { return }
+                self.currentSettings.shareAnonymousTelemetry = enabled
+                try? self.stateStore?.saveSettings(self.currentSettings)
+                if let exporter = self.telemetryExporter {
+                    Task { await exporter.setEnabled(enabled) }
+                }
+            },
             onPermissionStateChanged: { [weak self] state in
                 self?.handlePermissionStateChange(state, source: "onboarding")
             },
@@ -587,6 +638,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         vm.onSettingsChanged = { [weak self] newSettings in
             DispatchQueue.main.async {
                 guard let self else { return }
+                let telemetryChanged = self.currentSettings.shareAnonymousTelemetry != newSettings.shareAnonymousTelemetry
                 self.currentSettings = newSettings
                 try? self.stateStore?.saveSettings(newSettings)
                 self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
@@ -601,6 +653,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
                     newSettings.quickSwitchExcludedBundleIDs
                 )
+                if telemetryChanged, let exporter = self.telemetryExporter {
+                    Task {
+                        await exporter.setEnabled(newSettings.shareAnonymousTelemetry)
+                        if newSettings.shareAnonymousTelemetry { try? await exporter.flush() }
+                    }
+                }
             }
         }
         vm.onResetWindowCache = { [weak self] in
@@ -746,6 +804,65 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
         return "Debut-Diagnostics-\(formatter.string(from: Date())).json"
+    }
+
+    private func setupTelemetry() {
+        let environment = ProcessInfo.processInfo.environment
+        let namespace = environment["DEBUT_TELEMETRYDECK_NAMESPACE"]
+            ?? Bundle.main.object(forInfoDictionaryKey: "TelemetryDeckNamespace") as? String
+            ?? ""
+        let appID = environment["DEBUT_TELEMETRYDECK_APP_ID"]
+            ?? Bundle.main.object(forInfoDictionaryKey: "TelemetryDeckAppID") as? String
+            ?? ""
+        let client: any TelemetryClient = namespace.isEmpty || appID.isEmpty
+            ? UnavailableTelemetryClient()
+            : TelemetryDeckClient(namespace: namespace, appID: appID)
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Debut")
+        let exporter = TelemetryExporter(
+            client: client,
+            queue: DiskTelemetryQueue(file: support.appendingPathComponent("telemetry-queue.json")),
+            enabled: currentSettings.shareAnonymousTelemetry
+        )
+        telemetryExporter = exporter
+        PerformanceRecorder.shared.setObservationHandler { observation in
+            guard observation.durationMilliseconds >= 500 else { return }
+            let workload: TelemetryWorkload = observation.workload.windows >= 50
+                ? .stress : (observation.workload.windows >= 21 ? .busy : .typical)
+            Task {
+                try? await exporter.enqueue(.anomaly(
+                    operation: observation.operation,
+                    latency: TelemetryLatencyBucket(milliseconds: observation.durationMilliseconds),
+                    workload: workload
+                ))
+                try? await exporter.flush()
+            }
+        }
+        if currentSettings.shareAnonymousTelemetry {
+            Task { try? await exporter.flush() }
+        }
+    }
+
+    private func currentTelemetrySummary() -> TelemetryPayload {
+        let performance = PerformanceRecorder.shared.snapshot()
+        var counts: [PerformanceOperation: Int] = [:]
+        var latency: [PerformanceOperation: TelemetryLatencyBucket] = [:]
+        for observation in performance.recent { counts[observation.operation, default: 0] += 1 }
+        for (name, summary) in performance.summaries {
+            if let operation = PerformanceOperation(rawValue: name) {
+                latency[operation] = TelemetryLatencyBucket(milliseconds: summary.p95Milliseconds)
+            }
+        }
+        let windowCount = stageController?.stageManager.stages.reduce(0) { $0 + $1.windows.count } ?? 0
+        let workload: TelemetryWorkload = windowCount >= 50 ? .stress : (windowCount >= 21 ? .busy : .typical)
+        return .sessionSummary(
+            appVersion: DebutCore.version,
+            operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+            workload: workload,
+            operationCounts: counts,
+            latencyBuckets: latency,
+            anomalyCount: performance.recent.filter { $0.durationMilliseconds >= 500 }.count
+        )
     }
 
 }
