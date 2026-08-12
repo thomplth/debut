@@ -90,6 +90,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     public func switchToStage(id targetID: UUID, raiseWindowID: CGWindowID? = nil) {
+        let workload = PerformanceWorkload(
+            stages: stageManager.stages.count,
+            windows: stageManager.stages.first(where: { $0.id == targetID })?.windows.count ?? 0
+        )
+        let performanceID = PerformanceRecorder.shared.begin(.stageSwitch, workload: workload)
+        defer { PerformanceRecorder.shared.end(performanceID) }
         backtickCycleWindows = []
         backtickCycleIndex = 0
 
@@ -107,11 +113,16 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             desktopSurfaces?.orderToFront()
 
             // 2. Raise all windows in the target stage above the surface (no app activation yet)
+            let raiseID = PerformanceRecorder.shared.begin(
+                .stageRaise,
+                workload: .init(windows: targetStage?.windows.count ?? 0)
+            )
             if let targetStage {
                 for window in targetStage.windows {
                     _ = windowService.raiseWindow(windowID: window.windowID)
                 }
             }
+            _ = PerformanceRecorder.shared.end(raiseID)
 
             diag.report("stage_switched", details: [
                 "from": fromLabel,
@@ -477,15 +488,36 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             stage.windows.map(\.windowID)
         }
 
+        let batchID = PerformanceRecorder.shared.begin(
+            .previewAll,
+            workload: .init(windows: windowIDs.count, captures: windowIDs.count)
+        )
+        let firstID = PerformanceRecorder.shared.begin(
+            .previewFirst,
+            workload: .init(windows: windowIDs.count, captures: min(1, windowIDs.count))
+        )
         previewCaptureQueue.async { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                _ = PerformanceRecorder.shared.end(firstID)
+                _ = PerformanceRecorder.shared.end(batchID)
+                return
+            }
 
             var refreshedPreviews: [CGWindowID: CGImage] = [:]
-            for windowID in windowIDs {
+            for (index, windowID) in windowIDs.enumerated() {
+                let captureID = PerformanceRecorder.shared.begin(.previewCapture, workload: .init(captures: 1))
                 if let image = self.windowService.captureWindowImage(windowID: windowID) {
                     refreshedPreviews[windowID] = image
                 }
+                _ = PerformanceRecorder.shared.end(captureID, sampleResources: false)
+                if index == 0 { _ = PerformanceRecorder.shared.end(firstID) }
             }
+            if windowIDs.isEmpty { _ = PerformanceRecorder.shared.end(firstID) }
+            _ = PerformanceRecorder.shared.end(batchID)
+            self.diag.report("preview_capture_completed", level: .transient, details: [
+                "requested": "\(windowIDs.count)",
+                "captured": "\(refreshedPreviews.count)",
+            ])
 
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }

@@ -27,6 +27,8 @@ public struct SettingsView: View {
     @State private var selectedSection: SettingsSection = .appearance
     @State private var showingResetConfirmation = false
     private let shortcutRecordingService: (any ShortcutRecordingService)?
+    @State private var showingTelemetryPayload = false
+    @State private var telemetryPayload = ""
 
     public init(
         viewModel: SettingsViewModel = SettingsViewModel(),
@@ -39,22 +41,7 @@ public struct SettingsView: View {
     public var body: some View {
         settingsNavigation
             .frame(minWidth: 600, minHeight: 400)
-            .onChange(of: viewModel.settings.excludedBundleIDs) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.quickSwitchExcludedBundleIDs) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.launchAtLogin) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.showInMenuBar) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.confirmStageDeletion) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.animationsEnabled) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.glassStyle) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.plateCornerRadius) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.selectionOpacity) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.selectionBorderWidth) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.selectionBorderOpacity) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.inactivePlateScale) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.overlayPresentationDelay) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.keyBindings) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.commandHintVisibility) { _, _ in saveSettings() }
-            .onChange(of: viewModel.settings.commandUsageCounts) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings) { _, _ in saveSettings() }
     }
 
     private var settingsNavigation: some View {
@@ -74,6 +61,8 @@ public struct SettingsView: View {
                             .id(SettingsSection.excludedApps)
                         appSection
                             .id(SettingsSection.app)
+                        privacySection
+                            .id(SettingsSection.privacy)
                         keyboardShortcutsSection
                             .id(SettingsSection.keyboardShortcuts)
                         troubleshootingSection
@@ -98,6 +87,19 @@ public struct SettingsView: View {
             }
         } message: {
             Text("This removes all stage window assignments, including dormant windows, and rebuilds one stage from windows Debut can currently discover. Settings are preserved.")
+        }
+        .sheet(isPresented: $showingTelemetryPayload) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Data being shared").font(.title2.bold())
+                Text("This is the exact current allowlisted session-summary payload.")
+                    .foregroundStyle(.secondary)
+                ScrollView {
+                    Text(telemetryPayload).font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(minWidth: 540, minHeight: 260)
+                Text(viewModel.telemetryExcludedData).font(.caption).foregroundStyle(.secondary)
+                HStack { Spacer(); Button("Close") { showingTelemetryPayload = false }.keyboardShortcut(.defaultAction) }
+            }.padding(24)
         }
     }
 
@@ -494,6 +496,29 @@ public struct SettingsView: View {
         .onChange(of: viewModel.settings.quickSwitchModifiers) { _, _ in saveSettings() }
     }
 
+    private var privacySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Privacy").font(.title2.bold())
+            settingsToggle(
+                "Share anonymous usage and performance data",
+                isOn: $viewModel.settings.shareAnonymousTelemetry
+            )
+            Text("Shares one bucketed aggregate session summary and a small number of rate-limited performance anomalies. The choice takes effect immediately and local diagnostics stay available.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("View data being shared…") {
+                    telemetryPayload = (try? viewModel.telemetryPayloadPreview()) ?? "Payload unavailable."
+                    showingTelemetryPayload = true
+                }
+                Button("Privacy Policy") {
+                    NSWorkspace.shared.open(URL(string: "https://github.com/thomplth/Debut/blob/main/docs/privacy.md")!)
+                }
+            }
+            Text("Anonymous records contain no stable identifier, so they cannot later be located for per-user deletion. Disabling sharing deletes queued unsent records immediately.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var aboutSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("About")
@@ -582,6 +607,7 @@ public struct SettingsView: View {
         case .appearance: "paintbrush"
         case .excludedApps: "eye.slash"
         case .app: "gearshape"
+        case .privacy: "hand.raised"
         case .keyboardShortcuts: "keyboard"
         case .troubleshooting: "stethoscope"
         case .about: "info.circle"

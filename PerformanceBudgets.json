@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "benchmarks": {
+    "overlay_preparation": {
+      "baselineP95Milliseconds": 0.05,
+      "absoluteBudgetMilliseconds": 1.0,
+      "regressionPercent": 25
+    },
+    "window_reconciliation": {
+      "baselineP95Milliseconds": 0.35,
+      "absoluteBudgetMilliseconds": 2.0,
+      "regressionPercent": 25
+    },
+    "state_persistence": {
+      "baselineP95Milliseconds": 0.10,
+      "absoluteBudgetMilliseconds": 2.0,
+      "regressionPercent": 25
+    }
+  }
+}

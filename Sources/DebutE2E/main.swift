@@ -532,18 +532,18 @@ test("Windows discovered") {
     return (Int(windowCount) ?? 0) > 0
 }
 
-// --- 1b. Wallpaper notification integration ---
-header("1b. Desktop wallpaper notification integration")
+// --- 1b. Wallpaper store integration ---
+header("1b. Desktop wallpaper store integration")
 let wallpaperRefreshCount = readEvents().filter { $0["event"] == "desktop_wallpaper_refreshed" }.count
-DistributedNotificationCenter.default().postNotificationName(
-    Notification.Name("com.apple.desktop"),
-    object: nil,
-    userInfo: nil,
-    deliverImmediately: true
-)
-wait(0.5)
+let wallpaperStore = URL(fileURLWithPath: NSHomeDirectory())
+    .appendingPathComponent("Library/Application Support/com.apple.wallpaper/Store")
+let wallpaperTrigger = wallpaperStore.appendingPathComponent(".debut-e2e-trigger")
+try? FileManager.default.createDirectory(at: wallpaperStore, withIntermediateDirectories: true)
+try? Data("e2e".utf8).write(to: wallpaperTrigger, options: .atomic)
+try? FileManager.default.removeItem(at: wallpaperTrigger)
+wait(3)
 
-test("Wallpaper notification refreshes the desktop surface") {
+test("Wallpaper store changes refresh the desktop surface") {
     let refreshEvents = readEvents().filter { $0["event"] == "desktop_wallpaper_refreshed" }
     if refreshEvents.last?["loaded"] == "false" {
         info("  Wallpaper source is unavailable; fallback surface refreshed")

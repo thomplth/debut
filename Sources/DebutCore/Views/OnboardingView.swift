@@ -91,6 +91,17 @@ public struct OnboardingView: View {
                 welcomeFeature(icon: "keyboard", label: "Stay on the keyboard")
             }
 
+            Toggle(
+                "Share anonymous usage and performance data",
+                isOn: Binding(
+                    get: { viewModel.shareAnonymousTelemetry },
+                    set: { viewModel.setShareAnonymousTelemetry($0) }
+                )
+            )
+            .toggleStyle(.switch)
+            .help("Shares only bucketed aggregate measurements. Never shares app or window identity, screenshots, paths, or raw diagnostics.")
+            .accessibilityIdentifier("onboarding-anonymous-telemetry")
+
             Spacer()
 
             Button("Continue") {

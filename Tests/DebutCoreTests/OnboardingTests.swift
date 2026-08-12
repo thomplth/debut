@@ -91,6 +91,22 @@ struct OnboardingTests {
         #expect(permissions.screenRecordingRequestCount == 1)
     }
 
+    @Test("Anonymous sharing choice is visible and immediately reversible")
+    func anonymousSharingChoice() {
+        let permissions = MockOnboardingPermissionClient()
+        var observed: [Bool] = []
+        let viewModel = OnboardingViewModel(
+            permissionClient: permissions,
+            shareAnonymousTelemetry: true,
+            onTelemetryChanged: { observed.append($0) }
+        )
+
+        #expect(viewModel.shareAnonymousTelemetry)
+        viewModel.setShareAnonymousTelemetry(false)
+        #expect(!viewModel.shareAnonymousTelemetry)
+        #expect(observed == [false])
+    }
+
     @Test("Permission state changes are published immediately")
     func publishesPermissionChanges() {
         let permissions = MockOnboardingPermissionClient()

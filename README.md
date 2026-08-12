@@ -31,6 +31,8 @@ Architecture constraints, the toolchain, and the task workflow live in
 
 ## Verification
 
+### High-risk verification
+
 Unit and screenshot tests are the default development loop. E2E is reserved for
 high-risk changes — see [AGENTS.md](AGENTS.md) for the policy and
 [docs/local-e2e.md](docs/local-e2e.md) for running it headlessly.

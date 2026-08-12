@@ -8,6 +8,8 @@ let package = Package(
     products: [
         .executable(name: "Debut", targets: ["DebutApp"]),
         .executable(name: "DebutE2E", targets: ["DebutE2E"]),
+        .executable(name: "DebutPerformanceFixture", targets: ["DebutPerformanceFixture"]),
+        .executable(name: "DebutBenchmarks", targets: ["DebutBenchmarks"]),
         .library(name: "DebutCore", targets: ["DebutCore"]),
     ],
     targets: [
@@ -36,6 +38,15 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("ApplicationServices"),
             ]
+        ),
+        .executableTarget(
+            name: "DebutPerformanceFixture",
+            path: "Sources/DebutPerformanceFixture"
+        ),
+        .executableTarget(
+            name: "DebutBenchmarks",
+            dependencies: ["DebutCore"],
+            path: "Sources/DebutBenchmarks"
         ),
         .testTarget(
             name: "DebutCoreTests",

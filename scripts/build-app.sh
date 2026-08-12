@@ -20,6 +20,7 @@ mkdir -p "$MACOS" "$RESOURCES"
 
 cp "$BUILD_DIR/release/Debut" "$MACOS/Debut"
 cp "$PROJECT_DIR/Resources/Info.plist" "$CONTENTS/Info.plist"
+cp "$PROJECT_DIR/Resources/PrivacyInfo.xcprivacy" "$RESOURCES/PrivacyInfo.xcprivacy"
 
 # Generate a simple app icon using sips (theater mask from SF Symbols isn't available as icns,
 # so we create a minimal colored icon)

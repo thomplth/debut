@@ -33,10 +33,22 @@ struct SettingsViewModelTests {
             .appearance,
             .excludedApps,
             .app,
+            .privacy,
             .keyboardShortcuts,
             .troubleshooting,
             .about,
         ])
+    }
+
+    @Test("Privacy payload preview is exact JSON and documents excluded data")
+    func privacyPayloadPreview() throws {
+        let vm = SettingsViewModel()
+        let preview = try vm.telemetryPayloadPreview()
+        let data = try #require(preview.data(using: .utf8))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["schemaVersion"] as? Int == 1)
+        #expect(vm.telemetryExcludedData.contains("window titles"))
+        #expect(!preview.contains("bundleID"))
     }
 
     @Test("Troubleshooting actions are forwarded to the app")
