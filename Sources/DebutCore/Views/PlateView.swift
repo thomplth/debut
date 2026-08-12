@@ -135,6 +135,13 @@ enum PlateMotion {
         CGSize(width: width * scale, height: height * scale)
     }
 
+    static func plateSurfaceCornerRadius(
+        radius: CGFloat,
+        scale: CGFloat
+    ) -> CGFloat {
+        radius * scale
+    }
+
     static func focusedStageIndex(
         active: Int,
         hovered: Int?,
@@ -892,6 +899,10 @@ public struct OverlaySwiftUIView: View {
                             height: pHeight,
                             scale: scale
                         )
+                        let surfaceCornerRadius = PlateMotion.plateSurfaceCornerRadius(
+                            radius: CGFloat(viewModel.appearance.plateCornerRadius),
+                            scale: scale
+                        )
                         let plateOpacity = PlateMotion.plateOpacity(scale: scale)
                         let lift = PlateMotion.lift(isActive: isInteractionTarget)
                         let selectedWindowIndex = pointerSelection?.stageIndex == index
@@ -983,7 +994,7 @@ public struct OverlaySwiftUIView: View {
                             PlateSurfaceView(
                                 stageIndex: index,
                                 size: surfaceSize,
-                                cornerRadius: CGFloat(viewModel.appearance.plateCornerRadius),
+                                cornerRadius: surfaceCornerRadius,
                                 appearance: viewModel.appearance
                             )
                         }
