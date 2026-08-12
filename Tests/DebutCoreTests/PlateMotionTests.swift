@@ -36,6 +36,8 @@ struct PlateMotionTests {
     func dragPreviewVisibility() {
         #expect(PlateMotion.sourceWindowOpacity(isDragging: false) == 1)
         #expect(PlateMotion.sourceWindowOpacity(isDragging: true) == 0)
+        #expect(PlateMotion.sourceWindowDisablesAnimation(isDragging: false) == false)
+        #expect(PlateMotion.sourceWindowDisablesAnimation(isDragging: true) == true)
         #expect(PlateMotion.cursorPreviewOpacity == 1)
     }
 
