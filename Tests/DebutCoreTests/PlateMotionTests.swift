@@ -55,23 +55,46 @@ struct PlateMotionTests {
             PlateMotion.windowReorderTransition(
                 reduceMotion: false,
                 hasActiveDrag: true,
-                isFinishingDrop: false
+                isAwaitingCommittedLayout: false
             ) == .spring(duration: 0.294, bounce: 0.06)
         )
         #expect(
             PlateMotion.windowReorderTransition(
                 reduceMotion: false,
                 hasActiveDrag: true,
-                isFinishingDrop: true
+                isAwaitingCommittedLayout: true
             ) == nil
         )
         #expect(
             PlateMotion.windowReorderTransition(
                 reduceMotion: false,
                 hasActiveDrag: false,
-                isFinishingDrop: false
+                isAwaitingCommittedLayout: false
             ) == nil
         )
+    }
+
+    @Test("Snapped preview waits for the committed window order")
+    func snappedPreviewWaitsForCommittedLayout() {
+        let request = WindowMoveRequest(
+            windowID: 42,
+            fromStageIndex: 0,
+            fromWindowIndex: 0,
+            toStageIndex: 1,
+            toWindowIndex: 1
+        )
+        #expect(!PlateMotion.isWindowDropApplied(
+            request,
+            to: WindowLayoutKey(stageWindowIDs: [[42, 43], [50, 51]])
+        ))
+        #expect(PlateMotion.isWindowDropApplied(
+            request,
+            to: WindowLayoutKey(stageWindowIDs: [[43], [50, 42, 51]])
+        ))
+        #expect(!PlateMotion.isWindowDropApplied(
+            request,
+            to: WindowLayoutKey(stageWindowIDs: [[43], [42, 50, 51]])
+        ))
     }
 
     @Test("Drag hides the stationary card and keeps the cursor preview opaque")
