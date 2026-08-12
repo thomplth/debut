@@ -20,10 +20,6 @@ window previews, each badged with its app icon and captioned with its title.
 Plates stack vertically with the active stage centered, and carry no title of
 their own.
 
-**Template** — a list of app bundle IDs captured from a stage. Templates record
-which apps were present, not window geometry. They can currently be saved and
-deleted only; no flow applies one to a new stage.
-
 ## Specs
 
 - [Stage Manager overlay](spec/stage-manager.md) — layout, activation, navigation, stage management

@@ -658,7 +658,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             debouncedSaver?.flushNow(controller.stageManager)
             diag.report("window_cache_reset_completed", details: [
                 "discoveredAssignments": "\(controller.stageManager.activeStage.windows.count)",
-                "templatesPreserved": "\(controller.stageManager.templates.count)",
             ])
         } else {
             var resetManager = previousManager
@@ -667,7 +666,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             debouncedSaver?.flushNow(resetManager)
             diag.report("window_cache_reset_completed", details: [
                 "discoveredAssignments": "0",
-                "templatesPreserved": "\(resetManager.templates.count)",
                 "controllerAvailable": "false",
             ])
         }

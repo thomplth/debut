@@ -82,8 +82,7 @@ observer is active at a time and moves to the frontmost app on activation.
 State survives app restarts and reboots.
 
 Persisted: the stage list and its order, window-to-stage assignments (by bundle
-ID and title), templates, settings, and the active stage ID. Stages have no name
-to persist.
+ID and title), settings, and the active stage ID. Stages have no name to persist.
 
 Writes are debounced through `DebouncedSaver` on stage mutation and flushed
 synchronously on terminate.

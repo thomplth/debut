@@ -14,13 +14,11 @@ public enum SwapDirection: Sendable {
 public struct StageManager: Codable, Sendable {
     public private(set) var stages: [Stage]
     public private(set) var activeStageID: UUID
-    public private(set) var templates: [Template]
     public private(set) var dormantWindowAssignments: [DormantWindowAssignment]
 
     private enum CodingKeys: String, CodingKey {
         case stages
         case activeStageID
-        case templates
         case dormantWindowAssignments
     }
 
@@ -28,7 +26,6 @@ public struct StageManager: Codable, Sendable {
         let initial = Stage()
         self.stages = [initial]
         self.activeStageID = initial.id
-        self.templates = []
         self.dormantWindowAssignments = []
     }
 
@@ -36,7 +33,6 @@ public struct StageManager: Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.stages = try container.decode([Stage].self, forKey: .stages)
         self.activeStageID = try container.decode(UUID.self, forKey: .activeStageID)
-        self.templates = try container.decode([Template].self, forKey: .templates)
         self.dormantWindowAssignments = try container.decodeIfPresent(
             [DormantWindowAssignment].self,
             forKey: .dormantWindowAssignments
@@ -49,7 +45,6 @@ public struct StageManager: Codable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(stages, forKey: .stages)
         try container.encode(activeStageID, forKey: .activeStageID)
-        try container.encode(templates, forKey: .templates)
         try container.encode(dormantWindowAssignments, forKey: .dormantWindowAssignments)
     }
 
@@ -149,8 +144,8 @@ public struct StageManager: Codable, Sendable {
 
     // MARK: - Window management
 
-    /// Discards every cached window assignment and stage while keeping reusable
-    /// templates. The caller repopulates the new default stage from a fresh AX
+    /// Discards every cached window assignment and stage. The caller repopulates
+    /// the new default stage from a fresh AX
     /// discovery so ephemeral IDs and dormant ghosts cannot survive the reset.
     public mutating func resetWindowCache() {
         let initial = Stage()
@@ -310,16 +305,4 @@ public struct StageManager: Codable, Sendable {
         stages.first(where: { $0.windows.contains(where: { $0.windowID == windowID }) })?.id
     }
 
-    // MARK: - Templates
-
-    public mutating func saveStageAsTemplate(stageID: UUID, templateName: String) {
-        guard let stage = stages.first(where: { $0.id == stageID }) else { return }
-        let bundleIDs = Array(Set(stage.windows.map(\.ownerBundleID)).sorted())
-        let template = Template(name: templateName, appBundleIDs: bundleIDs)
-        templates.append(template)
-    }
-
-    public mutating func deleteTemplate(id: UUID) {
-        templates.removeAll { $0.id == id }
-    }
 }

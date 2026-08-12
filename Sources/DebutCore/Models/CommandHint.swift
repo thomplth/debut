@@ -47,7 +47,6 @@ public enum CommandHintCatalog {
             ("Select stage", [.nextStage, .previousStage], "rectangle.stack"),
             ("New stage", [.newStageBelow, .newStageAbove], "plus"),
             ("Delete stage", [.deleteStage], "trash"),
-            ("Save template", [.saveAsTemplate], "square.and.arrow.down"),
             ("Reorder stage", [.swapStageUp, .swapStageDown], "arrow.up.arrow.down"),
         ]
         if hasSelectedWindow {

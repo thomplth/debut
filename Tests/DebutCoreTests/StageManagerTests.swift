@@ -134,17 +134,7 @@ struct StageManagerTests {
         #expect(sm.stageContainingWindow(windowID: 999) == nil)
     }
 
-    @Test("Save template from windows")
-    func saveTemplate() {
-        var sm = StageManager()
-        let id = sm.stages[0].id
-        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toStageID: id)
-        sm.saveStageAsTemplate(stageID: id, templateName: "T")
-        #expect(sm.templates.count == 1)
-        #expect(sm.templates[0].appBundleIDs == ["com.a"])
-    }
-
-    @Test("Resetting the window cache removes live and dormant assignments but preserves templates")
+    @Test("Resetting the window cache removes live and dormant assignments")
     func resetWindowCache() {
         var sm = StageManager()
         let firstStageID = sm.activeStageID
@@ -158,7 +148,6 @@ struct StageManagerTests {
             ),
             toStageID: firstStageID
         )
-        sm.saveStageAsTemplate(stageID: firstStageID, templateName: "Saved Layout")
         _ = sm.makeWindowsDormant(forOwnerPID: 10)
         sm.createStage(position: .below)
         sm.addWindow(
@@ -178,7 +167,6 @@ struct StageManagerTests {
         #expect(sm.stages[0].windows.isEmpty)
         #expect(sm.activeStageID == sm.stages[0].id)
         #expect(sm.dormantWindowAssignments.isEmpty)
-        #expect(sm.templates.map(\.name) == ["Saved Layout"])
     }
 
     @Test("Remove empty stages preserves non-empty ones")
