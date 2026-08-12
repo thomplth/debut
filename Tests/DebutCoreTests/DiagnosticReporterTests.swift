@@ -104,6 +104,31 @@ struct DiagnosticReporterTests {
         let events = try #require(object["events"] as? [[String: String]])
         #expect(events.last?["event"] == "app_launched")
         #expect(object["updatedAt"] as? String != nil)
+        #expect(object["performance"] as? [String: Any] != nil)
+    }
+
+    @Test("Completed operations appear in the authoritative snapshot with workload correlation")
+    func performanceAppearsInSnapshot() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let recorder = PerformanceRecorder(
+            resourceReader: UnavailableProcessResourceReader(),
+            now: { 1_000_000 }
+        )
+        let reporter = DiagnosticReporter(directory: dir, performanceRecorder: recorder)
+        let correlation = recorder.begin(.overlayPreparation, workload: .init(stages: 4, windows: 12))
+        _ = recorder.end(correlation)
+
+        reporter.report("overlay_shown", level: .transient)
+        reporter.flush()
+
+        let data = try Data(contentsOf: dir.appendingPathComponent("diagnostic.json"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let performance = try #require(object["performance"] as? [String: Any])
+        let recent = try #require(performance["recent"] as? [[String: Any]])
+        #expect(recent.last?["operation"] as? String == "overlay_preparation")
+        let workload = try #require(recent.last?["workload"] as? [String: Any])
+        #expect(workload["windows"] as? Int == 12)
     }
 
     @Test("Shared reporter never writes into the real support directory under test")
