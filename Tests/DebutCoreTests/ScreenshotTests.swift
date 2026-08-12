@@ -236,6 +236,34 @@ struct ScreenshotTests {
         #expect(dragging[1]!.width > idle[1]!.width)
     }
 
+    @Test("Cross-stage drag keeps source icons inside its centered plate surface")
+    func crossStageDragKeepsSourceIconsInsidePlateSurface() throws {
+        let vm = makeSampleViewModel(stageCount: 2, windowsPerStage: [3, 2], activeIndex: 0)
+        let size = NSSize(width: 1200, height: 500)
+        let drag = WindowDragState(
+            windowID: vm.plates[0].windows[2].id,
+            sourceStageIndex: 0,
+            sourceWindowIndex: 2,
+            location: CGPoint(x: 600, y: 330),
+            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 0)
+        )
+        let view = OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag)
+        let surfaces = renderPlateSurfaceFrames(view, size: size)
+        let windows = renderWindowFrames(view, size: size)
+
+        let sourceSurface = try #require(surfaces[0])
+        let visibleSourceFrames = windows
+            .filter { $0.key.stageIndex == 0 && $0.key.windowIndex != 2 }
+            .map(\.value)
+        let sourceBounds = try #require(visibleSourceFrames.reduce(nil as CGRect?) { bounds, frame in
+            bounds.map { $0.union(frame) } ?? frame
+        })
+
+        #expect(sourceBounds.minX >= sourceSurface.minX)
+        #expect(sourceBounds.maxX <= sourceSurface.maxX)
+        #expect(abs(sourceBounds.midX - sourceSurface.midX) < 0.5)
+    }
+
     @Test("Onboarding welcome screen")
     func onboardingWelcome() throws {
         let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())

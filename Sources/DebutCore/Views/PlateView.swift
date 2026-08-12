@@ -303,6 +303,19 @@ enum PlateMotion {
         return 0
     }
 
+    static func windowGridCenterOffset(
+        stageIndex: Int,
+        drag: WindowDragState?,
+        cardStride: CGFloat
+    ) -> CGFloat {
+        guard let drag,
+              let target = drag.dropTarget,
+              target.stageIndex != drag.sourceStageIndex
+        else { return 0 }
+
+        return stageIndex == drag.sourceStageIndex ? cardStride / 2 : 0
+    }
+
     static func windowDropDestination(
         sourceStageIndex: Int,
         sourceWindowIndex: Int,
@@ -1304,6 +1317,13 @@ struct PlateSwiftUIView: View {
             .padding(.leading, PlateConstants.padding + stageHandleExpansion)
             .padding(.trailing, PlateConstants.padding)
             .padding(.top, PlateConstants.topPadding)
+            .offset(x: PlateMotion.windowGridCenterOffset(
+                stageIndex: stageIndex,
+                drag: layoutWindowDrag,
+                cardStride: thumbnailWidth
+                    + PlateConstants.windowCardExtraWidth
+                    + PlateConstants.windowSpacing
+            ))
 
             Spacer(minLength: 0)
         }
