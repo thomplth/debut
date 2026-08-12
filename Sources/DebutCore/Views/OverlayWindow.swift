@@ -27,6 +27,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     }
 
     public func update(viewModel: OverlayViewModel) {
+        synchronizeFrameToMainScreen(display: false)
         let view = OverlaySwiftUIView(
             viewModel: viewModel,
             onWindowSelected: onWindowSelected,
@@ -37,6 +38,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         )
         if let hostingView {
             hostingView.rootView = view
+            hostingView.frame = contentView?.bounds ?? .zero
         } else {
             let hv = NSHostingView(rootView: view)
             hv.frame = contentView?.bounds ?? .zero
@@ -47,8 +49,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     }
 
     public func showOverlay() {
-        guard let screen = NSScreen.main else { return }
-        setFrame(screen.frame, display: true)
+        synchronizeFrameToMainScreen(display: true)
         hostingView?.frame = contentView?.bounds ?? .zero
         alphaValue = 0
         makeKeyAndOrderFront(nil)
@@ -57,6 +58,11 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             self.animator().alphaValue = 1.0
         }
+    }
+
+    private func synchronizeFrameToMainScreen(display: Bool) {
+        guard let screen = NSScreen.main else { return }
+        setFrame(screen.frame, display: display)
     }
 
     public func hideOverlay() {

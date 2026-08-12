@@ -47,6 +47,12 @@ struct PlateLayoutAnimationKey: Equatable {
     let activeStageID: UUID?
 }
 
+enum PlateEdgeScrollTarget: Equatable {
+    case resting
+    case top
+    case bottom
+}
+
 enum PlateMotion {
     static let minimumPlateScale: CGFloat = 0.08
     static let minimumPlateOpacity: Double = 0.12
@@ -153,10 +159,41 @@ enum PlateMotion {
         bottomLimit: CGFloat,
         edgeRegion: CGFloat = PlateConstants.edgeHoverRegion
     ) -> CGFloat {
-        guard topLimit > bottomLimit, let pointerY else { return restingOffset }
-        if pointerY <= edgeRegion { return topLimit }
-        if pointerY >= containerHeight - edgeRegion { return bottomLimit }
-        return restingOffset
+        edgeScrollDestination(
+            target: edgeScrollTarget(
+                pointerY: pointerY,
+                containerHeight: containerHeight,
+                edgeRegion: edgeRegion
+            ),
+            restingOffset: restingOffset,
+            topLimit: topLimit,
+            bottomLimit: bottomLimit
+        )
+    }
+
+    static func edgeScrollTarget(
+        pointerY: CGFloat?,
+        containerHeight: CGFloat,
+        edgeRegion: CGFloat = PlateConstants.edgeHoverRegion
+    ) -> PlateEdgeScrollTarget {
+        guard let pointerY else { return .resting }
+        if pointerY <= edgeRegion { return .top }
+        if pointerY >= containerHeight - edgeRegion { return .bottom }
+        return .resting
+    }
+
+    static func edgeScrollDestination(
+        target: PlateEdgeScrollTarget,
+        restingOffset: CGFloat,
+        topLimit: CGFloat,
+        bottomLimit: CGFloat
+    ) -> CGFloat {
+        guard topLimit > bottomLimit else { return restingOffset }
+        switch target {
+        case .resting: return restingOffset
+        case .top: return topLimit
+        case .bottom: return bottomLimit
+        }
     }
 
     static func stageHandleExpansion(isRevealed: Bool) -> CGFloat {
@@ -709,9 +746,12 @@ public struct OverlaySwiftUIView: View {
                 anchorIndex: focusedStageIndex,
                 anchorY: anchorY
             )
-            let yOffset = PlateMotion.edgeScrollDestination(
+            let edgeScrollTarget = PlateMotion.edgeScrollTarget(
                 pointerY: hoveredStageIndex == nil ? nil : hoverPointerY,
-                containerHeight: geo.size.height,
+                containerHeight: geo.size.height
+            )
+            let yOffset = PlateMotion.edgeScrollDestination(
+                target: edgeScrollTarget,
                 restingOffset: restingOffset,
                 topLimit: PlateConstants.edgeScrollMargin,
                 bottomLimit: geo.size.height - PlateConstants.edgeScrollMargin
@@ -882,7 +922,7 @@ public struct OverlaySwiftUIView: View {
             }
             .animation(
                 reduceMotion ? .easeOut(duration: 0.12) : .easeInOut(duration: 1.15),
-                value: yOffset
+                value: edgeScrollTarget
             )
             .onChange(of: viewModel.activeStageIndex) { _, _ in
                 hoveredStageIndex = nil
