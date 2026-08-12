@@ -31,7 +31,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case newStageAbove
     case deleteStage
     case deleteStageForward
-    case saveAsTemplate
     case moveWindowUp
     case moveWindowDown
     case swapStageUp
@@ -74,7 +73,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .newStageAbove: "New stage above"
         case .deleteStage: "Delete stage"
         case .deleteStageForward: "Delete stage (forward delete)"
-        case .saveAsTemplate: "Save as template"
         case .moveWindowUp: "Move window up"
         case .moveWindowDown: "Move window down"
         case .swapStageUp: "Swap stage up"
@@ -119,7 +117,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .newStageAbove: .newStageAbove
         case .deleteStage: .deleteStage
         case .deleteStageForward: .deleteStage
-        case .saveAsTemplate: .saveAsTemplate
         case .moveWindowUp: .moveWindowUp
         case .moveWindowDown: .moveWindowDown
         case .swapStageUp: .swapStageUp
@@ -364,7 +361,6 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .newStageAbove: KeyCombo(keyCode: kVK_ANSI_N, shift: true),
             .deleteStage: KeyCombo(keyCode: kVK_Delete),
             .deleteStageForward: KeyCombo(keyCode: kVK_ForwardDelete),
-            .saveAsTemplate: KeyCombo(keyCode: kVK_Space),
             .moveWindowUp: KeyCombo(keyCode: kVK_UpArrow),
             .moveWindowDown: KeyCombo(keyCode: kVK_DownArrow),
             .swapStageUp: KeyCombo(keyCode: kVK_UpArrow, option: true),
@@ -388,9 +384,9 @@ public struct KeyBindings: Codable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let saved = try container.decodeIfPresent(
-            [KeyAction: KeyCombo].self,
+            DecodedKeyActionDictionary<KeyCombo>.self,
             forKey: .bindings
-        ) ?? [:]
+        )?.values ?? [:]
         bindings = KeyCombo.defaults().merging(saved) { _, savedCombo in savedCombo }
     }
 
@@ -410,5 +406,22 @@ public struct KeyBindings: Codable, Sendable, Equatable {
 
     public mutating func restoreDefaults() {
         bindings = KeyCombo.defaults()
+    }
+}
+
+struct DecodedKeyActionDictionary<Value: Decodable>: Decodable {
+    let values: [KeyAction: Value]
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var values: [KeyAction: Value] = [:]
+        while !container.isAtEnd {
+            let rawAction = try container.decode(String.self)
+            let value = try container.decode(Value.self)
+            if let action = KeyAction(rawValue: rawAction) {
+                values[action] = value
+            }
+        }
+        self.values = values
     }
 }

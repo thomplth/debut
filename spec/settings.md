@@ -8,7 +8,6 @@ Debut's behavior, appearance, shortcuts, and exclusions.
 ```
 ┌───────────────┬──────────────────────────────────┐
 │ Appearance    │                                  │
-│ Templates     │   scrollable content area,       │
 │ Excluded Apps │   all sections stacked           │
 │ App           │                                  │
 │ Keyboard      │                                  │
@@ -31,9 +30,6 @@ Individual controls, their ranges, and their default values are defined in
 
 **Appearance** — glass style, plus the plate and selection geometry the overlay
 renders with.
-
-**Templates** — the saved templates and their bundle IDs, with a delete control
-per template.
 
 **Excluded Apps** — a picker over running regular apps and the resulting
 exclusion list. Adding an app removes it from every stage and filters it out of
@@ -60,7 +56,4 @@ duplicate windows linger in Debut.
 
 ## Not yet implemented
 
-- Templates cannot be created or edited here — there is no create button, no
-  click-to-edit, and no searchable app picker. Templates are captured from the
-  overlay and can only be deleted in Settings.
 - No check-for-updates control.

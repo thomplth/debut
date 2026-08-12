@@ -45,6 +45,26 @@ struct KeyboardShortcutCustomizationTests {
         #expect(decoded.combo(for: .dismissOverlay)?.keyCode == kVK_Escape)
     }
 
+    @Test("Retired saved actions are ignored")
+    func retiredSavedActionsAreIgnored() throws {
+        var saved = KeyBindings()
+        saved.bindings[.newStageBelow] = KeyCombo(keyCode: kVK_ANSI_B)
+        var object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any]
+        )
+        var encodedBindings = try #require(object["bindings"] as? [Any])
+        encodedBindings.append("retiredAction")
+        encodedBindings.append(["keyCode": kVK_Space])
+        object["bindings"] = encodedBindings
+
+        let decoded = try JSONDecoder().decode(
+            KeyBindings.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        #expect(decoded.combo(for: .newStageBelow) == KeyCombo(keyCode: kVK_ANSI_B))
+    }
+
     @Test("A custom global shortcut replaces Command-Tab activation")
     func customActivation() {
         let service = EventTapKeyboardService()

@@ -88,9 +88,9 @@ public struct AppSettings: Codable, Sendable {
             forKey: .commandHintVisibility
         ) ?? .automatic
         commandUsageCounts = try container.decodeIfPresent(
-            [KeyAction: Int].self,
+            DecodedKeyActionDictionary<Int>.self,
             forKey: .commandUsageCounts
-        ) ?? [:]
+        )?.values ?? [:]
     }
 
     public func isExcluded(bundleID: String) -> Bool {

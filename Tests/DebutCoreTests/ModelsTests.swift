@@ -116,24 +116,3 @@ struct StageTests {
         #expect(decoded.id == stage.id)
     }
 }
-
-// MARK: - Template Tests
-
-@Suite("Template")
-struct TemplateTests {
-    @Test("Create template with apps")
-    func createTemplate() {
-        let template = Template(name: "Coding", appBundleIDs: ["com.apple.Terminal", "com.microsoft.VSCode"])
-        #expect(template.name == "Coding")
-        #expect(template.appBundleIDs.count == 2)
-    }
-
-    @Test("Template is Codable")
-    func templateCodable() throws {
-        let template = Template(name: "Review", appBundleIDs: ["com.apple.Safari"])
-        let data = try JSONEncoder().encode(template)
-        let decoded = try JSONDecoder().decode(Template.self, from: data)
-        #expect(decoded.name == "Review")
-        #expect(decoded.appBundleIDs == ["com.apple.Safari"])
-    }
-}

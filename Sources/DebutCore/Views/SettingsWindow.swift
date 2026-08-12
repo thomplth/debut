@@ -24,7 +24,7 @@ public final class SettingsWindow: NSWindow {
 
 public struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
-    @State private var selectedSection: SettingsSection = .templates
+    @State private var selectedSection: SettingsSection = .appearance
     @State private var showingResetConfirmation = false
 
     public init(viewModel: SettingsViewModel = SettingsViewModel()) {
@@ -65,8 +65,6 @@ public struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 32) {
                         appearanceSection
                             .id(SettingsSection.appearance)
-                        templatesSection
-                            .id(SettingsSection.templates)
                         excludedAppsSection
                             .id(SettingsSection.excludedApps)
                         appSection
@@ -94,7 +92,7 @@ public struct SettingsView: View {
                 viewModel.resetWindowCache()
             }
         } message: {
-            Text("This removes all stage window assignments, including dormant windows, and rebuilds one stage from windows Debut can currently discover. Settings and saved templates are preserved.")
+            Text("This removes all stage window assignments, including dormant windows, and rebuilds one stage from windows Debut can currently discover. Settings are preserved.")
         }
     }
 
@@ -179,41 +177,6 @@ public struct SettingsView: View {
                         .monospacedDigit()
                 }
                 Slider(value: $viewModel.settings.selectionBorderOpacity, in: 0...0.5, step: 0.01)
-            }
-        }
-    }
-
-    private var templatesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Templates")
-                .font(.title2.bold())
-
-            if viewModel.stageManager.templates.isEmpty {
-                Text("No templates saved. Use Space in the Stage Manager to save a stage as a template.")
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
-            } else {
-                ForEach(viewModel.stageManager.templates) { template in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(template.name)
-                                .font(.headline)
-                            Text(template.appBundleIDs.joined(separator: ", "))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Button(role: .destructive) {
-                            viewModel.stageManager.deleteTemplate(id: template.id)
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                    .padding(10)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                }
             }
         }
     }
@@ -586,7 +549,6 @@ public struct SettingsView: View {
     private func sectionIcon(_ section: SettingsSection) -> String {
         switch section {
         case .appearance: "paintbrush"
-        case .templates: "rectangle.stack"
         case .excludedApps: "eye.slash"
         case .app: "gearshape"
         case .keyboardShortcuts: "keyboard"

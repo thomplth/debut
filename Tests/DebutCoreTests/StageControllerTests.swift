@@ -390,10 +390,6 @@ struct StageControllerTests {
             ),
             toStageID: manager.activeStageID
         )
-        manager.saveStageAsTemplate(
-            stageID: manager.activeStageID,
-            templateName: "Saved Layout"
-        )
         let controller = StageController(
             windowService: windowService,
             keyboardService: MockKeyboardService(),
@@ -404,7 +400,6 @@ struct StageControllerTests {
 
         #expect(controller.stageManager.stages.count == 1)
         #expect(controller.stageManager.activeStage.windows.map(\.windowID) == [202])
-        #expect(controller.stageManager.templates.map(\.name) == ["Saved Layout"])
         #expect(controller.selectedStageIndex == 0)
         #expect(controller.selectedWindowIndex == 0)
     }

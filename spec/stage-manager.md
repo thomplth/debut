@@ -105,15 +105,14 @@ why the frontmost bundle ID has to be read from cache.
   overflow into an adjacent stage — below for the first stage, otherwise above —
   and the active stage follows the overflow. Deleting the only stage creates a
   fresh empty one.
-- `saveAsTemplate` captures the selected stage's app list as a template.
 - `moveWindowUp` and `moveWindowDown` move the selected window to the adjacent
   stage; the selection follows it, and the source stage remains even if it
   empties.
 - `swapStageUp` and `swapStageDown` exchange the selected stage's position with
   its neighbor.
 
-Stages cannot be renamed. Position numbers drive shortcuts and generated template
-names but are not displayed on plates.
+Stages cannot be renamed. Position numbers drive shortcuts but are not displayed
+on plates.
 
 ## Pointer
 
@@ -128,5 +127,3 @@ GitHub-hosted macOS do not deliver synthetic drags; see docs/local-e2e.md.
 - Plates beyond the screen edges do not scroll into view when navigating to an
   off-screen stage.
 - Window previews carry no Dock-style notification badge counts.
-- Saving a template does not prompt for a name; it silently uses the stage's
-  position label.

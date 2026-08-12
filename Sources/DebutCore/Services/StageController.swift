@@ -258,8 +258,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             createStage(position: .above)
         case .deleteStage:
             deleteSelectedStage()
-        case .saveAsTemplate:
-            saveSelectedStageAsTemplate()
         case .moveWindowUp:
             moveWindow(direction: .up)
         case .moveWindowDown:
@@ -616,14 +614,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         selectedWindowIndex = 0
         delegate?.stageControllerDidMutateState(self)
         notifyOverlayUpdated()
-    }
-
-    private func saveSelectedStageAsTemplate() {
-        guard isStageManagerVisible,
-              stageManager.stages.indices.contains(selectedStageIndex) else { return }
-        let stage = stageManager.stages[selectedStageIndex]
-        stageManager.saveStageAsTemplate(stageID: stage.id, templateName: stageLabel(forID: stage.id))
-        delegate?.stageControllerDidMutateState(self)
     }
 
     private func moveWindow(direction: SwapDirection) {
