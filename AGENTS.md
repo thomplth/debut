@@ -2,6 +2,8 @@
 
 ## Issue Lifecycle
 
+- Linear is the source of truth for task scope, decisions, progress, and acceptance criteria.
+- Before starting work, create a Linear issue if the user did not specify one. If the user specified an issue, use that issue instead.
 - Completed work moves to Review.
 - Only humans move issues to Done or close them.
 
@@ -10,7 +12,7 @@
 For every task:
 
 1. Always work in a clean, isolated Git worktree. Do not make task changes directly in the primary checkout.
-2. Use one task per worktree. Keep commits scoped and write imperative commit messages. Do not prescribe issue IDs in branch or commit names.
+2. Use one task per worktree. Keep commits scoped and write imperative commit messages. Prefix every commit message with its Linear issue ID (for example, `KHA-123: Fix window ordering`). Do not prescribe issue IDs in branch names.
 3. Always use test-driven development:
    - Add or update the tests first.
    - Run them and confirm they fail for the expected reason.
