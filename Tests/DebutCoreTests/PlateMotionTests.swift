@@ -459,6 +459,66 @@ struct PlateMotionTests {
         ) == WindowDropTarget(stageIndex: 1, windowIndex: 1))
     }
 
+    @Test("Same-stage drag animates windows into their prospective MRU order")
+    func sameStageWindowDragOffsets() {
+        let drag = WindowDragState(
+            windowID: 42,
+            sourceStageIndex: 0,
+            sourceWindowIndex: 0,
+            location: .zero,
+            dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 2)
+        )
+
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 0, windowIndex: 0, drag: drag, cardStride: 100
+        ) == 200)
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 0, windowIndex: 1, drag: drag, cardStride: 100
+        ) == -100)
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 0, windowIndex: 2, drag: drag, cardStride: 100
+        ) == -100)
+
+        let reverseDrag = WindowDragState(
+            windowID: 42,
+            sourceStageIndex: 0,
+            sourceWindowIndex: 2,
+            location: .zero,
+            dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 0)
+        )
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 0, windowIndex: 0, drag: reverseDrag, cardStride: 100
+        ) == 100)
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 0, windowIndex: 2, drag: reverseDrag, cardStride: 100
+        ) == -200)
+    }
+
+    @Test("Cross-stage drag opens an insertion gap and closes the source gap")
+    func crossStageWindowDragOffsets() {
+        let drag = WindowDragState(
+            windowID: 42,
+            sourceStageIndex: 0,
+            sourceWindowIndex: 1,
+            location: .zero,
+            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 1)
+        )
+
+        #expect(PlateMotion.displayedWindowCounts(actual: [3, 2], drag: drag) == [2, 3])
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 0, windowIndex: 0, drag: drag, cardStride: 100
+        ) == 0)
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 0, windowIndex: 2, drag: drag, cardStride: 100
+        ) == -100)
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 1, windowIndex: 0, drag: drag, cardStride: 100
+        ) == 0)
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 1, windowIndex: 1, drag: drag, cardStride: 100
+        ) == 100)
+    }
+
     @Test("A press without meaningful movement selects instead of starting a drag")
     func clickAndDragThreshold() {
         #expect(PlateInteraction.isWindowClick(translation: .zero))
