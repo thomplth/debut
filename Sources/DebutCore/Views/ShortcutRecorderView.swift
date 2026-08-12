@@ -5,6 +5,7 @@ import Carbon.HIToolbox
 struct ShortcutRecorderRow: View {
     let action: KeyAction
     @Binding var keyBindings: KeyBindings
+    let recordingService: (any ShortcutRecordingService)?
     @State private var isRecording: Bool = false
     @State private var pendingCombo: KeyCombo?
     @State private var conflicts: [ShortcutConflict] = []
@@ -15,7 +16,7 @@ struct ShortcutRecorderRow: View {
                 Text(action.displayName)
                 Spacer()
                 if isRecording {
-                    KeyRecorderRepresentable { combo in
+                    KeyRecorderRepresentable(recordingService: recordingService) { combo in
                         onKeyRecorded(combo)
                     } onCancel: {
                         cancelRecording()
@@ -100,6 +101,7 @@ struct ShortcutRecorderRow: View {
 }
 
 struct KeyRecorderRepresentable: NSViewRepresentable {
+    let recordingService: (any ShortcutRecordingService)?
     var onKeyRecorded: (KeyCombo) -> Void
     var onCancel: () -> Void
 
@@ -107,6 +109,7 @@ struct KeyRecorderRepresentable: NSViewRepresentable {
         let view = KeyRecorderNSView()
         view.onKeyRecorded = onKeyRecorded
         view.onCancel = onCancel
+        view.startRecording(using: recordingService)
         DispatchQueue.main.async {
             view.window?.makeFirstResponder(view)
         }
@@ -117,19 +120,41 @@ struct KeyRecorderRepresentable: NSViewRepresentable {
         nsView.onKeyRecorded = onKeyRecorded
         nsView.onCancel = onCancel
     }
+
+    static func dismantleNSView(_ nsView: KeyRecorderNSView, coordinator: ()) {
+        nsView.stopRecording()
+    }
 }
 
-final class KeyRecorderNSView: NSView {
+final class KeyRecorderNSView: NSView, @unchecked Sendable {
     var onKeyRecorded: ((KeyCombo) -> Void)?
     var onCancel: (() -> Void)?
+    private weak var recordingService: (any ShortcutRecordingService)?
 
     override var acceptsFirstResponder: Bool { true }
+
+    func startRecording(using service: (any ShortcutRecordingService)?) {
+        recordingService = service
+        service?.beginShortcutRecording { [weak self] combo in
+            guard let self else { return }
+            if let combo {
+                self.finishRecording(combo)
+            } else {
+                self.cancelRecording()
+            }
+        }
+    }
+
+    func stopRecording() {
+        recordingService?.endShortcutRecording()
+        recordingService = nil
+    }
 
     override func keyDown(with event: NSEvent) {
         let keyCode = Int(event.keyCode)
 
         if keyCode == kVK_Escape {
-            onCancel?()
+            cancelRecording()
             return
         }
 
@@ -147,6 +172,16 @@ final class KeyRecorderNSView: NSView {
             shift: event.modifierFlags.contains(.shift),
             option: event.modifierFlags.contains(.option)
         )
+        finishRecording(combo)
+    }
+
+    private func finishRecording(_ combo: KeyCombo) {
+        stopRecording()
         onKeyRecorded?(combo)
+    }
+
+    private func cancelRecording() {
+        stopRecording()
+        onCancel?()
     }
 }

@@ -27,8 +27,67 @@ final class SlowKeyboardDelegate: KeyboardEventDelegate, @unchecked Sendable {
     }
 }
 
+final class RecordedComboBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedCombo: KeyCombo?
+
+    var combo: KeyCombo? { lock.withLock { storedCombo } }
+
+    func record(_ combo: KeyCombo?) {
+        lock.withLock { storedCombo = combo }
+    }
+}
+
 @Suite("KeyboardService")
 struct KeyboardServiceTests {
+
+    @Test("Shortcut recording captures Ctrl-Tab before normal dispatch")
+    func recordingCapturesControlTab() async throws {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        let recorded = RecordedComboBox()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+        service.beginShortcutRecording { recorded.record($0) }
+
+        let event = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        event.flags = .maskControl
+
+        #expect(service.handleCGEvent(type: .keyDown, event: event) == nil)
+        for _ in 0..<1_000 where recorded.combo == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(recorded.combo == KeyCombo(keyCode: kVK_Tab, control: true))
+        #expect(delegate.receivedEvents.isEmpty)
+    }
+
+    @Test("Shortcut recording captures Cmd-Tab instead of opening Debut")
+    func recordingCapturesCommandTab() async throws {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        let recorded = RecordedComboBox()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+        service.beginShortcutRecording { recorded.record($0) }
+
+        let event = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        event.flags = .maskCommand
+
+        #expect(service.handleCGEvent(type: .keyDown, event: event) == nil)
+        for _ in 0..<1_000 where recorded.combo == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(recorded.combo == KeyCombo(keyCode: kVK_Tab, command: true))
+        #expect(delegate.receivedEvents.isEmpty)
+    }
 
     @Test("Mock service starts and stops")
     func startStop() {

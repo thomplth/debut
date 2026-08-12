@@ -613,7 +613,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self?.exportDiagnosticData()
             }
         }
-        let view = SettingsView(viewModel: vm)
+        let view = SettingsView(
+            viewModel: vm,
+            shortcutRecordingService: keyboardService
+        )
         let window = SettingsWindow(rootView: view)
         window.center()
         window.makeKeyAndOrderFront(nil)

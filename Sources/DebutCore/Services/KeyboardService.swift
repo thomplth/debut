@@ -76,3 +76,10 @@ public protocol KeyboardService: Sendable {
     func stop()
     var isRunning: Bool { get }
 }
+
+public protocol ShortcutRecordingService: AnyObject, Sendable {
+    func beginShortcutRecording(
+        handler: @escaping @MainActor @Sendable (KeyCombo?) -> Void
+    )
+    func endShortcutRecording()
+}

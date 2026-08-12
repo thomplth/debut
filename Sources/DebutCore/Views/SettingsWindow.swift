@@ -26,9 +26,14 @@ public struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
     @State private var selectedSection: SettingsSection = .appearance
     @State private var showingResetConfirmation = false
+    private let shortcutRecordingService: (any ShortcutRecordingService)?
 
-    public init(viewModel: SettingsViewModel = SettingsViewModel()) {
+    public init(
+        viewModel: SettingsViewModel = SettingsViewModel(),
+        shortcutRecordingService: (any ShortcutRecordingService)? = nil
+    ) {
         self._viewModel = State(initialValue: viewModel)
+        self.shortcutRecordingService = shortcutRecordingService
     }
 
     public var body: some View {
@@ -304,7 +309,8 @@ public struct SettingsView: View {
             ForEach(KeyAction.activationActions, id: \.self) { action in
                 ShortcutRecorderRow(
                     action: action,
-                    keyBindings: $viewModel.settings.keyBindings
+                    keyBindings: $viewModel.settings.keyBindings,
+                    recordingService: shortcutRecordingService
                 )
             }
 
@@ -315,7 +321,8 @@ public struct SettingsView: View {
             ForEach(KeyAction.sameAppActions, id: \.self) { action in
                 ShortcutRecorderRow(
                     action: action,
-                    keyBindings: $viewModel.settings.keyBindings
+                    keyBindings: $viewModel.settings.keyBindings,
+                    recordingService: shortcutRecordingService
                 )
             }
 
@@ -326,7 +333,8 @@ public struct SettingsView: View {
             ForEach(KeyAction.quickSwitchActions, id: \.self) { action in
                 ShortcutRecorderRow(
                     action: action,
-                    keyBindings: $viewModel.settings.keyBindings
+                    keyBindings: $viewModel.settings.keyBindings,
+                    recordingService: shortcutRecordingService
                 )
             }
 
@@ -446,7 +454,8 @@ public struct SettingsView: View {
             ForEach(KeyAction.sessionActions, id: \.self) { action in
                 ShortcutRecorderRow(
                     action: action,
-                    keyBindings: $viewModel.settings.keyBindings
+                    keyBindings: $viewModel.settings.keyBindings,
+                    recordingService: shortcutRecordingService
                 )
             }
 
