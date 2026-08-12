@@ -221,6 +221,45 @@ struct StageControllerTests {
         #expect(controller.isStageManagerVisible)
     }
 
+    @Test("Cmd+Tab from an excluded app starts on the stage MRU window")
+    func excludedAppCmdTabStartsAtMRU() {
+        let (controller, _, keyboardService) = makeController()
+        let stageID = controller.stageManager.activeStageID
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "MRU"),
+            toStageID: stageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Next"),
+            toStageID: stageID
+        )
+        controller.updateFrontmostApp(isExcluded: true)
+
+        keyboardService.simulateEvent(.cmdTabHold)
+
+        #expect(controller.selectedWindowIndex == 0)
+    }
+
+    @Test("Quick Cmd+Tab from an excluded app activates the stage MRU app")
+    func excludedAppQuickCmdTabActivatesMRU() {
+        let (controller, windowService, keyboardService) = makeController()
+        let stageID = controller.stageManager.activeStageID
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "MRU"),
+            toStageID: stageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Next"),
+            toStageID: stageID
+        )
+        controller.updateFrontmostApp(isExcluded: true)
+
+        keyboardService.simulateEvent(.cmdTabTap)
+
+        #expect(windowService.raisedWindowID == 101)
+        #expect(windowService.activatedBundleID == "com.a")
+    }
+
     @Test("Cmd+Tab handling returns before window preview capture finishes")
     func cmdTabReturnsBeforePreviewCaptureFinishes() {
         let windowService = DelayedCaptureWindowService(captureDelay: 0.35)
