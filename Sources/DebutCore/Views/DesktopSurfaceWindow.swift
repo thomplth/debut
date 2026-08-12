@@ -349,6 +349,8 @@ public final class DesktopSurfaceWindow: NSWindow {
         let scale = NSScreen.screens.first { $0.displayID == displayID }?.backingScaleFactor ?? 1
         let pixelSize = CGSize(width: frame.width * scale, height: frame.height * scale)
 
+        let performanceID = PerformanceRecorder.shared.begin(.wallpaperCapture, workload: .init(captures: 1))
+        defer { PerformanceRecorder.shared.end(performanceID) }
         do {
             let image = try await wallpaperCapture.captureWallpaper(
                 displayID: displayID,
