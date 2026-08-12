@@ -163,8 +163,8 @@ struct WindowDiscoveryServiceTests {
         #expect(stageManager.activeStage.windows.map(\.windowID) == [101])
     }
 
-    @Test("Startup reconciliation removes explicitly untrackable AX windows")
-    func startupRemovesUntrackableWindows() {
+    @Test("Startup reconciliation makes explicitly untrackable AX windows dormant")
+    func startupMakesUntrackableWindowsDormant() {
         let windowService = MockWindowService()
         windowService.apps = [
             AppInfo(bundleID: "com.google.Chrome", name: "Chrome", pid: 10, isHidden: false),
@@ -197,6 +197,95 @@ struct WindowDiscoveryServiceTests {
         ).reconcileWindows(&stageManager)
 
         #expect(stageManager.activeStage.windows.map(\.windowID) == [1])
+        // A misreported classification must stay recoverable. Deleting the
+        // assignment discards the only record of where the window belonged.
+        #expect(stageManager.dormantWindowAssignments.map(\.window.windowID) == [99])
+        #expect(stageManager.dormantWindowAssignments.first?.stageID == stageID)
+    }
+
+    @Test("A window misreported as untrackable returns to its own stage, not the active one")
+    func untrackableWindowReturnsToItsOriginalStage() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 10, isHidden: false),
+        ]
+        windowService.untrackableWindowIDList = [22357]
+
+        var stageManager = StageManager()
+        stageManager.createStage(position: .below)
+        stageManager.createStage(position: .below)
+        let originalStageID = stageManager.stages[2].id
+        stageManager.addWindow(
+            StageWindow(windowID: 22357, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Leisure", ownerPID: 10),
+            toStageID: originalStageID
+        )
+
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.reconcileWindows(&stageManager)
+        #expect(stageManager.dormantWindowAssignments.count == 1)
+
+        // The classification recovers, and the browser has retitled the window
+        // in the meantime — the case that defeats exact-title matching.
+        windowService.untrackableWindowIDList = []
+        windowService.windowList = [WindowInfo(
+            windowID: 22357,
+            ownerBundleID: "company.thebrowser.dia",
+            ownerName: "Dia",
+            ownerPID: 10,
+            title: "Develop: something else",
+            bounds: .zero,
+            isOnScreen: true
+        )]
+        service.reconcileWindows(&stageManager)
+
+        #expect(stageManager.dormantWindowAssignments.isEmpty)
+        #expect(stageManager.stages[0].windows.isEmpty)
+        #expect(stageManager.stages[2].windows.map(\.windowID) == [22357])
+    }
+
+    @Test("Untrackable dormancy is reported with the placement it set aside")
+    func untrackableDormancyIsReported() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DebutDiscoveryDiag-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 10, isHidden: false),
+        ]
+        windowService.untrackableWindowIDList = [22357]
+
+        var stageManager = StageManager()
+        stageManager.createStage(position: .below)
+        stageManager.addWindow(
+            StageWindow(windowID: 22357, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Leisure", ownerPID: 10),
+            toStageID: stageManager.stages[1].id
+        )
+
+        let reporter = DiagnosticReporter(directory: directory)
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        ).reconcileWindows(&stageManager)
+        reporter.flush()
+
+        let lines = try String(contentsOf: directory.appendingPathComponent("diagnostic.jsonl"), encoding: .utf8)
+            .split(separator: "\n")
+            .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: String] }
+        let dormancy = try #require(lines.first { $0["event"] == "window_made_dormant" })
+        #expect(dormancy["reason"] == "untrackable")
+        #expect(dormancy["windowID"] == "22357")
+        #expect(dormancy["bundleID"] == "company.thebrowser.dia")
+        #expect(dormancy["windowTitle"] == "Leisure")
+        #expect(dormancy["fromStage"] == "1")
+
+        let summary = try #require(lines.first { $0["event"] == "windows_reconciled" })
+        #expect(summary["untrackable"] == "1")
     }
 
     @Test("Empty window snapshot makes stopped-app assignments dormant")

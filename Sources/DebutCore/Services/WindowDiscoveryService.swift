@@ -13,6 +13,7 @@ public enum WindowArmingOutcome: Equatable, Sendable {
 }
 
 public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
+    private let diag: DiagnosticReporter
     private let windowService: any WindowService
     public var onWindowsDiscovered: (([WindowInfo]) -> Void)?
     public var onWindowClosed: ((CGWindowID) -> Void)?
@@ -96,8 +97,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)? = nil,
         frontmostPIDProvider: (@Sendable () -> pid_t?)? = nil,
         launchDiscoveryDelay: TimeInterval = 0.5,
-        processExitMonitor: any ProcessExitMonitoring
+        processExitMonitor: any ProcessExitMonitoring,
+        diagnosticReporter: DiagnosticReporter = .shared
     ) {
+        self.diag = diagnosticReporter
         self.windowService = windowService
         self.focusedWindowProvider = focusedWindowProvider
         self.frontmostPIDProvider = frontmostPIDProvider ?? {
@@ -145,11 +148,23 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
         let runningApps = windowService.listRunningApps()
 
-        // Explicit AX classification is authoritative. Unlike an omitted AX
-        // result, these IDs are known dialogs, floating windows, or auxiliary UI.
+        // Explicit AX classification identifies dialogs, floating windows, and
+        // auxiliary UI — but it is a snapshot, not a verdict. An app still
+        // warming up can describe a standard window this way, and deleting the
+        // assignment would make that momentary misreport permanent. Park the
+        // placement instead; a later snapshot reclaims it.
+        var untrackableDormantCount = 0
         for stage in stageManager.stages {
             for windowID in stage.windowIDs where untrackableWindowIDs.contains(windowID) {
-                stageManager.removeWindow(windowID: windowID, fromStageID: stage.id)
+                guard let assignment = stageManager.makeWindowDormant(windowID: windowID) else { continue }
+                untrackableDormantCount += 1
+                diag.report("window_made_dormant", details: [
+                    "windowID": "\(windowID)",
+                    "bundleID": assignment.window.ownerBundleID,
+                    "windowTitle": assignment.window.windowTitle,
+                    "fromStage": "\(stageManager.stages.firstIndex(where: { $0.id == assignment.stageID }) ?? -1)",
+                    "reason": "untrackable",
+                ])
             }
         }
 
@@ -194,16 +209,17 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             trackAndRegister(windowID: info.windowID, pid: info.ownerPID)
         }
 
-        DiagnosticReporter.shared.report("windows_reconciled", details: [
+        diag.report("windows_reconciled", details: [
             "liveCount": "\(liveWindows.count)",
             "added": "\(result.addedCount)",
             "reassigned": "\(result.reassignedCount)",
             "dormant": "\(stageManager.dormantWindowAssignments.count)",
+            "untrackable": "\(untrackableDormantCount)",
         ])
         for event in result.events {
             var details = event.diagnosticDetails
             details["trigger"] = "startup_reconcile"
-            DiagnosticReporter.shared.report("window_\(event.kind.rawValue)", details: details)
+            diag.report("window_\(event.kind.rawValue)", details: details)
         }
     }
 
