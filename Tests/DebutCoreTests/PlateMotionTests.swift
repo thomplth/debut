@@ -123,18 +123,60 @@ struct PlateMotionTests {
             previous: 2,
             at: CGPoint(x: 250, y: 110),
             containerWidth: 500,
-            stackOffset: 0,
+            currentStackOffset: 0,
             plateWidths: [300, 240, 180],
-            layout: layout
+            currentLayout: layout
         ) == 2)
         #expect(PlateInteraction.hoveredStageIndex(
             previous: 2,
             at: CGPoint(x: 250, y: layout.centers[1]),
             containerWidth: 500,
-            stackOffset: 0,
+            currentStackOffset: 0,
             plateWidths: [300, 240, 180],
-            layout: layout
+            currentLayout: layout
         ) == 1)
+    }
+
+    @Test("Hover hit testing follows the magnified plate frame")
+    func hoverHitTestingFollowsMagnifiedPlateFrame() {
+        let baseline = PlateMotion.stackLayout(
+            stageCount: 4,
+            focusIndex: 3,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let magnified = PlateMotion.stackLayout(
+            stageCount: 4,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let baselineOffset: CGFloat = 200 - baseline.centers[3]
+        let anchorY = baselineOffset + baseline.centers[0]
+        let magnifiedOffset = PlateMotion.anchoredOffset(
+            layout: magnified,
+            anchorIndex: 0,
+            anchorY: anchorY
+        )
+        let location = CGPoint(x: 130, y: anchorY)
+
+        #expect(PlateInteraction.stageIndex(
+            at: location,
+            containerWidth: 600,
+            stackOffset: baselineOffset,
+            plateWidths: [400, 400, 400, 400],
+            layout: baseline
+        ) == nil)
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: 0,
+            at: location,
+            containerWidth: 600,
+            currentStackOffset: magnifiedOffset,
+            plateWidths: [400, 400, 400, 400],
+            currentLayout: magnified
+        ) == 0)
     }
 
     @Test("Hover focus clears outside the horizontal transit corridor")
@@ -151,9 +193,9 @@ struct PlateMotionTests {
             previous: 0,
             at: CGPoint(x: 420, y: 110),
             containerWidth: 500,
-            stackOffset: 0,
+            currentStackOffset: 0,
             plateWidths: [300, 240],
-            layout: layout
+            currentLayout: layout
         ) == nil)
     }
 
@@ -172,17 +214,17 @@ struct PlateMotionTests {
             previous: 0,
             at: CGPoint(x: 250, y: -1),
             containerWidth: 500,
-            stackOffset: 0,
+            currentStackOffset: 0,
             plateWidths: widths,
-            layout: layout
+            currentLayout: layout
         ) == nil)
         #expect(PlateInteraction.hoveredStageIndex(
             previous: 1,
             at: CGPoint(x: 250, y: 201),
             containerWidth: 500,
-            stackOffset: 0,
+            currentStackOffset: 0,
             plateWidths: widths,
-            layout: layout
+            currentLayout: layout
         ) == nil)
     }
 
@@ -200,9 +242,9 @@ struct PlateMotionTests {
             previous: nil,
             at: CGPoint(x: 250, y: 110),
             containerWidth: 500,
-            stackOffset: 0,
+            currentStackOffset: 0,
             plateWidths: [300, 240],
-            layout: layout
+            currentLayout: layout
         ) == nil)
     }
 
@@ -221,17 +263,17 @@ struct PlateMotionTests {
             previous: 0,
             at: CGPoint(x: 390, y: 101),
             containerWidth: 500,
-            stackOffset: 0,
+            currentStackOffset: 0,
             plateWidths: widths,
-            layout: layout
+            currentLayout: layout
         ) == 0)
         #expect(PlateInteraction.hoveredStageIndex(
             previous: 0,
             at: CGPoint(x: 390, y: 119),
             containerWidth: 500,
-            stackOffset: 0,
+            currentStackOffset: 0,
             plateWidths: widths,
-            layout: layout
+            currentLayout: layout
         ) == nil)
     }
 
