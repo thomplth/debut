@@ -128,8 +128,8 @@ struct KeyboardShortcutCustomizationTests {
         #expect(delegate.receivedEvents == [.cmdTabHold, .newStageBelow])
     }
 
-    @Test("Quick switch shortcuts are data driven")
-    func customQuickSwitch() {
+    @Test("Legacy per-number bindings cannot move quick switch away from digit keys")
+    func quickSwitchDigitsStayFixed() {
         let service = EventTapKeyboardService()
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
@@ -142,10 +142,10 @@ struct KeyboardShortcutCustomizationTests {
         defer { service.stop() }
 
         let oldControlOne = keyEvent(keyCode: kVK_ANSI_1, flags: .maskControl)
-        #expect(service.handleCGEvent(type: .keyDown, event: oldControlOne) === oldControlOne)
+        #expect(service.handleCGEvent(type: .keyDown, event: oldControlOne) == nil)
 
         let optionB = keyEvent(keyCode: kVK_ANSI_B, flags: .maskAlternate)
-        #expect(service.handleCGEvent(type: .keyDown, event: optionB) == nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: optionB) === optionB)
         #expect(delegate.receivedEvents == [.switchToStage(1)])
     }
 

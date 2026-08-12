@@ -22,6 +22,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public var selectedWindowIndex: Int = 0
     public private(set) var keyboardServiceStarted: Bool = false
     public var overlayPresentationDelay: TimeInterval
+    public var quickSwitchBehavior: QuickSwitchBehavior
 
     /// Window previews captured when overlay opens
     public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
@@ -47,12 +48,14 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         keyboardService: any KeyboardService,
         stageManager: StageManager = StageManager(),
         overlayPresentationDelay: TimeInterval = AppSettings.defaultOverlayPresentationDelay,
+        quickSwitchBehavior: QuickSwitchBehavior = .stage,
         fullscreenAppActiveProvider: (() -> Bool)? = nil
     ) {
         self.windowService = windowService
         self.keyboardService = keyboardService
         self.stageManager = stageManager
         self.overlayPresentationDelay = overlayPresentationDelay
+        self.quickSwitchBehavior = quickSwitchBehavior
         self.fullscreenAppActiveProvider = fullscreenAppActiveProvider
 
         let started = keyboardService.start(delegate: self)
@@ -282,9 +285,11 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         // then prefer that app's most-recent window in the destination stage.
         let activeBundleID = stageManager.activeStage.windows.first?.ownerBundleID
         let targetStage = stageManager.stages[index]
-        let matchingWindowID = activeBundleID.flatMap { bundleID in
-            targetStage.windows.first(where: { $0.ownerBundleID == bundleID })?.windowID
-        }
+        let matchingWindowID = quickSwitchBehavior == .sameApplication
+            ? activeBundleID.flatMap { bundleID in
+                targetStage.windows.first(where: { $0.ownerBundleID == bundleID })?.windowID
+            }
+            : nil
 
         backtickCycleWindows = []
         backtickCycleIndex = 0

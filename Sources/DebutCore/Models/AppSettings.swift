@@ -11,6 +11,57 @@ public enum CommandHintVisibility: String, Codable, Sendable, CaseIterable {
     case always = "Always"
 }
 
+public enum QuickSwitchBehavior: String, Codable, Sendable, CaseIterable {
+    case stage
+    case sameApplication
+
+    public var displayName: String {
+        switch self {
+        case .stage: "Focus last active window"
+        case .sameApplication: "Keep current app"
+        }
+    }
+}
+
+public struct ShortcutModifiers: Codable, Sendable, Equatable, Hashable {
+    public var command: Bool
+    public var control: Bool
+    public var shift: Bool
+    public var option: Bool
+
+    public init(
+        command: Bool = false,
+        control: Bool = false,
+        shift: Bool = false,
+        option: Bool = false
+    ) {
+        self.command = command
+        self.control = control
+        self.shift = shift
+        self.option = option
+    }
+
+    public static let control = ShortcutModifiers(control: true)
+
+    public static let choices: [ShortcutModifiers] = (1..<16).map { bits in
+        ShortcutModifiers(
+            command: bits & 1 != 0,
+            control: bits & 2 != 0,
+            shift: bits & 4 != 0,
+            option: bits & 8 != 0
+        )
+    }
+
+    public var displayString: String {
+        var names: [String] = []
+        if command { names.append("Command") }
+        if control { names.append("Control") }
+        if shift { names.append("Shift") }
+        if option { names.append("Option") }
+        return names.joined(separator: "+")
+    }
+}
+
 public struct AppSettings: Codable, Sendable {
     public static let defaultOverlayPresentationDelay: TimeInterval = 0.08
 
@@ -33,6 +84,8 @@ public struct AppSettings: Codable, Sendable {
     public var overlayPresentationDelay: TimeInterval
     public var keyBindings: KeyBindings
     public var quickSwitchExcludedBundleIDs: [String]
+    public var quickSwitchBehavior: QuickSwitchBehavior
+    public var quickSwitchModifiers: ShortcutModifiers
 
     // Command hints
     public var commandHintVisibility: CommandHintVisibility
@@ -56,6 +109,8 @@ public struct AppSettings: Codable, Sendable {
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
         self.keyBindings = KeyBindings()
         self.quickSwitchExcludedBundleIDs = []
+        self.quickSwitchBehavior = .stage
+        self.quickSwitchModifiers = .control
         self.commandHintVisibility = .automatic
         self.commandUsageCounts = [:]
     }
@@ -83,6 +138,14 @@ public struct AppSettings: Codable, Sendable {
             [String].self,
             forKey: .quickSwitchExcludedBundleIDs
         ) ?? []
+        quickSwitchBehavior = try container.decodeIfPresent(
+            QuickSwitchBehavior.self,
+            forKey: .quickSwitchBehavior
+        ) ?? .stage
+        quickSwitchModifiers = try container.decodeIfPresent(
+            ShortcutModifiers.self,
+            forKey: .quickSwitchModifiers
+        ) ?? .control
         commandHintVisibility = try container.decodeIfPresent(
             CommandHintVisibility.self,
             forKey: .commandHintVisibility

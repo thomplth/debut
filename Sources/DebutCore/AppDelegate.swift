@@ -126,7 +126,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             windowService: windowService,
             keyboardService: keyboardService,
             stageManager: stageManager,
-            overlayPresentationDelay: currentSettings.overlayPresentationDelay
+            overlayPresentationDelay: currentSettings.overlayPresentationDelay,
+            quickSwitchBehavior: currentSettings.quickSwitchBehavior
         )
         controller.delegate = self
         controller.desktopSurfaces = surfaces
@@ -141,6 +142,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         keyboardService.quickSwitchExcludedBundleIDs = Set(
             currentSettings.quickSwitchExcludedBundleIDs
         )
+        keyboardService.quickSwitchModifiers = currentSettings.quickSwitchModifiers
 
         // Raise active stage windows above the desktop surface
         controller.switchToStage(id: stageManager.activeStageID)
@@ -598,9 +600,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 }
                 self.keyboardService?.keyBindings = newSettings.keyBindings
                 self.stageController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
+                self.stageController?.quickSwitchBehavior = newSettings.quickSwitchBehavior
                 self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
                     newSettings.quickSwitchExcludedBundleIDs
                 )
+                self.keyboardService?.quickSwitchModifiers = newSettings.quickSwitchModifiers
             }
         }
         vm.onResetWindowCache = { [weak self] in
