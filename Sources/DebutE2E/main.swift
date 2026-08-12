@@ -618,6 +618,17 @@ test("Overlay is visible") {
     info("  overlayVisible = \(readState()["overlayVisible"] ?? "nil")")
     return false
 }
+
+test("Window previews contain non-uniform captured pixels") {
+    for _ in 0..<30 {
+        if (Int(readState()["variedWindowPreviewCount"] ?? "0") ?? 0) > 0 {
+            return true
+        }
+        wait(0.1)
+    }
+    info("  Preview state: \(readState())")
+    return false
+}
 let selectedWindowIndexBeforeNext = readState()["selectedWindowIndex"]
 
 // --- 3. Navigate: Tab to next window ---

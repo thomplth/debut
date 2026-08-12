@@ -6,19 +6,40 @@ import CoreGraphics
 private final class DelayedCaptureWindowService: WindowService, @unchecked Sendable {
     let captureDelay: TimeInterval
     let capturedImage: CGImage?
+    let perWindowDelay: [CGWindowID: TimeInterval]
 
-    init(captureDelay: TimeInterval, capturedImage: CGImage? = nil) {
+    init(
+        captureDelay: TimeInterval,
+        capturedImage: CGImage? = nil,
+        perWindowDelay: [CGWindowID: TimeInterval] = [:]
+    ) {
         self.captureDelay = captureDelay
         self.capturedImage = capturedImage
+        self.perWindowDelay = perWindowDelay
     }
 
     func listRunningApps() -> [AppInfo] { [] }
     func listWindows() -> [WindowInfo] { [] }
     func listAllWindowIDs() -> Set<CGWindowID>? { nil }
 
-    func captureWindowImage(windowID: CGWindowID) -> CGImage? {
-        Thread.sleep(forTimeInterval: captureDelay)
-        return capturedImage
+    func captureWindowImages(
+        windowIDs: [CGWindowID],
+        onCapture: @escaping @Sendable (WindowImageCapture) -> Void
+    ) async {
+        await withTaskGroup(of: WindowImageCapture?.self) { group in
+            for windowID in windowIDs {
+                group.addTask { [captureDelay, capturedImage, perWindowDelay] in
+                    let delay = perWindowDelay[windowID] ?? captureDelay
+                    try? await Task.sleep(for: .seconds(delay))
+                    return capturedImage.map {
+                        WindowImageCapture(windowID: windowID, image: $0)
+                    }
+                }
+            }
+            for await capture in group {
+                if let capture { onCapture(capture) }
+            }
+        }
     }
 
     func raiseWindow(windowID: CGWindowID) -> Bool { true }
@@ -30,6 +51,12 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
     let overlayOpened = DispatchSemaphore(value: 0)
     let overlayClosed = DispatchSemaphore(value: 0)
     let overlayUpdated = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var storedPreviewSets: [Set<CGWindowID>] = []
+
+    var previewSets: [Set<CGWindowID>] {
+        lock.withLock { storedPreviewSets }
+    }
 
     func stageControllerDidOpenOverlay(_ controller: StageController) {
         overlayOpened.signal()
@@ -40,6 +67,7 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
     }
 
     func stageControllerDidUpdateSelection(_ controller: StageController) {
+        lock.withLock { storedPreviewSets.append(Set(controller.windowPreviews.keys)) }
         overlayUpdated.signal()
     }
 
@@ -71,10 +99,14 @@ struct StageControllerTests {
     private func makeTestImage() -> CGImage {
         let data: UnsafeMutableRawPointer? = nil
         let ctx = CGContext(
-            data: data, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            data: data, width: 2, height: 1, bitsPerComponent: 8, bytesPerRow: 8,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         )!
+        ctx.setFillColor(CGColor(gray: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+        ctx.fill(CGRect(x: 1, y: 0, width: 1, height: 1))
         return ctx.makeImage()!
     }
 
@@ -296,7 +328,43 @@ struct StageControllerTests {
 
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(controller.windowPreviews[101] != nil)
+        let preview = controller.windowPreviews[101]
+        #expect(preview != nil)
+        if let preview {
+            #expect(WindowImageStatistics.hasVariedLuminance(preview))
+        }
+    }
+
+    @Test("Window previews publish incrementally as concurrent captures finish")
+    func previewsPublishIncrementally() {
+        let windowService = DelayedCaptureWindowService(
+            captureDelay: 0,
+            capturedImage: makeTestImage(),
+            perWindowDelay: [101: 0.05, 202: 0.3]
+        )
+        let keyboardService = MockKeyboardService()
+        let controller = StageController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            overlayPresentationDelay: 0,
+            fullscreenAppActiveProvider: { false }
+        )
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+        for windowID in [CGWindowID(101), 202] {
+            controller.stageManager.addWindow(
+                StageWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"),
+                toStageID: controller.stageManager.activeStageID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdTabHold)
+
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(delegate.previewSets.contains(Set([101])))
+        #expect(delegate.previewSets.last == Set([101, 202]))
     }
 
     @Test("Cmd+Option+Tab hold opens overlay in stage mode")
@@ -572,7 +640,7 @@ struct StageControllerTests {
         controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
         controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
 
-        // Create a 1x1 test image
+        // Create a test image with real pixel variation.
         let testImage = makeTestImage()
 
         // First overlay open — both windows capturable
