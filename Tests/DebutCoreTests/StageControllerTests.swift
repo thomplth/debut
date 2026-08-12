@@ -155,6 +155,33 @@ struct StageControllerTests {
         #expect(windowSvc.activatedBundleID == "com.b")
     }
 
+    @Test("Dropping a window first in the current stage activates it on commit")
+    func currentStageDropSelectionCommitsDroppedWindow() {
+        let (controller, windowSvc, keyboardSvc) = makeController()
+        let stageID = controller.stageManager.stages[0].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: stageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toStageID: stageID
+        )
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(controller.moveWindowByDrag(
+            windowID: 202,
+            fromStageIndex: 0,
+            toStageIndex: 0,
+            toWindowIndex: 0
+        ))
+        keyboardSvc.simulateEvent(.cmdRelease)
+
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [202, 101])
+        #expect(windowSvc.raisedWindowID == 202)
+        #expect(windowSvc.activatedBundleID == "com.b")
+    }
+
     @Test("Cmd+Tab hold opens overlay")
     func cmdTabHold() {
         let (controller, _, keyboardSvc) = makeController()
