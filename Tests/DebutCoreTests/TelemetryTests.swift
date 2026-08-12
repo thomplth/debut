@@ -114,6 +114,45 @@ struct TelemetryTests {
         #expect(await secondClient.payloads.isEmpty)
         #expect(await second.status().dropped == 1)
     }
+
+    @Test("Idle intervals never count as latency anomalies")
+    func idleIntervalsAreNotAnomalies() {
+        let idle = PerformanceObservation(
+            correlationID: UUID(),
+            operation: .hiddenIdle,
+            durationMilliseconds: 190_000,
+            workload: .init()
+        )
+        let delayedDelivery = PerformanceObservation(
+            correlationID: UUID(),
+            operation: .mainQueueDelivery,
+            durationMilliseconds: 575,
+            workload: .init()
+        )
+
+        #expect(!PerformanceAnomalyPolicy.shouldReport(idle))
+        #expect(PerformanceAnomalyPolicy.shouldReport(delayedDelivery))
+    }
+
+    @Test("Exporter removes legacy idle anomalies while retaining real anomalies")
+    func pruneLegacyIdleAnomalies() async throws {
+        let queue = InMemoryTelemetryQueue()
+        await queue.replace(with: [
+            .anomaly(operation: .hiddenIdle, latency: .over500Milliseconds, workload: .typical),
+            .anomaly(operation: .wallpaperCapture, latency: .over500Milliseconds, workload: .typical),
+        ])
+        let exporter = TelemetryExporter(
+            client: RecordingTelemetryClient(),
+            queue: queue,
+            enabled: true
+        )
+
+        try await exporter.pruneInvalidAnomalies()
+
+        let payloads = await queue.payloads()
+        #expect(payloads.count == 1)
+        #expect(payloads.first?.operation == .wallpaperCapture)
+    }
 }
 
 private actor RecordingTelemetryClient: TelemetryClient {
