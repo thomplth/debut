@@ -7,6 +7,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case activatePreviousWindow
     case activateNextStage
     case activatePreviousStage
+    case activatePreviousStageAlternate
 
     // Global stage switching
     case quickSwitchStage1, quickSwitchStage2, quickSwitchStage3
@@ -43,6 +44,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .activatePreviousWindow: "Open / cycle windows backward"
         case .activateNextStage: "Open / cycle stages"
         case .activatePreviousStage: "Open / cycle stages backward"
+        case .activatePreviousStageAlternate: "Open / cycle stages backward (alternate)"
         case .quickSwitchStage1: "Quick switch to stage 1"
         case .quickSwitchStage2: "Quick switch to stage 2"
         case .quickSwitchStage3: "Quick switch to stage 3"
@@ -87,6 +89,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .activatePreviousWindow: .cmdShiftTabHold
         case .activateNextStage: .cmdOptionTabHold
         case .activatePreviousStage: .cmdOptionShiftTabHold
+        case .activatePreviousStageAlternate: .cmdOptionShiftTabHold
         case .quickSwitchStage1: .switchToStage(1)
         case .quickSwitchStage2: .switchToStage(2)
         case .quickSwitchStage3: .switchToStage(3)
@@ -128,7 +131,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     public var shortcutScope: ShortcutScope {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
-             .activateNextStage, .activatePreviousStage,
+             .activateNextStage, .activatePreviousStage, .activatePreviousStageAlternate,
              .quickSwitchStage1, .quickSwitchStage2, .quickSwitchStage3,
              .quickSwitchStage4, .quickSwitchStage5, .quickSwitchStage6,
              .quickSwitchStage7, .quickSwitchStage8, .quickSwitchStage9,
@@ -142,7 +145,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     public var isOverlayActivation: Bool {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
-             .activateNextStage, .activatePreviousStage:
+             .activateNextStage, .activatePreviousStage, .activatePreviousStageAlternate:
             true
         default:
             false
@@ -171,7 +174,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
 
     public static let activationActions: [KeyAction] = [
         .activateNextWindow, .activatePreviousWindow,
-        .activateNextStage, .activatePreviousStage,
+        .activateNextStage, .activatePreviousStage, .activatePreviousStageAlternate,
     ]
 
     public static let quickSwitchActions: [KeyAction] = [
@@ -325,6 +328,11 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
                 keyCode: kVK_Tab,
                 command: true,
                 shift: true,
+                option: true
+            ),
+            .activatePreviousStageAlternate: KeyCombo(
+                keyCode: kVK_ANSI_Grave,
+                command: true,
                 option: true
             ),
             .quickSwitchStage1: KeyCombo(keyCode: kVK_ANSI_1, control: true),

@@ -6,6 +6,21 @@ import Testing
 
 @Suite("Keyboard shortcut customization", .serialized)
 struct KeyboardShortcutCustomizationTests {
+    @Test("Command-Option-backtick is the alternate previous-stage shortcut")
+    func previousStageAlternateDefault() {
+        let bindings = KeyBindings()
+
+        #expect(bindings.combo(for: .activatePreviousStageAlternate) == KeyCombo(
+            keyCode: kVK_ANSI_Grave,
+            command: true,
+            option: true
+        ))
+        #expect(
+            KeyAction.activatePreviousStageAlternate.toKeyEvent()
+                == .cmdOptionShiftTabHold
+        )
+    }
+
     @Test("Defaults include every global and Stage Manager shortcut")
     func completeDefaults() {
         let bindings = KeyBindings()
