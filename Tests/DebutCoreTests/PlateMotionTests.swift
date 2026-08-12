@@ -32,6 +32,13 @@ struct PlateMotionTests {
         )
     }
 
+    @Test("Drag hides the stationary card and keeps the cursor preview opaque")
+    func dragPreviewVisibility() {
+        #expect(PlateMotion.sourceWindowOpacity(isDragging: false) == 1)
+        #expect(PlateMotion.sourceWindowOpacity(isDragging: true) == 0)
+        #expect(PlateMotion.cursorPreviewOpacity == 1)
+    }
+
     @Test("The active plate receives a subtle lift")
     func activePlateLift() {
         #expect(PlateMotion.lift(isActive: true) == .init(shadowOpacity: 0.22, shadowRadius: 18, shadowY: 8))
