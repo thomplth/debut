@@ -131,7 +131,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
         // Create desktop surfaces — one per display, sitting between active and inactive
         // stage windows
-        let surfaces = DesktopSurfaceCoordinator()
+        let surfaces = DesktopSurfaceCoordinator(onFileDragEntered: { [weak self] in
+            guard let self else { return }
+            self.desktopSurfaces?.orderOut()
+            NSWorkspace.shared.hideOtherApplications()
+            self.diag.report("real_desktop_presented_for_file_drag")
+        })
         surfaces.orderToFront()
         self.desktopSurfaces = surfaces
 

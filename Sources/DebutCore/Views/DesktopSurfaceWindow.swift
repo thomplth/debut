@@ -224,11 +224,40 @@ final class SystemDesktopWallpaperChangeObserver: DesktopWallpaperChangeObservin
 
 @MainActor
 final class DesktopWallpaperView: NSView {
+    var onFileDragEntered: @MainActor () -> Void = {}
+    private var fileDragRevealRequested = false
+
     var image: CGImage? {
         didSet { needsDisplay = true }
     }
 
     override var isOpaque: Bool { true }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        prepareForDrop(types: sender.draggingPasteboard.types)
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        fileDragRevealRequested = false
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        // The surface yields during draggingEntered so Finder handles the actual drop.
+        false
+    }
+
+    func prepareForDrop(types: [NSPasteboard.PasteboardType]?) -> NSDragOperation {
+        guard types?.contains(.fileURL) == true else { return [] }
+        if !fileDragRevealRequested {
+            fileDragRevealRequested = true
+            onFileDragEntered()
+        }
+        return .copy
+    }
+
+    func resetFileDrag() {
+        fileDragRevealRequested = false
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.black.setFill()
@@ -252,7 +281,10 @@ public final class DesktopSurfaceWindow: NSWindow {
     private let onWallpaperRefreshed: @MainActor (WallpaperCaptureOutcome) -> Void
     private var captureTask: Task<Void, Never>?
 
-    public convenience init(screen: NSScreen) {
+    public convenience init(
+        screen: NSScreen,
+        onFileDragEntered: @escaping @MainActor () -> Void = {}
+    ) {
         self.init(
             screen: screen,
             wallpaperCapture: SystemDesktopWallpaperCapture(),
@@ -273,7 +305,8 @@ public final class DesktopSurfaceWindow: NSWindow {
                     level: .lifecycle,
                     details: details
                 )
-            }
+            },
+            onFileDragEntered: onFileDragEntered
         )
     }
 
@@ -281,7 +314,8 @@ public final class DesktopSurfaceWindow: NSWindow {
         screen: NSScreen,
         wallpaperCapture: DesktopWallpaperCapturing,
         wallpaperChangeObserver: DesktopWallpaperChangeObserving,
-        onWallpaperRefreshed: @escaping @MainActor (WallpaperCaptureOutcome) -> Void = { _ in }
+        onWallpaperRefreshed: @escaping @MainActor (WallpaperCaptureOutcome) -> Void = { _ in },
+        onFileDragEntered: @escaping @MainActor () -> Void = {}
     ) {
         self.displayID = screen.displayID
         self.wallpaperCapture = wallpaperCapture
@@ -305,6 +339,8 @@ public final class DesktopSurfaceWindow: NSWindow {
         isMovableByWindowBackground = false
         ignoresMouseEvents = false
         contentView = wallpaperView
+        wallpaperView.onFileDragEntered = onFileDragEntered
+        wallpaperView.registerForDraggedTypes([.fileURL])
 
         wallpaperChangeObserver.start { [weak self] reason in
             self?.refreshWallpaper(reason: reason)
@@ -316,9 +352,14 @@ public final class DesktopSurfaceWindow: NSWindow {
     public override var canBecomeMain: Bool { false }
     public override func mouseDown(with event: NSEvent) {}
 
+    func prepareForDrop(types: [NSPasteboard.PasteboardType]?) -> NSDragOperation {
+        wallpaperView.prepareForDrop(types: types)
+    }
+
     /// Bring the surface to front, covering all inactive windows.
     /// Call this before raising active stage windows.
     public func orderToFront() {
+        wallpaperView.resetFileDrag()
         refreshWallpaper(reason: .presentation)
         orderFront(nil)
     }
@@ -423,8 +464,10 @@ public final class DesktopSurfaceCoordinator {
     private var surfaces: [CGDirectDisplayID: DesktopSurfaceWindow] = [:]
     private var surfaceFrames: [CGDirectDisplayID: CGRect] = [:]
     private var screenParametersToken: NSObjectProtocol?
+    private let onFileDragEntered: @MainActor () -> Void
 
-    public init() {
+    public init(onFileDragEntered: @escaping @MainActor () -> Void = {}) {
+        self.onFileDragEntered = onFileDragEntered
         screenParametersToken = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -458,7 +501,10 @@ public final class DesktopSurfaceCoordinator {
         for descriptor in plan.added {
             guard let screen = NSScreen.screens.first(where: { $0.displayID == descriptor.displayID })
             else { continue }
-            surfaces[descriptor.displayID] = DesktopSurfaceWindow(screen: screen)
+            surfaces[descriptor.displayID] = DesktopSurfaceWindow(
+                screen: screen,
+                onFileDragEntered: onFileDragEntered
+            )
             surfaceFrames[descriptor.displayID] = descriptor.frame
         }
     }
