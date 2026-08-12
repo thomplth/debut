@@ -2,6 +2,11 @@ import AppKit
 import ApplicationServices
 import AXPrivate
 import CoreGraphics
+import ScreenCaptureKit
+
+private struct SendableCaptureWindow: @unchecked Sendable {
+    let window: SCWindow
+}
 
 public final class AccessibilityWindowService: WindowService, @unchecked Sendable {
     private let windowCaptureEnabled: Bool
@@ -175,9 +180,73 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
     // MARK: - Window capture
 
-    public func captureWindowImage(windowID: CGWindowID) -> CGImage? {
-        guard windowCaptureEnabled else { return nil }
-        return CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, .boundsIgnoreFraming)
+    public func captureWindowImages(
+        windowIDs: [CGWindowID],
+        onCapture: @escaping @Sendable (WindowImageCapture) -> Void
+    ) async {
+        guard windowCaptureEnabled, !windowIDs.isEmpty else { return }
+
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(
+                true,
+                onScreenWindowsOnly: false
+            )
+        } catch {
+            DiagnosticReporter.shared.report("window_preview_enumeration_failed", details: [
+                "error": "\(error)",
+                "requestedCount": "\(windowIDs.count)",
+            ])
+            return
+        }
+
+        let requestedWindowIDs = Set(windowIDs)
+        let windows = content.windows
+            .filter { requestedWindowIDs.contains($0.windowID) }
+            .map(SendableCaptureWindow.init)
+        DiagnosticReporter.shared.report("window_preview_capture_started", level: .transient, details: [
+            "matchedCount": "\(windows.count)",
+            "requestedCount": "\(windowIDs.count)",
+            "shareableCount": "\(content.windows.count)",
+        ])
+
+        await withTaskGroup(of: WindowImageCapture?.self) { group in
+            for captureWindow in windows {
+                group.addTask { [captureWindow] in
+                    let window = captureWindow.window
+                    let filter = SCContentFilter(desktopIndependentWindow: window)
+                    let configuration = SCStreamConfiguration()
+                    configuration.width = max(
+                        1,
+                        Int(ceil(filter.contentRect.width * CGFloat(filter.pointPixelScale)))
+                    )
+                    configuration.height = max(
+                        1,
+                        Int(ceil(filter.contentRect.height * CGFloat(filter.pointPixelScale)))
+                    )
+                    configuration.showsCursor = false
+                    configuration.captureResolution = .best
+
+                    do {
+                        let image = try await SCScreenshotManager.captureImage(
+                            contentFilter: filter,
+                            configuration: configuration
+                        )
+                        return WindowImageCapture(windowID: window.windowID, image: image)
+                    } catch {
+                        DiagnosticReporter.shared.report("window_preview_capture_failed", details: [
+                            "error": "\(error)",
+                            "windowID": "\(window.windowID)",
+                        ])
+                        return nil
+                    }
+                }
+            }
+
+            for await capture in group {
+                if let capture { onCapture(capture) }
+            }
+        }
     }
 
     // MARK: - Window raise
