@@ -351,6 +351,29 @@ struct StageControllerTests {
         #expect(controller.selectedWindowIndex == 0) // release and press Tab again
     }
 
+    @Test("Held app-window shortcut stops at the last window")
+    func heldAppWindowCycleStopsAtEnd() {
+        let (controller, windowService, keyboardService) = makeController()
+        let stageID = controller.stageManager.activeStageID
+        for windowID in [CGWindowID(101), 202, 303] {
+            controller.stageManager.addWindow(
+                StageWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.example.App",
+                    ownerName: "App",
+                    windowTitle: "Window \(windowID)"
+                ),
+                toStageID: stageID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdBacktickRepeat)
+        keyboardService.simulateEvent(.cmdBacktickRepeat)
+
+        #expect(windowService.raisedWindowID == 303)
+    }
+
     @Test("MRU: recordWindowActivation brings to front")
     func mruTracking() {
         let (controller, _, _) = makeController()

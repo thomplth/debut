@@ -346,6 +346,25 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.nextWindowRepeat])
     }
 
+    @Test("Cmd+backtick auto-repeat is distinguished from a fresh press")
+    func cmdBacktickAutoRepeat() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let repeatedBacktick = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Grave),
+            keyDown: true
+        )!
+        repeatedBacktick.flags = .maskCommand
+        repeatedBacktick.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+
+        #expect(service.handleCGEvent(type: .keyDown, event: repeatedBacktick) == nil)
+        #expect(delegate.receivedEvents == [.cmdBacktickRepeat])
+    }
+
     @Test("Cmd+Option+Tab event")
     func cmdOptionTab() {
         let svc = MockKeyboardService()
