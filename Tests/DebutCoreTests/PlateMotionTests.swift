@@ -354,6 +354,20 @@ struct PlateMotionTests {
         ) == 50)
     }
 
+    @Test("Resting edge-scroll animation key is stable across screen sizes")
+    func resizedScreenDoesNotAnimateRestingStack() {
+        #expect(PlateMotion.edgeScrollTarget(
+            pointerY: nil,
+            containerHeight: 900,
+            edgeRegion: 80
+        ) == .resting)
+        #expect(PlateMotion.edgeScrollTarget(
+            pointerY: nil,
+            containerHeight: 1_800,
+            edgeRegion: 80
+        ) == .resting)
+    }
+
     @Test("Stage drag handle expands only the visual leading edge")
     func stageDragHandleExpansion() {
         #expect(PlateMotion.stageHandleExpansion(isRevealed: false) == 0)
