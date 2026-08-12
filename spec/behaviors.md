@@ -1,141 +1,140 @@
 # System Behaviors
 
-This document specifies how Debut manages the relationship between stages, windows, and apps at the system level — including isolation rules, transitive behaviors, persistence, and edge cases.
+How Debut relates stages, windows, and apps: assignment rules, isolation,
+persistence, and reconciliation. The architecture constraints explaining *why*
+these rules exist are in AGENTS.md.
 
----
+## Window-centric model
 
-## Window-Centric Model
+Debut tracks individual windows, not apps. A stage holds `StageWindow` entries,
+so one app can own windows in several stages at once.
 
-Debut tracks individual **windows** (by CGWindowID), not apps. Each stage contains a list of StageWindow entries. A single app (e.g., Safari) can have windows in different stages.
+A window is identified at runtime by its `CGWindowID` and persisted by
+(`ownerBundleID`, `windowTitle`); CGWindowIDs are ephemeral and are never written
+to disk. The window list comes from the AX API cross-referenced with
+`CGWindowList`.
 
-- [x] Windows identified by CGWindowID (ephemeral) + ownerBundleID/windowTitle (stable for persistence)
-- [x] Window list sourced from AX API (kAXWindowsAttribute) cross-referenced with CGWindowList
-- [x] Real windows only — track non-modal `AXStandardWindow` elements; exclude dialogs, floating windows, `AXUnknown` popups, shadows, toolbars, and other auxiliary surfaces
-- [x] Per-window AXObserver lifecycle tracking: kAXUIElementDestroyedNotification removes closed windows instantly
-- [x] Per-window AXObserver title tracking: kAXTitleChangedNotification updates titles in real-time
-- [x] One AXObserver per PID, shared across all that app's window notifications
+Only real windows are tracked — non-modal `AXStandardWindow` elements. Dialogs,
+floating windows, `AXUnknown` popups, shadows, toolbars, and other auxiliary
+surfaces are excluded.
 
----
+Each PID gets one AXObserver, shared across that app's window notifications.
+Windows are removed on `kAXUIElementDestroyedNotification` and titles refresh on
+`kAXTitleChangedNotification`.
 
-## App Switcher Isolation
+## App switcher isolation
 
-- [x] Cmd+Tab quick tap (released before the configurable hold delay, default 100ms): switch to most recently used window within active stage only without showing UI
-- [x] Cmd+Tab hold through the configurable delay: open Stage Manager overlay
-- [x] Cmd+` passes through to system (native window cycling within app)
-- [x] Isolation guarantee: no keyboard-driven switching crosses stage boundaries
+Tapping the activation shortcut switches to the most recently used window inside
+the active stage only, showing no UI. Holding presents the overlay.
 
----
+Debut also handles Cmd+\` (the default binding for `nextAppWindow`), cycling the
+current app's windows *within the active stage* rather than deferring to the
+system.
 
-## Window-to-Stage Assignment
+The guarantee: no keyboard-driven switching crosses a stage boundary.
 
-- [x] Every tracked window belongs to exactly one stage (no sharing/duplication)
+## Window-to-stage assignment
 
-### New window created (Cmd+N, "code .", etc.)
+Every tracked window belongs to exactly one stage. There is no sharing or
+duplication.
 
-- [x] New window assigned to active stage, even if same app has windows in other stages
-- [x] Detected via kAXFocusedWindowChangedNotification (new window gets focus)
+**A newly created window** (Cmd+N, `code .`) joins the active stage even when the
+same app already has windows elsewhere, detected through
+`kAXFocusedWindowChangedNotification`.
 
-### Existing window activated from another stage (Dock, Spotlight)
+**An existing window activated from another stage** (Dock, Spotlight) makes Debut
+switch to the stage that already owns it. The window itself does not move.
 
-- [x] Debut switches to the stage that owns that window
-- [x] No duplication — window stays in its original stage
+**Excluded apps** are invisible to the stage manager. The list is configured in
+Settings from a running-app picker, persisted, and applied immediately. It must
+filter at every layer — discovery, launch, activation, reconciliation, and the
+AXObserver.
 
-### Excluded apps
+**Quick-switch exclusions** let configured apps keep their own number shortcuts
+while frontmost. The frontmost bundle ID is cached from activation notifications,
+so quick switching performs no workspace or AX lookup.
 
-- [x] Excluded apps' windows are invisible to the stage manager
-- [x] Configured in Settings with running app picker
-- [x] Exclusion list persisted in settings.json
-- [x] Changes take effect immediately (live update to discovery service)
+## Stage switching
 
-### Quick switch exclusions
+Debut owns a full-screen desktop surface window at `.normal` level, sitting in
+z-order between active and inactive stage windows.
 
-- [x] Configured apps keep their Ctrl+number shortcuts while frontmost
-- [x] Exclusion list is persisted and applied immediately
-- [x] Frontmost app is cached from activation events; quick switching performs no workspace or AX lookup
+A switch orders that surface to the front, then raises the active stage's windows
+above it through AX. Inactive windows keep their positions and are simply
+occluded — no minimize animation, no position manipulation. Focus moves to the
+selected window, and the new stage becomes the reference for later switching.
 
----
+The surface is inert: it cannot become key or main, ignores mouse-down, and is
+not movable.
 
-## Stage Switching via Desktop Surface
+## MRU ordering
 
-Debut uses a full-screen "desktop surface" window (OLED black, NSWindow.level.normal) positioned between active and inactive stage windows in z-order.
+Windows within a stage are ordered by recency, index 0 being most recently
+focused.
 
-- [x] On switch: surface ordered to front, then active stage windows raised above it via AX
-- [x] Inactive windows remain at their positions — occluded by the surface
-- [x] No minimize animation, no position manipulation
-- [x] Surface locked: canBecomeKey=false, canBecomeMain=false, mouseDown no-op, isMovable=false
-- [x] Focus moves to selected window in new stage
-- [x] New active stage becomes reference for Cmd+Tab behavior
-
----
-
-## MRU (Most Recently Used) Ordering
-
-- [x] Windows in stage ordered by recency: index 0 = most recently focused
-- [x] AXObserver (kAXFocusedWindowChangedNotification) tracks within-app focus changes — event-driven, no polling
-- [x] NSWorkspace.didActivateApplicationNotification tracks cross-app activation
-- [x] Observer moves to frontmost app on activation — one observer active at a time
-- [x] Cmd+Tab tap switches to windows[1] (second most recent)
-- [x] Overlay opens with selectedWindowIndex=1 (second MRU)
-
----
+Ordering is maintained event-driven, never by polling.
+`kAXFocusedWindowChangedNotification` tracks focus changes inside an app and
+`NSWorkspace.didActivateApplicationNotification` tracks cross-app activation. One
+observer is active at a time and moves to the frontmost app on activation.
 
 ## Persistence
 
-Full persistence across app restarts and system reboots.
+State survives app restarts and reboots.
 
-### What is persisted
+Persisted: the stage list and its order, window-to-stage assignments (by bundle
+ID and title), templates, settings, and the active stage ID. Stages have no name
+to persist.
 
-- [x] Stage list, order, and names
-- [x] Window-to-stage assignments (by bundleID + windowTitle)
-- [x] Templates (by app bundleIDs)
-- [x] Settings / preferences (including appearance and exclusion list)
-- [x] Active stage ID
+Writes are debounced through `DebouncedSaver` on stage mutation and flushed
+synchronously on terminate.
 
-### Restore behavior on launch
+### Restore
 
-- [x] Load saved stage state from state.json
-- [x] Reconcile: match persisted windows to live windows by (bundleID, windowTitle)
-- [x] Fallback reconciliation: if title match fails, match by bundleID alone (handles dynamic titles like terminals, browsers, Slack)
-- [x] Update ephemeral CGWindowIDs, PIDs, and window titles to current values
-- [x] Keep stopped-app assignments dormant and restore them on a later launch
-- [x] Remove empty stages after reconciliation, except stages with dormant assignments (keep at least one)
-- [x] Add new live windows (not in snapshot) to first stage
-- [x] Excluded apps filtered during reconciliation
-- [x] Activate stage containing currently focused window on launch (fall back to first stage)
+On launch Debut loads `state.json` and reconciles persisted windows against live
+ones by (bundleID, windowTitle). When an exact title match fails it falls back to
+bundleID alone, because titles are not stable keys — terminal prompts, browser
+tabs, and Slack channels all change between sessions. Ephemeral CGWindowIDs,
+PIDs, and titles are refreshed to current values.
 
-### Storage
+Live windows absent from the snapshot join the first stage, and excluded apps are
+filtered out during reconciliation. Empty stages are pruned except those holding
+dormant assignments, and at least one stage always remains.
 
-- [x] Save to `~/Library/Application Support/Debut/state.json`
-- [x] Write on app terminate
-- [ ] Write on every stage mutation (currently only on quit)
+Debut then activates the stage owning the currently focused window, falling back
+to the first stage.
 
----
+### Dormancy
 
-## Stage Deletion
+When an app exits, its windows leave the live stage view but their stage and
+position persist as dormant assignments. A later launch reclaims them by exact
+bundle and title match, then by complete one-to-one bundle matching for apps with
+dynamic titles.
 
-- [x] Windows overflow to adjacent stage (first stage -> below, otherwise -> above)
-- [x] Active stage moves to stage that received overflow
-- [x] If only stage deleted -> create new empty default stage
+Dormant assignments have no time-based expiry and survive deliberate quits and
+updater relaunches alike, because macOS does not reliably distinguish those
+termination reasons. They are purged only by explicit window destruction,
+exclusion or reset, or stage deletion.
 
----
+Absence from an AX or `CGWindowList` snapshot never removes an assignment —
+hidden and ordered-out windows drop out of those snapshots routinely. Only a
+lifecycle event does.
 
-## Fullscreen Apps
+## Fullscreen apps
 
-- [x] Overlay not shown when frontmost app is in fullscreen (AXFullScreen check)
-- [x] Cmd+Tab passes through to system in fullscreen mode
-- [x] Desktop surface does not follow into fullscreen Spaces (no .canJoinAllSpaces)
+The overlay is not shown while the frontmost app is fullscreen, and the
+activation shortcut passes through to the system. The desktop surface must not
+join all Spaces, or it would follow into the fullscreen Space and cover the app.
 
----
+## Edge cases
 
-## Edge Cases
+- First launch creates a single stage containing every running window.
+- A window closed with Cmd+W or the red button leaves its stage immediately.
+- A title change from `cd`, a tab switch, or a save updates in place.
+- A window created outside Debut's awareness joins the active stage on focus and
+  gains lifecycle tracking at that point. All three discovery paths — startup
+  reconciliation, app launch, and focus change — must register tracking, or the
+  window becomes a ghost.
+- Hidden apps keep their ordered-out assignments until their windows return.
 
-- [x] First launch: create single default stage with all running windows
-- [x] App quits: live windows become persistent dormant assignments and the per-app observer is cleaned up
-- [x] Window closed (Cmd+W, red button): removed from stage instantly via kAXUIElementDestroyedNotification
-- [x] Window title changes (cd, tab switch, save): updated in real-time via kAXTitleChangedNotification
-- [x] Window created outside Debut's awareness -> added to active stage on focus, lifecycle tracking registered
-- [x] Hidden apps preserve ordered-out window assignments until their windows are visible again
-- [x] AX/CG snapshot absence never removes an assignment without a lifecycle event
-- [x] Recreated or relaunched windows reclaim retained/dormant assignments by bundle ID + title, with complete one-to-one bundle fallback for dynamic titles
-- [x] Dormant assignments have no time-based expiry and survive deliberate quits as well as updater relaunches
-- [x] System Cmd+` restored — Debut does not intercept backtick
+Stage deletion and its overflow rules are specified in
+[stage-manager.md](stage-manager.md).

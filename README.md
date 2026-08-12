@@ -1,75 +1,40 @@
 # Debut
 
-**A stage-based workspace manager for macOS that replaces the native app switcher with fully isolated, switchable workspaces.**
+A stage-based workspace manager for macOS. Debut replaces the native app switcher
+with isolated workspaces: Cmd+Tab and Cmd+\` cycle only within the active stage,
+never across stages.
 
-Debut lets you organize your open applications into named stages — focused workspaces scoped to a single task or project. Switching between stages is instant: one gesture hides everything from the previous context and reveals the next. Unlike macOS Spaces or Stage Manager, Debut provides complete isolation — Cmd+Tab and Cmd+\` only cycle within the active stage, never across stages.
+## Concepts
 
----
+**Stage** — a workspace holding a set of windows, scoped to one task or project.
+Exactly one stage is active at a time; windows in inactive stages stay where they
+are and are occluded by a full-screen desktop surface. Stages are not named. A
+stage's label is its 1-based position, so create, delete, and reorder need no
+bookkeeping.
 
-## Core Concepts
+**Window** — the unit Debut tracks. Stages hold individual windows rather than
+apps, so one app can have windows in several stages at once.
 
-### Stage
+**Plate** — a stage's representation inside the overlay: a horizontal row of
+window previews, each badged with its app icon and captioned with its title.
+Plates stack vertically with the active stage centered, and carry no title of
+their own.
 
-A named workspace containing a set of application windows. Each stage represents one task or project context (e.g., "Coding," "Code Review," "Email"). Only one stage is active at a time. Windows in inactive stages are hidden.
+**Template** — a list of app bundle IDs captured from a stage. Templates record
+which apps were present, not window geometry. They can currently be saved and
+deleted only; no flow applies one to a new stage.
 
-### Plate
+## Specs
 
-The visual representation of a stage inside the Stage Manager overlay. Each plate is a horizontal strip of app icons — visually similar to the native macOS app switcher — with the stage name displayed in the top-left corner. Plates are stacked vertically, with the active stage's plate centered on screen.
+- [Stage Manager overlay](spec/stage-manager.md) — layout, activation, navigation, stage management
+- [Settings window](spec/settings.md) — sections and behavior
+- [System behaviors](spec/behaviors.md) — assignment rules, isolation, persistence, reconciliation
 
-### Active Stage
+Architecture constraints, the toolchain, and the task workflow live in
+[AGENTS.md](AGENTS.md).
 
-The currently visible workspace. All app-switching shortcuts (Cmd+Tab, Cmd+\`) are scoped to the active stage. Launching a new app adds it to the active stage.
-
-### Template
-
-A saved app list that can be applied when creating a new stage. Templates capture which apps should be launched — not window positions or sizes. Useful for recurring workflows (e.g., a "Coding" template that opens your editor, terminal, and browser).
-
----
-
-## How Debut Differs
-
-| | Debut | Stage Manager | BetterStage | Contexts |
-|---|---|---|---|---|
-| Cmd+Tab isolation | Full | None | None | Per-Space only |
-| Named workspaces | Yes | No | Yes | No |
-| Visual stage overview | Vertical plate stack | Side thumbnails | Stage list | Window list |
-| Persistence across reboot | Full | Partial | Partial | No |
-| Templates / presets | Yes | No | No | No |
-| Window sharing across stages | Yes (single-window apps) | No | No | N/A |
-
----
-
-## Architecture
-
-Debut has two views:
-
-### 1. Stage Manager (overlay)
-
-A system-wide overlay activated by holding Cmd+Tab. Displays all stages as vertically stacked plates. Supports navigation between apps and stages, stage creation/deletion, reordering, renaming, and template saving — all via keyboard or mouse.
-
-**[Full spec: spec/stage-manager.md](spec/stage-manager.md)**
-
-### 2. Settings (window)
-
-A standalone settings window with a sidebar + scrollable main area. Manages templates, app preferences, keyboard shortcut customization, and about info. Entry point on first launch.
-
-**[Full spec: spec/settings.md](spec/settings.md)**
-
-### System Behaviors
-
-Window-to-stage assignment rules, Cmd+Tab/\` isolation, persistence, and transitive behaviors (what happens when apps launch, stages switch, or stages are deleted).
-
-**[Full spec: spec/behaviors.md](spec/behaviors.md)**
-
----
-
-## High-risk verification
+## Verification
 
 Unit and screenshot tests are the default development loop. E2E is reserved for
-high-risk changes to global input, Accessibility, window lifecycle, stage or
-overlay behavior, persistence, installation, or code signing.
-
-When E2E is needed, run it in the headless local Tart VM first so testing does
-not take over the developer desktop. GitHub-hosted macOS 26 is the fallback and
-remote confirmation. See **[Isolated local E2E](docs/local-e2e.md)** for setup,
-commands, evidence, and the current synthetic-drag limitation.
+high-risk changes — see [AGENTS.md](AGENTS.md) for the policy and
+[docs/local-e2e.md](docs/local-e2e.md) for running it headlessly.
