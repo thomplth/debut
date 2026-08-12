@@ -47,9 +47,11 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     nonisolated(unsafe) private static let timestampFormatter = ISO8601DateFormatter()
 
     // Guarded separately from `queue` so that reading it never waits behind
-    // pending file writes. Reporting happens on the main thread.
+    // pending file writes. Some reporters run on background tasks, so providers
+    // that read main-queue-owned state must opt into main-queue evaluation.
     private let stateProviderLock = NSLock()
-    private var stateProvider: (() -> [String: String])?
+    private var stateProvider: (@Sendable () -> [String: String])?
+    private var stateProviderRunsOnMainQueue = false
 
     private var snapshotFile: URL { directory.appendingPathComponent("diagnostic.json") }
     private var durableFile: URL { directory.appendingPathComponent("diagnostic.jsonl") }
@@ -99,9 +101,23 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         }
     }
 
-    public func setStateProvider(_ provider: @escaping () -> [String: String]) {
+    public func setStateProvider(_ provider: @escaping @Sendable () -> [String: String]) {
+        setStateProvider(provider, runsOnMainQueue: false)
+    }
+
+    public func setMainQueueStateProvider(
+        _ provider: @escaping @Sendable () -> [String: String]
+    ) {
+        setStateProvider(provider, runsOnMainQueue: true)
+    }
+
+    private func setStateProvider(
+        _ provider: @escaping @Sendable () -> [String: String],
+        runsOnMainQueue: Bool
+    ) {
         stateProviderLock.lock()
         stateProvider = provider
+        stateProviderRunsOnMainQueue = runsOnMainQueue
         stateProviderLock.unlock()
         let state = currentState()
         let performance = performanceRecorder.snapshot()
@@ -116,8 +132,15 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
 
     private func currentState() -> [String: String] {
         stateProviderLock.lock()
-        defer { stateProviderLock.unlock() }
-        return stateProvider?() ?? [:]
+        let provider = stateProvider
+        let runsOnMainQueue = stateProviderRunsOnMainQueue
+        stateProviderLock.unlock()
+
+        guard let provider else { return [:] }
+        if runsOnMainQueue, !Thread.isMainThread {
+            return DispatchQueue.main.sync(execute: provider)
+        }
+        return provider()
     }
 
     // MARK: - Durable event stream
