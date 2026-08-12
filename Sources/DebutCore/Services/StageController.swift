@@ -229,6 +229,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             }
         case .cmdBacktick:
             handleCmdBacktick(reverse: false)
+        case .cmdBacktickRepeat:
+            handleCmdBacktick(reverse: false, wraps: false)
         case .cmdShiftBacktick:
             handleCmdBacktick(reverse: true)
         case .cmdRelease:
@@ -302,7 +304,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     // MARK: - Private
 
-    private func handleCmdBacktick(reverse: Bool) {
+    private func handleCmdBacktick(reverse: Bool, wraps: Bool = true) {
         let activeStage = stageManager.activeStage
         guard let frontWindow = activeStage.windows.first else { return }
 
@@ -318,10 +320,13 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         if reverse {
-            backtickCycleIndex = (backtickCycleIndex - 1 + backtickCycleWindows.count)
-                % backtickCycleWindows.count
+            backtickCycleIndex = wraps
+                ? (backtickCycleIndex - 1 + backtickCycleWindows.count) % backtickCycleWindows.count
+                : max(0, backtickCycleIndex - 1)
         } else {
-            backtickCycleIndex = (backtickCycleIndex + 1) % backtickCycleWindows.count
+            backtickCycleIndex = wraps
+                ? (backtickCycleIndex + 1) % backtickCycleWindows.count
+                : min(backtickCycleWindows.count - 1, backtickCycleIndex + 1)
         }
 
         let targetID = backtickCycleWindows[backtickCycleIndex]

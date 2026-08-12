@@ -218,7 +218,13 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
 
             if globalAction.isSameAppCycle && !overlayVisible {
                 beginSession(using: globalAction)
-                deliver(globalAction.toKeyEvent(), asynchronously: deliverAsynchronously)
+                let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                let keyEvent: DebutKeyEvent = if isAutoRepeat && globalAction == .nextAppWindow {
+                    .cmdBacktickRepeat
+                } else {
+                    globalAction.toKeyEvent()
+                }
+                deliver(keyEvent, asynchronously: deliverAsynchronously)
                 return nil
             }
         }

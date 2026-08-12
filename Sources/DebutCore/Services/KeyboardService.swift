@@ -27,6 +27,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case swapStageDown          // Option+Down Arrow
 
     case cmdBacktick            // Cmd+` — next same-app window in stage
+    case cmdBacktickRepeat      // Held Cmd+` auto-repeat (stops at the last window)
     case cmdShiftBacktick       // Cmd+Shift+` — previous same-app window in stage
 
     case escape
@@ -60,7 +61,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
         case .swapStageDown:
             .swapStageDown
         case .cmdTabTap, .cmdRelease, .nextWindowRepeat, .switchToStage,
-             .cmdBacktick, .cmdShiftBacktick, .escape:
+             .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick, .escape:
             nil
         }
     }
