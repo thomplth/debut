@@ -14,13 +14,15 @@ Report cold launch, first use, and warm operation runs separately. Every observa
 
 ## Local schema and budgets
 
-Durations use a monotonic clock and milliseconds. Event-driven process samples expose user/system CPU nanoseconds, physical and peak footprint bytes, thread count, wakeups, and disk bytes. CPU percentage is derived only between two valid samples. Each operation retains the latest 100 durations and reports median, p95, p99, and max.
+Durations use a monotonic clock and milliseconds. Event-driven process samples expose user/system CPU nanoseconds, physical and peak footprint bytes, thread count, wakeups, and disk bytes. CPU percentage is derived only between two valid samples. Each operation retains the latest 100 durations and reports median, p95, p99, and max. Diagnostics retain the latest 20 correlated observations per operation so high-frequency event taps cannot evict evidence for slower paths.
 
 Tart baselines require at least 20 iterations where practical. A regression gates only when it exceeds both the absolute budget and the recorded baseline by the configured percentage. Hidden-idle checks use CPU, wakeups, memory growth, and layout/signpost activity. System budgets remain separate from deterministic algorithm responsiveness tests.
 
 ## Remote privacy contract
 
 The remote allowlist is: schema version, event kind, app version, operating-system major version, workload class, canonical operation name/count, latency bucket, and aggregate anomaly count. Values are bucketed before enqueue. Expected volume is one session summary plus at most 20 anomaly records per installation day; the queue holds at most 100 records.
+
+Latency anomalies require at least 500 ms of delayed work. `hidden_idle` is excluded because its duration measures an expected inactive interval rather than execution latency; startup also prunes idle anomalies queued by older builds.
 
 The denylist includes window titles, bundle IDs, app names, PIDs, CGWindowIDs, paths, screenshots, raw diagnostics, free-form error descriptions, locale/time zone, precise hardware identity, and persistent user or installation identifiers. No automatic SDK fields are accepted. Local diagnostics remain available when sharing is disabled.
 

@@ -97,4 +97,20 @@ struct PerformanceObservabilityTests {
         #expect(box.observation?.correlationID == id)
         #expect(box.observation?.operation == .stageSwitch)
     }
+
+    @Test("High-frequency event taps cannot evict recent evidence for other operations")
+    func recentEvidenceIsBoundedPerOperation() {
+        let recorder = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader(), now: { 1 })
+        let deliveryID = recorder.begin(.mainQueueDelivery, workload: .init(windows: 14))
+        _ = recorder.end(deliveryID, sampleResources: false)
+
+        for _ in 0..<150 {
+            let eventID = recorder.begin(.eventTap)
+            _ = recorder.end(eventID, sampleResources: false)
+        }
+
+        let recent = recorder.snapshot().recent
+        #expect(recent.contains { $0.correlationID == deliveryID })
+        #expect(recent.filter { $0.operation == .eventTap }.count == 20)
+    }
 }

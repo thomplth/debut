@@ -6,6 +6,21 @@ public enum TelemetryWorkload: String, Codable, Sendable {
     case stress
 }
 
+/// Selects latency anomalies that represent delayed work. Hidden-idle spans measure how long
+/// Debut remained inactive, so a long duration is expected and must never consume telemetry quota.
+public enum PerformanceAnomalyPolicy {
+    public static let minimumDurationMilliseconds = 500.0
+
+    public static func shouldReport(_ observation: PerformanceObservation) -> Bool {
+        observation.operation != .hiddenIdle
+            && observation.durationMilliseconds >= minimumDurationMilliseconds
+    }
+
+    static func shouldRetain(_ payload: TelemetryPayload) -> Bool {
+        payload.event != .anomaly || payload.operation != .hiddenIdle
+    }
+}
+
 public enum TelemetryLatencyBucket: String, Codable, Sendable {
     case under10Milliseconds = "lt_10ms"
     case milliseconds10To25 = "10_25ms"
@@ -302,7 +317,7 @@ public actor TelemetryExporter {
     }
 
     public func enqueue(_ payload: TelemetryPayload) async throws {
-        guard enabled else { return }
+        guard enabled, PerformanceAnomalyPolicy.shouldRetain(payload) else { return }
         var quota = try await currentQuota()
         var payloads = try await queue.payloads()
         guard quota.sent + payloads.count < dailyEventLimit else {
@@ -328,6 +343,15 @@ public actor TelemetryExporter {
             } catch {
                 throw error
             }
+        }
+    }
+
+    /// Removes invalid records written by older builds without disturbing valid queued events.
+    public func pruneInvalidAnomalies() async throws {
+        let payloads = try await queue.payloads()
+        let retained = payloads.filter(PerformanceAnomalyPolicy.shouldRetain)
+        if retained.count != payloads.count {
+            try await queue.replace(with: retained)
         }
     }
 
