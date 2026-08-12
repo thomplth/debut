@@ -1,9 +1,26 @@
 import Testing
 import CoreGraphics
+import Foundation
 @testable import DebutCore
 
 @Suite("Plate motion")
 struct PlateMotionTests {
+    @Test("Deleting the first stage changes the layout animation key")
+    func deletingFirstStageTriggersMotion() {
+        let first = UUID()
+        let second = UUID()
+        let before = PlateMotion.layoutAnimationKey(
+            stageIDs: [first, second],
+            activeIndex: 0
+        )
+        let after = PlateMotion.layoutAnimationKey(
+            stageIDs: [second],
+            activeIndex: 0
+        )
+
+        #expect(before != after)
+    }
+
     @Test("Stage focus uses a restrained spring")
     func stageFocusUsesRestrainedSpring() {
         #expect(

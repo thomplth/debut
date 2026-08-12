@@ -42,10 +42,25 @@ struct PlateStackLayout: Equatable {
     let totalHeight: CGFloat
 }
 
+struct PlateLayoutAnimationKey: Equatable {
+    let stageIDs: [UUID]
+    let activeStageID: UUID?
+}
+
 enum PlateMotion {
     static let minimumPlateScale: CGFloat = 0.08
     static let minimumPlateOpacity: Double = 0.12
     static let opacityScaleThreshold: CGFloat = 0.2
+
+    static func layoutAnimationKey(
+        stageIDs: [UUID],
+        activeIndex: Int
+    ) -> PlateLayoutAnimationKey {
+        PlateLayoutAnimationKey(
+            stageIDs: stageIDs,
+            activeStageID: stageIDs.indices.contains(activeIndex) ? stageIDs[activeIndex] : nil
+        )
+    }
 
     static func focusTransition(reduceMotion: Bool) -> PlateFocusTransition {
         reduceMotion
@@ -657,6 +672,10 @@ public struct OverlaySwiftUIView: View {
                 hasVisibleFooterHints: !activeFooterHints.isEmpty
             )
             let focusTransition = PlateMotion.focusTransition(reduceMotion: reduceMotion)
+            let layoutAnimationKey = PlateMotion.layoutAnimationKey(
+                stageIDs: plates.map(\.id),
+                activeIndex: viewModel.activeStageIndex
+            )
             let windowReorderTransition = PlateMotion.windowReorderTransition(
                 reduceMotion: reduceMotion
             )
@@ -829,7 +848,7 @@ public struct OverlaySwiftUIView: View {
             }
             .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeStageIndex)
             .transition(focusTransition.usesSpatialMotion ? .identity : .opacity)
-            .animation(focusTransition.animation, value: viewModel.activeStageIndex)
+            .animation(focusTransition.animation, value: layoutAnimationKey)
             .animation(focusTransition.animation, value: hoveredStageIndex)
             .animation(focusTransition.animation, value: pointerSelection)
             .animation(windowReorderTransition.animation, value: windowDrag?.dropTarget)
