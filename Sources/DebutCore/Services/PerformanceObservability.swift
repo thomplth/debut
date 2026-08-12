@@ -239,7 +239,7 @@ public final class PerformanceRecorder: @unchecked Sendable {
     private let log = OSLog(subsystem: "com.thomplth.Debut", category: "performance")
     private var active: [UUID: Active] = [:]
     private var buffers: [PerformanceOperation: PerformanceSampleBuffer] = [:]
-    private var observations: [PerformanceObservation] = []
+    private var observations: [PerformanceOperation: [PerformanceObservation]] = [:]
     private var resources: ProcessResourceSnapshot?
     private var resourceDelta: ProcessResourceDelta?
     private var observationHandler: (@Sendable (PerformanceObservation) -> Void)?
@@ -295,8 +295,12 @@ public final class PerformanceRecorder: @unchecked Sendable {
         var buffer = buffers[span.operation] ?? PerformanceSampleBuffer()
         buffer.append(duration)
         buffers[span.operation] = buffer
-        observations.append(observation)
-        if observations.count > 100 { observations.removeFirst(observations.count - 100) }
+        var recentForOperation = observations[span.operation] ?? []
+        recentForOperation.append(observation)
+        if recentForOperation.count > 20 {
+            recentForOperation.removeFirst(recentForOperation.count - 20)
+        }
+        observations[span.operation] = recentForOperation
         if let sampled {
             resourceDelta = resources.flatMap { ProcessResourceDelta.between($0, sampled) }
             resources = sampled
@@ -336,7 +340,7 @@ public final class PerformanceRecorder: @unchecked Sendable {
             summaries: Dictionary(uniqueKeysWithValues: buffers.compactMap { operation, buffer in
                 buffer.summary.map { (operation.rawValue, $0) }
             }),
-            recent: observations
+            recent: PerformanceOperation.allCases.flatMap { observations[$0] ?? [] }
         )
     }
 }

@@ -853,7 +853,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         )
         telemetryExporter = exporter
         PerformanceRecorder.shared.setObservationHandler { observation in
-            guard observation.durationMilliseconds >= 500 else { return }
+            guard PerformanceAnomalyPolicy.shouldReport(observation) else { return }
             let workload: TelemetryWorkload = observation.workload.windows >= 50
                 ? .stress : (observation.workload.windows >= 21 ? .busy : .typical)
             Task {
@@ -865,8 +865,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 try? await exporter.flush()
             }
         }
-        if currentSettings.shareAnonymousTelemetry {
-            Task { try? await exporter.flush() }
+        let telemetryEnabled = currentSettings.shareAnonymousTelemetry
+        Task {
+            try? await exporter.pruneInvalidAnomalies()
+            if telemetryEnabled { try? await exporter.flush() }
         }
     }
 
@@ -888,7 +890,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             workload: workload,
             operationCounts: counts,
             latencyBuckets: latency,
-            anomalyCount: performance.recent.filter { $0.durationMilliseconds >= 500 }.count
+            anomalyCount: performance.recent.filter(PerformanceAnomalyPolicy.shouldReport).count
         )
     }
 
