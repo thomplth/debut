@@ -82,9 +82,10 @@ enum PlateMotion {
 
     static func windowReorderTransition(
         reduceMotion: Bool,
-        hasActiveDrag: Bool
+        hasActiveDrag: Bool,
+        isFinishingDrop: Bool
     ) -> PlateFocusTransition? {
-        guard hasActiveDrag else { return nil }
+        guard hasActiveDrag, !isFinishingDrop else { return nil }
         return windowReorderTransition(reduceMotion: reduceMotion)
     }
 
@@ -664,6 +665,7 @@ public struct OverlaySwiftUIView: View {
     public var onDesktopSelected: (() -> Void)?
 
     @State private var windowDrag: WindowDragState?
+    @State private var isFinishingWindowDrop = false
     @State private var stageDrag: StageDragState?
     @State private var pointerSelection: PointerSelection?
     @State private var pointerMovementGate: PointerMovementGate
@@ -784,7 +786,8 @@ public struct OverlaySwiftUIView: View {
             )
             let activeWindowReorderTransition = PlateMotion.windowReorderTransition(
                 reduceMotion: reduceMotion,
-                hasActiveDrag: windowDrag != nil
+                hasActiveDrag: windowDrag != nil,
+                isFinishingDrop: isFinishingWindowDrop
             )
             let dragTargetIndex = windowDrag?.dropTarget?.stageIndex
                 ?? stageDrag?.destinationIndex
@@ -945,6 +948,12 @@ public struct OverlaySwiftUIView: View {
                 }
                 .frame(width: geo.size.width, alignment: .center)
                 .offset(y: yOffset)
+                .transaction { transaction in
+                    if isFinishingWindowDrop {
+                        transaction.animation = nil
+                        transaction.disablesAnimations = true
+                    }
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .overlay(alignment: .topLeading) {
@@ -1024,6 +1033,7 @@ public struct OverlaySwiftUIView: View {
         transition: PlateFocusTransition,
         cardStride: CGFloat
     ) {
+        isFinishingWindowDrop = true
         guard let drag = windowDrag,
               let target = drag.dropTarget,
               let destination = PlateMotion.windowDropDestination(
@@ -1058,6 +1068,9 @@ public struct OverlaySwiftUIView: View {
                 request.toStageIndex,
                 request.toWindowIndex
             )
+        }
+        DispatchQueue.main.async {
+            isFinishingWindowDrop = false
         }
     }
 
