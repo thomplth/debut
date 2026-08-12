@@ -330,12 +330,30 @@ public struct SettingsView: View {
                 .font(.headline)
                 .padding(.top, 4)
 
-            ForEach(KeyAction.quickSwitchActions, id: \.self) { action in
-                ShortcutRecorderRow(
-                    action: action,
-                    keyBindings: $viewModel.settings.keyBindings,
-                    recordingService: shortcutRecordingService
-                )
+            HStack {
+                Text("Switch directly to stage 1–9")
+                Spacer()
+                Picker("", selection: $viewModel.settings.quickSwitchModifiers) {
+                    ForEach(ShortcutModifiers.choices, id: \.self) { modifiers in
+                        Text("\(modifiers.displayString)+1–9").tag(modifiers)
+                    }
+                }
+                .frame(width: 220)
+            }
+
+            Text("The same modifiers plus 0 switch to stage 10.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("After switching")
+                Spacer()
+                Picker("", selection: $viewModel.settings.quickSwitchBehavior) {
+                    ForEach(QuickSwitchBehavior.allCases, id: \.self) { behavior in
+                        Text(behavior.displayName).tag(behavior)
+                    }
+                }
+                .frame(width: 220)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -467,9 +485,13 @@ public struct SettingsView: View {
 
             Button("Restore Defaults") {
                 viewModel.settings.keyBindings.restoreDefaults()
+                viewModel.settings.quickSwitchModifiers = .control
+                viewModel.settings.quickSwitchBehavior = .stage
             }
             .padding(.top, 8)
         }
+        .onChange(of: viewModel.settings.quickSwitchBehavior) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.quickSwitchModifiers) { _, _ in saveSettings() }
     }
 
     private var aboutSection: some View {
