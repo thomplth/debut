@@ -125,14 +125,12 @@ struct KeyboardServiceTests {
         svc.simulateEvent(.newStageBelow)
         svc.simulateEvent(.newStageAbove)
         svc.simulateEvent(.deleteStage)
-        svc.simulateEvent(.saveAsTemplate)
         svc.simulateEvent(.cmdRelease)
 
-        #expect(delegate.receivedEvents.count == 6)
+        #expect(delegate.receivedEvents.count == 5)
         #expect(delegate.receivedEvents[1] == .newStageBelow)
         #expect(delegate.receivedEvents[2] == .newStageAbove)
         #expect(delegate.receivedEvents[3] == .deleteStage)
-        #expect(delegate.receivedEvents[4] == .saveAsTemplate)
     }
 
     @Test("Quick switch events")

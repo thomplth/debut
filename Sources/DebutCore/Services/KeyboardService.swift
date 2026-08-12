@@ -21,8 +21,6 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case newStageBelow          // N
     case newStageAbove          // Shift+N
     case deleteStage            // Delete/Forward Delete
-    case saveAsTemplate         // Space
-
     case moveWindowUp           // Up Arrow
     case moveWindowDown         // Down Arrow
     case swapStageUp            // Option+Up Arrow
@@ -53,8 +51,6 @@ public enum DebutKeyEvent: Equatable, Sendable {
             .newStageAbove
         case .deleteStage:
             .deleteStage
-        case .saveAsTemplate:
-            .saveAsTemplate
         case .moveWindowUp:
             .moveWindowUp
         case .moveWindowDown:

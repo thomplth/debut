@@ -31,7 +31,6 @@ struct SettingsViewModelTests {
         let vm = SettingsViewModel()
         #expect(vm.sections == [
             .appearance,
-            .templates,
             .excludedApps,
             .app,
             .keyboardShortcuts,
@@ -56,16 +55,5 @@ struct SettingsViewModelTests {
 
         #expect(calls.reset == 1)
         #expect(calls.export == 1)
-    }
-
-    @Test("Template from StageManager")
-    func templateList() {
-        var vm = SettingsViewModel()
-        vm.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"),
-            toStageID: vm.stageManager.stages[0].id
-        )
-        vm.stageManager.saveStageAsTemplate(stageID: vm.stageManager.stages[0].id, templateName: "T")
-        #expect(vm.stageManager.templates.count == 1)
     }
 }

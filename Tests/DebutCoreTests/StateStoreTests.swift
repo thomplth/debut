@@ -21,14 +21,12 @@ struct StateStoreTests {
         var sm = StageManager()
         sm.createStage(position: .below)
         sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toStageID: sm.stages[1].id)
-        sm.saveStageAsTemplate(stageID: sm.stages[1].id, templateName: "Dev")
 
         try store.save(sm)
         let loaded = try store.load()
 
         #expect(loaded.stages.count == 2)
         #expect(loaded.stages[1].windows.count == 1)
-        #expect(loaded.templates.count == 1)
     }
 
     @Test("Load returns default when no file exists")
