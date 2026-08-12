@@ -157,6 +157,10 @@ enum PlateMotion {
         isDragging ? 0 : 1
     }
 
+    static func sourceWindowDisablesAnimation(isDragging: Bool) -> Bool {
+        isDragging
+    }
+
     static let cursorPreviewOpacity: Double = 1
 
     static func displayedWindowCounts(
@@ -961,6 +965,11 @@ struct PlateSwiftUIView: View {
                             )
                         )
                         .opacity(PlateMotion.sourceWindowOpacity(isDragging: isDragging))
+                        .transaction { transaction in
+                            if PlateMotion.sourceWindowDisablesAnimation(isDragging: isDragging) {
+                                transaction.animation = nil
+                            }
+                        }
                         .offset(x: dragOffset)
                         .background(
                             GeometryReader { windowGeo in
