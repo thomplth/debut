@@ -121,6 +121,17 @@ struct PlateMotionTests {
         #expect(PlateMotion.plateScale(distanceFromFocus: 20, inactiveScale: 0.8) == 0.08)
     }
 
+    @Test("Plate surface uses scaled dimensions instead of a transformed glass layer")
+    func plateSurfaceDimensions() {
+        #expect(
+            PlateMotion.plateSurfaceSize(
+                width: 400,
+                height: 180,
+                scale: 0.8
+            ) == CGSize(width: 320, height: 144)
+        )
+    }
+
     @Test("Plate opacity stays solid until scale falls below twenty percent")
     func scaleThresholdPlateOpacity() {
         #expect(PlateMotion.plateOpacity(scale: 1) == 1)

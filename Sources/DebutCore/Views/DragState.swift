@@ -51,6 +51,13 @@ struct PlateFramePreferenceKey: PreferenceKey {
     }
 }
 
+struct PlateSurfaceFramePreferenceKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: [Int: CGRect] = [:]
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
+    }
+}
+
 struct WindowFrameID: Hashable {
     let stageIndex: Int
     let windowIndex: Int

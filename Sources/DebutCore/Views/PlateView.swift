@@ -127,6 +127,14 @@ enum PlateMotion {
         return max(minimumPlateOpacity, progress * progress)
     }
 
+    static func plateSurfaceSize(
+        width: CGFloat,
+        height: CGFloat,
+        scale: CGFloat
+    ) -> CGSize {
+        CGSize(width: width * scale, height: height * scale)
+    }
+
     static func focusedStageIndex(
         active: Int,
         hovered: Int?,
@@ -866,6 +874,11 @@ public struct OverlaySwiftUIView: View {
                         )
                         let isInteractionTarget = index == focusedStageIndex
                         let scale = visualLayout.scales[index]
+                        let surfaceSize = PlateMotion.plateSurfaceSize(
+                            width: plateWidth,
+                            height: pHeight,
+                            scale: scale
+                        )
                         let plateOpacity = PlateMotion.plateOpacity(scale: scale)
                         let lift = PlateMotion.lift(isActive: isInteractionTarget)
                         let selectedWindowIndex = pointerSelection?.stageIndex == index
@@ -950,9 +963,17 @@ public struct OverlaySwiftUIView: View {
                         .frame(width: plateWidth, height: pHeight)
                         .scaleEffect(scale)
                         .frame(
-                            width: plateWidth * scale,
-                            height: pHeight * scale
+                            width: surfaceSize.width,
+                            height: surfaceSize.height
                         )
+                        .background {
+                            PlateSurfaceView(
+                                stageIndex: index,
+                                size: surfaceSize,
+                                cornerRadius: CGFloat(viewModel.appearance.plateCornerRadius),
+                                appearance: viewModel.appearance
+                            )
+                        }
                         .shadow(
                             color: .black.opacity(lift.shadowOpacity),
                             radius: lift.shadowRadius,
@@ -1287,10 +1308,6 @@ struct PlateSwiftUIView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .modifier(LiquidGlassModifier(
-            cornerRadius: CGFloat(appearance.plateCornerRadius),
-            appearance: appearance
-        ))
         .overlay(alignment: .leading) {
             if isStageHandleRevealed {
                 StageDragHandle()
@@ -1405,6 +1422,31 @@ private struct StageDragHandle: View {
             .frame(maxHeight: .infinity)
             .help("Drag to reorder stage")
             .accessibilityLabel("Reorder stage")
+    }
+}
+
+private struct PlateSurfaceView: View {
+    let stageIndex: Int
+    let size: CGSize
+    let cornerRadius: CGFloat
+    let appearance: AppSettings
+
+    var body: some View {
+        Color.clear
+            .frame(width: size.width, height: size.height)
+            .modifier(LiquidGlassModifier(
+                cornerRadius: cornerRadius,
+                appearance: appearance
+            ))
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: PlateSurfaceFramePreferenceKey.self,
+                        value: [stageIndex: geometry.frame(in: .named("overlay"))]
+                    )
+                }
+            }
+            .allowsHitTesting(false)
     }
 }
 
