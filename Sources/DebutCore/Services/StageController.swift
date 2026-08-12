@@ -95,6 +95,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private let fullscreenAppActiveProvider: (() -> Bool)?
     private var previewCaptureTask: Task<Void, Never>?
     private var previewCaptureGeneration: UInt = 0
+    private var frontmostAppIsExcluded = false
     private let diag = DiagnosticReporter.shared
 
     public init(
@@ -262,6 +263,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
+    public func updateFrontmostApp(isExcluded: Bool) {
+        frontmostAppIsExcluded = isExcluded
+    }
+
     // MARK: - KeyboardEventDelegate
 
     public func handleKeyEvent(_ event: DebutKeyEvent) {
@@ -420,9 +425,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func handleCmdTabTap() {
         let activeStage = stageManager.activeStage
-        guard activeStage.windows.count >= 2 else { return }
-        let targetWindow = activeStage.windows[1]
+        guard !activeStage.windows.isEmpty else { return }
+        let targetIndex = frontmostAppIsExcluded ? 0 : 1
+        guard activeStage.windows.indices.contains(targetIndex) else { return }
+        let targetWindow = activeStage.windows[targetIndex]
         _ = windowService.raiseWindow(windowID: targetWindow.windowID)
+        _ = windowService.activateApp(bundleID: targetWindow.ownerBundleID)
         stageManager.bringWindowToFront(windowID: targetWindow.windowID, inStageID: activeStage.id)
         delegate?.stageControllerDidMutateState(self)
     }
@@ -430,7 +438,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private func openOverlay(selectNextWindow: Bool) {
         setupOverlay()
         let windowCount = stageManager.activeStage.windows.count
-        selectedWindowIndex = windowCount >= 2 ? 1 : 0
+        selectedWindowIndex = !frontmostAppIsExcluded && windowCount >= 2 ? 1 : 0
     }
 
     private func openOverlay(selectLastWindow: Bool) {

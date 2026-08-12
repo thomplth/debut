@@ -223,8 +223,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.stageController?.recordWindowActivation(windowID: windowID)
             }
         }
-        discovery.onFrontmostAppChanged = { [weak keyboardService] bundleID in
+        discovery.onFrontmostAppChanged = { [weak self, weak keyboardService] bundleID in
             keyboardService?.updateFrontmostApp(bundleIdentifier: bundleID)
+            guard let self else { return }
+            self.stageController?.updateFrontmostApp(
+                isExcluded: bundleID.map { self.currentSettings.excludedBundleIDs.contains($0) }
+                    ?? false
+            )
         }
         discovery.onAppActivated = { [weak self] snapshot in
             DispatchQueue.main.async {
@@ -655,6 +660,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.currentSettings = newSettings
                 try? self.stateStore?.saveSettings(newSettings)
                 self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
+                self.stageController?.updateFrontmostApp(
+                    isExcluded: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+                        .map(newSettings.excludedBundleIDs.contains) ?? false
+                )
                 for bundleID in newSettings.excludedBundleIDs {
                     self.stageController?.stageManager.removeAllWindows(forBundleID: bundleID)
                 }
