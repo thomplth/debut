@@ -365,9 +365,25 @@ struct PlateMotionTests {
 
     @Test("A pointer or drag target becomes the gradient focus")
     func interactionFocusPriority() {
-        #expect(PlateMotion.focusedStageIndex(active: 2, hovered: nil, dragTarget: nil) == 2)
-        #expect(PlateMotion.focusedStageIndex(active: 2, hovered: 4, dragTarget: nil) == 4)
-        #expect(PlateMotion.focusedStageIndex(active: 2, hovered: 4, dragTarget: 1) == 1)
+        #expect(PlateMotion.focusedStageIndex(
+            active: 2, hovered: nil, dragTarget: nil, retainedDragTarget: nil
+        ) == 2)
+        #expect(PlateMotion.focusedStageIndex(
+            active: 2, hovered: 4, dragTarget: nil, retainedDragTarget: nil
+        ) == 4)
+        #expect(PlateMotion.focusedStageIndex(
+            active: 2, hovered: 4, dragTarget: 1, retainedDragTarget: nil
+        ) == 1)
+    }
+
+    @Test("Cross-stage drag focus is retained through drop completion")
+    func retainedCrossStageDragFocus() {
+        #expect(PlateMotion.focusedStageIndex(
+            active: 0, hovered: nil, dragTarget: 1, retainedDragTarget: nil
+        ) == 1)
+        #expect(PlateMotion.focusedStageIndex(
+            active: 0, hovered: nil, dragTarget: nil, retainedDragTarget: 1
+        ) == 1)
     }
 
     @Test("Edge hover scrolls overflow toward its boundary")

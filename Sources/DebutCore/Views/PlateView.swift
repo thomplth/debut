@@ -130,9 +130,10 @@ enum PlateMotion {
     static func focusedStageIndex(
         active: Int,
         hovered: Int?,
-        dragTarget: Int?
+        dragTarget: Int?,
+        retainedDragTarget: Int?
     ) -> Int {
-        dragTarget ?? hovered ?? active
+        dragTarget ?? retainedDragTarget ?? hovered ?? active
     }
 
     static func stackLayout(
@@ -681,6 +682,7 @@ public struct OverlaySwiftUIView: View {
 
     @State private var windowDrag: WindowDragState?
     @State private var settlingWindowDrop: WindowDropSettlingState?
+    @State private var retainedWindowDragFocusStageIndex: Int?
     @State private var stageDrag: StageDragState?
     @State private var pointerSelection: PointerSelection?
     @State private var pointerMovementGate: PointerMovementGate
@@ -815,7 +817,8 @@ public struct OverlaySwiftUIView: View {
             let focusedStageIndex = PlateMotion.focusedStageIndex(
                 active: viewModel.activeStageIndex,
                 hovered: hoveredStageIndex,
-                dragTarget: dragTargetIndex
+                dragTarget: dragTargetIndex,
+                retainedDragTarget: retainedWindowDragFocusStageIndex
             )
             let baselineLayout = PlateMotion.stackLayout(
                 stageCount: plates.count,
@@ -1004,7 +1007,7 @@ public struct OverlaySwiftUIView: View {
             .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeStageIndex)
             .transition(focusTransition.usesSpatialMotion ? .identity : .opacity)
             .animation(focusTransition.animation, value: layoutAnimationKey)
-            .animation(focusTransition.animation, value: hoveredStageIndex)
+            .animation(focusTransition.animation, value: focusedStageIndex)
             .animation(focusTransition.animation, value: pointerSelection)
             .animation(activeWindowReorderTransition?.animation, value: layoutWindowDrag?.dropTarget)
             .animation(focusTransition.animation, value: stageDrag?.destinationIndex)
@@ -1031,6 +1034,9 @@ public struct OverlaySwiftUIView: View {
                     hoverPointerY = location.y
                     guard pointerMovementGate.observe(at: NSEvent.mouseLocation) else {
                         return
+                    }
+                    if settlingWindowDrop == nil {
+                        retainedWindowDragFocusStageIndex = nil
                     }
                     hoveredStageIndex = PlateInteraction.hoveredStageIndex(
                         previous: hoveredStageIndex,
@@ -1083,6 +1089,8 @@ public struct OverlaySwiftUIView: View {
             commitWindowDrop(request)
             return
         }
+
+        retainedWindowDragFocusStageIndex = target.stageIndex
 
         withAnimation(transition.animation) {
             windowDrag?.location = destination
