@@ -360,15 +360,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         overlayWindow.onWindowMoved = {
             [weak self] windowID, fromIndex, fromWindowIndex, toIndex, toWindowIndex in
             guard let self, let ctrl = self.stageController else { return }
-            let stages = ctrl.stageManager.stages
-            guard stages.indices.contains(fromIndex), stages.indices.contains(toIndex) else { return }
-            ctrl.stageManager.moveWindow(
+            guard ctrl.moveWindowByDrag(
                 windowID: windowID,
-                fromStageID: stages[fromIndex].id,
-                toStageID: stages[toIndex].id,
-                at: toWindowIndex
-            )
-            self.debouncedSaver?.scheduleSave(ctrl.stageManager)
+                fromStageIndex: fromIndex,
+                toStageIndex: toIndex,
+                toWindowIndex: toWindowIndex
+            ) else { return }
             self.diag.report("window_moved_by_drag", details: [
                 "windowID": "\(windowID)",
                 "fromStageIndex": "\(fromIndex)",

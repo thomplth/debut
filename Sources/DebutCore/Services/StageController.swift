@@ -536,6 +536,41 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         commitSelection()
     }
 
+    @discardableResult
+    public func moveWindowByDrag(
+        windowID: CGWindowID,
+        fromStageIndex: Int,
+        toStageIndex: Int,
+        toWindowIndex: Int
+    ) -> Bool {
+        guard stageManager.stages.indices.contains(fromStageIndex),
+              stageManager.stages.indices.contains(toStageIndex),
+              stageManager.stages[fromStageIndex].windows.contains(where: {
+                  $0.windowID == windowID
+              })
+        else { return false }
+
+        let fromStageID = stageManager.stages[fromStageIndex].id
+        let toStageID = stageManager.stages[toStageIndex].id
+        stageManager.moveWindow(
+            windowID: windowID,
+            fromStageID: fromStageID,
+            toStageID: toStageID,
+            at: toWindowIndex
+        )
+
+        if selectedStageIndex == toStageIndex,
+           let movedIndex = stageManager.stages[toStageIndex].windows.firstIndex(where: {
+               $0.windowID == windowID
+           }) {
+            selectedWindowIndex = movedIndex
+        }
+
+        delegate?.stageControllerDidMutateState(self)
+        notifyOverlayUpdated()
+        return true
+    }
+
     /// Close the overlay but keep the Cmd session alive.
     /// Next Cmd+Tab or Cmd+Option+Tab reopens the overlay.
     private func discardOverlay() {

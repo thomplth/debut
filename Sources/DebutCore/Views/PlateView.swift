@@ -53,6 +53,12 @@ enum PlateMotion {
             : .spring(duration: 0.26, bounce: 0.08)
     }
 
+    static func windowReorderTransition(reduceMotion: Bool) -> PlateFocusTransition {
+        reduceMotion
+            ? .fade(duration: 0.18)
+            : .spring(duration: 0.42, bounce: 0.06)
+    }
+
     static func lift(isActive: Bool) -> PlateLift {
         isActive
             ? PlateLift(shadowOpacity: 0.22, shadowRadius: 18, shadowY: 8)
@@ -641,6 +647,9 @@ public struct OverlaySwiftUIView: View {
                 hasVisibleFooterHints: !activeFooterHints.isEmpty
             )
             let focusTransition = PlateMotion.focusTransition(reduceMotion: reduceMotion)
+            let windowReorderTransition = PlateMotion.windowReorderTransition(
+                reduceMotion: reduceMotion
+            )
             let dragTargetIndex = windowDrag?.dropTarget?.stageIndex
                 ?? stageDrag?.destinationIndex
                 ?? stageDrag?.stageIndex
@@ -791,30 +800,12 @@ public struct OverlaySwiftUIView: View {
                 .offset(y: yOffset)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-            .overlay(alignment: .topLeading) {
-                if let drag = windowDrag,
-                   let plate = plates[safe: drag.sourceStageIndex],
-                   let window = plate.windows[safe: drag.sourceWindowIndex] {
-                    WindowPreviewView(
-                        window: window,
-                        isWindowSelected: true,
-                        thumbnailWidth: tSize.width,
-                        thumbnailHeight: tSize.height,
-                        appearance: viewModel.appearance
-                    )
-                    .opacity(0.85)
-                    .scaleEffect(1.08)
-                    .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
-                    .position(drag.location)
-                    .allowsHitTesting(false)
-                }
-            }
             .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeStageIndex)
             .transition(focusTransition.usesSpatialMotion ? .identity : .opacity)
             .animation(focusTransition.animation, value: viewModel.activeStageIndex)
             .animation(focusTransition.animation, value: hoveredStageIndex)
             .animation(focusTransition.animation, value: pointerSelection)
-            .animation(focusTransition.animation, value: windowDrag?.dropTarget)
+            .animation(windowReorderTransition.animation, value: windowDrag?.dropTarget)
             .animation(focusTransition.animation, value: stageDrag?.destinationIndex)
             .coordinateSpace(name: "overlay")
             .onPreferenceChange(PlateFramePreferenceKey.self) { frames in

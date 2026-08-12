@@ -20,6 +20,18 @@ struct PlateMotionTests {
         )
     }
 
+    @Test("Window insertion uses slower macOS-style motion")
+    func windowInsertionUsesSlowerMotion() {
+        #expect(
+            PlateMotion.windowReorderTransition(reduceMotion: false)
+                == .spring(duration: 0.42, bounce: 0.06)
+        )
+        #expect(
+            PlateMotion.windowReorderTransition(reduceMotion: true)
+                == .fade(duration: 0.18)
+        )
+    }
+
     @Test("The active plate receives a subtle lift")
     func activePlateLift() {
         #expect(PlateMotion.lift(isActive: true) == .init(shadowOpacity: 0.22, shadowRadius: 18, shadowY: 8))
