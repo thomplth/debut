@@ -37,15 +37,15 @@ struct PlateMotionTests {
         )
     }
 
-    @Test("Window insertion uses slower macOS-style motion")
-    func windowInsertionUsesSlowerMotion() {
+    @Test("Window insertion uses brisk macOS-style motion")
+    func windowInsertionUsesBriskMotion() {
         #expect(
             PlateMotion.windowReorderTransition(reduceMotion: false)
-                == .spring(duration: 0.42, bounce: 0.06)
+                == .spring(duration: 0.294, bounce: 0.06)
         )
         #expect(
             PlateMotion.windowReorderTransition(reduceMotion: true)
-                == .fade(duration: 0.18)
+                == .fade(duration: 0.126)
         )
     }
 
@@ -569,6 +569,47 @@ struct PlateMotionTests {
         #expect(PlateMotion.windowDragOffset(
             stageIndex: 1, windowIndex: 1, drag: drag, cardStride: 100
         ) == 100)
+    }
+
+    @Test("Released preview snaps to same-stage, cross-stage, and empty-stage slots")
+    func releasedPreviewDestination() {
+        let frames = [
+            WindowFrameID(stageIndex: 0, windowIndex: 0): CGRect(x: 20, y: 20, width: 80, height: 100),
+            WindowFrameID(stageIndex: 0, windowIndex: 1): CGRect(x: 120, y: 20, width: 80, height: 100),
+            WindowFrameID(stageIndex: 0, windowIndex: 2): CGRect(x: 220, y: 20, width: 80, height: 100),
+            WindowFrameID(stageIndex: 1, windowIndex: 0): CGRect(x: 20, y: 200, width: 80, height: 100),
+            WindowFrameID(stageIndex: 1, windowIndex: 1): CGRect(x: 120, y: 200, width: 80, height: 100),
+        ]
+        let plates = [
+            0: CGRect(x: 0, y: 0, width: 340, height: 160),
+            1: CGRect(x: 0, y: 180, width: 240, height: 160),
+            2: CGRect(x: 0, y: 360, width: 140, height: 160),
+        ]
+
+        #expect(PlateMotion.windowDropDestination(
+            sourceStageIndex: 0,
+            sourceWindowIndex: 0,
+            target: WindowDropTarget(stageIndex: 0, windowIndex: 2),
+            cardStride: 100,
+            plateFrames: plates,
+            windowFrames: frames
+        ) == CGPoint(x: 260, y: 70))
+        #expect(PlateMotion.windowDropDestination(
+            sourceStageIndex: 0,
+            sourceWindowIndex: 0,
+            target: WindowDropTarget(stageIndex: 1, windowIndex: 1),
+            cardStride: 100,
+            plateFrames: plates,
+            windowFrames: frames
+        ) == CGPoint(x: 160, y: 250))
+        #expect(PlateMotion.windowDropDestination(
+            sourceStageIndex: 0,
+            sourceWindowIndex: 0,
+            target: WindowDropTarget(stageIndex: 2, windowIndex: 0),
+            cardStride: 100,
+            plateFrames: plates,
+            windowFrames: frames
+        ) == CGPoint(x: 70, y: 434))
     }
 
     @Test("A press without meaningful movement selects instead of starting a drag")

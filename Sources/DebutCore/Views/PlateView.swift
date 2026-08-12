@@ -76,8 +76,8 @@ enum PlateMotion {
 
     static func windowReorderTransition(reduceMotion: Bool) -> PlateFocusTransition {
         reduceMotion
-            ? .fade(duration: 0.18)
-            : .spring(duration: 0.42, bounce: 0.06)
+            ? .fade(duration: 0.126)
+            : .spring(duration: 0.294, bounce: 0.06)
     }
 
     static func lift(isActive: Bool) -> PlateLift {
@@ -270,6 +270,45 @@ enum PlateMotion {
         return 0
     }
 
+    static func windowDropDestination(
+        sourceStageIndex: Int,
+        sourceWindowIndex: Int,
+        target: WindowDropTarget,
+        cardStride: CGFloat,
+        plateFrames: [Int: CGRect],
+        windowFrames: [WindowFrameID: CGRect]
+    ) -> CGPoint? {
+        let sourceID = WindowFrameID(
+            stageIndex: sourceStageIndex,
+            windowIndex: sourceWindowIndex
+        )
+        guard let sourceFrame = windowFrames[sourceID] else { return nil }
+
+        if target.stageIndex == sourceStageIndex {
+            return CGPoint(
+                x: sourceFrame.midX
+                    + CGFloat(target.windowIndex - sourceWindowIndex) * cardStride,
+                y: sourceFrame.midY
+            )
+        }
+
+        let destinationFrames = windowFrames
+            .filter { $0.key.stageIndex == target.stageIndex }
+            .sorted { $0.key.windowIndex < $1.key.windowIndex }
+        if destinationFrames.indices.contains(target.windowIndex) {
+            let frame = destinationFrames[target.windowIndex].value
+            return CGPoint(x: frame.midX, y: frame.midY)
+        }
+        if let lastFrame = destinationFrames.last?.value {
+            return CGPoint(x: lastFrame.midX + cardStride, y: lastFrame.midY)
+        }
+        guard let plateFrame = plateFrames[target.stageIndex] else { return nil }
+        return CGPoint(
+            x: plateFrame.midX,
+            y: plateFrame.minY + PlateConstants.topPadding + sourceFrame.height / 2
+        )
+    }
+
     // A black shadow over the dark plate behind it needs more density and spread to
     // read as depth than it does in light mode. macOS scales the shadow this way rather
     // than inverting it to white.
@@ -337,6 +376,10 @@ enum PlateInteraction {
     ) -> WindowMoveRequest? {
         guard let completedDrag = windowDrag else { return nil }
         windowDrag = nil
+        return windowMoveRequest(for: completedDrag)
+    }
+
+    static func windowMoveRequest(for completedDrag: WindowDragState) -> WindowMoveRequest? {
         guard shouldMoveWindow(
             fromStageIndex: completedDrag.sourceStageIndex,
             fromWindowIndex: completedDrag.sourceWindowIndex,
@@ -827,7 +870,15 @@ public struct OverlaySwiftUIView: View {
                                 )
                             },
                             onWindowSelected: onWindowSelected,
-                            onWindowMoved: onWindowMoved,
+                            onWindowDropRequested: { request in
+                                finishWindowDrop(
+                                    request,
+                                    transition: windowReorderTransition,
+                                    cardStride: tSize.width
+                                        + PlateConstants.windowCardExtraWidth
+                                        + PlateConstants.windowSpacing
+                                )
+                            },
                             onStageHandleHoverChanged: { isHovering in
                                 if isHovering, revealedStageHandleIndex != index {
                                     revealedStageHandleIndex = index
@@ -956,6 +1007,48 @@ public struct OverlaySwiftUIView: View {
         }
     }
 
+    private func finishWindowDrop(
+        _ request: WindowMoveRequest,
+        transition: PlateFocusTransition,
+        cardStride: CGFloat
+    ) {
+        guard let drag = windowDrag,
+              let target = drag.dropTarget,
+              let destination = PlateMotion.windowDropDestination(
+                  sourceStageIndex: drag.sourceStageIndex,
+                  sourceWindowIndex: drag.sourceWindowIndex,
+                  target: target,
+                  cardStride: cardStride,
+                  plateFrames: plateFrames,
+                  windowFrames: windowFrames
+              )
+        else {
+            commitWindowDrop(request)
+            return
+        }
+
+        withAnimation(transition.animation) {
+            windowDrag?.location = destination
+        } completion: {
+            commitWindowDrop(request)
+        }
+    }
+
+    private func commitWindowDrop(_ request: WindowMoveRequest) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            windowDrag = nil
+            onWindowMoved?(
+                request.windowID,
+                request.fromStageIndex,
+                request.fromWindowIndex,
+                request.toStageIndex,
+                request.toWindowIndex
+            )
+        }
+    }
+
     private func updateStageDrag(
         index: Int,
         plate: PlateData,
@@ -1008,7 +1101,7 @@ struct PlateSwiftUIView: View {
     let stageIndex: Int
     var onPointerSelectionChanged: ((PointerSelection, Bool, CGPoint) -> Void)?
     var onWindowSelected: ((Int, Int) -> Void)?
-    var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
+    var onWindowDropRequested: ((WindowMoveRequest) -> Void)?
     var onStageHandleHoverChanged: ((Bool) -> Void)?
     var onStageDragChanged: ((CGSize) -> Void)?
     var onStageDragEnded: (() -> Void)?
@@ -1185,16 +1278,13 @@ struct PlateSwiftUIView: View {
                     onWindowSelected?(stageIndex, windowIndex)
                     return
                 }
-                guard let request = PlateInteraction.finishWindowDrag(&windowDrag) else {
+                guard let drag = windowDrag,
+                      let request = PlateInteraction.windowMoveRequest(for: drag)
+                else {
+                    windowDrag = nil
                     return
                 }
-                onWindowMoved?(
-                    request.windowID,
-                    request.fromStageIndex,
-                    request.fromWindowIndex,
-                    request.toStageIndex,
-                    request.toWindowIndex
-                )
+                onWindowDropRequested?(request)
             }
     }
 
