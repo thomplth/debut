@@ -215,17 +215,34 @@ struct DesktopSurfaceWindowTests {
         #expect(!window.collectionBehavior.contains(.canJoinAllSpaces))
     }
 
+    @Test("Desktop surface reveals Finder's desktop for file URL drags")
+    func fileURLDragRevealsDesktop() {
+        var revealCount = 0
+        let window = makeSurface(
+            capture: TestWallpaperCapture(),
+            onFileDragEntered: { revealCount += 1 }
+        )
+
+        #expect(window.wallpaperView.registeredDraggedTypes.contains(.fileURL))
+        #expect(window.prepareForDrop(types: [.string]).isEmpty)
+        #expect(window.prepareForDrop(types: [.fileURL]) == .copy)
+        #expect(window.prepareForDrop(types: [.fileURL]) == .copy)
+        #expect(revealCount == 1)
+    }
+
     private func makeSurface(
         screen: NSScreen? = nil,
         capture: TestWallpaperCapture,
         observer: TestWallpaperChangeObserver = TestWallpaperChangeObserver(),
-        onWallpaperRefreshed: @escaping @MainActor (WallpaperCaptureOutcome) -> Void = { _ in }
+        onWallpaperRefreshed: @escaping @MainActor (WallpaperCaptureOutcome) -> Void = { _ in },
+        onFileDragEntered: @escaping @MainActor () -> Void = {}
     ) -> DesktopSurfaceWindow {
         DesktopSurfaceWindow(
             screen: screen ?? NSScreen.main ?? NSScreen.screens[0],
             wallpaperCapture: capture,
             wallpaperChangeObserver: observer,
-            onWallpaperRefreshed: onWallpaperRefreshed
+            onWallpaperRefreshed: onWallpaperRefreshed,
+            onFileDragEntered: onFileDragEntered
         )
     }
 }
