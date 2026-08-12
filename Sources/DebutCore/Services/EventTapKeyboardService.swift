@@ -1,7 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 
-public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable {
+public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingService, @unchecked Sendable {
     private let lifecycleLock = NSLock()
     private var storedIsRunning: Bool = false
     private var storedEventTapRunsOnDedicatedThread: Bool = false
@@ -25,6 +25,8 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     private var storedOverlayVisible: Bool = false
     private var storedKeyBindings: KeyBindings = KeyBindings()
     private var storedQuickSwitchExcludedBundleIDs: Set<String> = []
+    private var shortcutRecordingHandler: (@MainActor @Sendable (KeyCombo?) -> Void)?
+    private var shortcutRecordingKeysDown: Set<Int64> = []
 
     public var overlayVisible: Bool {
         get { configurationLock.withLock { storedOverlayVisible } }
@@ -40,6 +42,20 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     }
 
     public init() {}
+
+    public func beginShortcutRecording(
+        handler: @escaping @MainActor @Sendable (KeyCombo?) -> Void
+    ) {
+        configurationLock.withLock {
+            shortcutRecordingHandler = handler
+        }
+    }
+
+    public func endShortcutRecording() {
+        configurationLock.withLock {
+            shortcutRecordingHandler = nil
+        }
+    }
 
     public func updateFrontmostApp(bundleIdentifier: String?) {
         configurationLock.withLock {
@@ -156,6 +172,36 @@ public final class EventTapKeyboardService: KeyboardService, @unchecked Sendable
     ) -> CGEvent? {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
+
+        if type == .keyUp,
+           configurationLock.withLock({ shortcutRecordingKeysDown.remove(keyCode) != nil }) {
+            return nil
+        }
+
+        if type == .keyDown {
+            var recordingHandler: (@MainActor @Sendable (KeyCombo?) -> Void)?
+            let consumeForRecording = configurationLock.withLock {
+                if shortcutRecordingKeysDown.contains(keyCode) {
+                    return true
+                }
+                guard let handler = shortcutRecordingHandler else { return false }
+                shortcutRecordingHandler = nil
+                shortcutRecordingKeysDown.insert(keyCode)
+                recordingHandler = handler
+                return true
+            }
+            if consumeForRecording {
+                if let recordingHandler {
+                    let combo: KeyCombo? = keyCode == Int64(kVK_Escape)
+                        ? nil
+                        : Self.keyCombo(keyCode: keyCode, flags: flags)
+                    DispatchQueue.main.async {
+                        recordingHandler(combo)
+                    }
+                }
+                return nil
+            }
+        }
 
         if type == .keyUp, quickSwitchKeysDown.remove(keyCode) != nil {
             return nil
