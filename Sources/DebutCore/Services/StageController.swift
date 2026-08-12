@@ -117,7 +117,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         self.keyboardServiceStarted = started
         diag.report(started ? "event_tap_created" : "event_tap_failed")
 
-        diag.setStateProvider { [weak self] in
+        diag.setMainQueueStateProvider { [weak self] in
             guard let self else { return ["error": "controller deallocated"] }
             return [
                 "overlayVisible": "\(self.isStageManagerVisible)",

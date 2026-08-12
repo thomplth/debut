@@ -185,4 +185,25 @@ struct DiagnosticReporterTests {
         let state = try #require(object["state"] as? [String: String])
         #expect(state["selectedWindowIndex"] == "3")
     }
+
+    @Test("A main-queue state provider is isolated from background reporters")
+    func mainQueueStateProviderRunsOnMainThread() async throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir)
+        reporter.setMainQueueStateProvider {
+            ["providerThread": Thread.isMainThread ? "main" : "background"]
+        }
+
+        await Task.detached {
+            reporter.report("preview_capture_completed", level: .transient)
+        }.value
+        reporter.flush()
+
+        let data = try Data(contentsOf: dir.appendingPathComponent("diagnostic.json"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let state = try #require(object["state"] as? [String: String])
+        #expect(state["providerThread"] == "main")
+    }
 }
