@@ -16,6 +16,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public let keyboardService: any KeyboardService
     public weak var delegate: StageControllerDelegate?
     public var onCommandUsed: (@Sendable (KeyAction) -> Void)?
+    public var onDesktopReveal: (() -> Void)?
 
     public private(set) var isStageManagerVisible: Bool = false
     public var selectedStageIndex: Int = 0
@@ -544,6 +545,18 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         selectedStageIndex = stageIndex
         selectedWindowIndex = windowIndex
         commitSelection()
+    }
+
+    /// Close the switcher and expose Finder's real desktop surface.
+    public func revealDesktop() {
+        guard isStageManagerVisible else { return }
+        isStageManagerVisible = false
+        if let tapService = keyboardService as? EventTapKeyboardService {
+            tapService.overlayVisible = false
+        }
+        dismissOverlayPresentation()
+        onDesktopReveal?()
+        diag.report("desktop_revealed_from_overlay")
     }
 
     @discardableResult

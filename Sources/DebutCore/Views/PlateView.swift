@@ -314,6 +314,14 @@ enum PlateInteraction {
         hypot(translation.width, translation.height) < minimumDragDistance
     }
 
+    static func isDesktopArea(
+        _ location: CGPoint,
+        plateFrames: [Int: CGRect]
+    ) -> Bool {
+        guard !plateFrames.isEmpty else { return false }
+        return !plateFrames.values.contains(where: { $0.contains(location) })
+    }
+
     static func shouldMoveWindow(
         fromStageIndex: Int,
         fromWindowIndex: Int,
@@ -602,6 +610,7 @@ public struct OverlaySwiftUIView: View {
     public var onStageReordered: ((Int, Int) -> Void)?
     public var onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
+    public var onDesktopSelected: (() -> Void)?
 
     @State private var windowDrag: WindowDragState?
     @State private var stageDrag: StageDragState?
@@ -620,7 +629,8 @@ public struct OverlaySwiftUIView: View {
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
         onStageReordered: ((Int, Int) -> Void)? = nil,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
-        onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil
+        onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
+        onDesktopSelected: (() -> Void)? = nil
     ) {
         self.init(
             viewModel: viewModel,
@@ -629,7 +639,8 @@ public struct OverlaySwiftUIView: View {
             onWindowMoved: onWindowMoved,
             onStageReordered: onStageReordered,
             onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
-            onPointerSelectionChanged: onPointerSelectionChanged
+            onPointerSelectionChanged: onPointerSelectionChanged,
+            onDesktopSelected: onDesktopSelected
         )
     }
 
@@ -640,7 +651,8 @@ public struct OverlaySwiftUIView: View {
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
         onStageReordered: ((Int, Int) -> Void)? = nil,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
-        onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil
+        onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
+        onDesktopSelected: (() -> Void)? = nil
     ) {
         self.init(
             viewModel: viewModel,
@@ -649,7 +661,8 @@ public struct OverlaySwiftUIView: View {
             onWindowMoved: onWindowMoved,
             onStageReordered: onStageReordered,
             onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
-            onPointerSelectionChanged: onPointerSelectionChanged
+            onPointerSelectionChanged: onPointerSelectionChanged,
+            onDesktopSelected: onDesktopSelected
         )
     }
 
@@ -660,7 +673,8 @@ public struct OverlaySwiftUIView: View {
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?,
         onStageReordered: ((Int, Int) -> Void)?,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?,
-        onPointerSelectionChanged: ((Int?, Int?) -> Void)?
+        onPointerSelectionChanged: ((Int?, Int?) -> Void)?,
+        onDesktopSelected: (() -> Void)?
     ) {
         self.viewModel = viewModel
         self.onWindowSelected = onWindowSelected
@@ -668,6 +682,7 @@ public struct OverlaySwiftUIView: View {
         self.onStageReordered = onStageReordered
         self.onStageHandleVisibilityChanged = onStageHandleVisibilityChanged
         self.onPointerSelectionChanged = onPointerSelectionChanged
+        self.onDesktopSelected = onDesktopSelected
         _windowDrag = State(initialValue: initialWindowDrag)
         _pointerMovementGate = State(
             initialValue: PointerMovementGate(initialLocation: NSEvent.mouseLocation)
@@ -894,6 +909,16 @@ public struct OverlaySwiftUIView: View {
             .animation(windowReorderTransition.animation, value: windowDrag?.dropTarget)
             .animation(focusTransition.animation, value: stageDrag?.destinationIndex)
             .coordinateSpace(name: "overlay")
+            .simultaneousGesture(
+                SpatialTapGesture(coordinateSpace: .named("overlay"))
+                    .onEnded { event in
+                        guard PlateInteraction.isDesktopArea(
+                            event.location,
+                            plateFrames: plateFrames
+                        ) else { return }
+                        onDesktopSelected?()
+                    }
+            )
             .onPreferenceChange(PlateFramePreferenceKey.self) { frames in
                 plateFrames = frames
             }
