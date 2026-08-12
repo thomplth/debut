@@ -153,6 +153,12 @@ enum PlateMotion {
         return isSelected ? 1.06 : 1
     }
 
+    static func sourceWindowOpacity(isDragging: Bool) -> Double {
+        isDragging ? 0 : 1
+    }
+
+    static let cursorPreviewOpacity: Double = 1
+
     static func displayedWindowCounts(
         actual: [Int],
         drag: WindowDragState?
@@ -800,6 +806,23 @@ public struct OverlaySwiftUIView: View {
                 .offset(y: yOffset)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .overlay(alignment: .topLeading) {
+                if let drag = windowDrag,
+                   let plate = plates[safe: drag.sourceStageIndex],
+                   let window = plate.windows[safe: drag.sourceWindowIndex] {
+                    WindowPreviewView(
+                        window: window,
+                        isWindowSelected: true,
+                        isDragging: true,
+                        thumbnailWidth: tSize.width,
+                        thumbnailHeight: tSize.height,
+                        appearance: viewModel.appearance
+                    )
+                    .opacity(PlateMotion.cursorPreviewOpacity)
+                    .position(drag.location)
+                    .allowsHitTesting(false)
+                }
+            }
             .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeStageIndex)
             .transition(focusTransition.usesSpatialMotion ? .identity : .opacity)
             .animation(focusTransition.animation, value: viewModel.activeStageIndex)
@@ -914,9 +937,6 @@ struct PlateSwiftUIView: View {
                     ForEach(Array(plate.windows.enumerated()), id: \.element.id) { index, window in
                         let isDragging = windowDrag?.sourceStageIndex == stageIndex
                             && windowDrag?.sourceWindowIndex == index
-                        let isMovingToAnotherStage = isDragging
-                            && windowDrag?.dropTarget?.stageIndex != nil
-                            && windowDrag?.dropTarget?.stageIndex != stageIndex
                         let cardStride = thumbnailWidth
                             + PlateConstants.windowCardExtraWidth
                             + PlateConstants.windowSpacing
@@ -940,7 +960,7 @@ struct PlateSwiftUIView: View {
                                 settings: appearance
                             )
                         )
-                        .opacity(isMovingToAnotherStage ? 0 : (isDragging ? 0.3 : 1.0))
+                        .opacity(PlateMotion.sourceWindowOpacity(isDragging: isDragging))
                         .offset(x: dragOffset)
                         .background(
                             GeometryReader { windowGeo in
