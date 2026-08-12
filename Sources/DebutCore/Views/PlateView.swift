@@ -83,10 +83,25 @@ enum PlateMotion {
     static func windowReorderTransition(
         reduceMotion: Bool,
         hasActiveDrag: Bool,
-        isFinishingDrop: Bool
+        isAwaitingCommittedLayout: Bool
     ) -> PlateFocusTransition? {
-        guard hasActiveDrag, !isFinishingDrop else { return nil }
+        guard hasActiveDrag, !isAwaitingCommittedLayout else { return nil }
         return windowReorderTransition(reduceMotion: reduceMotion)
+    }
+
+    static func windowLayoutKey(for plates: [PlateData]) -> WindowLayoutKey {
+        WindowLayoutKey(stageWindowIDs: plates.map { $0.windows.map(\.windowID) })
+    }
+
+    static func isWindowDropApplied(
+        _ request: WindowMoveRequest,
+        to layout: WindowLayoutKey
+    ) -> Bool {
+        guard layout.stageWindowIDs.indices.contains(request.toStageIndex),
+              layout.stageWindowIDs[request.toStageIndex].indices.contains(request.toWindowIndex)
+        else { return false }
+        return layout.stageWindowIDs[request.toStageIndex][request.toWindowIndex]
+            == request.windowID
     }
 
     static func lift(isActive: Bool) -> PlateLift {
@@ -665,7 +680,7 @@ public struct OverlaySwiftUIView: View {
     public var onDesktopSelected: (() -> Void)?
 
     @State private var windowDrag: WindowDragState?
-    @State private var isFinishingWindowDrop = false
+    @State private var settlingWindowDrop: WindowDropSettlingState?
     @State private var stageDrag: StageDragState?
     @State private var pointerSelection: PointerSelection?
     @State private var pointerMovementGate: PointerMovementGate
@@ -744,9 +759,14 @@ public struct OverlaySwiftUIView: View {
 
     public var body: some View {
         let plates = viewModel.plates
+        let windowLayoutKey = PlateMotion.windowLayoutKey(for: plates)
+        let hasCommittedSettlingDrop = settlingWindowDrop.map {
+            PlateMotion.isWindowDropApplied($0.request, to: windowLayoutKey)
+        } ?? false
+        let layoutWindowDrag = hasCommittedSettlingDrop ? nil : windowDrag
         let displayedWindowCounts = PlateMotion.displayedWindowCounts(
             actual: plates.map(\.windows.count),
-            drag: windowDrag
+            drag: layoutWindowDrag
         )
         let maxWindows = displayedWindowCounts.max() ?? 0
         let activeStageIndex = viewModel.activeStageIndex
@@ -786,10 +806,10 @@ public struct OverlaySwiftUIView: View {
             )
             let activeWindowReorderTransition = PlateMotion.windowReorderTransition(
                 reduceMotion: reduceMotion,
-                hasActiveDrag: windowDrag != nil,
-                isFinishingDrop: isFinishingWindowDrop
+                hasActiveDrag: layoutWindowDrag != nil,
+                isAwaitingCommittedLayout: settlingWindowDrop != nil
             )
-            let dragTargetIndex = windowDrag?.dropTarget?.stageIndex
+            let dragTargetIndex = layoutWindowDrag?.dropTarget?.stageIndex
                 ?? stageDrag?.destinationIndex
                 ?? stageDrag?.stageIndex
             let focusedStageIndex = PlateMotion.focusedStageIndex(
@@ -865,6 +885,8 @@ public struct OverlaySwiftUIView: View {
                             stageHandleExpansion: stageHandleExpansion,
                             isStageHandleRevealed: isStageHandleRevealed,
                             windowDrag: $windowDrag,
+                            layoutWindowDrag: layoutWindowDrag,
+                            settlingWindowID: settlingWindowDrop?.request.windowID,
                             plateFrames: $plateFrames,
                             windowFrames: $windowFrames,
                             stageIndex: index,
@@ -948,16 +970,22 @@ public struct OverlaySwiftUIView: View {
                 }
                 .frame(width: geo.size.width, alignment: .center)
                 .offset(y: yOffset)
-                .transaction { transaction in
-                    if isFinishingWindowDrop {
-                        transaction.animation = nil
-                        transaction.disablesAnimations = true
-                    }
-                }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .overlay(alignment: .topLeading) {
-                if let drag = windowDrag,
+                if let settlingWindowDrop {
+                    WindowPreviewView(
+                        window: settlingWindowDrop.window,
+                        isWindowSelected: true,
+                        isDragging: true,
+                        thumbnailWidth: tSize.width,
+                        thumbnailHeight: tSize.height,
+                        appearance: viewModel.appearance
+                    )
+                    .opacity(PlateMotion.cursorPreviewOpacity)
+                    .position(settlingWindowDrop.destination)
+                    .allowsHitTesting(false)
+                } else if let drag = windowDrag,
                    let plate = plates[safe: drag.sourceStageIndex],
                    let window = plate.windows[safe: drag.sourceWindowIndex] {
                     WindowPreviewView(
@@ -978,7 +1006,7 @@ public struct OverlaySwiftUIView: View {
             .animation(focusTransition.animation, value: layoutAnimationKey)
             .animation(focusTransition.animation, value: hoveredStageIndex)
             .animation(focusTransition.animation, value: pointerSelection)
-            .animation(activeWindowReorderTransition?.animation, value: windowDrag?.dropTarget)
+            .animation(activeWindowReorderTransition?.animation, value: layoutWindowDrag?.dropTarget)
             .animation(focusTransition.animation, value: stageDrag?.destinationIndex)
             .coordinateSpace(name: "overlay")
             .simultaneousGesture(
@@ -1025,6 +1053,12 @@ public struct OverlaySwiftUIView: View {
                 hoveredStageIndex = nil
                 hoverPointerY = nil
             }
+            .onChange(of: windowLayoutKey) { _, committedLayout in
+                finishWindowDropHandoff(ifAppliedTo: committedLayout)
+            }
+            .onAppear {
+                finishWindowDropHandoff(ifAppliedTo: windowLayoutKey)
+            }
         }
     }
 
@@ -1033,9 +1067,10 @@ public struct OverlaySwiftUIView: View {
         transition: PlateFocusTransition,
         cardStride: CGFloat
     ) {
-        isFinishingWindowDrop = true
         guard let drag = windowDrag,
               let target = drag.dropTarget,
+              let plate = viewModel.plates[safe: drag.sourceStageIndex],
+              let window = plate.windows[safe: drag.sourceWindowIndex],
               let destination = PlateMotion.windowDropDestination(
                   sourceStageIndex: drag.sourceStageIndex,
                   sourceWindowIndex: drag.sourceWindowIndex,
@@ -1052,7 +1087,18 @@ public struct OverlaySwiftUIView: View {
         withAnimation(transition.animation) {
             windowDrag?.location = destination
         } completion: {
-            commitWindowDrop(request)
+            settlingWindowDrop = WindowDropSettlingState(
+                request: request,
+                window: window,
+                destination: destination
+            )
+            onWindowMoved?(
+                request.windowID,
+                request.fromStageIndex,
+                request.fromWindowIndex,
+                request.toStageIndex,
+                request.toWindowIndex
+            )
         }
     }
 
@@ -1069,8 +1115,17 @@ public struct OverlaySwiftUIView: View {
                 request.toWindowIndex
             )
         }
-        DispatchQueue.main.async {
-            isFinishingWindowDrop = false
+    }
+
+    private func finishWindowDropHandoff(ifAppliedTo layout: WindowLayoutKey) {
+        guard let settlingWindowDrop,
+              PlateMotion.isWindowDropApplied(settlingWindowDrop.request, to: layout)
+        else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            windowDrag = nil
+            self.settlingWindowDrop = nil
         }
     }
 
@@ -1121,6 +1176,8 @@ struct PlateSwiftUIView: View {
     let stageHandleExpansion: CGFloat
     let isStageHandleRevealed: Bool
     @Binding var windowDrag: WindowDragState?
+    let layoutWindowDrag: WindowDragState?
+    let settlingWindowID: CGWindowID?
     @Binding var plateFrames: [Int: CGRect]
     @Binding var windowFrames: [WindowFrameID: CGRect]
     let stageIndex: Int
@@ -1141,15 +1198,16 @@ struct PlateSwiftUIView: View {
                         .frame(maxWidth: .infinity)
                 } else {
                     ForEach(Array(plate.windows.enumerated()), id: \.element.id) { index, window in
-                        let isDragging = windowDrag?.sourceStageIndex == stageIndex
-                            && windowDrag?.sourceWindowIndex == index
+                        let isDragging = layoutWindowDrag?.sourceStageIndex == stageIndex
+                            && layoutWindowDrag?.sourceWindowIndex == index
+                        let isSettling = settlingWindowID == window.windowID
                         let cardStride = thumbnailWidth
                             + PlateConstants.windowCardExtraWidth
                             + PlateConstants.windowSpacing
                         let dragOffset = PlateMotion.windowDragOffset(
                             stageIndex: stageIndex,
                             windowIndex: index,
-                            drag: windowDrag,
+                            drag: layoutWindowDrag,
                             cardStride: cardStride
                         )
                         WindowPreviewView(
@@ -1166,9 +1224,13 @@ struct PlateSwiftUIView: View {
                                 settings: appearance
                             )
                         )
-                        .opacity(PlateMotion.sourceWindowOpacity(isDragging: isDragging))
+                        .opacity(PlateMotion.sourceWindowOpacity(
+                            isDragging: isDragging || isSettling
+                        ))
                         .transaction { transaction in
-                            if PlateMotion.sourceWindowDisablesAnimation(isDragging: isDragging) {
+                            if PlateMotion.sourceWindowDisablesAnimation(
+                                isDragging: isDragging || isSettling
+                            ) {
                                 transaction.animation = nil
                             }
                         }
