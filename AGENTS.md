@@ -46,7 +46,7 @@ When E2E is justified, prioritize the headless Tart VM first:
 ./scripts/tart-e2e.sh run
 ```
 
-This runs the stable virtualized suite without taking over the foreground developer session. It currently passes 32 scenarios and explicitly skips four synthetic drag gestures that neither Tart nor GitHub-hosted macOS delivers. Setup and evidence locations are documented in `docs/local-e2e.md`.
+This runs the stable virtualized suite without taking over the foreground developer session. It explicitly skips the synthetic drag gestures that neither Tart nor GitHub-hosted macOS delivers; the script's own output is the authority on how many scenarios pass. Setup and evidence locations are documented in `docs/local-e2e.md`.
 
 Use `./scripts/tart-e2e.sh run-all` only when diagnosing those virtualized drag checks. If Tart is unavailable, use the free GitHub-hosted macOS 26 workflow in `.github/workflows/e2e.yml` as the fallback or remote confirmation. Do not manually trigger or wait for E2E on routine changes merely because the hosted workflow exists.
 
@@ -75,15 +75,6 @@ openssl pkcs12 -export -out /tmp/d.p12 -inkey /tmp/dk.pem -in /tmp/dc.pem -passo
 security import /tmp/d.p12 -k ~/Library/Keychains/login.keychain-db -P x -T /usr/bin/codesign
 security add-trusted-cert -d -r trustRoot -p codeSign -k ~/Library/Keychains/login.keychain-db /tmp/dc.pem
 ```
-
-## Tests
-
-- Unit + screenshot tests: `TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test`
-- Preferred headless E2E for high-risk changes: `./scripts/tart-e2e.sh run`
-- Virtualized drag diagnostic: `./scripts/tart-e2e.sh run-all`
-- Hosted E2E fallback/remote confirmation: `.github/workflows/e2e.yml`
-- Foreground E2E, disruptive and only after warning the user: `./scripts/e2e-test.sh`
-- Local build, install, and launch without E2E: `./scripts/rebuild.sh`
 
 ## Architecture Rules
 
