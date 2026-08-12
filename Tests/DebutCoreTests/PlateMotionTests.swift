@@ -644,6 +644,15 @@ struct PlateMotionTests {
         #expect(PlateMotion.windowDragOffset(
             stageIndex: 1, windowIndex: 1, drag: drag, cardStride: 100
         ) == 100)
+        #expect(PlateMotion.windowGridCenterOffset(
+            stageIndex: 0, drag: drag, cardStride: 100
+        ) == 50)
+        #expect(PlateMotion.windowGridCenterOffset(
+            stageIndex: 1, drag: drag, cardStride: 100
+        ) == 0)
+        #expect(PlateMotion.windowGridCenterOffset(
+            stageIndex: 2, drag: drag, cardStride: 100
+        ) == 0)
     }
 
     @Test("Released preview snaps to same-stage, cross-stage, and empty-stage slots")
