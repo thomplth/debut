@@ -4,7 +4,7 @@ import SwiftUI
 public final class OverlayWindow: NSWindow, @unchecked Sendable {
     private var hostingView: NSHostingView<OverlaySwiftUIView>?
     public var onWindowSelected: ((Int, Int) -> Void)?
-    public var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
+    public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
     public var onStageReordered: ((Int, Int) -> Void)?
     public var onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?

@@ -6,13 +6,20 @@ struct WindowDragState: Equatable {
     let sourceStageIndex: Int
     let sourceWindowIndex: Int
     var location: CGPoint
-    var dropTargetStageIndex: Int?
+    var dropTarget: WindowDropTarget?
+}
+
+struct WindowDropTarget: Equatable {
+    let stageIndex: Int
+    let windowIndex: Int
 }
 
 struct WindowMoveRequest: Equatable {
     let windowID: CGWindowID
     let fromStageIndex: Int
+    let fromWindowIndex: Int
     let toStageIndex: Int
+    let toWindowIndex: Int
 }
 
 struct StageDragState: Equatable {
@@ -30,6 +37,21 @@ struct PointerSelection: Equatable {
 struct PlateFramePreferenceKey: PreferenceKey {
     nonisolated(unsafe) static var defaultValue: [Int: CGRect] = [:]
     static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
+    }
+}
+
+struct WindowFrameID: Hashable {
+    let stageIndex: Int
+    let windowIndex: Int
+}
+
+struct WindowFramePreferenceKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: [WindowFrameID: CGRect] = [:]
+    static func reduce(
+        value: inout [WindowFrameID: CGRect],
+        nextValue: () -> [WindowFrameID: CGRect]
+    ) {
         value.merge(nextValue(), uniquingKeysWith: { $1 })
     }
 }

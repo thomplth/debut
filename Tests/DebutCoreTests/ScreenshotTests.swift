@@ -135,7 +135,7 @@ struct ScreenshotTests {
             sourceStageIndex: 1,
             sourceWindowIndex: 0,
             location: CGPoint(x: 600, y: 300),
-            dropTargetStageIndex: nil
+            dropTarget: nil
         )
         let idleFrames = renderPlateFrames(OverlaySwiftUIView(viewModel: vm), size: size)
         let draggingFrames = renderPlateFrames(
