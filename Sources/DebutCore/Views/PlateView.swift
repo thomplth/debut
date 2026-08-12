@@ -147,6 +147,61 @@ enum PlateMotion {
         return isSelected ? 1.06 : 1
     }
 
+    static func displayedWindowCounts(
+        actual: [Int],
+        drag: WindowDragState?
+    ) -> [Int] {
+        guard let drag,
+              let target = drag.dropTarget,
+              target.stageIndex != drag.sourceStageIndex,
+              actual.indices.contains(drag.sourceStageIndex),
+              actual.indices.contains(target.stageIndex),
+              actual[drag.sourceStageIndex] > 0
+        else { return actual }
+
+        var displayed = actual
+        displayed[drag.sourceStageIndex] -= 1
+        displayed[target.stageIndex] += 1
+        return displayed
+    }
+
+    static func windowDragOffset(
+        stageIndex: Int,
+        windowIndex: Int,
+        drag: WindowDragState?,
+        cardStride: CGFloat
+    ) -> CGFloat {
+        guard let drag, let target = drag.dropTarget else { return 0 }
+
+        if target.stageIndex == drag.sourceStageIndex,
+           stageIndex == drag.sourceStageIndex {
+            if windowIndex == drag.sourceWindowIndex {
+                return CGFloat(target.windowIndex - drag.sourceWindowIndex) * cardStride
+            }
+            if drag.sourceWindowIndex < target.windowIndex,
+               windowIndex > drag.sourceWindowIndex,
+               windowIndex <= target.windowIndex {
+                return -cardStride
+            }
+            if target.windowIndex < drag.sourceWindowIndex,
+               windowIndex >= target.windowIndex,
+               windowIndex < drag.sourceWindowIndex {
+                return cardStride
+            }
+            return 0
+        }
+
+        if stageIndex == drag.sourceStageIndex,
+           windowIndex > drag.sourceWindowIndex {
+            return -cardStride
+        }
+        if stageIndex == target.stageIndex,
+           windowIndex >= target.windowIndex {
+            return cardStride
+        }
+        return 0
+    }
+
     // A black shadow over the dark plate behind it needs more density and spread to
     // read as depth than it does in light mode. macOS scales the shadow this way rather
     // than inverting it to white.
@@ -553,7 +608,11 @@ public struct OverlaySwiftUIView: View {
 
     public var body: some View {
         let plates = viewModel.plates
-        let maxWindows = plates.map(\.windows.count).max() ?? 0
+        let displayedWindowCounts = PlateMotion.displayedWindowCounts(
+            actual: plates.map(\.windows.count),
+            drag: windowDrag
+        )
+        let maxWindows = displayedWindowCounts.max() ?? 0
         let activeStageIndex = viewModel.activeStageIndex
         let activePlate = plates[safe: activeStageIndex]
         let activeSelectedWindowIndex = pointerSelection?.stageIndex == activeStageIndex
@@ -573,7 +632,7 @@ public struct OverlaySwiftUIView: View {
             let tSize = PlateConstants.thumbnailSize(forWindowCount: maxWindows, screenWidth: geo.size.width)
             let pHeight = PlateConstants.plateHeight(thumbnailHeight: tSize.height)
             let plateWidths = PlateConstants.plateWidths(
-                forWindowCounts: plates.map(\.windows.count),
+                forWindowCounts: displayedWindowCounts,
                 thumbnailWidth: tSize.width
             )
 
@@ -864,6 +923,18 @@ struct PlateSwiftUIView: View {
                     ForEach(Array(plate.windows.enumerated()), id: \.element.id) { index, window in
                         let isDragging = windowDrag?.sourceStageIndex == stageIndex
                             && windowDrag?.sourceWindowIndex == index
+                        let isMovingToAnotherStage = isDragging
+                            && windowDrag?.dropTarget?.stageIndex != nil
+                            && windowDrag?.dropTarget?.stageIndex != stageIndex
+                        let cardStride = thumbnailWidth
+                            + PlateConstants.windowCardExtraWidth
+                            + PlateConstants.windowSpacing
+                        let dragOffset = PlateMotion.windowDragOffset(
+                            stageIndex: stageIndex,
+                            windowIndex: index,
+                            drag: windowDrag,
+                            cardStride: cardStride
+                        )
                         WindowPreviewView(
                             window: window,
                             isWindowSelected: selectedWindowIndex == index,
@@ -878,7 +949,8 @@ struct PlateSwiftUIView: View {
                                 settings: appearance
                             )
                         )
-                        .opacity(isDragging ? 0.3 : 1.0)
+                        .opacity(isMovingToAnotherStage ? 0 : (isDragging ? 0.3 : 1.0))
+                        .offset(x: dragOffset)
                         .background(
                             GeometryReader { windowGeo in
                                 Color.clear.preference(
