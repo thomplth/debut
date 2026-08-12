@@ -2,6 +2,60 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
+private final class PreviewCaptureMetrics: @unchecked Sendable {
+    private let lock = NSLock()
+    private let batchID: UUID
+    private let firstID: UUID
+    private var captureIDs: [CGWindowID: UUID]
+    private var capturedCount = 0
+    private var recordedFirst = false
+
+    init(windowIDs: [CGWindowID]) {
+        batchID = PerformanceRecorder.shared.begin(
+            .previewAll,
+            workload: .init(windows: windowIDs.count, captures: windowIDs.count)
+        )
+        firstID = PerformanceRecorder.shared.begin(
+            .previewFirst,
+            workload: .init(windows: windowIDs.count, captures: min(1, windowIDs.count))
+        )
+        captureIDs = Dictionary(uniqueKeysWithValues: windowIDs.map { windowID in
+            (
+                windowID,
+                PerformanceRecorder.shared.begin(.previewCapture, workload: .init(captures: 1))
+            )
+        })
+    }
+
+    func recordCapture(windowID: CGWindowID) {
+        lock.withLock {
+            if let captureID = captureIDs.removeValue(forKey: windowID) {
+                _ = PerformanceRecorder.shared.end(captureID, sampleResources: false)
+            }
+            capturedCount += 1
+            if !recordedFirst {
+                recordedFirst = true
+                _ = PerformanceRecorder.shared.end(firstID)
+            }
+        }
+    }
+
+    func finish() -> Int {
+        lock.withLock {
+            for captureID in captureIDs.values {
+                _ = PerformanceRecorder.shared.end(captureID, sampleResources: false)
+            }
+            captureIDs.removeAll()
+            if !recordedFirst {
+                recordedFirst = true
+                _ = PerformanceRecorder.shared.end(firstID)
+            }
+            _ = PerformanceRecorder.shared.end(batchID)
+            return capturedCount
+        }
+    }
+}
+
 public protocol StageControllerDelegate: AnyObject {
     func stageControllerDidOpenOverlay(_ controller: StageController)
     func stageControllerDidCloseOverlay(_ controller: StageController)
@@ -27,6 +81,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     /// Window previews captured when overlay opens
     public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
+    public private(set) var variedWindowPreviewIDs: Set<CGWindowID> = []
 
     /// Desktop surfaces — one per display, sitting between active and inactive stage windows
     public var desktopSurfaces: DesktopSurfaceCoordinator?
@@ -38,10 +93,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private var overlayPresentationGeneration: UInt = 0
     private var isOverlayPresented: Bool = false
     private let fullscreenAppActiveProvider: (() -> Bool)?
-    private let previewCaptureQueue = DispatchQueue(
-        label: "com.thomplth.Debut.preview-capture",
-        qos: .userInitiated
-    )
+    private var previewCaptureTask: Task<Void, Never>?
+    private var previewCaptureGeneration: UInt = 0
     private let diag = DiagnosticReporter.shared
 
     public init(
@@ -77,6 +130,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 "windowCountsByStage": self.stageManager.stages
                     .map { String($0.windows.count) }
                     .joined(separator: ","),
+                "windowPreviewCount": "\(self.windowPreviews.count)",
+                "variedWindowPreviewCount": "\(self.variedWindowPreviewIDs.count)",
             ]
         }
     }
@@ -488,55 +543,51 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             stage.windows.map(\.windowID)
         }
 
-        let batchID = PerformanceRecorder.shared.begin(
-            .previewAll,
-            workload: .init(windows: windowIDs.count, captures: windowIDs.count)
-        )
-        let firstID = PerformanceRecorder.shared.begin(
-            .previewFirst,
-            workload: .init(windows: windowIDs.count, captures: min(1, windowIDs.count))
-        )
-        previewCaptureQueue.async { [weak self] in
-            guard let self else {
-                _ = PerformanceRecorder.shared.end(firstID)
-                _ = PerformanceRecorder.shared.end(batchID)
-                return
-            }
+        previewCaptureTask?.cancel()
+        previewCaptureGeneration &+= 1
+        let generation = previewCaptureGeneration
+        let assignedWindowIDs = Set(windowIDs)
+        let metrics = PreviewCaptureMetrics(windowIDs: windowIDs)
 
-            var refreshedPreviews: [CGWindowID: CGImage] = [:]
-            for (index, windowID) in windowIDs.enumerated() {
-                let captureID = PerformanceRecorder.shared.begin(.previewCapture, workload: .init(captures: 1))
-                if let image = self.windowService.captureWindowImage(windowID: windowID) {
-                    refreshedPreviews[windowID] = image
+        // A missing capture can mean that a window is merely hidden, so retain its last good
+        // preview. Only assignments that no longer exist are removed.
+        windowPreviews = windowPreviews.filter { assignedWindowIDs.contains($0.key) }
+        variedWindowPreviewIDs.formIntersection(assignedWindowIDs)
+
+        previewCaptureTask = Task { [weak self, windowService] in
+            await windowService.captureWindowImages(windowIDs: windowIDs) { [weak self] capture in
+                metrics.recordCapture(windowID: capture.windowID)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self,
+                          self.previewCaptureGeneration == generation,
+                          self.stageManager.stages.contains(where: { stage in
+                              stage.windows.contains(where: { $0.windowID == capture.windowID })
+                          })
+                    else { return }
+
+                    self.windowPreviews[capture.windowID] = capture.image
+                    if WindowImageStatistics.hasVariedLuminance(capture.image) {
+                        self.variedWindowPreviewIDs.insert(capture.windowID)
+                    } else {
+                        self.variedWindowPreviewIDs.remove(capture.windowID)
+                    }
+                    if self.isStageManagerVisible {
+                        self.notifyOverlayUpdated()
+                    }
                 }
-                _ = PerformanceRecorder.shared.end(captureID, sampleResources: false)
-                if index == 0 { _ = PerformanceRecorder.shared.end(firstID) }
             }
-            if windowIDs.isEmpty { _ = PerformanceRecorder.shared.end(firstID) }
-            _ = PerformanceRecorder.shared.end(batchID)
-            self.diag.report("preview_capture_completed", level: .transient, details: [
+            let capturedCount = metrics.finish()
+            DiagnosticReporter.shared.report("preview_capture_completed", level: .transient, details: [
                 "requested": "\(windowIDs.count)",
-                "captured": "\(refreshedPreviews.count)",
+                "captured": "\(capturedCount)",
             ])
 
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-
-                // A missing capture can mean that a window is merely hidden, so
-                // retain its last good preview. Remove only windows no longer assigned.
-                let liveWindowIDs = Set(
-                    self.stageManager.stages.flatMap { $0.windows.map(\.windowID) }
-                )
-                self.windowPreviews = self.windowPreviews.filter {
-                    liveWindowIDs.contains($0.key)
-                }
-                for (windowID, image) in refreshedPreviews where liveWindowIDs.contains(windowID) {
-                    self.windowPreviews[windowID] = image
-                }
-
-                if self.isStageManagerVisible {
-                    self.notifyOverlayUpdated()
-                }
+                guard let self,
+                      self.previewCaptureGeneration == generation,
+                      self.isStageManagerVisible
+                else { return }
+                self.notifyOverlayUpdated()
             }
         }
     }

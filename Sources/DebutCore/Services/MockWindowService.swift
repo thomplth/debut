@@ -19,8 +19,14 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public func listUntrackableWindowIDs() -> Set<CGWindowID> { untrackableWindowIDList }
     public func listAllWindowIDs() -> Set<CGWindowID>? { allWindowIDList }
 
-    public func captureWindowImage(windowID: CGWindowID) -> CGImage? {
-        capturedImages[windowID]
+    public func captureWindowImages(
+        windowIDs: [CGWindowID],
+        onCapture: @escaping @Sendable (WindowImageCapture) -> Void
+    ) async {
+        for windowID in windowIDs {
+            guard let image = capturedImages[windowID] else { continue }
+            onCapture(WindowImageCapture(windowID: windowID, image: image))
+        }
     }
 
     public func raiseWindow(windowID: CGWindowID) -> Bool {

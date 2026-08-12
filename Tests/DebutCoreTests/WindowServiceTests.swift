@@ -31,10 +31,23 @@ struct WindowServiceTests {
     }
 
     @Test("Disabled live previews do not request screen capture")
-    func disabledLivePreviewsAvoidCapture() {
+    func disabledLivePreviewsAvoidCapture() async {
         let service = AccessibilityWindowService(windowCaptureEnabled: false)
+        let counter = CaptureCounter()
 
-        #expect(service.captureWindowImage(windowID: kCGNullWindowID) == nil)
+        await service.captureWindowImages(windowIDs: [kCGNullWindowID]) { _ in
+            counter.increment()
+        }
+        #expect(counter.value == 0)
+    }
+
+    @Test("Preview validation checks pixels rather than image presence")
+    func previewValidationChecksPixelVariation() throws {
+        let uniform = try #require(makeImage(bytes: [127, 127]))
+        let varied = try #require(makeImage(bytes: [0, 255]))
+
+        #expect(!WindowImageStatistics.hasVariedLuminance(uniform))
+        #expect(WindowImageStatistics.hasVariedLuminance(varied))
     }
 
     @Test("List running apps")
@@ -126,4 +139,30 @@ struct WindowServiceTests {
 
         #expect(scanCount == 1)
     }
+}
+
+private func makeImage(bytes: [UInt8]) -> CGImage? {
+    let colorSpace = CGColorSpaceCreateDeviceGray()
+    guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+    return CGImage(
+        width: bytes.count,
+        height: 1,
+        bitsPerComponent: 8,
+        bitsPerPixel: 8,
+        bytesPerRow: bytes.count,
+        space: colorSpace,
+        bitmapInfo: CGBitmapInfo(rawValue: 0),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent
+    )
+}
+
+private final class CaptureCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue = 0
+
+    var value: Int { lock.withLock { storedValue } }
+    func increment() { lock.withLock { storedValue += 1 } }
 }

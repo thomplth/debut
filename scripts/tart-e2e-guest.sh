@@ -61,6 +61,22 @@ grant_accessibility() {
 'kTCCServiceAccessibility','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
+grant_screen_capture() {
+    local client="$1"
+    local signed_path="$2"
+    local requirement csreq_hex escaped_client timestamp
+
+    requirement="$(codesign -d -r- "$signed_path" 2>&1 | awk -F ' => ' '/designated/{print $2}')"
+    csreq_hex="$(printf '%s' "$requirement" | csreq -r- -b /dev/stdout | xxd -p | tr -d '\n')"
+    escaped_client="${client//\'/\'\'}"
+    timestamp="$(date +%s)"
+
+    sudo sqlite3 "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+'kTCCServiceScreenCapture','$escaped_client',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+    sqlite3 "$USER_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+'kTCCServiceScreenCapture','$escaped_client',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+}
+
 grant_post_event() {
     local client="$1"
     local signed_path="${2:-}"
@@ -132,8 +148,9 @@ echo "Installing the host build in the isolated guest..."
 sudo rm -rf "$APP_PATH"
 sudo ditto -x -k "$APP_ARCHIVE" /Applications
 
-echo "Granting Accessibility to Debut and the E2E input driver..."
+echo "Granting Screen Recording and Accessibility to Debut and the E2E input driver..."
 grant_accessibility "com.thomplth.Debut" 0 "$APP_PATH"
+grant_screen_capture "com.thomplth.Debut" "$APP_PATH"
 grant_accessibility "$E2E_SOURCE" 1 "$E2E_SOURCE"
 grant_post_event "$E2E_SOURCE" "$E2E_SOURCE"
 sudo killall tccd 2>/dev/null || true
@@ -147,7 +164,6 @@ printf 'Debut E2E fixture one\n' > "$FIXTURE_DIR/one.txt"
 printf 'Debut E2E fixture two\n' > "$FIXTURE_DIR/two.txt"
 chown -R "$console_user" "$FIXTURE_DIR"
 
-as_console launchctl setenv DEBUT_DISABLE_WINDOW_PREVIEWS 1
 as_console open -na TextEdit "$FIXTURE_DIR/one.txt"
 as_console open -na TextEdit "$FIXTURE_DIR/two.txt"
 wait_for_fixture_apps

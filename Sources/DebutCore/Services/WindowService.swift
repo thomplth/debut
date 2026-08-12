@@ -35,12 +35,63 @@ public struct AppInfo: Sendable, Equatable {
     }
 }
 
+public struct WindowImageCapture: @unchecked Sendable {
+    public let windowID: CGWindowID
+    public let image: CGImage
+
+    public init(windowID: CGWindowID, image: CGImage) {
+        self.windowID = windowID
+        self.image = image
+    }
+}
+
+enum WindowImageStatistics {
+    static func hasVariedLuminance(_ image: CGImage, sampleSize: Int = 16) -> Bool {
+        let width = min(sampleSize, image.width)
+        let height = min(sampleSize, image.height)
+        guard width > 0, height > 0 else { return false }
+
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        return pixels.withUnsafeMutableBytes { buffer in
+            guard let base = buffer.baseAddress,
+                  let context = CGContext(
+                      data: base,
+                      width: width,
+                      height: height,
+                      bitsPerComponent: 8,
+                      bytesPerRow: width * 4,
+                      space: CGColorSpaceCreateDeviceRGB(),
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  )
+            else { return false }
+
+            context.interpolationQuality = .none
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+            let bytes = buffer.bindMemory(to: UInt8.self)
+            var minimum = UInt16.max
+            var maximum = UInt16.min
+            for pixel in stride(from: 0, to: bytes.count, by: 4) {
+                let luminance = UInt16(bytes[pixel])
+                    + UInt16(bytes[pixel + 1])
+                    + UInt16(bytes[pixel + 2])
+                minimum = min(minimum, luminance)
+                maximum = max(maximum, luminance)
+            }
+            return maximum > minimum
+        }
+    }
+}
+
 public protocol WindowService: Sendable {
     func listRunningApps() -> [AppInfo]
     func listWindows() -> [WindowInfo]
     func listUntrackableWindowIDs() -> Set<CGWindowID>
     func listAllWindowIDs() -> Set<CGWindowID>?
-    func captureWindowImage(windowID: CGWindowID) -> CGImage?
+    func captureWindowImages(
+        windowIDs: [CGWindowID],
+        onCapture: @escaping @Sendable (WindowImageCapture) -> Void
+    ) async
     func raiseWindow(windowID: CGWindowID) -> Bool
     func activateApp(bundleID: String) -> Bool
     func isAccessibilityEnabled() -> Bool
