@@ -142,17 +142,23 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Assignments from stopped processes become dormant rather than being deleted.
     /// Unmatched live windows go to the first stage.
     public func reconcileWindows(_ stageManager: inout StageManager) {
+        let discoveryID = PerformanceRecorder.shared.begin(.windowDiscovery)
         let liveWindows = windowService.listWindows().filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
         let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
         let runningApps = windowService.listRunningApps()
+        _ = PerformanceRecorder.shared.end(discoveryID)
 
         // Explicit AX classification identifies dialogs, floating windows, and
         // auxiliary UI — but it is a snapshot, not a verdict. An app still
         // warming up can describe a standard window this way, and deleting the
         // assignment would make that momentary misreport permanent. Park the
         // placement instead; a later snapshot reclaims it.
+        let classificationID = PerformanceRecorder.shared.begin(
+            .windowClassification,
+            workload: .init(windows: liveWindows.count)
+        )
         var untrackableDormantCount = 0
         for stage in stageManager.stages {
             for windowID in stage.windowIDs where untrackableWindowIDs.contains(windowID) {
@@ -167,6 +173,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 ])
             }
         }
+        _ = PerformanceRecorder.shared.end(classificationID)
 
         // An empty snapshot while regular apps are running usually means AX window
         // enumeration failed. Treating it as authoritative would erase every saved

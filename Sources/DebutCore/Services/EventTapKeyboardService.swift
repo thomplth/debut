@@ -175,6 +175,8 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         event: CGEvent,
         deliverAsynchronously: Bool
     ) -> CGEvent? {
+        let performanceID = PerformanceRecorder.shared.begin(.eventTap)
+        defer { PerformanceRecorder.shared.end(performanceID, sampleResources: false) }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
@@ -381,11 +383,14 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     }
 
     private func deliver(_ event: DebutKeyEvent, asynchronously: Bool) {
+        let deliveryID = PerformanceRecorder.shared.begin(.mainQueueDelivery)
         if asynchronously {
             DispatchQueue.main.async { [weak self] in
+                _ = PerformanceRecorder.shared.end(deliveryID, sampleResources: false)
                 self?.delegate?.handleKeyEvent(event)
             }
         } else {
+            _ = PerformanceRecorder.shared.end(deliveryID, sampleResources: false)
             delegate?.handleKeyEvent(event)
         }
     }

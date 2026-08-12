@@ -24,6 +24,15 @@ public final class StateStore: Sendable {
     // MARK: - Stage state
 
     public func save(_ manager: StageManager) throws {
+        let performanceID = PerformanceRecorder.shared.begin(
+            .statePersistence,
+            workload: .init(
+                stages: manager.stages.count,
+                windows: manager.stages.reduce(0) { $0 + $1.windows.count },
+                dormantWindows: manager.dormantWindowAssignments.count
+            )
+        )
+        defer { PerformanceRecorder.shared.end(performanceID) }
         try ensureDirectory()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -51,6 +60,8 @@ public final class StateStore: Sendable {
     // MARK: - Settings
 
     public func saveSettings(_ settings: AppSettings) throws {
+        let performanceID = PerformanceRecorder.shared.begin(.statePersistence)
+        defer { PerformanceRecorder.shared.end(performanceID) }
         try ensureDirectory()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

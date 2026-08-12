@@ -53,21 +53,32 @@ public final class OnboardingViewModel {
     public private(set) var page: OnboardingPage = .welcome
     public private(set) var tutorialStep: OnboardingTutorialStep = .switchWindows
     public private(set) var permissions: OnboardingPermissionState
+    public private(set) var shareAnonymousTelemetry: Bool
 
     private let permissionClient: any OnboardingPermissionClient
     private let onPermissionStateChanged: @MainActor (OnboardingPermissionState) -> Void
     private let onCompleted: @MainActor () -> Void
+    private let onTelemetryChanged: @MainActor (Bool) -> Void
     private var didComplete = false
 
     public init(
         permissionClient: any OnboardingPermissionClient,
+        shareAnonymousTelemetry: Bool = true,
+        onTelemetryChanged: @escaping @MainActor (Bool) -> Void = { _ in },
         onPermissionStateChanged: @escaping @MainActor (OnboardingPermissionState) -> Void = { _ in },
         onCompleted: @escaping @MainActor () -> Void = {}
     ) {
         self.permissionClient = permissionClient
         self.permissions = permissionClient.currentState()
+        self.shareAnonymousTelemetry = shareAnonymousTelemetry
+        self.onTelemetryChanged = onTelemetryChanged
         self.onPermissionStateChanged = onPermissionStateChanged
         self.onCompleted = onCompleted
+    }
+
+    public func setShareAnonymousTelemetry(_ enabled: Bool) {
+        shareAnonymousTelemetry = enabled
+        onTelemetryChanged(enabled)
     }
 
     public var canStartTutorial: Bool {
