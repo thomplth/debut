@@ -136,6 +136,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self?.recordCommandUsage(action)
             }
         }
+        controller.onDesktopReveal = { [weak self] in
+            DispatchQueue.main.async {
+                self?.desktopSurfaces?.orderOut()
+                NSWorkspace.shared.hideOtherApplications()
+                self?.diag.report("real_desktop_presented")
+            }
+        }
         stageController = controller
 
         keyboardService.keyBindings = currentSettings.keyBindings
@@ -408,6 +415,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 "stageIndex": stageIndex.map(String.init) ?? "none",
                 "windowIndex": windowIndex.map(String.init) ?? "none",
             ])
+        }
+
+        overlayWindow.onDesktopSelected = { [weak self] in
+            self?.stageController?.revealDesktop()
         }
 
         let vm = OverlayViewModel(

@@ -467,6 +467,12 @@ public final class DesktopSurfaceCoordinator {
         }
     }
 
+    public func orderOut() {
+        for surface in surfaces.values {
+            surface.dismiss()
+        }
+    }
+
     /// Recapture without reordering, for when an already-visible surface is about to be looked at.
     public func refreshWallpaper() {
         for surface in surfaces.values {

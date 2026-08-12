@@ -668,6 +668,23 @@ struct PlateMotionTests {
         #expect(PlateInteraction.pointerSelection(current: second, target: second, isHovering: false) == nil)
     }
 
+    @Test("Only points outside every plate select the desktop")
+    func desktopAreaSelection() {
+        let plateFrames = [
+            0: CGRect(x: 300, y: 200, width: 400, height: 300),
+            1: CGRect(x: 350, y: 540, width: 300, height: 200),
+        ]
+
+        #expect(PlateInteraction.isDesktopArea(
+            CGPoint(x: 100, y: 100),
+            plateFrames: plateFrames
+        ))
+        #expect(!PlateInteraction.isDesktopArea(
+            CGPoint(x: 500, y: 350),
+            plateFrames: plateFrames
+        ))
+    }
+
     @Test("A stationary pointer is ignored until it moves after the overlay appears")
     func stationaryPointerDoesNotSelect() {
         var gate = PointerMovementGate()

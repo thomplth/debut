@@ -333,6 +333,19 @@ struct StageControllerTests {
         #expect(controller.stageManager.activeStageID == originalStageID)
     }
 
+    @Test("Desktop selection closes the overlay and requests the real desktop")
+    func desktopSelectionRevealsDesktop() {
+        let (controller, _, keyboardSvc) = makeController()
+        var revealCount = 0
+        controller.onDesktopReveal = { revealCount += 1 }
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        controller.revealDesktop()
+
+        #expect(!controller.isStageManagerVisible)
+        #expect(revealCount == 1)
+    }
+
     @Test("Held Tab stops at the last window and a fresh press wraps")
     func tabCycle() {
         let (controller, _, keyboardSvc) = makeController()
