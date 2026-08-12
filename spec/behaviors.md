@@ -64,8 +64,9 @@ above it through AX. Inactive windows keep their positions and are simply
 occluded — no minimize animation, no position manipulation. Focus moves to the
 selected window, and the new stage becomes the reference for later switching.
 
-The surface is inert: it cannot become key or main, ignores mouse-down, and is
-not movable.
+The surface cannot become key or main, ignores mouse-down, and is not movable.
+When a file URL drag enters it, Debut yields the surface and other applications
+so Finder's real desktop becomes the drop destination while the drag is still active.
 
 ## MRU ordering
 
