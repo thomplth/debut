@@ -183,6 +183,27 @@ struct ScreenshotTests {
         ) < 0.5)
     }
 
+    @Test("Cross-stage drag grows the target plate before drop")
+    func crossStageDragFocusesTargetPlate() throws {
+        let vm = makeSampleViewModel(stageCount: 2, windowsPerStage: [2, 2], activeIndex: 0)
+        let size = NSSize(width: 1200, height: 500)
+        let drag = WindowDragState(
+            windowID: vm.plates[0].windows[0].id,
+            sourceStageIndex: 0,
+            sourceWindowIndex: 0,
+            location: CGPoint(x: 600, y: 330),
+            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 0)
+        )
+        let idle = renderPlateFrames(OverlaySwiftUIView(viewModel: vm), size: size)
+        let dragging = renderPlateFrames(
+            OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag),
+            size: size
+        )
+
+        #expect(idle[0]!.width > idle[1]!.width)
+        #expect(dragging[1]!.width > dragging[0]!.width)
+    }
+
     @Test("Onboarding welcome screen")
     func onboardingWelcome() throws {
         let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())
