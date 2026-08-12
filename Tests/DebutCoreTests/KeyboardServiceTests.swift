@@ -376,6 +376,24 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdOptionTabHold])
     }
 
+    @Test("Cmd+Option+backtick opens the previous-stage direction")
+    func cmdOptionBacktick() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let event = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Grave),
+            keyDown: true
+        )!
+        event.flags = [.maskCommand, .maskAlternate]
+
+        #expect(service.handleCGEvent(type: .keyDown, event: event) == nil)
+        #expect(delegate.receivedEvents == [.cmdOptionShiftTabHold])
+    }
+
     @Test("Cmd+Q passes through while the overlay is visible")
     func commandQPassesThroughVisibleOverlay() {
         let service = EventTapKeyboardService()
