@@ -262,40 +262,40 @@ enum PlateInteraction {
         previous: Int?,
         at location: CGPoint,
         containerWidth: CGFloat,
-        stackOffset: CGFloat,
+        currentStackOffset: CGFloat,
         plateWidths: [CGFloat],
-        layout: PlateStackLayout
+        currentLayout: PlateStackLayout
     ) -> Int? {
-        guard plateWidths.count == layout.centers.count,
-              layout.scales.count == layout.centers.count,
-              layout.heights.count == layout.centers.count
+        guard plateWidths.count == currentLayout.centers.count,
+              currentLayout.scales.count == currentLayout.centers.count,
+              currentLayout.heights.count == currentLayout.centers.count
         else { return nil }
 
         if let hit = stageIndex(
             at: location,
             containerWidth: containerWidth,
-            stackOffset: stackOffset,
+            stackOffset: currentStackOffset,
             plateWidths: plateWidths,
-            layout: layout
+            layout: currentLayout
         ) {
             return hit
         }
 
-        for upperIndex in layout.centers.indices.dropLast() {
+        for upperIndex in currentLayout.centers.indices.dropLast() {
             let lowerIndex = upperIndex + 1
             let upperFrame = plateFrame(
                 at: upperIndex,
                 containerWidth: containerWidth,
-                stackOffset: stackOffset,
+                stackOffset: currentStackOffset,
                 plateWidths: plateWidths,
-                layout: layout
+                layout: currentLayout
             )
             let lowerFrame = plateFrame(
                 at: lowerIndex,
                 containerWidth: containerWidth,
-                stackOffset: stackOffset,
+                stackOffset: currentStackOffset,
                 plateWidths: plateWidths,
-                layout: layout
+                layout: currentLayout
             )
             let gapHeight = lowerFrame.minY - upperFrame.maxY
             guard gapHeight > 0,
@@ -739,9 +739,9 @@ public struct OverlaySwiftUIView: View {
                         previous: hoveredStageIndex,
                         at: location,
                         containerWidth: geo.size.width,
-                        stackOffset: baselineOffset,
+                        currentStackOffset: yOffset,
                         plateWidths: plateWidths,
-                        layout: baselineLayout
+                        currentLayout: visualLayout
                     )
                 case .ended:
                     hoverPointerY = nil
