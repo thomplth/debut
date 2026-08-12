@@ -268,13 +268,24 @@ public struct StageManager: Codable, Sendable {
         return true
     }
 
-    public mutating func moveWindow(windowID: CGWindowID, fromStageID: UUID, toStageID: UUID) {
+    /// Moves a window and, when supplied, inserts it at its new MRU position.
+    public mutating func moveWindow(
+        windowID: CGWindowID,
+        fromStageID: UUID,
+        toStageID: UUID,
+        at windowIndex: Int? = nil
+    ) {
         guard let fromIndex = stages.firstIndex(where: { $0.id == fromStageID }),
               let toIndex = stages.firstIndex(where: { $0.id == toStageID }),
               let window = stages[fromIndex].windows.first(where: { $0.windowID == windowID })
         else { return }
+        guard fromIndex != toIndex || windowIndex != nil else { return }
         stages[fromIndex].removeWindow(windowID: windowID)
-        stages[toIndex].addWindow(window)
+        if let windowIndex {
+            stages[toIndex].insertWindow(window, at: windowIndex)
+        } else {
+            stages[toIndex].addWindow(window)
+        }
     }
 
     public mutating func bringWindowToFront(windowID: CGWindowID, inStageID stageID: UUID) {
