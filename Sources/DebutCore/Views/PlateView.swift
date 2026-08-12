@@ -80,6 +80,14 @@ enum PlateMotion {
             : .spring(duration: 0.294, bounce: 0.06)
     }
 
+    static func windowReorderTransition(
+        reduceMotion: Bool,
+        hasActiveDrag: Bool
+    ) -> PlateFocusTransition? {
+        guard hasActiveDrag else { return nil }
+        return windowReorderTransition(reduceMotion: reduceMotion)
+    }
+
     static func lift(isActive: Bool) -> PlateLift {
         isActive
             ? PlateLift(shadowOpacity: 0.22, shadowRadius: 18, shadowY: 8)
@@ -774,6 +782,10 @@ public struct OverlaySwiftUIView: View {
             let windowReorderTransition = PlateMotion.windowReorderTransition(
                 reduceMotion: reduceMotion
             )
+            let activeWindowReorderTransition = PlateMotion.windowReorderTransition(
+                reduceMotion: reduceMotion,
+                hasActiveDrag: windowDrag != nil
+            )
             let dragTargetIndex = windowDrag?.dropTarget?.stageIndex
                 ?? stageDrag?.destinationIndex
                 ?? stageDrag?.stageIndex
@@ -957,7 +969,7 @@ public struct OverlaySwiftUIView: View {
             .animation(focusTransition.animation, value: layoutAnimationKey)
             .animation(focusTransition.animation, value: hoveredStageIndex)
             .animation(focusTransition.animation, value: pointerSelection)
-            .animation(windowReorderTransition.animation, value: windowDrag?.dropTarget)
+            .animation(activeWindowReorderTransition?.animation, value: windowDrag?.dropTarget)
             .animation(focusTransition.animation, value: stageDrag?.destinationIndex)
             .coordinateSpace(name: "overlay")
             .simultaneousGesture(

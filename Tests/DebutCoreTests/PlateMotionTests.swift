@@ -49,6 +49,22 @@ struct PlateMotionTests {
         )
     }
 
+    @Test("Window reorder motion stops when drag state is cleared")
+    func windowReorderMotionEndsWithDrag() {
+        #expect(
+            PlateMotion.windowReorderTransition(
+                reduceMotion: false,
+                hasActiveDrag: true
+            ) == .spring(duration: 0.294, bounce: 0.06)
+        )
+        #expect(
+            PlateMotion.windowReorderTransition(
+                reduceMotion: false,
+                hasActiveDrag: false
+            ) == nil
+        )
+    }
+
     @Test("Drag hides the stationary card and keeps the cursor preview opaque")
     func dragPreviewVisibility() {
         #expect(PlateMotion.sourceWindowOpacity(isDragging: false) == 1)
