@@ -22,6 +22,16 @@ struct WindowMoveRequest: Equatable {
     let toWindowIndex: Int
 }
 
+struct WindowDropSettlingState {
+    let request: WindowMoveRequest
+    let window: PlateWindowData
+    let destination: CGPoint
+}
+
+struct WindowLayoutKey: Equatable {
+    let stageWindowIDs: [[CGWindowID]]
+}
+
 struct StageDragState: Equatable {
     let stageIndex: Int
     let stageID: UUID
