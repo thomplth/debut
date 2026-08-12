@@ -41,6 +41,17 @@ struct ScreenshotTests {
         return frames
     }
 
+    private func renderWindowFrames<V: View>(_ view: V, size: NSSize) -> [WindowFrameID: CGRect] {
+        var frames: [WindowFrameID: CGRect] = [:]
+        let rootView = view
+            .frame(width: size.width, height: size.height)
+            .onPreferenceChange(WindowFramePreferenceKey.self) { frames = $0 }
+        let hostingView = NSHostingView(rootView: rootView)
+        hostingView.frame = NSRect(origin: .zero, size: size)
+        hostingView.layoutSubtreeIfNeeded()
+        return frames
+    }
+
     private func saveImage(_ image: NSImage, name: String) throws {
         let url = Self.outputDir.appendingPathComponent("\(name).png")
         guard let tiff = image.tiffRepresentation,
@@ -147,6 +158,29 @@ struct ScreenshotTests {
             throw ScreenshotError.renderFailed
         }
         #expect(abs(idleFrame.midY - draggingFrame.midY) < 0.5)
+    }
+
+    @Test("Window frame preferences remain stable drag-slot anchors")
+    func windowFramesRemainStableDragSlotAnchors() throws {
+        let vm = makeSampleViewModel(stageCount: 1, windowsPerStage: [3], activeIndex: 0)
+        let size = NSSize(width: 1200, height: 400)
+        let drag = WindowDragState(
+            windowID: vm.plates[0].windows[0].id,
+            sourceStageIndex: 0,
+            sourceWindowIndex: 0,
+            location: CGPoint(x: 600, y: 200),
+            dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 2)
+        )
+        let idle = renderWindowFrames(OverlaySwiftUIView(viewModel: vm), size: size)
+        let dragging = renderWindowFrames(
+            OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag),
+            size: size
+        )
+
+        #expect(abs(
+            dragging[WindowFrameID(stageIndex: 0, windowIndex: 0)]!.midX
+                - idle[WindowFrameID(stageIndex: 0, windowIndex: 0)]!.midX
+        ) < 0.5)
     }
 
     @Test("Onboarding welcome screen")
