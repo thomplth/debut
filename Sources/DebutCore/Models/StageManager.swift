@@ -225,6 +225,29 @@ public struct StageManager: Codable, Sendable {
         return assignments.count
     }
 
+    /// Sets one window's placement aside instead of discarding it. AX can
+    /// misreport a live window as auxiliary UI, and a deletion makes that
+    /// misreport permanent; a dormant assignment is reclaimed by the next
+    /// snapshot that sees the window normally.
+    @discardableResult
+    public mutating func makeWindowDormant(windowID: CGWindowID) -> DormantWindowAssignment? {
+        for stageIndex in stages.indices {
+            guard let windowIndex = stages[stageIndex].windows.firstIndex(where: {
+                $0.windowID == windowID
+            }) else { continue }
+            let assignment = DormantWindowAssignment(
+                stageID: stages[stageIndex].id,
+                windowIndex: windowIndex,
+                window: stages[stageIndex].windows[windowIndex]
+            )
+            stages[stageIndex].removeWindow(windowID: windowID)
+            dormantWindowAssignments.removeAll { $0.id == assignment.id }
+            dormantWindowAssignments.append(assignment)
+            return assignment
+        }
+        return nil
+    }
+
     @discardableResult
     public mutating func restoreDormantWindow(
         assignmentID: UUID,

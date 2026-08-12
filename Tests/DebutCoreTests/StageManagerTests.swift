@@ -249,6 +249,26 @@ struct StageManagerTests {
         #expect(sm.dormantWindowAssignments.map(\.window.windowID) == [101, 102])
     }
 
+    @Test("A single window can be made dormant without disturbing its neighbours")
+    func makeWindowDormantPreservesPlacement() {
+        var sm = StageManager()
+        let stage1 = sm.activeStageID
+        sm.createStage(position: .below)
+        let stage2 = sm.activeStageID
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toStageID: stage2)
+        sm.addWindow(StageWindow(windowID: 102, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Two", ownerPID: 10), toStageID: stage2)
+        sm.addWindow(StageWindow(windowID: 103, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Three", ownerPID: 10), toStageID: stage2)
+
+        let assignment = sm.makeWindowDormant(windowID: 102)
+
+        #expect(assignment?.stageID == stage2)
+        #expect(assignment?.windowIndex == 1)
+        #expect(sm.stages.first(where: { $0.id == stage2 })?.windows.map(\.windowID) == [101, 103])
+        #expect(sm.dormantWindowAssignments.map(\.window.windowID) == [102])
+        #expect(sm.makeWindowDormant(windowID: 999) == nil)
+        #expect(sm.stages.first(where: { $0.id == stage1 })?.windows.isEmpty == true)
+    }
+
     @Test("Dormant assignments survive persistence and legacy state still decodes")
     func dormantAssignmentsAreCodableAndForwardCompatible() throws {
         var sm = StageManager()
