@@ -54,13 +54,22 @@ struct PlateMotionTests {
         #expect(
             PlateMotion.windowReorderTransition(
                 reduceMotion: false,
-                hasActiveDrag: true
+                hasActiveDrag: true,
+                isFinishingDrop: false
             ) == .spring(duration: 0.294, bounce: 0.06)
         )
         #expect(
             PlateMotion.windowReorderTransition(
                 reduceMotion: false,
-                hasActiveDrag: false
+                hasActiveDrag: true,
+                isFinishingDrop: true
+            ) == nil
+        )
+        #expect(
+            PlateMotion.windowReorderTransition(
+                reduceMotion: false,
+                hasActiveDrag: false,
+                isFinishingDrop: false
             ) == nil
         )
     }
