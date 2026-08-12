@@ -191,9 +191,14 @@ enum PlateInteraction {
         hypot(translation.width, translation.height) < minimumDragDistance
     }
 
-    static func shouldMoveWindow(fromStageIndex: Int, toStageIndex: Int?) -> Bool {
-        guard let toStageIndex else { return false }
-        return fromStageIndex != toStageIndex
+    static func shouldMoveWindow(
+        fromStageIndex: Int,
+        fromWindowIndex: Int,
+        to target: WindowDropTarget?
+    ) -> Bool {
+        guard let target else { return false }
+        return target.stageIndex != fromStageIndex
+            || target.windowIndex != fromWindowIndex
     }
 
     static func finishWindowDrag(
@@ -203,14 +208,40 @@ enum PlateInteraction {
         windowDrag = nil
         guard shouldMoveWindow(
             fromStageIndex: completedDrag.sourceStageIndex,
-            toStageIndex: completedDrag.dropTargetStageIndex
-        ), let targetStageIndex = completedDrag.dropTargetStageIndex
+            fromWindowIndex: completedDrag.sourceWindowIndex,
+            to: completedDrag.dropTarget
+        ), let target = completedDrag.dropTarget
         else { return nil }
         return WindowMoveRequest(
             windowID: completedDrag.windowID,
             fromStageIndex: completedDrag.sourceStageIndex,
-            toStageIndex: targetStageIndex
+            fromWindowIndex: completedDrag.sourceWindowIndex,
+            toStageIndex: target.stageIndex,
+            toWindowIndex: target.windowIndex
         )
+    }
+
+    static func windowDropTarget(
+        at location: CGPoint,
+        sourceStageIndex: Int,
+        sourceWindowIndex: Int,
+        plateFrames: [Int: CGRect],
+        windowFrames: [WindowFrameID: CGRect]
+    ) -> WindowDropTarget? {
+        guard let stageIndex = plateFrames.keys.sorted().first(where: {
+            plateFrames[$0]?.contains(location) == true
+        }) else { return nil }
+
+        let destinationFrames = windowFrames
+            .filter { id, _ in
+                id.stageIndex == stageIndex
+                    && !(stageIndex == sourceStageIndex && id.windowIndex == sourceWindowIndex)
+            }
+            .sorted { $0.key.windowIndex < $1.key.windowIndex }
+        let insertionIndex = destinationFrames.firstIndex(where: {
+            location.x < $0.value.midX
+        }) ?? destinationFrames.count
+        return WindowDropTarget(stageIndex: stageIndex, windowIndex: insertionIndex)
     }
 
     static func stageDestination(
@@ -444,7 +475,7 @@ public struct PlateConstants {
 public struct OverlaySwiftUIView: View {
     public let viewModel: OverlayViewModel
     public var onWindowSelected: ((Int, Int) -> Void)?
-    public var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
+    public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
     public var onStageReordered: ((Int, Int) -> Void)?
     public var onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
@@ -454,6 +485,7 @@ public struct OverlaySwiftUIView: View {
     @State private var pointerSelection: PointerSelection?
     @State private var pointerMovementGate: PointerMovementGate
     @State private var plateFrames: [Int: CGRect] = [:]
+    @State private var windowFrames: [WindowFrameID: CGRect] = [:]
     @State private var revealedStageHandleIndex: Int?
     @State private var hoveredStageIndex: Int?
     @State private var hoverPointerY: CGFloat?
@@ -462,7 +494,7 @@ public struct OverlaySwiftUIView: View {
     public init(
         viewModel: OverlayViewModel,
         onWindowSelected: ((Int, Int) -> Void)? = nil,
-        onWindowMoved: ((CGWindowID, Int, Int) -> Void)? = nil,
+        onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
         onStageReordered: ((Int, Int) -> Void)? = nil,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil
@@ -482,7 +514,7 @@ public struct OverlaySwiftUIView: View {
         viewModel: OverlayViewModel,
         initialWindowDrag: WindowDragState,
         onWindowSelected: ((Int, Int) -> Void)? = nil,
-        onWindowMoved: ((CGWindowID, Int, Int) -> Void)? = nil,
+        onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
         onStageReordered: ((Int, Int) -> Void)? = nil,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil
@@ -502,7 +534,7 @@ public struct OverlaySwiftUIView: View {
         viewModel: OverlayViewModel,
         initialWindowDrag: WindowDragState?,
         onWindowSelected: ((Int, Int) -> Void)?,
-        onWindowMoved: ((CGWindowID, Int, Int) -> Void)?,
+        onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?,
         onStageReordered: ((Int, Int) -> Void)?,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)?
@@ -550,7 +582,7 @@ public struct OverlaySwiftUIView: View {
                 hasVisibleFooterHints: !activeFooterHints.isEmpty
             )
             let focusTransition = PlateMotion.focusTransition(reduceMotion: reduceMotion)
-            let dragTargetIndex = windowDrag?.dropTargetStageIndex
+            let dragTargetIndex = windowDrag?.dropTarget?.stageIndex
                 ?? stageDrag?.destinationIndex
                 ?? stageDrag?.stageIndex
             let focusedStageIndex = PlateMotion.focusedStageIndex(
@@ -624,6 +656,7 @@ public struct OverlaySwiftUIView: View {
                             isStageHandleRevealed: isStageHandleRevealed,
                             windowDrag: $windowDrag,
                             plateFrames: $plateFrames,
+                            windowFrames: $windowFrames,
                             stageIndex: index,
                             onPointerSelectionChanged: { selection, isHovering, location in
                                 if isHovering && !pointerMovementGate.observe(at: location) {
@@ -722,11 +755,14 @@ public struct OverlaySwiftUIView: View {
             .animation(focusTransition.animation, value: viewModel.activeStageIndex)
             .animation(focusTransition.animation, value: hoveredStageIndex)
             .animation(focusTransition.animation, value: pointerSelection)
-            .animation(focusTransition.animation, value: windowDrag?.dropTargetStageIndex)
+            .animation(focusTransition.animation, value: windowDrag?.dropTarget)
             .animation(focusTransition.animation, value: stageDrag?.destinationIndex)
             .coordinateSpace(name: "overlay")
             .onPreferenceChange(PlateFramePreferenceKey.self) { frames in
                 plateFrames = frames
+            }
+            .onPreferenceChange(WindowFramePreferenceKey.self) { frames in
+                windowFrames = frames
             }
             .onContinuousHover(coordinateSpace: .local) { phase in
                 switch phase {
@@ -807,10 +843,11 @@ struct PlateSwiftUIView: View {
     let isStageHandleRevealed: Bool
     @Binding var windowDrag: WindowDragState?
     @Binding var plateFrames: [Int: CGRect]
+    @Binding var windowFrames: [WindowFrameID: CGRect]
     let stageIndex: Int
     var onPointerSelectionChanged: ((PointerSelection, Bool, CGPoint) -> Void)?
     var onWindowSelected: ((Int, Int) -> Void)?
-    var onWindowMoved: ((CGWindowID, Int, Int) -> Void)?
+    var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
     var onStageHandleHoverChanged: ((Bool) -> Void)?
     var onStageDragChanged: ((CGSize) -> Void)?
     var onStageDragEnded: (() -> Void)?
@@ -842,6 +879,19 @@ struct PlateSwiftUIView: View {
                             )
                         )
                         .opacity(isDragging ? 0.3 : 1.0)
+                        .background(
+                            GeometryReader { windowGeo in
+                                Color.clear.preference(
+                                    key: WindowFramePreferenceKey.self,
+                                    value: [
+                                        WindowFrameID(
+                                            stageIndex: stageIndex,
+                                            windowIndex: index
+                                        ): windowGeo.frame(in: .named("overlay"))
+                                    ]
+                                )
+                            }
+                        )
                         .onContinuousHover { phase in
                             let selection = PointerSelection(
                                 stageIndex: stageIndex,
@@ -939,11 +989,19 @@ struct PlateSwiftUIView: View {
                         sourceStageIndex: stageIndex,
                         sourceWindowIndex: windowIndex,
                         location: value.location,
-                        dropTargetStageIndex: dropTargetIndex(at: value.location)
+                        dropTarget: dropTarget(
+                            at: value.location,
+                            sourceWindowIndex: windowIndex
+                        )
                     )
                 } else {
                     windowDrag?.location = value.location
-                    windowDrag?.dropTargetStageIndex = dropTargetIndex(at: value.location)
+                    if let drag = windowDrag {
+                        windowDrag?.dropTarget = dropTarget(
+                            at: value.location,
+                            sourceWindowIndex: drag.sourceWindowIndex
+                        )
+                    }
                 }
             }
             .onEnded { value in
@@ -957,18 +1015,24 @@ struct PlateSwiftUIView: View {
                 onWindowMoved?(
                     request.windowID,
                     request.fromStageIndex,
-                    request.toStageIndex
+                    request.fromWindowIndex,
+                    request.toStageIndex,
+                    request.toWindowIndex
                 )
             }
     }
 
-    private func dropTargetIndex(at location: CGPoint) -> Int? {
-        for (index, frame) in plateFrames {
-            if frame.contains(location) {
-                return index
-            }
-        }
-        return nil
+    private func dropTarget(
+        at location: CGPoint,
+        sourceWindowIndex: Int
+    ) -> WindowDropTarget? {
+        PlateInteraction.windowDropTarget(
+            at: location,
+            sourceStageIndex: stageIndex,
+            sourceWindowIndex: sourceWindowIndex,
+            plateFrames: plateFrames,
+            windowFrames: windowFrames
+        )
     }
 }
 

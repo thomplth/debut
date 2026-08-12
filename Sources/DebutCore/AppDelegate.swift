@@ -357,20 +357,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             )
         }
 
-        overlayWindow.onWindowMoved = { [weak self] windowID, fromIndex, toIndex in
+        overlayWindow.onWindowMoved = {
+            [weak self] windowID, fromIndex, fromWindowIndex, toIndex, toWindowIndex in
             guard let self, let ctrl = self.stageController else { return }
             let stages = ctrl.stageManager.stages
             guard stages.indices.contains(fromIndex), stages.indices.contains(toIndex) else { return }
             ctrl.stageManager.moveWindow(
                 windowID: windowID,
                 fromStageID: stages[fromIndex].id,
-                toStageID: stages[toIndex].id
+                toStageID: stages[toIndex].id,
+                at: toWindowIndex
             )
             self.debouncedSaver?.scheduleSave(ctrl.stageManager)
             self.diag.report("window_moved_by_drag", details: [
                 "windowID": "\(windowID)",
                 "fromStageIndex": "\(fromIndex)",
+                "fromWindowIndex": "\(fromWindowIndex)",
                 "toStageIndex": "\(toIndex)",
+                "toWindowIndex": "\(toWindowIndex)",
             ])
             // Let SwiftUI finish the drag transaction before replacing its root view.
             DispatchQueue.main.async { [weak self] in

@@ -88,6 +88,45 @@ struct StageManagerTests {
         #expect(sm.stages[1].windows.count == 1)
     }
 
+    @Test("Reorder windows within a stage")
+    func reorderWindowsWithinStage() {
+        var sm = StageManager()
+        let stageID = sm.stages[0].id
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
+        sm.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
+        sm.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageID)
+
+        sm.moveWindow(
+            windowID: 101,
+            fromStageID: stageID,
+            toStageID: stageID,
+            at: 2
+        )
+
+        #expect(sm.stages[0].windows.map(\.windowID) == [202, 303, 101])
+    }
+
+    @Test("Insert a window at any position in another stage")
+    func insertWindowAcrossStages() {
+        var sm = StageManager()
+        sm.createStage(position: .below)
+        let sourceID = sm.stages[0].id
+        let destinationID = sm.stages[1].id
+        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: sourceID)
+        sm.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: destinationID)
+        sm.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: destinationID)
+
+        sm.moveWindow(
+            windowID: 101,
+            fromStageID: sourceID,
+            toStageID: destinationID,
+            at: 1
+        )
+
+        #expect(sm.stages[0].windows.isEmpty)
+        #expect(sm.stages[1].windows.map(\.windowID) == [202, 101, 303])
+    }
+
     @Test("MRU: bringWindowToFront")
     func mru() {
         var sm = StageManager()
