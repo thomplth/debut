@@ -132,6 +132,13 @@ struct PlateMotionTests {
         )
     }
 
+    @Test("Plate surface corner radius scales with its dimensions")
+    func plateSurfaceCornerRadius() {
+        #expect(PlateMotion.plateSurfaceCornerRadius(radius: 22, scale: 1) == 22)
+        #expect(PlateMotion.plateSurfaceCornerRadius(radius: 22, scale: 0.8) == 17.6)
+        #expect(PlateMotion.plateSurfaceCornerRadius(radius: 22, scale: 0.08) == 1.76)
+    }
+
     @Test("Plate opacity stays solid until scale falls below twenty percent")
     func scaleThresholdPlateOpacity() {
         #expect(PlateMotion.plateOpacity(scale: 1) == 1)
