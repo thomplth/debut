@@ -216,14 +216,12 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                     let window = captureWindow.window
                     let filter = SCContentFilter(desktopIndependentWindow: window)
                     let configuration = SCStreamConfiguration()
-                    configuration.width = max(
-                        1,
-                        Int(ceil(filter.contentRect.width * CGFloat(filter.pointPixelScale)))
+                    let pixelSize = PreviewCaptureSize.pixelSize(
+                        contentSize: filter.contentRect.size,
+                        pointPixelScale: CGFloat(filter.pointPixelScale)
                     )
-                    configuration.height = max(
-                        1,
-                        Int(ceil(filter.contentRect.height * CGFloat(filter.pointPixelScale)))
-                    )
+                    configuration.width = pixelSize.width
+                    configuration.height = pixelSize.height
                     configuration.showsCursor = false
                     configuration.captureResolution = .best
 
