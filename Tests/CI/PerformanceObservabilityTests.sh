@@ -18,5 +18,8 @@ grep -q 'window titles' docs/privacy.md
 grep -q 'PrivacyInfo.xcprivacy' scripts/build-app.sh
 grep -q 'DEBUT_PERFORMANCE_PROFILE' Sources/DebutPerformanceFixture/main.swift
 grep -q 'preview-50' scripts/tart-performance-guest.sh
+grep -q 'overlay-end-to-end-visible' scripts/tart-performance-guest.sh
+grep -q 'overlay-render-submission' scripts/tart-performance-guest.sh
+! grep -q 'overlay-first-frame' scripts/tart-performance-guest.sh
 
 echo "Performance observability repository contract passed."

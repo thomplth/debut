@@ -66,7 +66,7 @@ as_console open "$APP"
 sleep 8
 diagnostic="$console_home/Library/Application Support/Debut/diagnostic.json"
 as_console "$FIXTURE" --drive "$RESULTS/input-$PROFILE.jsonl"
-for scenario in launch-restore overlay-first-frame first-preview all-previews preview-1 preview-5 preview-10 preview-21 preview-50 selection-cycle stage-switch hidden-idle-45s cycles-100 process-exit title-change ax-timeout wallpaper-capture wallpaper-cancellation; do
+for scenario in launch-restore overlay-end-to-end-visible overlay-render-submission first-preview all-previews preview-1 preview-5 preview-10 preview-21 preview-50 selection-cycle stage-switch hidden-idle-45s cycles-100 process-exit title-change ax-timeout wallpaper-capture wallpaper-cancellation; do
     start="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
     case "$scenario" in
         title-change)

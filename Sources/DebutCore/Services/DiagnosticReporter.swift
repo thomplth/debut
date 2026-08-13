@@ -39,6 +39,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     private let directory: URL
     private let rotationByteLimit: Int
     private let performanceRecorder: PerformanceRecorder
+    private let overlayPresentationRecorder: OverlayPresentationRecorder
     private var eventLog: [[String: String]] = []
     private let queue = DispatchQueue(label: "com.thomplth.Debut.diagnostic")
 
@@ -64,11 +65,13 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     init(
         directory: URL,
         rotationByteLimit: Int = 2_000_000,
-        performanceRecorder: PerformanceRecorder = .shared
+        performanceRecorder: PerformanceRecorder = .shared,
+        overlayPresentationRecorder: OverlayPresentationRecorder = .shared
     ) {
         self.directory = directory
         self.rotationByteLimit = rotationByteLimit
         self.performanceRecorder = performanceRecorder
+        self.overlayPresentationRecorder = overlayPresentationRecorder
         super.init()
         NSLog("[Debut] DiagnosticReporter initialized at %@", directory.path)
     }
@@ -87,6 +90,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         // entire held-Tab sequence.
         let state = currentState()
         let performance = performanceRecorder.snapshot()
+        let overlayPresentation = overlayPresentationRecorder.snapshot()
         queue.async {
             NSLog("[Debut] %@ %@", event, details.description)
             var entry = details
@@ -97,7 +101,11 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
                 self.eventLog.removeFirst(self.eventLog.count - 100)
             }
             if level == .lifecycle { self.appendDurableEvent(entry) }
-            self.writeSnapshotFile(state: state, performance: performance)
+            self.writeSnapshotFile(
+                state: state,
+                performance: performance,
+                overlayPresentation: overlayPresentation
+            )
         }
     }
 
@@ -121,7 +129,14 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         stateProviderLock.unlock()
         let state = currentState()
         let performance = performanceRecorder.snapshot()
-        queue.async { self.writeSnapshotFile(state: state, performance: performance) }
+        let overlayPresentation = overlayPresentationRecorder.snapshot()
+        queue.async {
+            self.writeSnapshotFile(
+                state: state,
+                performance: performance,
+                overlayPresentation: overlayPresentation
+            )
+        }
     }
 
     /// Drains pending writes. Tests need a deterministic point at which the
@@ -181,12 +196,14 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     /// Must be called on `queue`.
     private func writeSnapshotFile(
         state: [String: String],
-        performance: PerformanceSnapshot
+        performance: PerformanceSnapshot,
+        overlayPresentation: OverlayPresentationSnapshot
     ) {
         let output: [String: Any] = [
             "state": state,
             "events": eventLog,
             "performance": jsonObject(performance) ?? [:],
+            "overlayPresentation": jsonObject(overlayPresentation) ?? [:],
             "updatedAt": Self.timestampFormatter.string(from: Date()),
         ]
         guard let data = try? JSONSerialization.data(

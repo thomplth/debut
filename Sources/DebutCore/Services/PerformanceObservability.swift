@@ -7,7 +7,8 @@ public enum PerformanceOperation: String, CaseIterable, Codable, Sendable {
     case eventTap = "event_tap"
     case mainQueueDelivery = "main_queue_delivery"
     case overlayPreparation = "overlay_preparation"
-    case overlayFirstFrame = "overlay_first_frame"
+    case overlayRenderSubmission = "overlay_render_submission"
+    case overlayEndToEndVisible = "overlay_end_to_end_visible"
     case previewFirst = "preview_first"
     case previewAll = "preview_all"
     case previewCapture = "preview_capture"
@@ -204,9 +205,27 @@ public struct SystemProcessResourceReader: ProcessResourceReading {
 
 public struct PerformanceObservation: Codable, Equatable, Sendable {
     public let correlationID: UUID
+    public let traceID: UUID?
     public let operation: PerformanceOperation
     public let durationMilliseconds: Double
     public let workload: PerformanceWorkload
+    public let temperature: TelemetryTemperature?
+
+    public init(
+        correlationID: UUID,
+        traceID: UUID? = nil,
+        operation: PerformanceOperation,
+        durationMilliseconds: Double,
+        workload: PerformanceWorkload,
+        temperature: TelemetryTemperature? = nil
+    ) {
+        self.correlationID = correlationID
+        self.traceID = traceID
+        self.operation = operation
+        self.durationMilliseconds = durationMilliseconds
+        self.workload = workload
+        self.temperature = temperature
+    }
 }
 
 public struct PerformanceSnapshot: Codable, Sendable {
@@ -220,8 +239,10 @@ public final class PerformanceRecorder: @unchecked Sendable {
     private struct Active {
         let operation: PerformanceOperation
         let started: UInt64
-        let workload: PerformanceWorkload
+        var workload: PerformanceWorkload
+        var temperature: TelemetryTemperature?
         let signpostID: OSSignpostID
+        var traceID: UUID?
     }
 
     public static let shared = PerformanceRecorder(resourceReader: defaultResourceReader())
@@ -256,7 +277,8 @@ public final class PerformanceRecorder: @unchecked Sendable {
     public func begin(
         _ operation: PerformanceOperation,
         workload: PerformanceWorkload = PerformanceWorkload(),
-        correlationID: UUID = UUID()
+        correlationID: UUID = UUID(),
+        traceID: UUID? = nil
     ) -> UUID {
         let signpostID = OSSignpostID(log: log)
         let signpostMetadata = "operation=\(operation.rawValue) correlation=\(correlationID.uuidString) windows=\(workload.windows) stages=\(workload.stages)" as NSString
@@ -267,7 +289,9 @@ public final class PerformanceRecorder: @unchecked Sendable {
             operation: operation,
             started: now(),
             workload: workload,
-            signpostID: signpostID
+            temperature: nil,
+            signpostID: signpostID,
+            traceID: traceID
         )
         lock.unlock()
         return correlationID
@@ -288,9 +312,11 @@ public final class PerformanceRecorder: @unchecked Sendable {
         let duration = Double(ended >= span.started ? ended - span.started : 0) / 1_000_000
         let observation = PerformanceObservation(
             correlationID: correlationID,
+            traceID: span.traceID,
             operation: span.operation,
             durationMilliseconds: duration,
-            workload: span.workload
+            workload: span.workload,
+            temperature: span.temperature
         )
         var buffer = buffers[span.operation] ?? PerformanceSampleBuffer()
         buffer.append(duration)
@@ -312,6 +338,46 @@ public final class PerformanceRecorder: @unchecked Sendable {
                     "%{public}@", signpostMetadata)
         handler?(observation)
         return observation
+    }
+
+    public func updateWorkload(_ workload: PerformanceWorkload, for correlationID: UUID) {
+        lock.lock()
+        if var span = active[correlationID] {
+            span.workload = workload
+            active[correlationID] = span
+        }
+        lock.unlock()
+    }
+
+    public func updateTemperature(
+        _ temperature: TelemetryTemperature,
+        for correlationID: UUID
+    ) {
+        lock.lock()
+        if var span = active[correlationID] {
+            span.temperature = temperature
+            active[correlationID] = span
+        }
+        lock.unlock()
+    }
+
+    public func updateTraceID(_ traceID: UUID, for correlationID: UUID) {
+        lock.lock()
+        if var span = active[correlationID] {
+            span.traceID = traceID
+            active[correlationID] = span
+        }
+        lock.unlock()
+    }
+
+    public func cancel(_ correlationID: UUID) {
+        lock.lock()
+        let span = active.removeValue(forKey: correlationID)
+        lock.unlock()
+        guard let span else { return }
+        let metadata = "operation=\(span.operation.rawValue) correlation=\(correlationID.uuidString) cancelled=true" as NSString
+        os_signpost(.end, log: log, name: "DebutOperation", signpostID: span.signpostID,
+                    "%{public}@", metadata)
     }
 
     public func setObservationHandler(
