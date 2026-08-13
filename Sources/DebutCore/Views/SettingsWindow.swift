@@ -372,7 +372,7 @@ public struct SettingsView: View {
                 .padding(.top, 4)
 
             HStack {
-                Text("Switch directly to stage 1–9")
+                Text("Switch directly to stage")
                 Spacer()
                 Picker("", selection: $viewModel.settings.quickSwitchModifiers) {
                     ForEach(ShortcutModifiers.choices, id: \.self) { modifiers in
@@ -382,16 +382,12 @@ public struct SettingsView: View {
                 .frame(width: 220)
             }
 
-            Text("The same modifiers plus 0 switch to stage 10.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             HStack {
-                Text("After switching")
+                Text("Switch to stage with current app")
                 Spacer()
-                Picker("", selection: $viewModel.settings.quickSwitchBehavior) {
-                    ForEach(QuickSwitchBehavior.allCases, id: \.self) { behavior in
-                        Text(behavior.displayName).tag(behavior)
+                Picker("", selection: $viewModel.settings.quickSwitchSameApplicationModifiers) {
+                    ForEach(ShortcutModifiers.choices, id: \.self) { modifiers in
+                        Text("\(modifiers.displayString)+1–9").tag(modifiers)
                     }
                 }
                 .frame(width: 220)
@@ -527,12 +523,17 @@ public struct SettingsView: View {
             Button("Restore Defaults") {
                 viewModel.settings.keyBindings.restoreDefaults()
                 viewModel.settings.quickSwitchModifiers = .control
-                viewModel.settings.quickSwitchBehavior = .stage
+                viewModel.settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(
+                    control: true,
+                    option: true
+                )
             }
             .padding(.top, 8)
         }
-        .onChange(of: viewModel.settings.quickSwitchBehavior) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.quickSwitchModifiers) { _, _ in saveSettings() }
+        .onChange(of: viewModel.settings.quickSwitchSameApplicationModifiers) { _, _ in
+            saveSettings()
+        }
     }
 
     private var privacySection: some View {

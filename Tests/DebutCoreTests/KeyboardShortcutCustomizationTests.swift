@@ -29,10 +29,7 @@ struct KeyboardShortcutCustomizationTests {
             keyCode: kVK_Tab,
             command: true
         ))
-        #expect(bindings.combo(for: .quickSwitchStage10) == KeyCombo(
-            keyCode: kVK_ANSI_0,
-            control: true
-        ))
+        #expect(KeyAction.quickSwitchActions.allSatisfy { ($0.quickSwitchPosition ?? 10) <= 9 })
         #expect(bindings.combo(for: .nextAppWindow) == KeyCombo(
             keyCode: kVK_ANSI_Grave,
             command: true

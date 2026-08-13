@@ -146,7 +146,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             keyboardService: keyboardService,
             stageManager: stageManager,
             overlayPresentationDelay: currentSettings.overlayPresentationDelay,
-            quickSwitchBehavior: currentSettings.quickSwitchBehavior,
             previewRefreshPolicy: currentSettings.previewRefreshPolicy,
             previewCacheTTL: currentSettings.previewCacheTTL
         )
@@ -171,6 +170,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             currentSettings.quickSwitchExcludedBundleIDs
         )
         keyboardService.quickSwitchModifiers = currentSettings.quickSwitchModifiers
+        keyboardService.quickSwitchSameApplicationModifiers =
+            currentSettings.quickSwitchSameApplicationModifiers
 
         // Raise active stage windows above the desktop surface
         controller.switchToStage(id: stageManager.activeStageID)
@@ -744,13 +745,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 }
                 self.keyboardService?.keyBindings = newSettings.keyBindings
                 self.stageController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
-                self.stageController?.quickSwitchBehavior = newSettings.quickSwitchBehavior
                 self.stageController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
                 self.stageController?.previewCacheTTL = newSettings.previewCacheTTL
                 self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
                     newSettings.quickSwitchExcludedBundleIDs
                 )
                 self.keyboardService?.quickSwitchModifiers = newSettings.quickSwitchModifiers
+                self.keyboardService?.quickSwitchSameApplicationModifiers =
+                    newSettings.quickSwitchSameApplicationModifiers
                 if telemetryChanged, let exporter = self.telemetryExporter {
                     Task {
                         await exporter.setEnabled(newSettings.shareAnonymousTelemetry)

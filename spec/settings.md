@@ -41,7 +41,9 @@ deletion confirmation, and the animation toggle.
 **Keyboard Shortcuts** — an editable binding for every `KeyAction`, recorded by
 clicking a row and pressing the combination. Conflicts are detected inline and
 require explicit replacement. The section also carries the overlay hold delay,
-the command-hint controls, and quick-switch exclusions.
+the command-hint controls, and quick-switch exclusions. Quick switching exposes
+separate modifier settings for direct stage switching and for switching while
+keeping the current app; both apply to digits 1–9.
 
 Command hints annotate the overlay's available commands. `Automatic` retires each
 hint once its command has been used more than three times, `Never` hides them
