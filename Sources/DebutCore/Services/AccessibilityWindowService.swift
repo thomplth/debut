@@ -105,9 +105,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         }
     }
 
-    /// Returns window IDs that AX explicitly identifies as auxiliary UI rather
-    /// than user-manageable standard windows. This is separate from an omitted
-    /// AX result, which may only mean that an app returned a partial snapshot.
+    /// Returns window IDs that AX explicitly identifies as modal or auxiliary UI
+    /// rather than user-manageable standard or non-modal dialog windows. This is
+    /// separate from an omitted AX result, which may only mean that an app returned
+    /// a partial snapshot.
     public func listUntrackableWindowIDs() -> Set<CGWindowID> {
         classifyAXWindowIDs().untrackable
     }
@@ -125,7 +126,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
     static func isTrackableAXWindow(role: String, subrole: String, isModal: Bool) -> Bool {
         role == kAXWindowRole as String &&
-            subrole == kAXStandardWindowSubrole as String &&
+            (subrole == kAXStandardWindowSubrole as String ||
+                subrole == kAXDialogSubrole as String) &&
             !isModal
     }
 
