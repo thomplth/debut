@@ -85,6 +85,13 @@ private final class PreviewCaptureMetrics: @unchecked Sendable {
     }
 }
 
+/// What a cached preview was captured from, so the next activation can tell whether it is
+/// still trustworthy without re-capturing to find out.
+private struct PreviewCacheEntry {
+    let capturedAt: Date
+    let windowTitle: String
+}
+
 public protocol StageControllerDelegate: AnyObject {
     func stageControllerDidOpenOverlay(_ controller: StageController)
     func stageControllerDidOpenOverlay(
@@ -131,6 +138,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var keyboardServiceStarted: Bool = false
     public var overlayPresentationDelay: TimeInterval
     public var quickSwitchBehavior: QuickSwitchBehavior
+    public var previewRefreshPolicy: PreviewRefreshPolicy
+    public var previewCacheTTL: TimeInterval
 
     /// Window previews captured when overlay opens
     public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
@@ -148,6 +157,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private let fullscreenAppActiveProvider: (() -> Bool)?
     private var previewCaptureTask: Task<Void, Never>?
     private var previewCaptureGeneration: UInt = 0
+    private var previewCacheEntries: [CGWindowID: PreviewCacheEntry] = [:]
+    private var pendingPreviewCaptureIDs: [CGWindowID] = []
+    private let previewClock: @Sendable () -> Date
+    private var pendingPreviewFlush = false
     private var frontmostAppIsExcluded = false
     private let diag = DiagnosticReporter.shared
     private let overlayPresentationRecorder: OverlayPresentationRecorder
@@ -160,7 +173,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         overlayPresentationDelay: TimeInterval = AppSettings.defaultOverlayPresentationDelay,
         quickSwitchBehavior: QuickSwitchBehavior = .stage,
         fullscreenAppActiveProvider: (() -> Bool)? = nil,
-        overlayPresentationRecorder: OverlayPresentationRecorder = .shared
+        overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
+        previewRefreshPolicy: PreviewRefreshPolicy = .lastActiveOnly,
+        previewCacheTTL: TimeInterval = AppSettings.defaultPreviewCacheTTL,
+        previewClock: @escaping @Sendable () -> Date = Date.init
     ) {
         self.windowService = windowService
         self.keyboardService = keyboardService
@@ -169,6 +185,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         self.quickSwitchBehavior = quickSwitchBehavior
         self.fullscreenAppActiveProvider = fullscreenAppActiveProvider
         self.overlayPresentationRecorder = overlayPresentationRecorder
+        self.previewRefreshPolicy = previewRefreshPolicy
+        self.previewCacheTTL = previewCacheTTL
+        self.previewClock = previewClock
 
         let started = keyboardService.start(delegate: self)
         self.keyboardServiceStarted = started
@@ -587,15 +606,15 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             selectedStageIndex = index
         }
         preOverlayStageID = stageManager.activeStageID
-        // The surface may already be on screen from an earlier stage switch, so opening the
-        // overlay is its own reason to recapture.
         let assignedWindowIDs = stageManager.stages.flatMap { $0.windows.map(\.windowID) }
+        pruneWindowPreviews(assignedWindowIDs: Set(assignedWindowIDs))
         let cachedCount = variedWindowPreviewIDs.intersection(assignedWindowIDs).count
+        pendingPreviewCaptureIDs = windowIDsNeedingCapture()
         if let presentation {
             let workload = PerformanceWorkload(
                 stages: stageManager.stages.count,
                 windows: assignedWindowIDs.count,
-                captures: assignedWindowIDs.count
+                captures: pendingPreviewCaptureIDs.count
             )
             overlayPresentationRecorder.updateEnvironment(
                 for: presentation,
@@ -607,7 +626,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
         desktopSurfaces?.refreshWallpaper(overlayPresentation: presentation)
         scheduleOverlayPresentation()
-        refreshWindowPreviews(overlayPresentation: presentation)
     }
 
     private func scheduleOverlayPresentation() {
@@ -635,6 +653,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 self,
                 overlayPresentation: presentation
             )
+            // Capturing before this point puts SCK enumeration, capture completions and the
+            // resulting view rebuilds on the main queue ahead of the overlay's first frame,
+            // which measured as ~37ms of render-submission delay for a two-line block.
+            self.captureDirtyWindowPreviews(overlayPresentation: presentation)
         }
     }
 
@@ -695,48 +717,90 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         return (fullscreenRef as? Bool) == true
     }
 
-    private func refreshWindowPreviews(
+    /// A missing capture can mean that a window is merely hidden, so a preview is retained until
+    /// its assignment is gone. Per AGENTS.md, absence from AX or CGWindowList never proves
+    /// destruction.
+    private func pruneWindowPreviews(assignedWindowIDs: Set<CGWindowID>) {
+        windowPreviews = windowPreviews.filter { assignedWindowIDs.contains($0.key) }
+        variedWindowPreviewIDs.formIntersection(assignedWindowIDs)
+        previewCacheEntries = previewCacheEntries.filter { assignedWindowIDs.contains($0.key) }
+    }
+
+    /// The windows whose cached preview cannot be trusted for this activation. Everything else
+    /// is served from `windowPreviews` without a capture.
+    private func windowIDsNeedingCapture() -> [CGWindowID] {
+        let assignedWindows = stageManager.stages.flatMap(\.windows)
+        guard previewRefreshPolicy == .lastActiveOnly else {
+            return assignedWindows.map(\.windowID)
+        }
+
+        // The window in front of the active stage is the one that was just being used, so its
+        // content is the one most likely to have moved on since the last capture.
+        let lastActiveWindowID = stageManager.activeStage.windows.first?.windowID
+        let now = previewClock()
+        return assignedWindows.compactMap { window in
+            if window.windowID == lastActiveWindowID { return window.windowID }
+            guard windowPreviews[window.windowID] != nil,
+                  let entry = previewCacheEntries[window.windowID]
+            else { return window.windowID }
+            if entry.windowTitle != window.windowTitle { return window.windowID }
+            // Dirty tracking alone goes stale for windows that change without ever being
+            // activated — video, chat, dashboards.
+            if now.timeIntervalSince(entry.capturedAt) >= previewCacheTTL { return window.windowID }
+            return nil
+        }
+    }
+
+    private func captureDirtyWindowPreviews(
         overlayPresentation: OverlayPresentationContext? = nil
     ) {
-        let windowIDs = stageManager.stages.flatMap { stage in
-            stage.windows.map(\.windowID)
-        }
+        let windowIDs = pendingPreviewCaptureIDs
+        pendingPreviewCaptureIDs = []
 
         previewCaptureTask?.cancel()
         previewCaptureGeneration &+= 1
         let generation = previewCaptureGeneration
-        let assignedWindowIDs = Set(windowIDs)
         let metrics = PreviewCaptureMetrics(
             windowIDs: windowIDs,
             overlayPresentation: overlayPresentation,
             overlayPresentationRecorder: overlayPresentationRecorder
         )
 
-        // A missing capture can mean that a window is merely hidden, so retain its last good
-        // preview. Only assignments that no longer exist are removed.
-        windowPreviews = windowPreviews.filter { assignedWindowIDs.contains($0.key) }
-        variedWindowPreviewIDs.formIntersection(assignedWindowIDs)
+        guard !windowIDs.isEmpty else {
+            _ = metrics.finish()
+            diag.report("preview_capture_skipped", level: .transient, details: [
+                "cached": "\(windowPreviews.count)",
+            ])
+            return
+        }
 
+        let clock = previewClock
         previewCaptureTask = Task { [weak self, windowService] in
             await windowService.captureWindowImages(windowIDs: windowIDs) { [weak self] capture in
                 metrics.recordCapture(windowID: capture.windowID)
+                // Luminance analysis draws the capture through Core Graphics. Doing it here
+                // rather than in the main-queue hop keeps the render path free.
+                let hasVariedLuminance = WindowImageStatistics.hasVariedLuminance(capture.image)
+                let capturedAt = clock()
                 DispatchQueue.main.async { [weak self] in
                     guard let self,
                           self.previewCaptureGeneration == generation,
-                          self.stageManager.stages.contains(where: { stage in
-                              stage.windows.contains(where: { $0.windowID == capture.windowID })
-                          })
+                          let window = self.stageManager.stages
+                              .flatMap(\.windows)
+                              .first(where: { $0.windowID == capture.windowID })
                     else { return }
 
                     self.windowPreviews[capture.windowID] = capture.image
-                    if WindowImageStatistics.hasVariedLuminance(capture.image) {
+                    self.previewCacheEntries[capture.windowID] = PreviewCacheEntry(
+                        capturedAt: capturedAt,
+                        windowTitle: window.windowTitle
+                    )
+                    if hasVariedLuminance {
                         self.variedWindowPreviewIDs.insert(capture.windowID)
                     } else {
                         self.variedWindowPreviewIDs.remove(capture.windowID)
                     }
-                    if self.isStageManagerVisible {
-                        self.notifyOverlayUpdated()
-                    }
+                    self.scheduleOverlayPreviewFlush()
                 }
             }
             let capturedCount = metrics.finish()
@@ -747,11 +811,24 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
             DispatchQueue.main.async { [weak self] in
                 guard let self,
-                      self.previewCaptureGeneration == generation,
-                      self.isStageManagerVisible
+                      self.previewCaptureGeneration == generation
                 else { return }
-                self.notifyOverlayUpdated()
+                self.scheduleOverlayPreviewFlush()
             }
+        }
+    }
+
+    /// Concurrent captures land in a burst, and each one otherwise rebuilt the whole overlay
+    /// view model. Coalescing to one rebuild per frame keeps previews streaming in without
+    /// turning a 15-window refresh into 15 full SwiftUI diffs.
+    private func scheduleOverlayPreviewFlush() {
+        guard isStageManagerVisible, !pendingPreviewFlush else { return }
+        pendingPreviewFlush = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+            guard let self else { return }
+            self.pendingPreviewFlush = false
+            guard self.isStageManagerVisible else { return }
+            self.notifyOverlayUpdated()
         }
     }
 

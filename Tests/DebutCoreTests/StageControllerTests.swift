@@ -51,6 +51,7 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
     let overlayOpened = DispatchSemaphore(value: 0)
     let overlayClosed = DispatchSemaphore(value: 0)
     let overlayUpdated = DispatchSemaphore(value: 0)
+    var onOverlayOpened: (@Sendable () -> Void)?
     private let lock = NSLock()
     private var storedPreviewSets: [Set<CGWindowID>] = []
     private var storedPresentationContexts: [OverlayPresentationContext] = []
@@ -64,6 +65,7 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
     }
 
     func stageControllerDidOpenOverlay(_ controller: StageController) {
+        onOverlayOpened?()
         overlayOpened.signal()
     }
 
@@ -74,6 +76,7 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
         if let overlayPresentation {
             lock.withLock { storedPresentationContexts.append(overlayPresentation) }
         }
+        onOverlayOpened?()
         overlayOpened.signal()
     }
 
@@ -94,6 +97,41 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
 // assert a callback eventually arrives use a generous ceiling. Waits that
 // assert timing keep an explicit lower bound instead of a tight ceiling.
 private let livenessTimeout: TimeInterval = 10
+
+private final class Locked<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) { self.value = value }
+
+    func get() -> Value { lock.withLock { value } }
+    func set(_ newValue: Value) { lock.withLock { value = newValue } }
+}
+
+private final class TestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = Date(timeIntervalSinceReferenceDate: 0)
+
+    var now: Date { lock.withLock { value } }
+
+    func advance(by interval: TimeInterval) {
+        lock.withLock { value += interval }
+    }
+}
+
+/// Polls instead of sleeping a fixed span, so a loaded machine slows the test down
+/// rather than failing it.
+private func waitUntil(
+    timeout: TimeInterval = livenessTimeout,
+    _ condition: () -> Bool
+) -> Bool {
+    let deadline = Date() + timeout
+    while Date() < deadline {
+        if condition() { return true }
+        Thread.sleep(forTimeInterval: 0.01)
+    }
+    return condition()
+}
 
 private final class CommandUsageRecorder: @unchecked Sendable {
     private let lock = NSLock()
@@ -490,6 +528,206 @@ struct StageControllerTests {
         #expect(delegate.previewSets.last == Set([101, 202]))
     }
 
+    // MARK: - Preview cache
+
+    private func makeCacheController(
+        policy: PreviewRefreshPolicy = .lastActiveOnly,
+        ttl: TimeInterval = 600,
+        clock: TestClock = TestClock()
+    ) -> (StageController, MockWindowService, MockKeyboardService, PreviewRefreshDelegate) {
+        let windowService = MockWindowService()
+        let keyboardService = MockKeyboardService()
+        let controller = StageController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            fullscreenAppActiveProvider: { false },
+            previewRefreshPolicy: policy,
+            previewCacheTTL: ttl,
+            previewClock: { clock.now }
+        )
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+        return (controller, windowService, keyboardService, delegate)
+    }
+
+    @Test("Cached previews are served without re-capturing")
+    func cachedPreviewsSkipCapture() throws {
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
+        let stageID = controller.stageManager.stages[0].id
+        for windowID in [CGWindowID(101), 202, 303] {
+            controller.stageManager.addWindow(
+                StageWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
+                toStageID: stageID
+            )
+        }
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage(), 303: makeTestImage()]
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { controller.windowPreviews.count == 3 })
+        keyboardSvc.simulateEvent(.escape)
+
+        let frontWindowID = try #require(controller.stageManager.activeStage.windows.first?.windowID)
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
+
+        let secondRequest = Set(try #require(windowSvc.captureRequests.last))
+        #expect(secondRequest == [frontWindowID], "Only the last active window should be re-captured")
+        #expect(controller.windowPreviews.count == 3, "Cached previews must survive a partial refresh")
+        keyboardSvc.simulateEvent(.escape)
+    }
+
+    @Test("An activation with nothing dirty captures nothing at all")
+    func fullyCachedActivationIssuesNoCapture() {
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
+        let activeStageID = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        let otherStageID = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: activeStageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toStageID: otherStageID
+        )
+        controller.stageManager.activateStage(id: activeStageID)
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { controller.windowPreviews.count == 2 })
+        keyboardSvc.simulateEvent(.escape)
+
+        // With the active stage emptied there is no last-active window left to refresh.
+        controller.stageManager.removeWindow(windowID: 101, fromStageID: activeStageID)
+        controller.stageManager.activateStage(id: activeStageID)
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        Thread.sleep(forTimeInterval: 0.2)
+        #expect(windowSvc.captureRequests.count == 1, "A fully cached activation must not enumerate or capture")
+        #expect(controller.windowPreviews[202] != nil)
+        keyboardSvc.simulateEvent(.escape)
+    }
+
+    @Test("A title change forces a re-capture")
+    func titleChangeForcesRecapture() {
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
+        let activeStageID = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        let otherStageID = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: activeStageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Inbox"),
+            toStageID: otherStageID
+        )
+        controller.stageManager.activateStage(id: activeStageID)
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { controller.windowPreviews.count == 2 })
+        keyboardSvc.simulateEvent(.escape)
+
+        controller.stageManager.updateWindowTitle(windowID: 202, title: "Inbox (3)")
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
+        #expect(Set(windowSvc.captureRequests[1]).contains(202), "A retitled window is stale")
+        keyboardSvc.simulateEvent(.escape)
+    }
+
+    @Test("A preview older than the cache TTL is re-captured")
+    func ttlExpiryForcesRecapture() {
+        let clock = TestClock()
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(ttl: 60, clock: clock)
+        let activeStageID = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        let otherStageID = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: activeStageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toStageID: otherStageID
+        )
+        controller.stageManager.activateStage(id: activeStageID)
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { controller.windowPreviews.count == 2 })
+        keyboardSvc.simulateEvent(.escape)
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
+        #expect(!Set(windowSvc.captureRequests[1]).contains(202), "A fresh preview is still good")
+        keyboardSvc.simulateEvent(.escape)
+
+        clock.advance(by: 61)
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 3 })
+        #expect(Set(windowSvc.captureRequests[2]).contains(202), "An expired preview must be refreshed")
+        keyboardSvc.simulateEvent(.escape)
+    }
+
+    @Test("The all-previews policy re-captures every window")
+    func allPolicyCapturesEveryWindow() {
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(policy: .all)
+        let stageID = controller.stageManager.stages[0].id
+        for windowID in [CGWindowID(101), 202, 303] {
+            controller.stageManager.addWindow(
+                StageWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
+                toStageID: stageID
+            )
+        }
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage(), 303: makeTestImage()]
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { controller.windowPreviews.count == 3 })
+        keyboardSvc.simulateEvent(.escape)
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
+        #expect(Set(windowSvc.captureRequests[1]) == [101, 202, 303])
+        keyboardSvc.simulateEvent(.escape)
+    }
+
+    @Test("No preview is captured before the overlay is revealed")
+    func capturesWaitForOverlayReveal() {
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
+        let stageID = controller.stageManager.stages[0].id
+        for windowID in [CGWindowID(101), 202] {
+            controller.stageManager.addWindow(
+                StageWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
+                toStageID: stageID
+            )
+        }
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
+
+        let requestsAtReveal = Locked<Int?>(nil)
+        delegate.onOverlayOpened = { requestsAtReveal.set(windowSvc.captureRequests.count) }
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { controller.windowPreviews.count == 2 })
+
+        #expect(requestsAtReveal.get() == 0, "Captures must not compete with the reveal for the main queue")
+        keyboardSvc.simulateEvent(.escape)
+    }
+
     @Test("Cmd+Option+Tab hold opens overlay in stage mode")
     func cmdOptionTabHold() {
         let (controller, _, keyboardSvc) = makeController()
@@ -770,8 +1008,8 @@ struct StageControllerTests {
         windowSvc.capturedImages = [101: testImage, 202: testImage]
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(controller.windowPreviews[101] != nil)
-        #expect(controller.windowPreviews[202] != nil)
+        #expect(waitUntil { controller.windowPreviews[101] != nil })
+        #expect(waitUntil { controller.windowPreviews[202] != nil })
         keyboardSvc.simulateEvent(.escape)
 
         // Second overlay open — window 202 is hidden (capture returns nil)
@@ -799,7 +1037,7 @@ struct StageControllerTests {
         // Open overlay to populate previews
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(controller.windowPreviews[101] != nil)
+        #expect(waitUntil { controller.windowPreviews[101] != nil })
         keyboardSvc.simulateEvent(.escape)
 
         // Remove window from stage

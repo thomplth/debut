@@ -139,6 +139,42 @@ struct WindowServiceTests {
 
         #expect(scanCount == 1)
     }
+
+    @Test("An oversized window is captured down to the preview cap")
+    func capturePixelSizeIsCapped() {
+        let size = PreviewCaptureSize.pixelSize(
+            contentSize: CGSize(width: 2206, height: 1440),
+            pointPixelScale: 2,
+            maxPixelDimension: 640
+        )
+
+        #expect(size.width == 640)
+        #expect(size.height == 418)
+    }
+
+    @Test("A window smaller than the cap is captured at native resolution")
+    func smallCaptureKeepsNativeSize() {
+        let size = PreviewCaptureSize.pixelSize(
+            contentSize: CGSize(width: 300, height: 200),
+            pointPixelScale: 1,
+            maxPixelDimension: 640
+        )
+
+        #expect(size.width == 300)
+        #expect(size.height == 200)
+    }
+
+    @Test("A degenerate window still yields a capturable size")
+    func degenerateCaptureSizeStaysValid() {
+        let size = PreviewCaptureSize.pixelSize(
+            contentSize: CGSize(width: 0, height: 0),
+            pointPixelScale: 2,
+            maxPixelDimension: 640
+        )
+
+        #expect(size.width == 1)
+        #expect(size.height == 1)
+    }
 }
 
 private func makeImage(bytes: [UInt8]) -> CGImage? {

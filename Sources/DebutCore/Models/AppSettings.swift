@@ -23,6 +23,18 @@ public enum QuickSwitchBehavior: String, Codable, Sendable, CaseIterable {
     }
 }
 
+public enum PreviewRefreshPolicy: String, Codable, Sendable, CaseIterable {
+    case lastActiveOnly
+    case all
+
+    public var displayName: String {
+        switch self {
+        case .lastActiveOnly: "Only windows that may have changed"
+        case .all: "Every window, every time"
+        }
+    }
+}
+
 public struct ShortcutModifiers: Codable, Sendable, Equatable, Hashable {
     public var command: Bool
     public var control: Bool
@@ -64,6 +76,7 @@ public struct ShortcutModifiers: Codable, Sendable, Equatable, Hashable {
 
 public struct AppSettings: Codable, Sendable, Equatable {
     public static let defaultOverlayPresentationDelay: TimeInterval = 0.08
+    public static let defaultPreviewCacheTTL: TimeInterval = 60
 
     public var launchAtLogin: Bool
     public var showInMenuBar: Bool
@@ -87,6 +100,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var quickSwitchExcludedBundleIDs: [String]
     public var quickSwitchBehavior: QuickSwitchBehavior
     public var quickSwitchModifiers: ShortcutModifiers
+
+    // Window previews
+    public var previewRefreshPolicy: PreviewRefreshPolicy
+    public var previewCacheTTL: TimeInterval
 
     // Command hints
     public var commandHintVisibility: CommandHintVisibility
@@ -113,6 +130,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.quickSwitchExcludedBundleIDs = []
         self.quickSwitchBehavior = .stage
         self.quickSwitchModifiers = .control
+        self.previewRefreshPolicy = .lastActiveOnly
+        self.previewCacheTTL = Self.defaultPreviewCacheTTL
         self.commandHintVisibility = .automatic
         self.commandUsageCounts = [:]
     }
@@ -152,6 +171,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
             ShortcutModifiers.self,
             forKey: .quickSwitchModifiers
         ) ?? .control
+        previewRefreshPolicy = try container.decodeIfPresent(
+            PreviewRefreshPolicy.self,
+            forKey: .previewRefreshPolicy
+        ) ?? .lastActiveOnly
+        previewCacheTTL = try container.decodeIfPresent(
+            TimeInterval.self,
+            forKey: .previewCacheTTL
+        ) ?? Self.defaultPreviewCacheTTL
         commandHintVisibility = try container.decodeIfPresent(
             CommandHintVisibility.self,
             forKey: .commandHintVisibility

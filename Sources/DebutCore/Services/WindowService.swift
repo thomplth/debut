@@ -45,6 +45,28 @@ public struct WindowImageCapture: @unchecked Sendable {
     }
 }
 
+enum PreviewCaptureSize {
+    /// Previews are drawn into thumbnails at most 160pt wide, so a native-resolution capture
+    /// costs orders of magnitude more memory and render work than the overlay can use: a
+    /// 4412x2880 capture is ~50MB on its own, and the cache holds one per window.
+    static let maxPixelDimension = 640
+
+    static func pixelSize(
+        contentSize: CGSize,
+        pointPixelScale: CGFloat,
+        maxPixelDimension: Int = maxPixelDimension
+    ) -> (width: Int, height: Int) {
+        let nativeWidth = contentSize.width * pointPixelScale
+        let nativeHeight = contentSize.height * pointPixelScale
+        let longest = max(nativeWidth, nativeHeight)
+        let scale = longest > CGFloat(maxPixelDimension) ? CGFloat(maxPixelDimension) / longest : 1
+        return (
+            width: max(1, Int(ceil(nativeWidth * scale))),
+            height: max(1, Int(ceil(nativeHeight * scale)))
+        )
+    }
+}
+
 enum WindowImageStatistics {
     static func hasVariedLuminance(_ image: CGImage, sampleSize: Int = 16) -> Bool {
         let width = min(sampleSize, image.width)

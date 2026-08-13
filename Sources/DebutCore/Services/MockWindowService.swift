@@ -12,6 +12,18 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public var capturedImages: [CGWindowID: CGImage] = [:]
     public var accessibilityEnabled: Bool = true
 
+    private let captureLock = NSLock()
+    private var recordedCaptureRequests: [[CGWindowID]] = []
+
+    /// One entry per `captureWindowImages` call, in call order.
+    public var captureRequests: [[CGWindowID]] {
+        captureLock.withLock { recordedCaptureRequests }
+    }
+
+    public var capturedWindowIDs: [CGWindowID] {
+        captureRequests.flatMap { $0 }
+    }
+
     public init() {}
 
     public func listRunningApps() -> [AppInfo] { apps }
@@ -23,6 +35,7 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
         windowIDs: [CGWindowID],
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
+        captureLock.withLock { recordedCaptureRequests.append(windowIDs) }
         for windowID in windowIDs {
             guard let image = capturedImages[windowID] else { continue }
             onCapture(WindowImageCapture(windowID: windowID, image: image))
