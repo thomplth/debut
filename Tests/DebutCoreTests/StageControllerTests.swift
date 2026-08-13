@@ -53,12 +53,27 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
     let overlayUpdated = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var storedPreviewSets: [Set<CGWindowID>] = []
+    private var storedPresentationContexts: [OverlayPresentationContext] = []
 
     var previewSets: [Set<CGWindowID>] {
         lock.withLock { storedPreviewSets }
     }
 
+    var presentationContexts: [OverlayPresentationContext] {
+        lock.withLock { storedPresentationContexts }
+    }
+
     func stageControllerDidOpenOverlay(_ controller: StageController) {
+        overlayOpened.signal()
+    }
+
+    func stageControllerDidOpenOverlay(
+        _ controller: StageController,
+        overlayPresentation: OverlayPresentationContext?
+    ) {
+        if let overlayPresentation {
+            lock.withLock { storedPresentationContexts.append(overlayPresentation) }
+        }
         overlayOpened.signal()
     }
 
@@ -95,6 +110,75 @@ private final class CommandUsageRecorder: @unchecked Sendable {
 
 @Suite("StageController", .serialized)
 struct StageControllerTests {
+
+    @Test("Quick release finalizes its correlated presentation as cancelled")
+    @MainActor
+    func quickReleaseFinalizesPresentationTrace() throws {
+        let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
+        let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
+        let controller = StageController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            overlayPresentationDelay: 1,
+            fullscreenAppActiveProvider: { false },
+            overlayPresentationRecorder: overlay
+        )
+        let context = overlay.begin(configuredDelayMilliseconds: 1_000)
+
+        controller.handleKeyEvent(.cmdTabHold, overlayPresentation: context)
+        controller.handleKeyEvent(.cmdRelease)
+
+        let trace = try #require(overlay.snapshot().completed.last)
+        #expect(trace.traceID == context.traceID)
+        #expect(trace.outcome == .releasedBeforePresentation)
+        #expect(trace.phases.contains { $0.phase == .fullscreenProbeCompleted })
+        #expect(trace.phases.contains { $0.phase == .presentationScheduled })
+        #expect(performance.snapshot().recent.allSatisfy {
+            $0.operation != .overlayEndToEndVisible
+        })
+    }
+
+    @Test("Fullscreen rejection is a terminal trace outcome")
+    func fullscreenRejectionFinalizesPresentationTrace() throws {
+        let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
+        let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
+        let controller = StageController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            fullscreenAppActiveProvider: { true },
+            overlayPresentationRecorder: overlay
+        )
+        let context = overlay.begin(configuredDelayMilliseconds: 80)
+
+        controller.handleKeyEvent(.cmdTabHold, overlayPresentation: context)
+
+        let trace = try #require(overlay.snapshot().completed.last)
+        #expect(trace.outcome == .fullscreenRejected)
+        #expect(!controller.isStageManagerVisible)
+    }
+
+    @Test("Presentation deadline preserves the originating trace")
+    func presentationDeadlinePreservesTrace() throws {
+        let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
+        let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
+        let controller = StageController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            overlayPresentationDelay: 0,
+            fullscreenAppActiveProvider: { false },
+            overlayPresentationRecorder: overlay
+        )
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+        let context = overlay.begin(configuredDelayMilliseconds: 0)
+
+        controller.handleKeyEvent(.cmdTabHold, overlayPresentation: context)
+
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(delegate.presentationContexts == [context])
+        let phases = try #require(overlay.snapshot().active.first).phases.map(\.phase)
+        #expect(phases.contains(.presentationDeadlineFired))
+    }
 
     private func makeTestImage() -> CGImage {
         let data: UnsafeMutableRawPointer? = nil

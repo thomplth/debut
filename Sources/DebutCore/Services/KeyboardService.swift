@@ -69,6 +69,19 @@ public enum DebutKeyEvent: Equatable, Sendable {
 
 public protocol KeyboardEventDelegate: AnyObject, Sendable {
     func handleKeyEvent(_ event: DebutKeyEvent)
+    func handleKeyEvent(
+        _ event: DebutKeyEvent,
+        overlayPresentation: OverlayPresentationContext?
+    )
+}
+
+public extension KeyboardEventDelegate {
+    func handleKeyEvent(
+        _ event: DebutKeyEvent,
+        overlayPresentation: OverlayPresentationContext?
+    ) {
+        handleKeyEvent(event)
+    }
 }
 
 public protocol KeyboardService: Sendable {

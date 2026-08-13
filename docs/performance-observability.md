@@ -2,6 +2,10 @@
 
 Debut measures work only when an existing event occurs. It adds no polling or recurring timer. `diagnostic.json` is the offline source of truth; Instruments signposts, deterministic benchmark JSON, Tart artifacts, and anonymous summaries use the same `PerformanceOperation` names and millisecond units.
 
+Plate presentation uses `overlay_end_to_end_visible` as its primary user-facing latency. The span begins when the event tap recognizes a non-repeating activation and ends when the overlay's reveal animation completes. `diagnostic.json.overlayPresentation` retains the latest 20 correlated traces, including main-actor delivery, fullscreen probing, intentional presentation delay, deadline overshoot, preparation, window ordering, render submission, reveal completion, preview capture, and wallpaper completion. Rejected and cancelled attempts remain local diagnostic traces but never enter the successful latency summary.
+
+`overlay_render_submission` replaces the old `overlay_first_frame` name. It means AppKit drew pending content and Core Animation was flushed; it is not evidence that WindowServer displayed a physical frame. Installed-app performance validation may compare that marker and reveal completion against ScreenCaptureKit pixel observations.
+
 ## Workloads and measurement phases
 
 | Profile | Stages | Windows | Processes |
@@ -10,7 +14,7 @@ Debut measures work only when an existing event occurs. It adds no polling or re
 | busy | 7 | 21 | 7 |
 | stress | 10 | 50 | 10 |
 
-Report cold launch, first use, and warm operation runs separately. Every observation carries a random in-memory correlation ID and geometric workload counts (stages, windows, dormant windows, processes, captures). Correlation IDs never leave local diagnostics and traces.
+Report cold launch, first use, and warm operation runs separately. Overlay traces retain orthogonal process-use, preview-cache, wallpaper, hosting-view, process-age, and workload dimensions. Every observation carries a random in-memory span ID plus an optional in-memory trace ID and geometric workload counts (stages, windows, dormant windows, processes, captures). IDs never leave local diagnostics and traces.
 
 ## Local schema and budgets
 
@@ -20,7 +24,7 @@ Tart baselines require at least 20 iterations where practical. A regression gate
 
 ## Remote privacy contract
 
-The remote allowlist is: schema version, event kind, app version, operating-system major version, workload class, canonical operation name/count, latency bucket, and aggregate anomaly count. Values are bucketed before enqueue. Expected volume is one session summary plus at most 20 anomaly records per installation day; the queue holds at most 100 records.
+The remote allowlist is: schema version, event kind, app version, operating-system major version, workload class, overlay temperature class, canonical operation name/count, latency bucket, and aggregate anomaly count. Values are bucketed before enqueue. Expected volume is one session summary plus at most 19 anomaly records per installation day; each operation may contribute at most two anomaly records per day so a noisy capture path cannot crowd out UI latency. The queue holds at most 100 records.
 
 Latency anomalies require at least 500 ms of delayed work. `hidden_idle` is excluded because its duration measures an expected inactive interval rather than execution latency; startup also prunes idle anomalies queued by older builds.
 

@@ -131,6 +131,32 @@ struct DiagnosticReporterTests {
         #expect(workload["windows"] as? Int == 12)
     }
 
+    @Test("Correlated overlay traces appear in the authoritative snapshot")
+    func overlayTraceAppearsInSnapshot() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
+        let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
+        let reporter = DiagnosticReporter(
+            directory: dir,
+            performanceRecorder: performance,
+            overlayPresentationRecorder: overlay
+        )
+        let context = overlay.begin(configuredDelayMilliseconds: 80)
+        overlay.mark(.mainActorDequeued, for: context)
+        overlay.complete(context, outcome: .presented)
+
+        reporter.report("overlay_presentation_completed", level: .transient)
+        reporter.flush()
+
+        let data = try Data(contentsOf: dir.appendingPathComponent("diagnostic.json"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let snapshot = try #require(object["overlayPresentation"] as? [String: Any])
+        let completed = try #require(snapshot["completed"] as? [[String: Any]])
+        #expect(completed.last?["traceID"] as? String == context.traceID.uuidString)
+        #expect(completed.last?["outcome"] as? String == "presented")
+    }
+
     @Test("Shared reporter never writes into the real support directory under test")
     func sharedReporterIsSandboxedDuringTests() {
         let appSupport = FileManager.default

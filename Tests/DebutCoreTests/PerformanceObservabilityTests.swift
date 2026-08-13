@@ -7,7 +7,8 @@ struct PerformanceObservabilityTests {
     @Test("Canonical operations have stable wire names")
     func stableOperationNames() {
         #expect(PerformanceOperation.allCases.map(\.rawValue) == [
-            "event_tap", "main_queue_delivery", "overlay_preparation", "overlay_first_frame",
+            "event_tap", "main_queue_delivery", "overlay_preparation", "overlay_render_submission",
+            "overlay_end_to_end_visible",
             "preview_first", "preview_all", "preview_capture", "window_discovery",
             "window_classification", "window_reconciliation", "stage_switch",
             "stage_raise", "wallpaper_capture", "state_persistence", "hidden_idle",
