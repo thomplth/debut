@@ -64,8 +64,8 @@ struct StateStoreTests {
         settings.confirmStageDeletion = false
         settings.overlayPresentationDelay = 0.25
         settings.quickSwitchExcludedBundleIDs = ["com.tinyspeck.slackmacgap"]
-        settings.quickSwitchBehavior = .sameApplication
         settings.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
+        settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(command: true)
         settings.commandHintVisibility = .always
         _ = settings.recordCommandUsage(.newStageBelow)
 
@@ -75,13 +75,13 @@ struct StateStoreTests {
         #expect(loaded.confirmStageDeletion == false)
         #expect(loaded.overlayPresentationDelay == 0.25)
         #expect(loaded.quickSwitchExcludedBundleIDs == ["com.tinyspeck.slackmacgap"])
-        #expect(loaded.quickSwitchBehavior == .sameApplication)
         #expect(loaded.quickSwitchModifiers == ShortcutModifiers(control: true, option: true))
+        #expect(loaded.quickSwitchSameApplicationModifiers == ShortcutModifiers(command: true))
         #expect(loaded.commandHintVisibility == .always)
         #expect(loaded.commandUsageCounts[.newStageBelow] == 1)
     }
 
-    @Test("Older settings use stage-focused quick switch with Control digits")
+    @Test("Older settings use Control and Control-Option quick-switch defaults")
     func legacySettingsDefaultQuickSwitchConfiguration() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
@@ -89,14 +89,18 @@ struct StateStoreTests {
         )
         object.removeValue(forKey: "quickSwitchBehavior")
         object.removeValue(forKey: "quickSwitchModifiers")
+        object.removeValue(forKey: "quickSwitchSameApplicationModifiers")
 
         let decoded = try JSONDecoder().decode(
             AppSettings.self,
             from: JSONSerialization.data(withJSONObject: object)
         )
 
-        #expect(decoded.quickSwitchBehavior == .stage)
         #expect(decoded.quickSwitchModifiers == .control)
+        #expect(decoded.quickSwitchSameApplicationModifiers == ShortcutModifiers(
+            control: true,
+            option: true
+        ))
     }
 
     @Test("Older settings default quick switch exclusions to empty")

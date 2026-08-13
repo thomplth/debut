@@ -13,7 +13,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case quickSwitchStage1, quickSwitchStage2, quickSwitchStage3
     case quickSwitchStage4, quickSwitchStage5, quickSwitchStage6
     case quickSwitchStage7, quickSwitchStage8, quickSwitchStage9
-    case quickSwitchStage10
 
     // Global same-app window cycling
     case nextAppWindow
@@ -54,7 +53,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .quickSwitchStage7: "Quick switch to stage 7"
         case .quickSwitchStage8: "Quick switch to stage 8"
         case .quickSwitchStage9: "Quick switch to stage 9"
-        case .quickSwitchStage10: "Quick switch to stage 10"
         case .nextAppWindow: "Next window in current app"
         case .previousAppWindow: "Previous window in current app"
         case .nextWindow: "Next window"
@@ -99,7 +97,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .quickSwitchStage7: .switchToStage(7)
         case .quickSwitchStage8: .switchToStage(8)
         case .quickSwitchStage9: .switchToStage(9)
-        case .quickSwitchStage10: .switchToStage(10)
         case .nextAppWindow: .cmdBacktick
         case .previousAppWindow: .cmdShiftBacktick
         case .nextWindow: .nextWindow
@@ -135,7 +132,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
              .quickSwitchStage1, .quickSwitchStage2, .quickSwitchStage3,
              .quickSwitchStage4, .quickSwitchStage5, .quickSwitchStage6,
              .quickSwitchStage7, .quickSwitchStage8, .quickSwitchStage9,
-             .quickSwitchStage10, .nextAppWindow, .previousAppWindow:
+             .nextAppWindow, .previousAppWindow:
             .global
         default:
             .session
@@ -163,7 +160,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .quickSwitchStage7: 7
         case .quickSwitchStage8: 8
         case .quickSwitchStage9: 9
-        case .quickSwitchStage10: 10
         default: nil
         }
     }
@@ -181,7 +177,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         .quickSwitchStage1, .quickSwitchStage2, .quickSwitchStage3,
         .quickSwitchStage4, .quickSwitchStage5, .quickSwitchStage6,
         .quickSwitchStage7, .quickSwitchStage8, .quickSwitchStage9,
-        .quickSwitchStage10,
     ]
 
     public static let sameAppActions: [KeyAction] = [
@@ -344,7 +339,6 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .quickSwitchStage7: KeyCombo(keyCode: kVK_ANSI_7, control: true),
             .quickSwitchStage8: KeyCombo(keyCode: kVK_ANSI_8, control: true),
             .quickSwitchStage9: KeyCombo(keyCode: kVK_ANSI_9, control: true),
-            .quickSwitchStage10: KeyCombo(keyCode: kVK_ANSI_0, control: true),
             .nextAppWindow: KeyCombo(keyCode: kVK_ANSI_Grave, command: true),
             .previousAppWindow: KeyCombo(
                 keyCode: kVK_ANSI_Grave,

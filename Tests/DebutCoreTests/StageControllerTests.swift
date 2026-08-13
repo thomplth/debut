@@ -912,7 +912,6 @@ struct StageControllerTests {
     @Test("Quick switch focuses the current app's MRU window in the target stage")
     func quickSwitchKeepsCurrentApp() {
         let (controller, windowSvc, keyboardSvc) = makeController()
-        controller.quickSwitchBehavior = .sameApplication
         let sourceStageID = controller.stageManager.stages[0].id
         controller.stageManager.addWindow(
             StageWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
@@ -931,7 +930,7 @@ struct StageControllerTests {
         )
         controller.stageManager.activateStage(id: sourceStageID)
 
-        keyboardSvc.simulateEvent(.switchToStage(2))
+        keyboardSvc.simulateEvent(.switchToStageKeepingCurrentApplication(2))
 
         #expect(controller.stageManager.activeStageID == targetStageID)
         #expect(windowSvc.raisedWindowID == 303)
@@ -985,7 +984,7 @@ struct StageControllerTests {
         )
         controller.stageManager.activateStage(id: sourceStageID)
 
-        keyboardSvc.simulateEvent(.switchToStage(2))
+        keyboardSvc.simulateEvent(.switchToStageKeepingCurrentApplication(2))
 
         #expect(controller.stageManager.activeStageID == targetStageID)
         #expect(windowSvc.raisedWindowID == 202)

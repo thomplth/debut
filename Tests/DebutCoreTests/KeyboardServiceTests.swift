@@ -240,18 +240,19 @@ struct KeyboardServiceTests {
         _ = svc.start(delegate: delegate)
 
         svc.simulateEvent(.switchToStage(1))
-        svc.simulateEvent(.switchToStage(5))
+        svc.simulateEvent(.switchToStageKeepingCurrentApplication(5))
 
-        #expect(delegate.receivedEvents == [.switchToStage(1), .switchToStage(5)])
+        #expect(delegate.receivedEvents == [
+            .switchToStage(1), .switchToStageKeepingCurrentApplication(5),
+        ])
     }
 
-    @Test("Ctrl digit shortcuts map 1-9 to stages 1-9 and 0 to stage 10")
+    @Test("Quick switch digit shortcuts map only 1-9 to stages 1-9")
     func quickSwitchKeyMapping() {
         let mappings = [
             (kVK_ANSI_1, 1), (kVK_ANSI_2, 2), (kVK_ANSI_3, 3),
             (kVK_ANSI_4, 4), (kVK_ANSI_5, 5), (kVK_ANSI_6, 6),
             (kVK_ANSI_7, 7), (kVK_ANSI_8, 8), (kVK_ANSI_9, 9),
-            (kVK_ANSI_0, 10),
         ]
 
         for (keyCode, expectedPosition) in mappings {
@@ -260,6 +261,10 @@ struct KeyboardServiceTests {
                 flags: .maskControl
             ) == expectedPosition)
         }
+        #expect(EventTapKeyboardService.quickSwitchStagePosition(
+            keyCode: Int64(kVK_ANSI_0),
+            flags: .maskControl
+        ) == nil)
     }
 
     @Test("Quick switch requires Ctrl without Command, Option, or Shift")
@@ -289,6 +294,7 @@ struct KeyboardServiceTests {
         _ = service.start(delegate: delegate)
         defer { service.stop() }
         service.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
+        service.quickSwitchSameApplicationModifiers = ShortcutModifiers(command: true)
 
         let configured = CGEvent(
             keyboardEventSource: nil,
@@ -306,6 +312,54 @@ struct KeyboardServiceTests {
         #expect(service.handleCGEvent(type: .keyDown, event: configured) == nil)
         #expect(service.handleCGEvent(type: .keyDown, event: oldDefault) === oldDefault)
         #expect(delegate.receivedEvents == [.switchToStage(4)])
+    }
+
+    @Test("Same-app quick switch uses its own configured modifier chord")
+    func sameAppQuickSwitchUsesConfiguredModifiers() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        _ = service.start(delegate: delegate)
+        defer { service.stop() }
+        service.quickSwitchModifiers = .control
+        service.quickSwitchSameApplicationModifiers = ShortcutModifiers(
+            control: true,
+            option: true
+        )
+
+        let sameApp = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_4),
+            keyDown: true
+        )!
+        sameApp.flags = [.maskControl, .maskAlternate]
+
+        #expect(service.handleCGEvent(type: .keyDown, event: sameApp) == nil)
+        #expect(delegate.receivedEvents == [.switchToStageKeepingCurrentApplication(4)])
+    }
+
+    @Test("Digit zero is not captured by either quick-switch shortcut")
+    func quickSwitchIgnoresZero() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        _ = service.start(delegate: delegate)
+        defer { service.stop() }
+
+        let direct = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_0),
+            keyDown: true
+        )!
+        direct.flags = .maskControl
+        let sameApp = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_0),
+            keyDown: true
+        )!
+        sameApp.flags = [.maskControl, .maskAlternate]
+
+        #expect(service.handleCGEvent(type: .keyDown, event: direct) === direct)
+        #expect(service.handleCGEvent(type: .keyDown, event: sameApp) === sameApp)
+        #expect(delegate.receivedEvents.isEmpty)
     }
 
     @Test("Quick switch consumes key-up even when Ctrl was released first")
