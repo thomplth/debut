@@ -9,20 +9,34 @@ private final class PreviewCaptureMetrics: @unchecked Sendable {
     private var captureIDs: [CGWindowID: UUID]
     private var capturedCount = 0
     private var recordedFirst = false
+    private let overlayPresentation: OverlayPresentationContext?
+    private let overlayPresentationRecorder: OverlayPresentationRecorder
 
-    init(windowIDs: [CGWindowID]) {
+    init(
+        windowIDs: [CGWindowID],
+        overlayPresentation: OverlayPresentationContext? = nil,
+        overlayPresentationRecorder: OverlayPresentationRecorder = .shared
+    ) {
+        self.overlayPresentation = overlayPresentation
+        self.overlayPresentationRecorder = overlayPresentationRecorder
         batchID = PerformanceRecorder.shared.begin(
             .previewAll,
-            workload: .init(windows: windowIDs.count, captures: windowIDs.count)
+            workload: .init(windows: windowIDs.count, captures: windowIDs.count),
+            traceID: overlayPresentation?.traceID
         )
         firstID = PerformanceRecorder.shared.begin(
             .previewFirst,
-            workload: .init(windows: windowIDs.count, captures: min(1, windowIDs.count))
+            workload: .init(windows: windowIDs.count, captures: min(1, windowIDs.count)),
+            traceID: overlayPresentation?.traceID
         )
         captureIDs = Dictionary(uniqueKeysWithValues: windowIDs.map { windowID in
             (
                 windowID,
-                PerformanceRecorder.shared.begin(.previewCapture, workload: .init(captures: 1))
+                PerformanceRecorder.shared.begin(
+                    .previewCapture,
+                    workload: .init(captures: 1),
+                    traceID: overlayPresentation?.traceID
+                )
             )
         })
     }
@@ -36,6 +50,12 @@ private final class PreviewCaptureMetrics: @unchecked Sendable {
             if !recordedFirst {
                 recordedFirst = true
                 _ = PerformanceRecorder.shared.end(firstID)
+                if let overlayPresentation {
+                    overlayPresentationRecorder.mark(
+                        .firstPreviewCompleted,
+                        for: overlayPresentation
+                    )
+                }
             }
         }
     }
@@ -49,8 +69,17 @@ private final class PreviewCaptureMetrics: @unchecked Sendable {
             if !recordedFirst {
                 recordedFirst = true
                 _ = PerformanceRecorder.shared.end(firstID)
+                if let overlayPresentation {
+                    overlayPresentationRecorder.mark(
+                        .firstPreviewCompleted,
+                        for: overlayPresentation
+                    )
+                }
             }
             _ = PerformanceRecorder.shared.end(batchID)
+            if let overlayPresentation {
+                overlayPresentationRecorder.mark(.allPreviewsCompleted, for: overlayPresentation)
+            }
             return capturedCount
         }
     }
@@ -58,10 +87,34 @@ private final class PreviewCaptureMetrics: @unchecked Sendable {
 
 public protocol StageControllerDelegate: AnyObject {
     func stageControllerDidOpenOverlay(_ controller: StageController)
+    func stageControllerDidOpenOverlay(
+        _ controller: StageController,
+        overlayPresentation: OverlayPresentationContext?
+    )
     func stageControllerDidCloseOverlay(_ controller: StageController)
+    func stageControllerDidCloseOverlay(
+        _ controller: StageController,
+        overlayPresentation: OverlayPresentationContext?
+    )
     func stageControllerDidUpdateSelection(_ controller: StageController)
     func stageControllerDidSwitchStage(_ controller: StageController)
     func stageControllerDidMutateState(_ controller: StageController)
+}
+
+public extension StageControllerDelegate {
+    func stageControllerDidOpenOverlay(
+        _ controller: StageController,
+        overlayPresentation: OverlayPresentationContext?
+    ) {
+        stageControllerDidOpenOverlay(controller)
+    }
+
+    func stageControllerDidCloseOverlay(
+        _ controller: StageController,
+        overlayPresentation: OverlayPresentationContext?
+    ) {
+        stageControllerDidCloseOverlay(controller)
+    }
 }
 
 public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
@@ -97,6 +150,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private var previewCaptureGeneration: UInt = 0
     private var frontmostAppIsExcluded = false
     private let diag = DiagnosticReporter.shared
+    private let overlayPresentationRecorder: OverlayPresentationRecorder
+    private var activeOverlayPresentation: OverlayPresentationContext?
 
     public init(
         windowService: any WindowService,
@@ -104,7 +159,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         stageManager: StageManager = StageManager(),
         overlayPresentationDelay: TimeInterval = AppSettings.defaultOverlayPresentationDelay,
         quickSwitchBehavior: QuickSwitchBehavior = .stage,
-        fullscreenAppActiveProvider: (() -> Bool)? = nil
+        fullscreenAppActiveProvider: (() -> Bool)? = nil,
+        overlayPresentationRecorder: OverlayPresentationRecorder = .shared
     ) {
         self.windowService = windowService
         self.keyboardService = keyboardService
@@ -112,6 +168,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         self.overlayPresentationDelay = overlayPresentationDelay
         self.quickSwitchBehavior = quickSwitchBehavior
         self.fullscreenAppActiveProvider = fullscreenAppActiveProvider
+        self.overlayPresentationRecorder = overlayPresentationRecorder
 
         let started = keyboardService.start(delegate: self)
         self.keyboardServiceStarted = started
@@ -267,9 +324,47 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         frontmostAppIsExcluded = isExcluded
     }
 
+    public func markOverlayPresentation(
+        _ phase: OverlayPresentationPhase,
+        context: OverlayPresentationContext
+    ) {
+        overlayPresentationRecorder.mark(phase, for: context)
+    }
+
+    public func updateOverlayHostingView(
+        _ state: OverlayHostingViewState,
+        context: OverlayPresentationContext
+    ) {
+        overlayPresentationRecorder.updateHostingView(state, for: context)
+    }
+
+    public func completeOverlayPresentation(
+        _ context: OverlayPresentationContext,
+        outcome: OverlayPresentationOutcome
+    ) {
+        overlayPresentationRecorder.complete(context, outcome: outcome)
+        if activeOverlayPresentation == context {
+            activeOverlayPresentation = nil
+        }
+    }
+
     // MARK: - KeyboardEventDelegate
 
     public func handleKeyEvent(_ event: DebutKeyEvent) {
+        handleKeyEvent(event, overlayPresentation: nil)
+    }
+
+    public func handleKeyEvent(
+        _ event: DebutKeyEvent,
+        overlayPresentation: OverlayPresentationContext?
+    ) {
+        if let overlayPresentation {
+            activeOverlayPresentation = overlayPresentation
+            overlayPresentationRecorder.updateConfiguredDelay(
+                milliseconds: max(0, overlayPresentationDelay) * 1_000,
+                for: overlayPresentation
+            )
+        }
         diag.report("key_event", level: .transient, details: ["keyEvent": "\(event)"])
         if let action = event.commandHintAction {
             onCommandUsed?(action)
@@ -465,7 +560,21 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func setupOverlay() {
         // Don't show overlay when a fullscreen app is active
-        if isFullscreenAppActive() { return }
+        let presentation = activeOverlayPresentation
+        let fullscreen = isFullscreenAppActive()
+        if let presentation {
+            overlayPresentationRecorder.mark(.fullscreenProbeCompleted, for: presentation)
+        }
+        if fullscreen {
+            if let presentation {
+                overlayPresentationRecorder.complete(presentation, outcome: .fullscreenRejected)
+                activeOverlayPresentation = nil
+            }
+            return
+        }
+        if let presentation {
+            overlayPresentationRecorder.mark(.controllerAccepted, for: presentation)
+        }
 
         backtickCycleWindows = []
         backtickCycleIndex = 0
@@ -480,9 +589,25 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         preOverlayStageID = stageManager.activeStageID
         // The surface may already be on screen from an earlier stage switch, so opening the
         // overlay is its own reason to recapture.
-        desktopSurfaces?.refreshWallpaper()
+        let assignedWindowIDs = stageManager.stages.flatMap { $0.windows.map(\.windowID) }
+        let cachedCount = variedWindowPreviewIDs.intersection(assignedWindowIDs).count
+        if let presentation {
+            let workload = PerformanceWorkload(
+                stages: stageManager.stages.count,
+                windows: assignedWindowIDs.count,
+                captures: assignedWindowIDs.count
+            )
+            overlayPresentationRecorder.updateEnvironment(
+                for: presentation,
+                previewCache: .classify(cached: cachedCount, assigned: assignedWindowIDs.count),
+                wallpaperState: desktopSurfaces?.overlayWallpaperState ?? .unavailable,
+                workload: workload,
+                cachedPreviewCount: cachedCount
+            )
+        }
+        desktopSurfaces?.refreshWallpaper(overlayPresentation: presentation)
         scheduleOverlayPresentation()
-        refreshWindowPreviews()
+        refreshWindowPreviews(overlayPresentation: presentation)
     }
 
     private func scheduleOverlayPresentation() {
@@ -490,6 +615,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         let generation = overlayPresentationGeneration
 
         let delay = max(0, overlayPresentationDelay)
+        if let presentation = activeOverlayPresentation {
+            overlayPresentationRecorder.mark(.presentationScheduled, for: presentation)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self,
                   self.overlayPresentationGeneration == generation,
@@ -498,16 +626,37 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             else { return }
 
             self.isOverlayPresented = true
+            let presentation = self.activeOverlayPresentation
+            if let presentation {
+                self.overlayPresentationRecorder.mark(.presentationDeadlineFired, for: presentation)
+            }
             self.diag.report("overlay_opened")
-            self.delegate?.stageControllerDidOpenOverlay(self)
+            self.delegate?.stageControllerDidOpenOverlay(
+                self,
+                overlayPresentation: presentation
+            )
         }
     }
 
-    private func dismissOverlayPresentation() {
+    private func dismissOverlayPresentation(
+        beforePresentationOutcome: OverlayPresentationOutcome = .hiddenBeforeReveal
+    ) {
         overlayPresentationGeneration &+= 1
-        guard isOverlayPresented else { return }
+        guard isOverlayPresented else {
+            if let presentation = activeOverlayPresentation {
+                overlayPresentationRecorder.complete(
+                    presentation,
+                    outcome: beforePresentationOutcome
+                )
+                activeOverlayPresentation = nil
+            }
+            return
+        }
         isOverlayPresented = false
-        delegate?.stageControllerDidCloseOverlay(self)
+        delegate?.stageControllerDidCloseOverlay(
+            self,
+            overlayPresentation: activeOverlayPresentation
+        )
     }
 
     private func notifyOverlayUpdated() {
@@ -546,7 +695,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         return (fullscreenRef as? Bool) == true
     }
 
-    private func refreshWindowPreviews() {
+    private func refreshWindowPreviews(
+        overlayPresentation: OverlayPresentationContext? = nil
+    ) {
         let windowIDs = stageManager.stages.flatMap { stage in
             stage.windows.map(\.windowID)
         }
@@ -555,7 +706,11 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         previewCaptureGeneration &+= 1
         let generation = previewCaptureGeneration
         let assignedWindowIDs = Set(windowIDs)
-        let metrics = PreviewCaptureMetrics(windowIDs: windowIDs)
+        let metrics = PreviewCaptureMetrics(
+            windowIDs: windowIDs,
+            overlayPresentation: overlayPresentation,
+            overlayPresentationRecorder: overlayPresentationRecorder
+        )
 
         // A missing capture can mean that a window is merely hidden, so retain its last good
         // preview. Only assignments that no longer exist are removed.
@@ -607,7 +762,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             tapService.overlayVisible = false
         }
 
-        dismissOverlayPresentation()
+        dismissOverlayPresentation(beforePresentationOutcome: .releasedBeforePresentation)
 
         guard stageManager.stages.indices.contains(selectedStageIndex) else { return }
         let targetStage = stageManager.stages[selectedStageIndex]

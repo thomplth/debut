@@ -38,6 +38,24 @@ struct TelemetryTests {
         }
     }
 
+    @Test("Overlay anomaly exposes only a bucketed temperature")
+    func overlayTemperatureAllowlist() throws {
+        let payload = TelemetryPayload.anomaly(
+            operation: .overlayEndToEndVisible,
+            latency: .over500Milliseconds,
+            workload: .typical,
+            temperature: .processFirst
+        )
+        let object = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(payload)
+        ) as! [String: Any]
+
+        #expect(object["temperature"] as? String == "process_first")
+        #expect(Set(object.keys) == [
+            "schemaVersion", "event", "operation", "latency", "workload", "temperature",
+        ])
+    }
+
     @Test("Disabling stops delivery immediately and deletes queued events")
     func optOutClearsQueue() async throws {
         let transport = RecordingTelemetryClient()
@@ -74,6 +92,82 @@ struct TelemetryTests {
         let status = await exporter.status()
         #expect(status.sent == 1)
         #expect(status.dropped == 1)
+    }
+
+    @Test("One noisy operation cannot consume the anomaly budget")
+    func perOperationCap() async throws {
+        let queue = InMemoryTelemetryQueue()
+        let exporter = TelemetryExporter(
+            client: RecordingTelemetryClient(),
+            queue: queue,
+            enabled: true,
+            dailyEventLimit: 6,
+            dailyPerOperationLimit: 2
+        )
+        let wallpaper = TelemetryPayload.anomaly(
+            operation: .wallpaperCapture,
+            latency: .over500Milliseconds,
+            workload: .typical
+        )
+        for _ in 0..<5 { try await exporter.enqueue(wallpaper) }
+        try await exporter.enqueue(.anomaly(
+            operation: .overlayEndToEndVisible,
+            latency: .over500Milliseconds,
+            workload: .typical
+        ))
+
+        let payloads = await queue.payloads()
+        #expect(payloads.filter { $0.operation == .wallpaperCapture }.count == 2)
+        #expect(payloads.filter { $0.operation == .overlayEndToEndVisible }.count == 1)
+        #expect(await exporter.status().dropped == 3)
+    }
+
+    @Test("Per-operation cap survives delivery and exporter restart")
+    func durablePerOperationCap() async throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DebutTelemetryOperations-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let wallpaper = TelemetryPayload.anomaly(
+            operation: .wallpaperCapture,
+            latency: .over500Milliseconds,
+            workload: .typical
+        )
+        let first = TelemetryExporter(
+            client: RecordingTelemetryClient(),
+            queue: DiskTelemetryQueue(file: file),
+            enabled: true,
+            dailyEventLimit: 10,
+            dailyPerOperationLimit: 2
+        )
+        try await first.enqueue(wallpaper)
+        try await first.flush()
+        try await first.enqueue(wallpaper)
+        try await first.flush()
+
+        let secondClient = RecordingTelemetryClient()
+        let second = TelemetryExporter(
+            client: secondClient,
+            queue: DiskTelemetryQueue(file: file),
+            enabled: true,
+            dailyEventLimit: 10,
+            dailyPerOperationLimit: 2
+        )
+        try await second.enqueue(wallpaper)
+        try await second.flush()
+
+        #expect(await secondClient.payloads.isEmpty)
+        #expect(await second.status().dropped == 1)
+    }
+
+    @Test("Legacy quota files decode without per-operation counters")
+    func legacyQuotaMigration() throws {
+        let data = Data(#"{"day":"2026-08-13","sent":3,"dropped":4}"#.utf8)
+        let quota = try JSONDecoder().decode(TelemetryQuota.self, from: data)
+
+        #expect(quota.day == "2026-08-13")
+        #expect(quota.sent == 3)
+        #expect(quota.dropped == 4)
+        #expect(quota.acceptedByOperation.isEmpty)
     }
 
     @Test("TelemetryDeck adapter uses v2 EU ingestion with an empty user and flat allowlisted primitives")

@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -331,6 +332,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     }
 
     nonisolated public func applicationWillTerminate(_ notification: Notification) {
+        OverlayPresentationRecorder.shared.finalizeAll(outcome: .appTerminated)
         let stageController = MainActor.assumeIsolated { self.stageController }
         let debouncedSaver = MainActor.assumeIsolated { self.debouncedSaver }
         if let stageController, let debouncedSaver {
@@ -351,14 +353,28 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     // MARK: - StageControllerDelegate
 
     nonisolated public func stageControllerDidOpenOverlay(_ controller: StageController) {
+        stageControllerDidOpenOverlay(controller, overlayPresentation: nil)
+    }
+
+    nonisolated public func stageControllerDidOpenOverlay(
+        _ controller: StageController,
+        overlayPresentation: OverlayPresentationContext?
+    ) {
         DispatchQueue.main.async { [weak self] in
-            self?.showStageManagerOverlay()
+            self?.showStageManagerOverlay(overlayPresentation: overlayPresentation)
         }
     }
 
     nonisolated public func stageControllerDidCloseOverlay(_ controller: StageController) {
+        stageControllerDidCloseOverlay(controller, overlayPresentation: nil)
+    }
+
+    nonisolated public func stageControllerDidCloseOverlay(
+        _ controller: StageController,
+        overlayPresentation: OverlayPresentationContext?
+    ) {
         DispatchQueue.main.async { [weak self] in
-            self?.hideStageManagerOverlay()
+            self?.hideStageManagerOverlay(overlayPresentation: overlayPresentation)
         }
     }
 
@@ -386,7 +402,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
     }
 
-    private func showStageManagerOverlay() {
+    private func showStageManagerOverlay(
+        overlayPresentation: OverlayPresentationContext? = nil
+    ) {
         guard let stageController, let overlayWindow else { return }
         if let hiddenIdlePerformanceID {
             _ = PerformanceRecorder.shared.end(hiddenIdlePerformanceID)
@@ -396,7 +414,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             stages: stageController.stageManager.stages.count,
             windows: stageController.stageManager.stages.reduce(0) { $0 + $1.windows.count }
         )
-        let preparationID = PerformanceRecorder.shared.begin(.overlayPreparation, workload: workload)
+        if let overlayPresentation {
+            stageController.markOverlayPresentation(.preparationBegan, context: overlayPresentation)
+        }
+        let preparationID = PerformanceRecorder.shared.begin(
+            .overlayPreparation,
+            workload: workload,
+            traceID: overlayPresentation?.traceID
+        )
 
         overlayWindow.onWindowSelected = { [weak self] stageIndex, windowIndex in
             self?.diag.report("overlay_window_selected_by_pointer", level: .transient, details: [
@@ -472,13 +497,45 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             appearance: currentSettings
         )
         reportCommandHintLayout(viewModel: vm)
-        overlayWindow.update(viewModel: vm)
-        overlayWindow.showOverlay()
+        let createdHostingView = overlayWindow.update(viewModel: vm)
+        if let overlayPresentation {
+            stageController.updateOverlayHostingView(
+                createdHostingView ? .created : .reused,
+                context: overlayPresentation
+            )
+        }
+        overlayWindow.showOverlay { [weak self, weak stageController] in
+            guard let self, let stageController, let overlayPresentation else { return }
+            stageController.completeOverlayPresentation(
+                overlayPresentation,
+                outcome: .presented
+            )
+            self.diag.report("overlay_presentation_completed", level: .transient, details: [
+                "outcome": OverlayPresentationOutcome.presented.rawValue,
+            ])
+        }
+        if let overlayPresentation {
+            stageController.markOverlayPresentation(.windowOrdered, context: overlayPresentation)
+        }
         _ = PerformanceRecorder.shared.end(preparationID)
-        let firstFrameID = PerformanceRecorder.shared.begin(.overlayFirstFrame, workload: workload)
-        DispatchQueue.main.async { [weak overlayWindow] in
+        if let overlayPresentation {
+            stageController.markOverlayPresentation(.preparationCompleted, context: overlayPresentation)
+        }
+        let renderSubmissionID = PerformanceRecorder.shared.begin(
+            .overlayRenderSubmission,
+            workload: workload,
+            traceID: overlayPresentation?.traceID
+        )
+        DispatchQueue.main.async { [weak overlayWindow, weak stageController] in
             overlayWindow?.contentView?.displayIfNeeded()
-            _ = PerformanceRecorder.shared.end(firstFrameID)
+            CATransaction.flush()
+            if let overlayPresentation {
+                stageController?.markOverlayPresentation(
+                    .renderSubmitted,
+                    context: overlayPresentation
+                )
+            }
+            _ = PerformanceRecorder.shared.end(renderSubmissionID)
         }
         diag.report("overlay_shown")
     }
@@ -511,7 +568,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         ])
     }
 
-    private func hideStageManagerOverlay() {
+    private func hideStageManagerOverlay(
+        overlayPresentation: OverlayPresentationContext? = nil
+    ) {
+        if let overlayPresentation {
+            stageController?.completeOverlayPresentation(
+                overlayPresentation,
+                outcome: .hiddenBeforeReveal
+            )
+        }
         overlayWindow?.hideOverlay()
         diag.report("overlay_hidden")
         if hiddenIdlePerformanceID == nil {
@@ -865,7 +930,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 try? await exporter.enqueue(.anomaly(
                     operation: observation.operation,
                     latency: TelemetryLatencyBucket(milliseconds: observation.durationMilliseconds),
-                    workload: workload
+                    workload: workload,
+                    temperature: observation.temperature
                 ))
                 try? await exporter.flush()
             }

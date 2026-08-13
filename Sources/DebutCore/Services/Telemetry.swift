@@ -6,6 +6,12 @@ public enum TelemetryWorkload: String, Codable, Sendable {
     case stress
 }
 
+public enum TelemetryTemperature: String, Codable, Sendable {
+    case processFirst = "process_first"
+    case cacheCold = "cache_cold"
+    case warm
+}
+
 /// Selects latency anomalies that represent delayed work. Hidden-idle spans measure how long
 /// Debut remained inactive, so a long duration is expected and must never consume telemetry quota.
 public enum PerformanceAnomalyPolicy {
@@ -52,6 +58,7 @@ public struct TelemetryPayload: Codable, Equatable, Sendable {
     public let appVersion: String?
     public let operatingSystemMajor: Int?
     public let workload: TelemetryWorkload
+    public let temperature: TelemetryTemperature?
     public let operationCounts: [String: Int]?
     public let latencyBuckets: [String: TelemetryLatencyBucket]?
     public let anomalyCount: Int?
@@ -72,6 +79,7 @@ public struct TelemetryPayload: Codable, Equatable, Sendable {
             appVersion: appVersion,
             operatingSystemMajor: operatingSystemMajor,
             workload: workload,
+            temperature: nil,
             operationCounts: Dictionary(uniqueKeysWithValues: operationCounts.map { ($0.key.rawValue, $0.value) }),
             latencyBuckets: Dictionary(uniqueKeysWithValues: latencyBuckets.map { ($0.key.rawValue, $0.value) }),
             anomalyCount: max(0, anomalyCount),
@@ -83,7 +91,8 @@ public struct TelemetryPayload: Codable, Equatable, Sendable {
     public static func anomaly(
         operation: PerformanceOperation,
         latency: TelemetryLatencyBucket,
-        workload: TelemetryWorkload
+        workload: TelemetryWorkload,
+        temperature: TelemetryTemperature? = nil
     ) -> TelemetryPayload {
         TelemetryPayload(
             schemaVersion: 1,
@@ -91,6 +100,7 @@ public struct TelemetryPayload: Codable, Equatable, Sendable {
             appVersion: nil,
             operatingSystemMajor: nil,
             workload: workload,
+            temperature: temperature,
             operationCounts: nil,
             latencyBuckets: nil,
             anomalyCount: nil,
@@ -100,7 +110,7 @@ public struct TelemetryPayload: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, event, appVersion, operatingSystemMajor, workload
+        case schemaVersion, event, appVersion, operatingSystemMajor, workload, temperature
         case operationCounts, latencyBuckets, anomalyCount, operation, latency
     }
 
@@ -109,6 +119,7 @@ public struct TelemetryPayload: Codable, Equatable, Sendable {
         try container.encode(schemaVersion, forKey: .schemaVersion)
         try container.encode(event, forKey: .event)
         try container.encode(workload, forKey: .workload)
+        try container.encodeIfPresent(temperature, forKey: .temperature)
         try container.encodeIfPresent(appVersion, forKey: .appVersion)
         try container.encodeIfPresent(operatingSystemMajor, forKey: .operatingSystemMajor)
         try container.encodeIfPresent(operationCounts, forKey: .operationCounts)
@@ -177,6 +188,9 @@ public final class TelemetryDeckClient: TelemetryClient, @unchecked Sendable {
         if let count = payload.anomalyCount { dimensions["Debut.anomalyCount"] = count }
         if let operation = payload.operation { dimensions["Debut.operation"] = operation.rawValue }
         if let latency = payload.latency { dimensions["Debut.latencyBucket"] = latency.rawValue }
+        if let temperature = payload.temperature {
+            dimensions["Debut.temperature"] = temperature.rawValue
+        }
         for (operation, count) in payload.operationCounts ?? [:] {
             dimensions["Debut.operation.\(operation).count"] = count
         }
@@ -211,10 +225,33 @@ public struct TelemetryQuota: Codable, Equatable, Sendable {
     public var day: String
     public var sent: Int
     public var dropped: Int
-    public init(day: String = "", sent: Int = 0, dropped: Int = 0) {
+    public var acceptedByOperation: [String: Int]
+
+    public init(
+        day: String = "",
+        sent: Int = 0,
+        dropped: Int = 0,
+        acceptedByOperation: [String: Int] = [:]
+    ) {
         self.day = day
         self.sent = sent
         self.dropped = dropped
+        self.acceptedByOperation = acceptedByOperation
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case day, sent, dropped, acceptedByOperation
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        day = try container.decodeIfPresent(String.self, forKey: .day) ?? ""
+        sent = try container.decodeIfPresent(Int.self, forKey: .sent) ?? 0
+        dropped = try container.decodeIfPresent(Int.self, forKey: .dropped) ?? 0
+        acceptedByOperation = try container.decodeIfPresent(
+            [String: Int].self,
+            forKey: .acceptedByOperation
+        ) ?? [:]
     }
 }
 
@@ -294,6 +331,7 @@ public actor TelemetryExporter {
     private let client: any TelemetryClient
     private let queue: any TelemetryQueue
     private let dailyEventLimit: Int
+    private let dailyPerOperationLimit: Int
     private let now: @Sendable () -> Date
     private var enabled: Bool
 
@@ -302,12 +340,14 @@ public actor TelemetryExporter {
         queue: any TelemetryQueue,
         enabled: Bool,
         dailyEventLimit: Int = 20,
+        dailyPerOperationLimit: Int = 2,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.client = client
         self.queue = queue
         self.enabled = enabled
         self.dailyEventLimit = max(1, dailyEventLimit)
+        self.dailyPerOperationLimit = max(1, dailyPerOperationLimit)
         self.now = now
     }
 
@@ -320,12 +360,25 @@ public actor TelemetryExporter {
         guard enabled, PerformanceAnomalyPolicy.shouldRetain(payload) else { return }
         var quota = try await currentQuota()
         var payloads = try await queue.payloads()
-        guard quota.sent + payloads.count < dailyEventLimit else {
+        if payload.event == .anomaly, let operation = payload.operation {
+            let accepted = quota.acceptedByOperation[operation.rawValue, default: 0]
+            guard accepted < dailyPerOperationLimit else {
+                quota.dropped += 1
+                try await queue.setQuota(quota)
+                return
+            }
+        }
+        let summaryReservation = dailyEventLimit > 1 && payload.event == .anomaly ? 1 : 0
+        guard quota.sent + payloads.count < dailyEventLimit - summaryReservation else {
             quota.dropped += 1
             try await queue.setQuota(quota)
             return
         }
         payloads.append(payload)
+        if payload.event == .anomaly, let operation = payload.operation {
+            quota.acceptedByOperation[operation.rawValue, default: 0] += 1
+            try await queue.setQuota(quota)
+        }
         try await queue.replace(with: payloads)
     }
 

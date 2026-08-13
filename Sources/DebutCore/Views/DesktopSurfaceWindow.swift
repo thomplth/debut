@@ -280,6 +280,8 @@ public final class DesktopSurfaceWindow: NSWindow {
     private let wallpaperChangeObserver: DesktopWallpaperChangeObserving
     private let onWallpaperRefreshed: @MainActor (WallpaperCaptureOutcome) -> Void
     private var captureTask: Task<Void, Never>?
+    nonisolated(unsafe) private var wallpaperLoaded = false
+    nonisolated(unsafe) private var wallpaperCapturePending = false
 
     public convenience init(
         screen: NSScreen,
@@ -375,10 +377,22 @@ public final class DesktopSurfaceWindow: NSWindow {
         close()
     }
 
-    func refreshWallpaper(reason: WallpaperRefreshReason) {
+    nonisolated var overlayWallpaperState: OverlayWallpaperState {
+        if wallpaperCapturePending { return .capturePending }
+        return wallpaperLoaded ? .ready : .unavailable
+    }
+
+    func refreshWallpaper(
+        reason: WallpaperRefreshReason,
+        overlayPresentation: OverlayPresentationContext? = nil
+    ) {
         captureTask?.cancel()
+        wallpaperCapturePending = true
         captureTask = Task { @MainActor [weak self] in
-            await self?.performRefresh(reason: reason)
+            await self?.performRefresh(
+                reason: reason,
+                overlayPresentation: overlayPresentation
+            )
         }
     }
 
@@ -386,11 +400,18 @@ public final class DesktopSurfaceWindow: NSWindow {
         await captureTask?.value
     }
 
-    private func performRefresh(reason: WallpaperRefreshReason) async {
+    private func performRefresh(
+        reason: WallpaperRefreshReason,
+        overlayPresentation: OverlayPresentationContext?
+    ) async {
         let scale = NSScreen.screens.first { $0.displayID == displayID }?.backingScaleFactor ?? 1
         let pixelSize = CGSize(width: frame.width * scale, height: frame.height * scale)
 
-        let performanceID = PerformanceRecorder.shared.begin(.wallpaperCapture, workload: .init(captures: 1))
+        let performanceID = PerformanceRecorder.shared.begin(
+            .wallpaperCapture,
+            workload: .init(captures: 1),
+            traceID: overlayPresentation?.traceID
+        )
         defer { PerformanceRecorder.shared.end(performanceID) }
         do {
             let image = try await wallpaperCapture.captureWallpaper(
@@ -399,6 +420,14 @@ public final class DesktopSurfaceWindow: NSWindow {
             )
             guard !Task.isCancelled else { return }
             wallpaperView.image = image
+            wallpaperLoaded = true
+            wallpaperCapturePending = false
+            if let overlayPresentation {
+                OverlayPresentationRecorder.shared.mark(
+                    .wallpaperCompleted,
+                    for: overlayPresentation
+                )
+            }
             onWallpaperRefreshed(
                 WallpaperCaptureOutcome(
                     loaded: true,
@@ -409,6 +438,13 @@ public final class DesktopSurfaceWindow: NSWindow {
             )
         } catch {
             guard !Task.isCancelled else { return }
+            wallpaperCapturePending = false
+            if let overlayPresentation {
+                OverlayPresentationRecorder.shared.mark(
+                    .wallpaperCompleted,
+                    for: overlayPresentation
+                )
+            }
             // Keep whatever was last captured. Clearing here would flash the surface black on a
             // transient failure, which is the very symptom this window exists to avoid.
             onWallpaperRefreshed(
@@ -521,10 +557,23 @@ public final class DesktopSurfaceCoordinator {
         }
     }
 
+    public var overlayWallpaperState: OverlayWallpaperState {
+        guard !surfaces.isEmpty else { return .unavailable }
+        let states = surfaces.values.map(\.overlayWallpaperState)
+        if states.allSatisfy({ $0 == .ready }) { return .ready }
+        if states.contains(.capturePending) { return .capturePending }
+        return .unavailable
+    }
+
     /// Recapture without reordering, for when an already-visible surface is about to be looked at.
-    public func refreshWallpaper() {
+    public func refreshWallpaper(
+        overlayPresentation: OverlayPresentationContext? = nil
+    ) {
         for surface in surfaces.values {
-            surface.refreshWallpaper(reason: .presentation)
+            surface.refreshWallpaper(
+                reason: .presentation,
+                overlayPresentation: overlayPresentation
+            )
         }
     }
 }

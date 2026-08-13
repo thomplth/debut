@@ -6,9 +6,18 @@ import CoreGraphics
 
 final class TestKeyboardDelegate: KeyboardEventDelegate, @unchecked Sendable {
     var receivedEvents: [DebutKeyEvent] = []
+    var overlayContexts: [OverlayPresentationContext] = []
 
     func handleKeyEvent(_ event: DebutKeyEvent) {
         receivedEvents.append(event)
+    }
+
+    func handleKeyEvent(
+        _ event: DebutKeyEvent,
+        overlayPresentation: OverlayPresentationContext?
+    ) {
+        receivedEvents.append(event)
+        if let overlayPresentation { overlayContexts.append(overlayPresentation) }
     }
 }
 
@@ -40,6 +49,38 @@ final class RecordedComboBox: @unchecked Sendable {
 
 @Suite("KeyboardService")
 struct KeyboardServiceTests {
+
+    @Test("A fresh overlay activation carries one trace from event recognition to delivery")
+    func overlayActivationCorrelation() {
+        let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
+        let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
+        let service = EventTapKeyboardService(
+            overlayPresentationRecorder: overlay,
+            performanceRecorder: performance
+        )
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let event = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        event.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: event) == nil)
+
+        #expect(delegate.receivedEvents == [.cmdTabHold])
+        #expect(delegate.overlayContexts.count == 1)
+        let trace = overlay.snapshot().active.first
+        #expect(trace?.traceID == delegate.overlayContexts.first?.traceID)
+        #expect(trace?.phases.map(\.phase) == [.activationRecognized, .mainActorDequeued])
+        let correlatedOperations = performance.snapshot().recent.filter {
+            $0.traceID == delegate.overlayContexts.first?.traceID
+        }.map(\.operation)
+        #expect(correlatedOperations.contains(.eventTap))
+        #expect(correlatedOperations.contains(.mainQueueDelivery))
+    }
 
     @Test("Shortcut recording captures Ctrl-Tab before normal dispatch")
     func recordingCapturesControlTab() async throws {

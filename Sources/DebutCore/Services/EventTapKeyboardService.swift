@@ -28,6 +28,8 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private var storedQuickSwitchModifiers: ShortcutModifiers = .control
     private var shortcutRecordingHandler: (@MainActor @Sendable (KeyCombo?) -> Void)?
     private var shortcutRecordingKeysDown: Set<Int64> = []
+    private let overlayPresentationRecorder: OverlayPresentationRecorder
+    private let performanceRecorder: PerformanceRecorder
 
     public var overlayVisible: Bool {
         get { configurationLock.withLock { storedOverlayVisible } }
@@ -46,7 +48,13 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         set { configurationLock.withLock { storedQuickSwitchModifiers = newValue } }
     }
 
-    public init() {}
+    public init(
+        overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
+        performanceRecorder: PerformanceRecorder = .shared
+    ) {
+        self.overlayPresentationRecorder = overlayPresentationRecorder
+        self.performanceRecorder = performanceRecorder
+    }
 
     public func beginShortcutRecording(
         handler: @escaping @MainActor @Sendable (KeyCombo?) -> Void
@@ -175,8 +183,8 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         event: CGEvent,
         deliverAsynchronously: Bool
     ) -> CGEvent? {
-        let performanceID = PerformanceRecorder.shared.begin(.eventTap)
-        defer { PerformanceRecorder.shared.end(performanceID, sampleResources: false) }
+        let performanceID = performanceRecorder.begin(.eventTap)
+        defer { performanceRecorder.end(performanceID, sampleResources: false) }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
@@ -275,7 +283,20 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                 } else {
                     globalAction.toKeyEvent()
                 }
-                deliver(keyEvent, asynchronously: deliverAsynchronously)
+                let presentation = !isAutoRepeat && !overlayVisible
+                    ? overlayPresentationRecorder.begin(configuredDelayMilliseconds: 0)
+                    : nil
+                if let presentation {
+                    performanceRecorder.updateTraceID(
+                        presentation.traceID,
+                        for: performanceID
+                    )
+                }
+                deliver(
+                    keyEvent,
+                    asynchronously: deliverAsynchronously,
+                    overlayPresentation: presentation
+                )
                 return nil
             }
 
@@ -382,16 +403,35 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         return nil
     }
 
-    private func deliver(_ event: DebutKeyEvent, asynchronously: Bool) {
-        let deliveryID = PerformanceRecorder.shared.begin(.mainQueueDelivery)
+    private func deliver(
+        _ event: DebutKeyEvent,
+        asynchronously: Bool,
+        overlayPresentation: OverlayPresentationContext? = nil
+    ) {
+        let deliveryID = performanceRecorder.begin(
+            .mainQueueDelivery,
+            traceID: overlayPresentation?.traceID
+        )
         if asynchronously {
             DispatchQueue.main.async { [weak self] in
-                _ = PerformanceRecorder.shared.end(deliveryID, sampleResources: false)
-                self?.delegate?.handleKeyEvent(event)
+                _ = self?.performanceRecorder.end(deliveryID, sampleResources: false)
+                if let overlayPresentation {
+                    self?.overlayPresentationRecorder.mark(
+                        .mainActorDequeued,
+                        for: overlayPresentation
+                    )
+                }
+                self?.delegate?.handleKeyEvent(
+                    event,
+                    overlayPresentation: overlayPresentation
+                )
             }
         } else {
-            _ = PerformanceRecorder.shared.end(deliveryID, sampleResources: false)
-            delegate?.handleKeyEvent(event)
+            _ = performanceRecorder.end(deliveryID, sampleResources: false)
+            if let overlayPresentation {
+                overlayPresentationRecorder.mark(.mainActorDequeued, for: overlayPresentation)
+            }
+            delegate?.handleKeyEvent(event, overlayPresentation: overlayPresentation)
         }
     }
 
