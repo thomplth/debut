@@ -11,18 +11,6 @@ public enum CommandHintVisibility: String, Codable, Sendable, CaseIterable {
     case always = "Always"
 }
 
-public enum QuickSwitchBehavior: String, Codable, Sendable, CaseIterable {
-    case stage
-    case sameApplication
-
-    public var displayName: String {
-        switch self {
-        case .stage: "Focus last active window"
-        case .sameApplication: "Keep current app"
-        }
-    }
-}
-
 public enum PreviewRefreshPolicy: String, Codable, Sendable, CaseIterable {
     case lastActiveOnly
     case all
@@ -98,8 +86,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var overlayPresentationDelay: TimeInterval
     public var keyBindings: KeyBindings
     public var quickSwitchExcludedBundleIDs: [String]
-    public var quickSwitchBehavior: QuickSwitchBehavior
     public var quickSwitchModifiers: ShortcutModifiers
+    public var quickSwitchSameApplicationModifiers: ShortcutModifiers
 
     // Window previews
     public var previewRefreshPolicy: PreviewRefreshPolicy
@@ -128,8 +116,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
         self.keyBindings = KeyBindings()
         self.quickSwitchExcludedBundleIDs = []
-        self.quickSwitchBehavior = .stage
         self.quickSwitchModifiers = .control
+        self.quickSwitchSameApplicationModifiers = ShortcutModifiers(
+            control: true,
+            option: true
+        )
         self.previewRefreshPolicy = .lastActiveOnly
         self.previewCacheTTL = Self.defaultPreviewCacheTTL
         self.commandHintVisibility = .automatic
@@ -163,14 +154,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
             [String].self,
             forKey: .quickSwitchExcludedBundleIDs
         ) ?? []
-        quickSwitchBehavior = try container.decodeIfPresent(
-            QuickSwitchBehavior.self,
-            forKey: .quickSwitchBehavior
-        ) ?? .stage
         quickSwitchModifiers = try container.decodeIfPresent(
             ShortcutModifiers.self,
             forKey: .quickSwitchModifiers
         ) ?? .control
+        quickSwitchSameApplicationModifiers = try container.decodeIfPresent(
+            ShortcutModifiers.self,
+            forKey: .quickSwitchSameApplicationModifiers
+        ) ?? ShortcutModifiers(control: true, option: true)
         previewRefreshPolicy = try container.decodeIfPresent(
             PreviewRefreshPolicy.self,
             forKey: .previewRefreshPolicy

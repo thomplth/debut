@@ -26,6 +26,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private var storedKeyBindings: KeyBindings = KeyBindings()
     private var storedQuickSwitchExcludedBundleIDs: Set<String> = []
     private var storedQuickSwitchModifiers: ShortcutModifiers = .control
+    private var storedQuickSwitchSameApplicationModifiers = ShortcutModifiers(
+        control: true,
+        option: true
+    )
     private var shortcutRecordingHandler: (@MainActor @Sendable (KeyCombo?) -> Void)?
     private var shortcutRecordingKeysDown: Set<Int64> = []
     private let overlayPresentationRecorder: OverlayPresentationRecorder
@@ -46,6 +50,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     public var quickSwitchModifiers: ShortcutModifiers {
         get { configurationLock.withLock { storedQuickSwitchModifiers } }
         set { configurationLock.withLock { storedQuickSwitchModifiers = newValue } }
+    }
+    public var quickSwitchSameApplicationModifiers: ShortcutModifiers {
+        get { configurationLock.withLock { storedQuickSwitchSameApplicationModifiers } }
+        set { configurationLock.withLock { storedQuickSwitchSameApplicationModifiers = newValue } }
     }
 
     public init(
@@ -249,23 +257,33 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             let quickSwitchConfiguration = configurationLock.withLock {
                 (
                     storedQuickSwitchModifiers,
+                    storedQuickSwitchSameApplicationModifiers,
                     storedQuickSwitchExcludedBundleIDs,
                     cachedFrontmostAppBundleIdentifier
                 )
             }
-            if let stagePosition = Self.quickSwitchStagePosition(
+            let stagePosition = Self.quickSwitchStagePosition(
                 keyCode: keyCode,
                 flags: flags,
                 modifiers: quickSwitchConfiguration.0
-            ) {
+            )
+            let sameApplicationStagePosition = Self.quickSwitchStagePosition(
+                keyCode: keyCode,
+                flags: flags,
+                modifiers: quickSwitchConfiguration.1
+            )
+            if let stagePosition = stagePosition ?? sameApplicationStagePosition {
                 if quickSwitchKeysDown.contains(keyCode) { return nil }
-                if !quickSwitchConfiguration.1.isEmpty,
-                   let bundleID = quickSwitchConfiguration.2,
-                   quickSwitchConfiguration.1.contains(bundleID) {
+                if !quickSwitchConfiguration.2.isEmpty,
+                   let bundleID = quickSwitchConfiguration.3,
+                   quickSwitchConfiguration.2.contains(bundleID) {
                     return event
                 }
                 if quickSwitchKeysDown.insert(keyCode).inserted {
-                    deliver(.switchToStage(stagePosition), asynchronously: deliverAsynchronously)
+                    let keyEvent: DebutKeyEvent = sameApplicationStagePosition != nil
+                        ? .switchToStageKeepingCurrentApplication(stagePosition)
+                        : .switchToStage(stagePosition)
+                    deliver(keyEvent, asynchronously: deliverAsynchronously)
                 }
                 return nil
             }
@@ -435,8 +453,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         }
     }
 
-    /// Maps an exact Ctrl+number-row shortcut to its 1-based stage position.
-    /// Ctrl+0 targets stage 10.
+    /// Maps an exact configured-modifier + number-row shortcut to stage positions 1-9.
     static func quickSwitchStagePosition(
         keyCode: Int64,
         flags: CGEventFlags,
@@ -462,7 +479,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         case kVK_ANSI_7: return 7
         case kVK_ANSI_8: return 8
         case kVK_ANSI_9: return 9
-        case kVK_ANSI_0: return 10
         default: return nil
         }
     }

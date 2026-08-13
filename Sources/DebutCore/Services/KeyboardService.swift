@@ -16,7 +16,8 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case previousStage          // Shift+Option+Tab
     case jumpToStage(Int)       // 1-8 (selects stage within open overlay)
     case jumpToLastStage        // 9 (selects the final stage within open overlay)
-    case switchToStage(Int)     // Ctrl+0-9 (global immediate switch; 0 is stage 10)
+    case switchToStage(Int)     // Configured modifier + 1-9 (global immediate switch)
+    case switchToStageKeepingCurrentApplication(Int)
 
     case newStageBelow          // N
     case newStageAbove          // Shift+N
@@ -61,6 +62,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
         case .swapStageDown:
             .swapStageDown
         case .cmdTabTap, .cmdRelease, .nextWindowRepeat, .switchToStage,
+             .switchToStageKeepingCurrentApplication,
              .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick, .escape:
             nil
         }

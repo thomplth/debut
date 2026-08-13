@@ -87,11 +87,12 @@ All navigation wraps cyclically.
 
 ### Quick switch
 
-`quickSwitchStage1`–`quickSwitchStage10` switch stage immediately without opening
+`quickSwitchStage1`–`quickSwitchStage9` switch stage immediately without opening
 the overlay and work with no active session, dismissing the overlay first if it
-happens to be open. On arrival Debut prefers the destination stage's most recent
-window belonging to the app that was active before the switch, falling back to
-that stage's MRU head.
+happens to be open. The direct-stage modifier focuses the destination stage's MRU
+head. The separately configured same-app modifier prefers the destination stage's
+most recent window belonging to the app that was active before the switch, falling
+back to that stage's MRU head. Digit 0 has no quick-switch binding.
 
 Quick switch defers only to user-configured frontmost app exclusions. AGENTS.md
 records why its modifier combination must be tested before Cmd-state tracking and

@@ -137,7 +137,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public var selectedWindowIndex: Int = 0
     public private(set) var keyboardServiceStarted: Bool = false
     public var overlayPresentationDelay: TimeInterval
-    public var quickSwitchBehavior: QuickSwitchBehavior
     public var previewRefreshPolicy: PreviewRefreshPolicy
     public var previewCacheTTL: TimeInterval
 
@@ -171,7 +170,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         keyboardService: any KeyboardService,
         stageManager: StageManager = StageManager(),
         overlayPresentationDelay: TimeInterval = AppSettings.defaultOverlayPresentationDelay,
-        quickSwitchBehavior: QuickSwitchBehavior = .stage,
         fullscreenAppActiveProvider: (() -> Bool)? = nil,
         overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
         previewRefreshPolicy: PreviewRefreshPolicy = .lastActiveOnly,
@@ -182,7 +180,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         self.keyboardService = keyboardService
         self.stageManager = stageManager
         self.overlayPresentationDelay = overlayPresentationDelay
-        self.quickSwitchBehavior = quickSwitchBehavior
         self.fullscreenAppActiveProvider = fullscreenAppActiveProvider
         self.overlayPresentationRecorder = overlayPresentationRecorder
         self.previewRefreshPolicy = previewRefreshPolicy
@@ -442,7 +439,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         case .jumpToLastStage:
             jumpToStage(index: stageManager.stages.count - 1)
         case .switchToStage(let position):
-            quickSwitchToStage(index: position - 1)
+            quickSwitchToStage(index: position - 1, keepingCurrentApplication: false)
+        case .switchToStageKeepingCurrentApplication(let position):
+            quickSwitchToStage(index: position - 1, keepingCurrentApplication: true)
         case .newStageBelow:
             createStage(position: .below)
         case .newStageAbove:
@@ -462,16 +461,16 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     // MARK: - Quick switch
 
-    /// Immediately switch to the stage at the given index (Ctrl+<0-9>).
+    /// Immediately switch to the stage at the given index (configured modifier + 1-9).
     /// Works whether or not the overlay is open; if open, it is dismissed first.
-    private func quickSwitchToStage(index: Int) {
+    private func quickSwitchToStage(index: Int, keepingCurrentApplication: Bool) {
         guard stageManager.stages.indices.contains(index) else { return }
 
         // Stage window order is MRU. Capture the active app before switching,
         // then prefer that app's most-recent window in the destination stage.
         let activeBundleID = stageManager.activeStage.windows.first?.ownerBundleID
         let targetStage = stageManager.stages[index]
-        let matchingWindowID = quickSwitchBehavior == .sameApplication
+        let matchingWindowID = keepingCurrentApplication
             ? activeBundleID.flatMap { bundleID in
                 targetStage.windows.first(where: { $0.ownerBundleID == bundleID })?.windowID
             }
