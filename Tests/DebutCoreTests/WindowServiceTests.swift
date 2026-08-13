@@ -6,11 +6,16 @@ import ApplicationServices
 @Suite("MockWindowService")
 struct WindowServiceTests {
 
-    @Test("Only non-modal AX standard windows are trackable")
+    @Test("Non-modal AX standard and dialog windows are trackable")
     func classifiesTrackableAXWindows() {
         #expect(AccessibilityWindowService.isTrackableAXWindow(
             role: kAXWindowRole as String,
             subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+        #expect(AccessibilityWindowService.isTrackableAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXDialogSubrole as String,
             isModal: false
         ))
         #expect(!AccessibilityWindowService.isTrackableAXWindow(

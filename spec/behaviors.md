@@ -14,9 +14,9 @@ A window is identified at runtime by its `CGWindowID` and persisted by
 to disk. The window list comes from the AX API cross-referenced with
 `CGWindowList`.
 
-Only real windows are tracked — non-modal `AXStandardWindow` elements. Dialogs,
-floating windows, `AXUnknown` popups, shadows, toolbars, and other auxiliary
-surfaces are excluded.
+Only real windows are tracked — non-modal `AXStandardWindow` and `AXDialog`
+elements. Modal dialogs, floating windows, `AXUnknown` popups, shadows, toolbars,
+and other auxiliary surfaces are excluded.
 
 Each PID gets one AXObserver, shared across that app's window notifications.
 Windows are removed on `kAXUIElementDestroyedNotification` and titles refresh on
