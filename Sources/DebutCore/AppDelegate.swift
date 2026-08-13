@@ -146,7 +146,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             keyboardService: keyboardService,
             stageManager: stageManager,
             overlayPresentationDelay: currentSettings.overlayPresentationDelay,
-            quickSwitchBehavior: currentSettings.quickSwitchBehavior
+            quickSwitchBehavior: currentSettings.quickSwitchBehavior,
+            previewRefreshPolicy: currentSettings.previewRefreshPolicy,
+            previewCacheTTL: currentSettings.previewCacheTTL
         )
         controller.delegate = self
         controller.desktopSurfaces = surfaces
@@ -743,6 +745,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.keyboardService?.keyBindings = newSettings.keyBindings
                 self.stageController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
                 self.stageController?.quickSwitchBehavior = newSettings.quickSwitchBehavior
+                self.stageController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
+                self.stageController?.previewCacheTTL = newSettings.previewCacheTTL
                 self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
                     newSettings.quickSwitchExcludedBundleIDs
                 )

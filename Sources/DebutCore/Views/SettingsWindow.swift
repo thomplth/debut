@@ -185,6 +185,45 @@ public struct SettingsView: View {
                 }
                 Slider(value: $viewModel.settings.selectionBorderOpacity, in: 0...0.5, step: 0.01)
             }
+
+            Text("Window previews")
+                .font(.headline)
+                .padding(.top, 8)
+
+            HStack {
+                Text("Refresh")
+                Spacer()
+                Picker("", selection: $viewModel.settings.previewRefreshPolicy) {
+                    ForEach(PreviewRefreshPolicy.allCases, id: \.self) { policy in
+                        Text(policy.displayName).tag(policy)
+                    }
+                }
+                .frame(width: 250)
+            }
+
+            if viewModel.settings.previewRefreshPolicy == .all {
+                Label(
+                    "Capturing every window on every activation costs roughly 12–17 ms per window and delays the overlay on machines with many windows open.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Re-capture previews older than")
+                    Spacer()
+                    Text("\(Int(viewModel.settings.previewCacheTTL.rounded())) s")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $viewModel.settings.previewCacheTTL, in: 5...600, step: 5)
+                Text("Keeps previews current for windows that change on their own, such as video or chat.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(viewModel.settings.previewRefreshPolicy == .all)
         }
     }
 
