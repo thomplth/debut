@@ -203,7 +203,7 @@ public struct SettingsView: View {
 
             if viewModel.settings.previewRefreshPolicy == .all {
                 Label(
-                    "Capturing every window on every activation costs roughly 12–17 ms per window and delays the overlay on machines with many windows open.",
+                    "Capturing every window on every activation delays the overlay, especially with many windows open.",
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.caption)
