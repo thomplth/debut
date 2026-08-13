@@ -150,10 +150,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let runningApps = windowService.listRunningApps()
         _ = PerformanceRecorder.shared.end(discoveryID)
 
-        // Explicit AX classification identifies dialogs, floating windows, and
+        // Explicit AX classification identifies modal, floating, and other
         // auxiliary UI — but it is a snapshot, not a verdict. An app still
-        // warming up can describe a standard window this way, and deleting the
-        // assignment would make that momentary misreport permanent. Park the
+        // warming up can describe a user-manageable window this way, and deleting
+        // the assignment would make that momentary misreport permanent. Park the
         // placement instead; a later snapshot reclaims it.
         let classificationID = PerformanceRecorder.shared.begin(
             .windowClassification,
