@@ -446,6 +446,37 @@ struct StageControllerTests {
         #expect(delegate.overlayClosed.wait(timeout: .now()) == .success)
     }
 
+    @Test("Moving a window updates the visible overlay without reopening it")
+    func movingWindowDoesNotReopenOverlay() {
+        let (controller, _, keyboardService) = makeController()
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+        controller.overlayPresentationDelay = 0
+
+        let sourceStageID = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.addWindow(
+            StageWindow(
+                windowID: 101,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "T1"
+            ),
+            toStageID: sourceStageID
+        )
+        controller.stageManager.activateStage(id: sourceStageID)
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+
+        keyboardService.simulateEvent(.moveWindowDown)
+
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 0.1) == .timedOut)
+        #expect(controller.selectedStageIndex == 1)
+        #expect(controller.stageManager.stages[1].windows.map(\.windowID) == [101])
+    }
+
     @Test("Configured overlay presentation delay controls the hold threshold")
     func configuredOverlayPresentationDelay() {
         let windowService = MockWindowService()
