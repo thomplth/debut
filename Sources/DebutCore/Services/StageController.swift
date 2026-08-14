@@ -1023,10 +1023,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
         delegate?.stageControllerDidMutateState(self)
         notifyOverlayUpdated()
-        // Force overlay rebuild since stage contents changed
-        if isOverlayPresented {
-            delegate?.stageControllerDidOpenOverlay(self)
-        }
     }
 
     private func swapStage(direction: SwapDirection) {
