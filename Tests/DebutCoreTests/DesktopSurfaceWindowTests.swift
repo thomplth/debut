@@ -142,6 +142,22 @@ struct DesktopSurfaceWindowTests {
         #expect(try #require(outcome.meanLuminance) > 0.99)
     }
 
+    @Test("Wallpaper capture never runs on the main thread")
+    func captureRunsOffTheMainThread() async {
+        // The surface refreshes as part of presenting the overlay, so running
+        // ScreenCaptureKit's enumeration and screenshot IPC on the main actor
+        // put them ahead of the overlay's own render work in the same queue.
+        let capture = TestWallpaperCapture()
+        let window = makeSurface(capture: capture)
+        await window.awaitPendingRefresh()
+
+        window.refreshWallpaper(reason: .presentation)
+        await window.awaitPendingRefresh()
+
+        #expect(capture.requests.count == 2)
+        #expect(capture.mainThreadCalls == 0)
+    }
+
     @Test("A failed capture keeps the last good wallpaper instead of flashing black")
     func failedCaptureKeepsLastGoodImage() async throws {
         let recorder = OutcomeRecorder()
@@ -405,8 +421,7 @@ private final class OutcomeRecorder {
     }
 }
 
-@MainActor
-private final class TestWallpaperCapture: DesktopWallpaperCapturing {
+private final class TestWallpaperCapture: DesktopWallpaperCapturing, @unchecked Sendable {
     enum Failure: Error { case denied }
 
     struct Request {
@@ -414,12 +429,29 @@ private final class TestWallpaperCapture: DesktopWallpaperCapturing {
         let pixelSize: CGSize
     }
 
-    var requests: [Request] = []
-    var nextResult: Result<CGImage, Error> = .success(TestWallpaperCapture.makeImage(width: 2))
+    private let lock = NSLock()
+    private var storedRequests: [Request] = []
+    private var storedResult: Result<CGImage, Error> = .success(TestWallpaperCapture.makeImage(width: 2))
+    private var storedMainThreadCalls = 0
+
+    var requests: [Request] { lock.withLock { storedRequests } }
+    var mainThreadCalls: Int { lock.withLock { storedMainThreadCalls } }
+
+    var nextResult: Result<CGImage, Error> {
+        get { lock.withLock { storedResult } }
+        set { lock.withLock { storedResult = newValue } }
+    }
 
     func captureWallpaper(displayID: CGDirectDisplayID, pixelSize: CGSize) async throws -> CGImage {
-        requests.append(Request(displayID: displayID, pixelSize: pixelSize))
-        return try nextResult.get()
+        try record(displayID: displayID, pixelSize: pixelSize).get()
+    }
+
+    private func record(displayID: CGDirectDisplayID, pixelSize: CGSize) -> Result<CGImage, Error> {
+        lock.withLock {
+            storedRequests.append(Request(displayID: displayID, pixelSize: pixelSize))
+            if Thread.isMainThread { storedMainThreadCalls += 1 }
+            return storedResult
+        }
     }
 
     static func makeImage(width: Int, white: Bool = false) -> CGImage {
