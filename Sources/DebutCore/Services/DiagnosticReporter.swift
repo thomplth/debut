@@ -53,6 +53,8 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     private let stateProviderLock = NSLock()
     private var stateProvider: (@Sendable () -> [String: String])?
     private var stateProviderRunsOnMainQueue = false
+    private var publishedState: [String: String] = [:]
+    private var stateRefreshScheduled = false
 
     private var snapshotFile: URL { directory.appendingPathComponent("diagnostic.json") }
     private var durableFile: URL { directory.appendingPathComponent("diagnostic.jsonl") }
@@ -152,10 +154,54 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         stateProviderLock.unlock()
 
         guard let provider else { return [:] }
-        if runsOnMainQueue, !Thread.isMainThread {
-            return DispatchQueue.main.sync(execute: provider)
+        guard runsOnMainQueue, !Thread.isMainThread else {
+            return publish(provider())
         }
-        return provider()
+
+        // Waiting on the main queue here charged the caller for unrelated main
+        // work: a 3.1s overlay render stall was billed to a preview capture that
+        // had not started. Hand the refresh to main and use the last snapshot.
+        scheduleStateRefresh(provider)
+        stateProviderLock.lock()
+        defer { stateProviderLock.unlock() }
+        return publishedState
+    }
+
+    @discardableResult
+    private func publish(_ state: [String: String]) -> [String: String] {
+        stateProviderLock.lock()
+        publishedState = state
+        stateProviderLock.unlock()
+        return state
+    }
+
+    /// Coalesced so a burst of background reports enqueues one refresh. The
+    /// refresh writes its own snapshot, otherwise the state block would stay one
+    /// report behind for any sequence that only reports off the main thread.
+    private func scheduleStateRefresh(_ provider: @escaping @Sendable () -> [String: String]) {
+        stateProviderLock.lock()
+        let alreadyScheduled = stateRefreshScheduled
+        stateRefreshScheduled = true
+        stateProviderLock.unlock()
+        guard !alreadyScheduled else { return }
+
+        DispatchQueue.main.async {
+            let state = provider()
+            self.stateProviderLock.lock()
+            self.publishedState = state
+            self.stateRefreshScheduled = false
+            self.stateProviderLock.unlock()
+
+            let performance = self.performanceRecorder.snapshot()
+            let overlayPresentation = self.overlayPresentationRecorder.snapshot()
+            self.queue.async {
+                self.writeSnapshotFile(
+                    state: state,
+                    performance: performance,
+                    overlayPresentation: overlayPresentation
+                )
+            }
+        }
     }
 
     // MARK: - Durable event stream
