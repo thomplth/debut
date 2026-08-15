@@ -212,3 +212,84 @@ private final class CaptureCounter: @unchecked Sendable {
     var value: Int { lock.withLock { storedValue } }
     func increment() { lock.withLock { storedValue += 1 } }
 }
+
+@Suite("Recent value cache")
+struct RecentValueCacheTests {
+    private final class Loader: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storedCalls = 0
+        private var storedNanoseconds: UInt64 = 0
+        var shouldFail = false
+        var delaySeconds: Double = 0
+
+        var calls: Int { lock.withLock { storedCalls } }
+        var now: UInt64 { lock.withLock { storedNanoseconds } }
+        func advance(milliseconds: UInt64) {
+            lock.withLock { storedNanoseconds += milliseconds * 1_000_000 }
+        }
+
+        struct Failure: Error {}
+
+        func load() async throws -> Int {
+            let sequence = lock.withLock { () -> Int in
+                storedCalls += 1
+                return storedCalls
+            }
+            if delaySeconds > 0 { try? await Task.sleep(for: .seconds(delaySeconds)) }
+            if shouldFail { throw Failure() }
+            return sequence
+        }
+    }
+
+    private func makeCache(_ loader: Loader, maximumAgeMilliseconds: UInt64 = 500) -> RecentValueCache<Int> {
+        RecentValueCache(
+            maximumAgeNanoseconds: maximumAgeMilliseconds * 1_000_000,
+            now: { loader.now },
+            load: { try await loader.load() }
+        )
+    }
+
+    @Test("Callers that arrive during a load join it instead of starting another")
+    func concurrentCallersShareOneLoad() async throws {
+        // The wallpaper capture and the window previews both need the shareable
+        // content at the same instant of a presentation, and the enumeration
+        // costs tens of milliseconds no matter who asks for it.
+        let loader = Loader()
+        loader.delaySeconds = 0.05
+        let cache = makeCache(loader)
+
+        let values = try await withThrowingTaskGroup(of: Int.self) { group in
+            for _ in 0..<5 { group.addTask { try await cache.value() } }
+            var collected: [Int] = []
+            for try await value in group { collected.append(value) }
+            return collected
+        }
+
+        #expect(loader.calls == 1)
+        #expect(values == [1, 1, 1, 1, 1])
+    }
+
+    @Test("A value older than the maximum age is loaded again")
+    func staleValueIsReloaded() async throws {
+        let loader = Loader()
+        let cache = makeCache(loader, maximumAgeMilliseconds: 500)
+
+        #expect(try await cache.value() == 1)
+        loader.advance(milliseconds: 100)
+        #expect(try await cache.value() == 1)
+        loader.advance(milliseconds: 500)
+        #expect(try await cache.value() == 2)
+        #expect(loader.calls == 2)
+    }
+
+    @Test("A failed load is not cached")
+    func failedLoadIsNotCached() async throws {
+        let loader = Loader()
+        loader.shouldFail = true
+        let cache = makeCache(loader)
+
+        await #expect(throws: Loader.Failure.self) { try await cache.value() }
+        loader.shouldFail = false
+        #expect(try await cache.value() == 2)
+    }
+}
