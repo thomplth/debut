@@ -110,8 +110,12 @@ public protocol WindowService: Sendable {
     func listWindows() -> [WindowInfo]
     func listUntrackableWindowIDs() -> Set<CGWindowID>
     func listAllWindowIDs() -> Set<CGWindowID>?
+    /// `onEnumerated` reports which requested windows the shareable-content
+    /// snapshot actually matched, before any of them is captured. Without it a
+    /// caller cannot tell the shared enumeration wait apart from capture time.
     func captureWindowImages(
         windowIDs: [CGWindowID],
+        onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async
     func raiseWindow(windowID: CGWindowID) -> Bool

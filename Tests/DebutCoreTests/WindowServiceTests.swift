@@ -35,15 +35,20 @@ struct WindowServiceTests {
         ))
     }
 
-    @Test("Disabled live previews do not request screen capture")
+    @Test("Disabled live previews neither enumerate nor capture")
     func disabledLivePreviewsAvoidCapture() async {
         let service = AccessibilityWindowService(windowCaptureEnabled: false)
         let counter = CaptureCounter()
+        let enumerations = CaptureCounter()
 
-        await service.captureWindowImages(windowIDs: [kCGNullWindowID]) { _ in
+        await service.captureWindowImages(
+            windowIDs: [kCGNullWindowID],
+            onEnumerated: { _ in enumerations.increment() }
+        ) { _ in
             counter.increment()
         }
         #expect(counter.value == 0)
+        #expect(enumerations.value == 0)
     }
 
     @Test("Preview validation checks pixels rather than image presence")

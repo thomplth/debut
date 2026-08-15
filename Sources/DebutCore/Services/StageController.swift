@@ -2,54 +2,68 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
-private final class PreviewCaptureMetrics: @unchecked Sendable {
+final class PreviewCaptureMetrics: @unchecked Sendable {
     private let lock = NSLock()
     private let batchID: UUID
     private let firstID: UUID
-    private var captureIDs: [CGWindowID: UUID]
+    private var enumerationID: UUID?
+    private var captureIDs: [CGWindowID: UUID] = [:]
     private var capturedCount = 0
     private var recordedFirst = false
     private let overlayPresentation: OverlayPresentationContext?
     private let overlayPresentationRecorder: OverlayPresentationRecorder
+    private let performanceRecorder: PerformanceRecorder
 
     init(
         windowIDs: [CGWindowID],
         overlayPresentation: OverlayPresentationContext? = nil,
-        overlayPresentationRecorder: OverlayPresentationRecorder = .shared
+        overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
+        performanceRecorder: PerformanceRecorder = .shared
     ) {
         self.overlayPresentation = overlayPresentation
         self.overlayPresentationRecorder = overlayPresentationRecorder
-        batchID = PerformanceRecorder.shared.begin(
+        self.performanceRecorder = performanceRecorder
+        batchID = performanceRecorder.begin(
             .previewAll,
             workload: .init(windows: windowIDs.count, captures: windowIDs.count),
             traceID: overlayPresentation?.traceID
         )
-        firstID = PerformanceRecorder.shared.begin(
+        firstID = performanceRecorder.begin(
             .previewFirst,
             workload: .init(windows: windowIDs.count, captures: min(1, windowIDs.count)),
             traceID: overlayPresentation?.traceID
         )
-        captureIDs = Dictionary(uniqueKeysWithValues: windowIDs.map { windowID in
-            (
-                windowID,
-                PerformanceRecorder.shared.begin(
+        enumerationID = performanceRecorder.begin(
+            .previewEnumeration,
+            workload: .init(windows: windowIDs.count),
+            traceID: overlayPresentation?.traceID
+        )
+    }
+
+    /// Per-window timers only start here. Beginning them in `init` charged every
+    /// window for the shared enumeration wait that precedes any capture.
+    func recordEnumeration(matchedWindowIDs: [CGWindowID]) {
+        lock.withLock {
+            endEnumerationLocked()
+            for windowID in matchedWindowIDs where captureIDs[windowID] == nil {
+                captureIDs[windowID] = performanceRecorder.begin(
                     .previewCapture,
                     workload: .init(captures: 1),
                     traceID: overlayPresentation?.traceID
                 )
-            )
-        })
+            }
+        }
     }
 
     func recordCapture(windowID: CGWindowID) {
         lock.withLock {
             if let captureID = captureIDs.removeValue(forKey: windowID) {
-                _ = PerformanceRecorder.shared.end(captureID, sampleResources: false)
+                _ = performanceRecorder.end(captureID, sampleResources: false)
             }
             capturedCount += 1
             if !recordedFirst {
                 recordedFirst = true
-                _ = PerformanceRecorder.shared.end(firstID)
+                _ = performanceRecorder.end(firstID)
                 if let overlayPresentation {
                     overlayPresentationRecorder.mark(
                         .firstPreviewCompleted,
@@ -62,13 +76,14 @@ private final class PreviewCaptureMetrics: @unchecked Sendable {
 
     func finish() -> Int {
         lock.withLock {
+            endEnumerationLocked()
             for captureID in captureIDs.values {
-                _ = PerformanceRecorder.shared.end(captureID, sampleResources: false)
+                _ = performanceRecorder.end(captureID, sampleResources: false)
             }
             captureIDs.removeAll()
             if !recordedFirst {
                 recordedFirst = true
-                _ = PerformanceRecorder.shared.end(firstID)
+                _ = performanceRecorder.end(firstID)
                 if let overlayPresentation {
                     overlayPresentationRecorder.mark(
                         .firstPreviewCompleted,
@@ -76,12 +91,19 @@ private final class PreviewCaptureMetrics: @unchecked Sendable {
                     )
                 }
             }
-            _ = PerformanceRecorder.shared.end(batchID)
+            _ = performanceRecorder.end(batchID)
             if let overlayPresentation {
                 overlayPresentationRecorder.mark(.allPreviewsCompleted, for: overlayPresentation)
             }
             return capturedCount
         }
+    }
+
+    /// Must be called with `lock` held.
+    private func endEnumerationLocked() {
+        guard let enumerationID else { return }
+        self.enumerationID = nil
+        _ = performanceRecorder.end(enumerationID, sampleResources: false)
     }
 }
 
@@ -775,7 +797,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
         let clock = previewClock
         previewCaptureTask = Task { [weak self, windowService] in
-            await windowService.captureWindowImages(windowIDs: windowIDs) { [weak self] capture in
+            await windowService.captureWindowImages(
+                windowIDs: windowIDs,
+                onEnumerated: { matchedWindowIDs in
+                    metrics.recordEnumeration(matchedWindowIDs: matchedWindowIDs)
+                }
+            ) { [weak self] capture in
                 metrics.recordCapture(windowID: capture.windowID)
                 // Luminance analysis draws the capture through Core Graphics. Doing it here
                 // rather than in the main-queue hop keeps the render path free.

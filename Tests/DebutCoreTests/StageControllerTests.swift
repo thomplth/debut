@@ -24,8 +24,10 @@ private final class DelayedCaptureWindowService: WindowService, @unchecked Senda
 
     func captureWindowImages(
         windowIDs: [CGWindowID],
+        onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
+        onEnumerated(capturedImage == nil ? [] : windowIDs)
         await withTaskGroup(of: WindowImageCapture?.self) { group in
             for windowID in windowIDs {
                 group.addTask { [captureDelay, capturedImage, perWindowDelay] in

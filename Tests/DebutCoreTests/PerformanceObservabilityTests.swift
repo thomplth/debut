@@ -9,6 +9,7 @@ struct PerformanceObservabilityTests {
         #expect(PerformanceOperation.allCases.map(\.rawValue) == [
             "event_tap", "main_queue_delivery", "overlay_preparation", "overlay_render_submission",
             "overlay_end_to_end_visible",
+            "preview_enumeration",
             "preview_first", "preview_all", "preview_capture", "window_discovery",
             "window_classification", "window_reconciliation", "stage_switch",
             "stage_raise", "wallpaper_capture", "state_persistence", "hidden_idle",
@@ -113,5 +114,79 @@ struct PerformanceObservabilityTests {
         let recent = recorder.snapshot().recent
         #expect(recent.contains { $0.correlationID == deliveryID })
         #expect(recent.filter { $0.operation == .eventTap }.count == 20)
+    }
+}
+
+@Suite("Preview capture metrics")
+struct PreviewCaptureMetricsTests {
+    private final class Clock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var nanoseconds: UInt64 = 0
+
+        var now: UInt64 { lock.withLock { nanoseconds } }
+        func advance(milliseconds: UInt64) {
+            lock.withLock { nanoseconds += milliseconds * 1_000_000 }
+        }
+    }
+
+    private func makeRecorder(_ clock: Clock) -> PerformanceRecorder {
+        PerformanceRecorder(
+            resourceReader: UnavailableProcessResourceReader(),
+            now: { clock.now }
+        )
+    }
+
+    @Test("Shareable-content enumeration is timed apart from the captures it precedes")
+    func enumerationIsExcludedFromCaptureTimings() {
+        // Starting a per-window timer before enumeration billed every window for
+        // the shared wait, which made a capture look slow when nothing had been
+        // captured yet.
+        let clock = Clock()
+        let recorder = makeRecorder(clock)
+        let metrics = PreviewCaptureMetrics(windowIDs: [1, 2], performanceRecorder: recorder)
+
+        clock.advance(milliseconds: 90)
+        metrics.recordEnumeration(matchedWindowIDs: [1, 2])
+        clock.advance(milliseconds: 10)
+        metrics.recordCapture(windowID: 1)
+        metrics.recordCapture(windowID: 2)
+        _ = metrics.finish()
+
+        let recent = recorder.snapshot().recent
+        let enumeration = recent.filter { $0.operation == .previewEnumeration }
+        #expect(enumeration.count == 1)
+        #expect(enumeration.first?.durationMilliseconds == 90)
+
+        let captures = recent.filter { $0.operation == .previewCapture }
+        #expect(captures.count == 2)
+        #expect(captures.allSatisfy { $0.durationMilliseconds == 10 })
+    }
+
+    @Test("Windows the enumeration never matched are not timed as captures")
+    func unmatchedWindowsAreNotTimedAsCaptures() {
+        let clock = Clock()
+        let recorder = makeRecorder(clock)
+        let metrics = PreviewCaptureMetrics(windowIDs: [1, 2, 3], performanceRecorder: recorder)
+
+        metrics.recordEnumeration(matchedWindowIDs: [1])
+        metrics.recordCapture(windowID: 1)
+        _ = metrics.finish()
+
+        let captures = recorder.snapshot().recent.filter { $0.operation == .previewCapture }
+        #expect(captures.count == 1)
+    }
+
+    @Test("A batch that never enumerates still closes its enumeration timing")
+    func abandonedBatchClosesEnumeration() {
+        let clock = Clock()
+        let recorder = makeRecorder(clock)
+        let metrics = PreviewCaptureMetrics(windowIDs: [], performanceRecorder: recorder)
+
+        clock.advance(milliseconds: 5)
+        _ = metrics.finish()
+
+        let recent = recorder.snapshot().recent
+        #expect(recent.filter { $0.operation == .previewEnumeration }.count == 1)
+        #expect(recent.filter { $0.operation == .previewCapture }.isEmpty)
     }
 }
