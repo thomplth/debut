@@ -95,11 +95,9 @@ protocol DesktopWallpaperCapturing: AnyObject, Sendable {
 final class SystemDesktopWallpaperCapture: DesktopWallpaperCapturing {
     func captureWallpaper(displayID: CGDirectDisplayID, pixelSize: CGSize) async throws -> CGImage {
         // Desktop windows are left out of this list on purpose: they are the wallpaper. Excluding
-        // them below would leave the filter with nothing to composite.
-        let content = try await SCShareableContent.excludingDesktopWindows(
-            true,
-            onScreenWindowsOnly: true
-        )
+        // them below would leave the filter with nothing to composite. The shared snapshot also
+        // carries off-screen windows, which cost nothing to exclude because they composite nothing.
+        let content = try await ShareableContent.shared.value().content
         guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
             throw WallpaperCaptureError.displayUnavailable(displayID)
         }
