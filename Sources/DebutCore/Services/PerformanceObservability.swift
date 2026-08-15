@@ -9,6 +9,7 @@ public enum PerformanceOperation: String, CaseIterable, Codable, Sendable {
     case overlayPreparation = "overlay_preparation"
     case overlayRenderSubmission = "overlay_render_submission"
     case overlayEndToEndVisible = "overlay_end_to_end_visible"
+    case previewEnumeration = "preview_enumeration"
     case previewFirst = "preview_first"
     case previewAll = "preview_all"
     case previewCapture = "preview_capture"

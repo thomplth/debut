@@ -33,9 +33,11 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
 
     public func captureWindowImages(
         windowIDs: [CGWindowID],
+        onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
         captureLock.withLock { recordedCaptureRequests.append(windowIDs) }
+        onEnumerated(windowIDs.filter { capturedImages[$0] != nil })
         for windowID in windowIDs {
             guard let image = capturedImages[windowID] else { continue }
             onCapture(WindowImageCapture(windowID: windowID, image: image))
