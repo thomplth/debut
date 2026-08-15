@@ -76,8 +76,11 @@ enum WallpaperCaptureError: Error, CustomStringConvertible {
     }
 }
 
-@MainActor
-protocol DesktopWallpaperCapturing: AnyObject {
+/// Deliberately not main-actor isolated. The surface refreshes while the overlay
+/// is being presented, so isolating the capture would put ScreenCaptureKit's
+/// enumeration and screenshot IPC in the same queue as the overlay's own render
+/// work. Only the resulting image assignment needs the main actor.
+protocol DesktopWallpaperCapturing: AnyObject, Sendable {
     func captureWallpaper(displayID: CGDirectDisplayID, pixelSize: CGSize) async throws -> CGImage
 }
 
@@ -89,7 +92,6 @@ protocol DesktopWallpaperCapturing: AnyObject {
 ///
 /// The `CGWindowListCreateImage` family cannot read it either — macOS 15 obsoleted those calls,
 /// and they now hand back a blank frame rather than failing.
-@MainActor
 final class SystemDesktopWallpaperCapture: DesktopWallpaperCapturing {
     func captureWallpaper(displayID: CGDirectDisplayID, pixelSize: CGSize) async throws -> CGImage {
         // Desktop windows are left out of this list on purpose: they are the wallpaper. Excluding
