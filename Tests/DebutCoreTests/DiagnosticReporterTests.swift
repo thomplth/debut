@@ -212,24 +212,94 @@ struct DiagnosticReporterTests {
         #expect(state["selectedWindowIndex"] == "3")
     }
 
-    @Test("A main-queue state provider is isolated from background reporters")
+    private func snapshotState(in directory: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent("diagnostic.json")),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let state = object["state"] as? [String: String]
+        else { return [:] }
+        return state
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 2,
+        _ condition: @Sendable () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        return condition()
+    }
+
+    @Test("A main-queue state provider is only ever evaluated on the main thread")
     func mainQueueStateProviderRunsOnMainThread() async throws {
         let dir = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let reporter = DiagnosticReporter(directory: dir)
         reporter.setMainQueueStateProvider {
-            ["providerThread": Thread.isMainThread ? "main" : "background"]
+            #expect(Thread.isMainThread)
+            return ["providerThread": Thread.isMainThread ? "main" : "background"]
         }
 
         await Task.detached {
             reporter.report("preview_capture_completed", level: .transient)
         }.value
+
+        let converged = await waitUntil { [self] in
+            reporter.flush()
+            return snapshotState(in: dir)["providerThread"] == "main"
+        }
+        #expect(converged)
+    }
+
+    @Test("A background report does not wait for the main queue")
+    func backgroundReportDoesNotWaitForMainQueue() async throws {
+        // Blocking on the main queue here made every preview capture wait behind
+        // the overlay's own render work: a 3.1s main-queue stall was charged to
+        // `preview_first` even though the capture had not started.
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir)
+        reporter.setMainQueueStateProvider { ["overlayVisible": "true"] }
+
+        let occupied = MutableState()
+        let release = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async {
+            occupied.value = "occupied"
+            _ = release.wait(timeout: .now() + 5)
+        }
+        _ = await waitUntil { occupied.value == "occupied" }
+        defer { release.signal() }
+
+        let milliseconds = await Task.detached {
+            let started = DispatchTime.now().uptimeNanoseconds
+            reporter.report("window_preview_capture_started", level: .transient)
+            return Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+        }.value
+
+        #expect(milliseconds < 500)
+    }
+
+    @Test("A main-thread report evaluates the provider inline")
+    func mainThreadReportEvaluatesProviderInline() async throws {
+        // The state block is how E2E observes a running session, so a report made
+        // on the main thread must never publish a stale snapshot.
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir)
+        let selection = MutableState()
+        reporter.setMainQueueStateProvider { ["selectedWindowIndex": selection.value] }
+
+        await MainActor.run {
+            selection.value = "7"
+            reporter.report("stage_switched", level: .lifecycle)
+        }
         reporter.flush()
 
-        let data = try Data(contentsOf: dir.appendingPathComponent("diagnostic.json"))
-        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let state = try #require(object["state"] as? [String: String])
-        #expect(state["providerThread"] == "main")
+        #expect(snapshotState(in: dir)["selectedWindowIndex"] == "7")
     }
 }
