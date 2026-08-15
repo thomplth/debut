@@ -184,6 +184,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
     public func captureWindowImages(
         windowIDs: [CGWindowID],
+        onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
         guard windowCaptureEnabled, !windowIDs.isEmpty else { return }
@@ -206,7 +207,11 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         let windows = content.windows
             .filter { requestedWindowIDs.contains($0.windowID) }
             .map(SendableCaptureWindow.init)
-        DiagnosticReporter.shared.report("window_preview_capture_started", level: .transient, details: [
+        onEnumerated(windows.map(\.window.windowID))
+        // Durable: this is the boundary between the shared enumeration wait and
+        // the captures, and a stall on either side is only diagnosable from a
+        // log that survived the session it happened in.
+        DiagnosticReporter.shared.report("window_preview_capture_started", details: [
             "matchedCount": "\(windows.count)",
             "requestedCount": "\(windowIDs.count)",
             "shareableCount": "\(content.windows.count)",
