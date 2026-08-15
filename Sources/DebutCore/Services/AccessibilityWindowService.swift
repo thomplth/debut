@@ -191,10 +191,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
         let content: SCShareableContent
         do {
-            content = try await SCShareableContent.excludingDesktopWindows(
-                true,
-                onScreenWindowsOnly: false
-            )
+            content = try await ShareableContent.shared.value().content
         } catch {
             DiagnosticReporter.shared.report("window_preview_enumeration_failed", details: [
                 "error": "\(error)",
