@@ -191,8 +191,8 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         event: CGEvent,
         deliverAsynchronously: Bool
     ) -> CGEvent? {
-        let performanceID = performanceRecorder.begin(.eventTap)
-        defer { performanceRecorder.end(performanceID, sampleResources: false) }
+        let performanceID = performanceRecorder.begin(.eventTap, sampleResources: false)
+        defer { performanceRecorder.end(performanceID) }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
@@ -428,11 +428,12 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     ) {
         let deliveryID = performanceRecorder.begin(
             .mainQueueDelivery,
-            traceID: overlayPresentation?.traceID
+            traceID: overlayPresentation?.traceID,
+            sampleResources: false
         )
         if asynchronously {
             DispatchQueue.main.async { [weak self] in
-                _ = self?.performanceRecorder.end(deliveryID, sampleResources: false)
+                _ = self?.performanceRecorder.end(deliveryID)
                 if let overlayPresentation {
                     self?.overlayPresentationRecorder.mark(
                         .mainActorDequeued,
@@ -445,7 +446,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                 )
             }
         } else {
-            _ = performanceRecorder.end(deliveryID, sampleResources: false)
+            _ = performanceRecorder.end(deliveryID)
             if let overlayPresentation {
                 overlayPresentationRecorder.mark(.mainActorDequeued, for: overlayPresentation)
             }

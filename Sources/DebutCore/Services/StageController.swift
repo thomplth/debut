@@ -36,7 +36,8 @@ final class PreviewCaptureMetrics: @unchecked Sendable {
         enumerationID = performanceRecorder.begin(
             .previewEnumeration,
             workload: .init(windows: windowIDs.count),
-            traceID: overlayPresentation?.traceID
+            traceID: overlayPresentation?.traceID,
+            sampleResources: false
         )
     }
 
@@ -49,7 +50,8 @@ final class PreviewCaptureMetrics: @unchecked Sendable {
                 captureIDs[windowID] = performanceRecorder.begin(
                     .previewCapture,
                     workload: .init(captures: 1),
-                    traceID: overlayPresentation?.traceID
+                    traceID: overlayPresentation?.traceID,
+                    sampleResources: false
                 )
             }
         }
@@ -58,7 +60,7 @@ final class PreviewCaptureMetrics: @unchecked Sendable {
     func recordCapture(windowID: CGWindowID) {
         lock.withLock {
             if let captureID = captureIDs.removeValue(forKey: windowID) {
-                _ = performanceRecorder.end(captureID, sampleResources: false)
+                _ = performanceRecorder.end(captureID)
             }
             capturedCount += 1
             if !recordedFirst {
@@ -78,7 +80,7 @@ final class PreviewCaptureMetrics: @unchecked Sendable {
         lock.withLock {
             endEnumerationLocked()
             for captureID in captureIDs.values {
-                _ = performanceRecorder.end(captureID, sampleResources: false)
+                _ = performanceRecorder.end(captureID)
             }
             captureIDs.removeAll()
             if !recordedFirst {
@@ -103,7 +105,7 @@ final class PreviewCaptureMetrics: @unchecked Sendable {
     private func endEnumerationLocked() {
         guard let enumerationID else { return }
         self.enumerationID = nil
-        _ = performanceRecorder.end(enumerationID, sampleResources: false)
+        _ = performanceRecorder.end(enumerationID)
     }
 }
 
