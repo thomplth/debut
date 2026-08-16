@@ -107,6 +107,7 @@ public struct ProcessResourceSnapshot: Codable, Equatable, Sendable {
     public let wakeups: UInt64
     public let bytesRead: UInt64
     public let bytesWritten: UInt64
+    public let pageIns: UInt64
 
     public init(
         monotonicNanoseconds: UInt64,
@@ -117,7 +118,8 @@ public struct ProcessResourceSnapshot: Codable, Equatable, Sendable {
         threadCount: Int,
         wakeups: UInt64,
         bytesRead: UInt64,
-        bytesWritten: UInt64
+        bytesWritten: UInt64,
+        pageIns: UInt64
     ) {
         self.monotonicNanoseconds = monotonicNanoseconds
         self.userCPUNanoseconds = userCPUNanoseconds
@@ -128,6 +130,7 @@ public struct ProcessResourceSnapshot: Codable, Equatable, Sendable {
         self.wakeups = wakeups
         self.bytesRead = bytesRead
         self.bytesWritten = bytesWritten
+        self.pageIns = pageIns
     }
 }
 
@@ -136,6 +139,9 @@ public struct ProcessResourceDelta: Codable, Equatable, Sendable {
     public let wakeups: UInt64
     public let bytesRead: UInt64
     public let bytesWritten: UInt64
+    /// A stall that burned no CPU and read no bytes is either a lock or a page
+    /// fault, and this is the only one of the two the process can see itself.
+    public let pageIns: UInt64
 
     public static func between(
         _ previous: ProcessResourceSnapshot,
@@ -146,7 +152,8 @@ public struct ProcessResourceDelta: Codable, Equatable, Sendable {
               current.systemCPUNanoseconds >= previous.systemCPUNanoseconds,
               current.wakeups >= previous.wakeups,
               current.bytesRead >= previous.bytesRead,
-              current.bytesWritten >= previous.bytesWritten
+              current.bytesWritten >= previous.bytesWritten,
+              current.pageIns >= previous.pageIns
         else { return nil }
         let elapsed = current.monotonicNanoseconds - previous.monotonicNanoseconds
         let cpu = current.userCPUNanoseconds - previous.userCPUNanoseconds
@@ -155,7 +162,8 @@ public struct ProcessResourceDelta: Codable, Equatable, Sendable {
             cpuPercent: Double(cpu) / Double(elapsed) * 100,
             wakeups: current.wakeups - previous.wakeups,
             bytesRead: current.bytesRead - previous.bytesRead,
-            bytesWritten: current.bytesWritten - previous.bytesWritten
+            bytesWritten: current.bytesWritten - previous.bytesWritten,
+            pageIns: current.pageIns - previous.pageIns
         )
     }
 }
@@ -199,7 +207,8 @@ public struct SystemProcessResourceReader: ProcessResourceReading {
             threadCount: result == KERN_SUCCESS ? Int(threadCount) : 0,
             wakeups: usage.ri_pkg_idle_wkups + usage.ri_interrupt_wkups,
             bytesRead: usage.ri_diskio_bytesread,
-            bytesWritten: usage.ri_diskio_byteswritten
+            bytesWritten: usage.ri_diskio_byteswritten,
+            pageIns: usage.ri_pageins
         )
     }
 }
@@ -211,6 +220,10 @@ public struct PerformanceObservation: Codable, Equatable, Sendable {
     public let durationMilliseconds: Double
     public let workload: PerformanceWorkload
     public let temperature: TelemetryTemperature?
+    /// Measured across this span alone. A process-wide delta shared between
+    /// operations is overwritten by whichever one ends last, which makes it
+    /// unusable as evidence about any of them.
+    public let resourceDelta: ProcessResourceDelta?
 
     public init(
         correlationID: UUID,
@@ -218,7 +231,8 @@ public struct PerformanceObservation: Codable, Equatable, Sendable {
         operation: PerformanceOperation,
         durationMilliseconds: Double,
         workload: PerformanceWorkload,
-        temperature: TelemetryTemperature? = nil
+        temperature: TelemetryTemperature? = nil,
+        resourceDelta: ProcessResourceDelta? = nil
     ) {
         self.correlationID = correlationID
         self.traceID = traceID
@@ -226,12 +240,12 @@ public struct PerformanceObservation: Codable, Equatable, Sendable {
         self.durationMilliseconds = durationMilliseconds
         self.workload = workload
         self.temperature = temperature
+        self.resourceDelta = resourceDelta
     }
 }
 
 public struct PerformanceSnapshot: Codable, Sendable {
     public let resources: ProcessResourceSnapshot?
-    public let resourceDelta: ProcessResourceDelta?
     public let summaries: [String: PerformanceSummary]
     public let recent: [PerformanceObservation]
 }
@@ -244,6 +258,7 @@ public final class PerformanceRecorder: @unchecked Sendable {
         var temperature: TelemetryTemperature?
         let signpostID: OSSignpostID
         var traceID: UUID?
+        let startResources: ProcessResourceSnapshot?
     }
 
     public static let shared = PerformanceRecorder(resourceReader: defaultResourceReader())
@@ -263,7 +278,6 @@ public final class PerformanceRecorder: @unchecked Sendable {
     private var buffers: [PerformanceOperation: PerformanceSampleBuffer] = [:]
     private var observations: [PerformanceOperation: [PerformanceObservation]] = [:]
     private var resources: ProcessResourceSnapshot?
-    private var resourceDelta: ProcessResourceDelta?
     private var observationHandler: (@Sendable (PerformanceObservation) -> Void)?
 
     public init(
@@ -279,8 +293,10 @@ public final class PerformanceRecorder: @unchecked Sendable {
         _ operation: PerformanceOperation,
         workload: PerformanceWorkload = PerformanceWorkload(),
         correlationID: UUID = UUID(),
-        traceID: UUID? = nil
+        traceID: UUID? = nil,
+        sampleResources: Bool = true
     ) -> UUID {
+        let startResources = sampleResources ? resourceReader.read() : nil
         let signpostID = OSSignpostID(log: log)
         let signpostMetadata = "operation=\(operation.rawValue) correlation=\(correlationID.uuidString) windows=\(workload.windows) stages=\(workload.stages)" as NSString
         os_signpost(.begin, log: log, name: "DebutOperation", signpostID: signpostID,
@@ -292,32 +308,40 @@ public final class PerformanceRecorder: @unchecked Sendable {
             workload: workload,
             temperature: nil,
             signpostID: signpostID,
-            traceID: traceID
+            traceID: traceID,
+            startResources: startResources
         )
         lock.unlock()
         return correlationID
     }
 
     @discardableResult
-    public func end(
-        _ correlationID: UUID,
-        sampleResources: Bool = true
-    ) -> PerformanceObservation? {
+    public func end(_ correlationID: UUID) -> PerformanceObservation? {
         let ended = now()
-        let sampled = sampleResources ? resourceReader.read() : nil
         lock.lock()
         guard let span = active.removeValue(forKey: correlationID) else {
             lock.unlock()
             return nil
         }
+        lock.unlock()
+
+        // Whether to sample was decided once, at `begin`. Reading the counters
+        // costs a Mach task scan, and the event tap runs this on every key.
+        let sampled = span.startResources == nil ? nil : resourceReader.read()
+
+        lock.lock()
         let duration = Double(ended >= span.started ? ended - span.started : 0) / 1_000_000
+        let spanDelta = span.startResources.flatMap { start in
+            sampled.flatMap { ProcessResourceDelta.between(start, $0) }
+        }
         let observation = PerformanceObservation(
             correlationID: correlationID,
             traceID: span.traceID,
             operation: span.operation,
             durationMilliseconds: duration,
             workload: span.workload,
-            temperature: span.temperature
+            temperature: span.temperature,
+            resourceDelta: spanDelta
         )
         var buffer = buffers[span.operation] ?? PerformanceSampleBuffer()
         buffer.append(duration)
@@ -328,10 +352,7 @@ public final class PerformanceRecorder: @unchecked Sendable {
             recentForOperation.removeFirst(recentForOperation.count - 20)
         }
         observations[span.operation] = recentForOperation
-        if let sampled {
-            resourceDelta = resources.flatMap { ProcessResourceDelta.between($0, sampled) }
-            resources = sampled
-        }
+        if let sampled { resources = sampled }
         let handler = observationHandler
         lock.unlock()
         let signpostMetadata = "operation=\(span.operation.rawValue) correlation=\(correlationID.uuidString) duration_ms=\(duration)" as NSString
@@ -403,7 +424,6 @@ public final class PerformanceRecorder: @unchecked Sendable {
         defer { lock.unlock() }
         return PerformanceSnapshot(
             resources: resources,
-            resourceDelta: resourceDelta,
             summaries: Dictionary(uniqueKeysWithValues: buffers.compactMap { operation, buffer in
                 buffer.summary.map { (operation.rawValue, $0) }
             }),
