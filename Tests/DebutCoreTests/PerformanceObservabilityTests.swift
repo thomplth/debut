@@ -42,7 +42,8 @@ struct PerformanceObservabilityTests {
             threadCount: 4,
             wakeups: 20,
             bytesRead: 10,
-            bytesWritten: 20
+            bytesWritten: 20,
+            pageIns: 3
         )
         let new = ProcessResourceSnapshot(
             monotonicNanoseconds: 2_000_000_000,
@@ -53,7 +54,8 @@ struct PerformanceObservabilityTests {
             threadCount: 5,
             wakeups: 25,
             bytesRead: 40,
-            bytesWritten: 80
+            bytesWritten: 80,
+            pageIns: 11
         )
 
         let delta = ProcessResourceDelta.between(old, new)
@@ -61,6 +63,9 @@ struct PerformanceObservabilityTests {
         #expect(delta?.wakeups == 5)
         #expect(delta?.bytesRead == 30)
         #expect(delta?.bytesWritten == 60)
+        // A stall with no CPU and no reads is either a lock or a page fault, and
+        // page-ins are the only one of those the process can see for itself.
+        #expect(delta?.pageIns == 8)
 
         let reset = ProcessResourceSnapshot(
             monotonicNanoseconds: 3_000_000_000,
@@ -71,9 +76,46 @@ struct PerformanceObservabilityTests {
             threadCount: 4,
             wakeups: 1,
             bytesRead: 1,
-            bytesWritten: 1
+            bytesWritten: 1,
+            pageIns: 1
         )
         #expect(ProcessResourceDelta.between(new, reset) == nil)
+    }
+
+    @Test("Each observation carries the resource cost measured across its own span")
+    func perObservationResourceDelta() {
+        // A single global delta was overwritten by whichever operation ended
+        // last, so it could not be used as evidence about any of them.
+        let reader = ScriptedResourceReader([
+            makeSnapshot(at: 0, cpuNanoseconds: 0, pageIns: 0),
+            makeSnapshot(at: 1_000_000_000, cpuNanoseconds: 500_000_000, pageIns: 7),
+            makeSnapshot(at: 2_000_000_000, cpuNanoseconds: 500_000_000, pageIns: 7),
+            makeSnapshot(at: 3_000_000_000, cpuNanoseconds: 600_000_000, pageIns: 9),
+        ])
+        let recorder = PerformanceRecorder(resourceReader: reader, now: { 1 })
+
+        let preparation = recorder.end(recorder.begin(.overlayPreparation))
+        let switched = recorder.end(recorder.begin(.stageSwitch))
+
+        #expect(preparation?.resourceDelta?.cpuPercent == 50)
+        #expect(preparation?.resourceDelta?.pageIns == 7)
+        #expect(switched?.resourceDelta?.cpuPercent == 10)
+        #expect(switched?.resourceDelta?.pageIns == 2)
+    }
+
+    @Test("A span that skips resource sampling never reads the process counters")
+    func unsampledSpanHasNoDelta() {
+        let reader = ScriptedResourceReader([
+            makeSnapshot(at: 0, cpuNanoseconds: 0, pageIns: 0),
+            makeSnapshot(at: 1_000_000_000, cpuNanoseconds: 500_000_000, pageIns: 7),
+        ])
+        let recorder = PerformanceRecorder(resourceReader: reader, now: { 1 })
+
+        let id = recorder.begin(.previewCapture, sampleResources: false)
+        let observation = recorder.end(id)
+
+        #expect(observation?.resourceDelta == nil)
+        #expect(reader.reads == 0)
     }
 
     @Test("Unavailable process metrics do not prevent operation recording")
@@ -103,12 +145,12 @@ struct PerformanceObservabilityTests {
     @Test("High-frequency event taps cannot evict recent evidence for other operations")
     func recentEvidenceIsBoundedPerOperation() {
         let recorder = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader(), now: { 1 })
-        let deliveryID = recorder.begin(.mainQueueDelivery, workload: .init(windows: 14))
-        _ = recorder.end(deliveryID, sampleResources: false)
+        let deliveryID = recorder.begin(.mainQueueDelivery, workload: .init(windows: 14), sampleResources: false)
+        _ = recorder.end(deliveryID)
 
         for _ in 0..<150 {
-            let eventID = recorder.begin(.eventTap)
-            _ = recorder.end(eventID, sampleResources: false)
+            let eventID = recorder.begin(.eventTap, sampleResources: false)
+            _ = recorder.end(eventID)
         }
 
         let recent = recorder.snapshot().recent
@@ -188,5 +230,43 @@ struct PreviewCaptureMetricsTests {
         let recent = recorder.snapshot().recent
         #expect(recent.filter { $0.operation == .previewEnumeration }.count == 1)
         #expect(recent.filter { $0.operation == .previewCapture }.isEmpty)
+    }
+}
+
+private func makeSnapshot(
+    at monotonicNanoseconds: UInt64,
+    cpuNanoseconds: UInt64,
+    pageIns: UInt64
+) -> ProcessResourceSnapshot {
+    ProcessResourceSnapshot(
+        monotonicNanoseconds: monotonicNanoseconds,
+        userCPUNanoseconds: cpuNanoseconds,
+        systemCPUNanoseconds: 0,
+        physicalFootprintBytes: 0,
+        peakPhysicalFootprintBytes: 0,
+        threadCount: 1,
+        wakeups: 0,
+        bytesRead: 0,
+        bytesWritten: 0,
+        pageIns: pageIns
+    )
+}
+
+private final class ScriptedResourceReader: ProcessResourceReading, @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [ProcessResourceSnapshot]
+    private var readCount = 0
+
+    var reads: Int { lock.withLock { readCount } }
+
+    init(_ snapshots: [ProcessResourceSnapshot]) {
+        pending = snapshots
+    }
+
+    func read() -> ProcessResourceSnapshot? {
+        lock.withLock {
+            readCount += 1
+            return pending.isEmpty ? nil : pending.removeFirst()
+        }
     }
 }
