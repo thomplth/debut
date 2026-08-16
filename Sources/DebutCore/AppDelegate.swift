@@ -27,6 +27,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var runtimeWindowReconciler = RuntimeWindowReconciler()
     private var telemetryExporter: TelemetryExporter?
     private var hiddenIdlePerformanceID: UUID?
+    private let mainQueueWatchdog = MainQueueStallWatchdog { stall in
+        DiagnosticReporter.shared.report("main_queue_stalled", details: [
+            "cpuPercent": stall.resourceDelta.map { String(format: "%.1f", $0.cpuPercent) } ?? "unknown",
+            "elapsedMilliseconds": String(format: "%.1f", stall.elapsedMilliseconds),
+            "pageIns": stall.resourceDelta.map { "\($0.pageIns)" } ?? "unknown",
+            "phase": "overlay_render_submission",
+            "traceID": stall.traceID?.uuidString ?? "none",
+        ])
+    }
 
     public override init() {
         super.init()
@@ -529,7 +538,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             workload: workload,
             traceID: overlayPresentation?.traceID
         )
-        DispatchQueue.main.async { [weak overlayWindow, weak stageController] in
+        // Armed across the enqueue so a queue that is still blocked reports
+        // itself, rather than leaving a long duration to be explained afterwards.
+        mainQueueWatchdog.arm(traceID: overlayPresentation?.traceID)
+        DispatchQueue.main.async { [weak overlayWindow, weak stageController, watchdog = mainQueueWatchdog] in
+            watchdog.disarm()
             overlayWindow?.contentView?.displayIfNeeded()
             CATransaction.flush()
             if let overlayPresentation {
