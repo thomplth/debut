@@ -40,4 +40,30 @@ struct OverlayWindowTests {
         #expect(window.alphaValue == 1)
         window.orderOut(nil)
     }
+
+    @Test("The overlay orders front without asking to become the key window")
+    func showOrdersFrontWhileInactive() async {
+        // Debut is an accessory app, so it is usually inactive when the overlay
+        // is shown. A borderless window cannot become key, so asking for key
+        // status buys nothing and leaves ordering subject to app activation.
+        let window = OverlayWindow()
+        _ = window.update(viewModel: OverlayViewModel(
+            stageManager: StageManager(),
+            activeStageIndex: 0,
+            selectedWindowIndex: 0
+        ))
+
+        #expect(!window.canBecomeKey)
+
+        await withCheckedContinuation { continuation in
+            window.showOverlay(revealDuration: 0) {
+                continuation.resume()
+            }
+        }
+
+        #expect(window.isVisible)
+        #expect(!window.isKeyWindow)
+        #expect(NSApp?.keyWindow !== window)
+        window.orderOut(nil)
+    }
 }

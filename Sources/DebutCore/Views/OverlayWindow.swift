@@ -60,7 +60,10 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         synchronizeFrameToMainScreen(display: true)
         hostingView?.frame = contentView?.bounds ?? .zero
         alphaValue = 0
-        makeKeyAndOrderFront(nil)
+        // A borderless window cannot become key, and Debut is an accessory app
+        // that is inactive when the overlay opens. Asking for key status buys
+        // nothing and makes the ordering conditional on app activation.
+        orderFrontRegardless()
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = max(0, revealDuration)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
