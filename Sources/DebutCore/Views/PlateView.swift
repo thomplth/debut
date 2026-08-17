@@ -127,21 +127,6 @@ enum PlateMotion {
         return max(minimumPlateOpacity, progress * progress)
     }
 
-    static func plateSurfaceSize(
-        width: CGFloat,
-        height: CGFloat,
-        scale: CGFloat
-    ) -> CGSize {
-        CGSize(width: width * scale, height: height * scale)
-    }
-
-    static func plateSurfaceCornerRadius(
-        radius: CGFloat,
-        scale: CGFloat
-    ) -> CGFloat {
-        radius * scale
-    }
-
     static func focusedStageIndex(
         active: Int,
         hovered: Int?,
@@ -180,6 +165,17 @@ enum PlateMotion {
             centers: centers,
             totalHeight: runningTop - spacing
         )
+    }
+
+    /// Every plate lays out in an identical unscaled slot so the animated scale stays a
+    /// render transform; this shifts the slot so the scaled plate lands on its stack center.
+    static func plateSlotOffset(
+        layout: PlateStackLayout,
+        index: Int,
+        plateHeight: CGFloat
+    ) -> CGFloat {
+        guard layout.centers.indices.contains(index) else { return 0 }
+        return layout.centers[index] - plateHeight / 2
     }
 
     static func anchoredOffset(
@@ -883,7 +879,7 @@ public struct OverlaySwiftUIView: View {
             )
 
             ZStack(alignment: .topLeading) {
-                VStack(spacing: spacing) {
+                ZStack(alignment: .top) {
                     ForEach(Array(plates.enumerated()), id: \.element.id) { index, plate in
                         let plateWidth = plateWidths[index]
                         let isActive = index == viewModel.activeStageIndex
@@ -894,14 +890,10 @@ public struct OverlaySwiftUIView: View {
                         )
                         let isInteractionTarget = index == focusedStageIndex
                         let scale = visualLayout.scales[index]
-                        let surfaceSize = PlateMotion.plateSurfaceSize(
-                            width: plateWidth,
-                            height: pHeight,
-                            scale: scale
-                        )
-                        let surfaceCornerRadius = PlateMotion.plateSurfaceCornerRadius(
-                            radius: CGFloat(viewModel.appearance.plateCornerRadius),
-                            scale: scale
+                        let slotOffset = PlateMotion.plateSlotOffset(
+                            layout: visualLayout,
+                            index: index,
+                            plateHeight: pHeight
                         )
                         let plateOpacity = PlateMotion.plateOpacity(scale: scale)
                         let lift = PlateMotion.lift(isActive: isInteractionTarget)
@@ -985,27 +977,14 @@ public struct OverlaySwiftUIView: View {
                         .frame(width: plateWidth + stageHandleExpansion, height: pHeight)
                         .offset(x: -stageHandleExpansion / 2)
                         .frame(width: plateWidth, height: pHeight)
-                        .scaleEffect(scale)
-                        .frame(
-                            width: surfaceSize.width,
-                            height: surfaceSize.height
-                        )
                         .background {
                             PlateSurfaceView(
                                 stageIndex: index,
-                                size: surfaceSize,
-                                cornerRadius: surfaceCornerRadius,
+                                size: CGSize(width: plateWidth, height: pHeight),
+                                cornerRadius: CGFloat(viewModel.appearance.plateCornerRadius),
                                 appearance: viewModel.appearance
                             )
                         }
-                        .shadow(
-                            color: .black.opacity(lift.shadowOpacity),
-                            radius: lift.shadowRadius,
-                            y: lift.shadowY
-                        )
-                        .opacity(plateOpacity * (isStageDragging ? 0.78 : 1.0))
-                        .offset(isStageDragging ? (stageDrag?.offset ?? .zero) : .zero)
-                        .zIndex(isStageDragging ? 3 : (isActive || isInteractionTarget ? 2 : 0))
                         .background(
                             GeometryReader { plateGeo in
                                 Color.clear.preference(
@@ -1014,9 +993,19 @@ public struct OverlaySwiftUIView: View {
                                 )
                             }
                         )
+                        .scaleEffect(scale)
+                        .shadow(
+                            color: .black.opacity(lift.shadowOpacity),
+                            radius: lift.shadowRadius,
+                            y: lift.shadowY
+                        )
+                        .opacity(plateOpacity * (isStageDragging ? 0.78 : 1.0))
+                        .offset(y: slotOffset)
+                        .offset(isStageDragging ? (stageDrag?.offset ?? .zero) : .zero)
+                        .zIndex(isStageDragging ? 3 : (isActive || isInteractionTarget ? 2 : 0))
                     }
                 }
-                .frame(width: geo.size.width, alignment: .center)
+                .frame(width: geo.size.width, height: pHeight, alignment: .top)
                 .offset(y: yOffset)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
