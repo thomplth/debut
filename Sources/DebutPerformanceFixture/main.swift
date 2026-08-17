@@ -1,5 +1,4 @@
 import AppKit
-import Darwin
 import Foundation
 
 private enum InputDriver {

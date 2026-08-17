@@ -7,7 +7,6 @@ public struct PlateWindowData: Sendable, Identifiable {
     public let ownerBundleID: String
     public let ownerName: String
     public let windowTitle: String
-    public let isShared: Bool
     public let previewImage: CGImage?
 }
 
@@ -44,7 +43,6 @@ public struct OverlayViewModel: Sendable {
                         ownerBundleID: window.ownerBundleID,
                         ownerName: window.ownerName,
                         windowTitle: window.windowTitle,
-                        isShared: window.isShared,
                         previewImage: windowPreviews[window.windowID]
                     )
                 },
@@ -65,7 +63,6 @@ public struct OverlayViewModel: Sendable {
             ownerBundleID: window.ownerBundleID,
             ownerName: window.ownerName,
             windowTitle: window.windowTitle,
-            isShared: window.isShared,
             previewImage: windowPreviews[window.windowID]
         )
     }

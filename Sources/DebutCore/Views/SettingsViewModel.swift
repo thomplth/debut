@@ -43,7 +43,7 @@ public struct SettingsViewModel: Sendable {
                 buckets[operation] = TelemetryLatencyBucket(milliseconds: summary.p95Milliseconds)
             }
         }
-        let windowCount = stageManager.stages.reduce(0) { $0 + $1.windows.count }
+        let windowCount = stageManager.liveWindowCount
         let workload: TelemetryWorkload = windowCount >= 50 ? .stress : (windowCount >= 21 ? .busy : .typical)
         let payload = TelemetryPayload.sessionSummary(
             appVersion: DebutCore.version,

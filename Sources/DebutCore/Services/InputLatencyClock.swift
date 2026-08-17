@@ -1,4 +1,4 @@
-import Foundation
+import Darwin
 
 /// Measures how long a key event waited between being stamped and reaching our tap callback.
 public struct InputLatencyClock: Sendable {

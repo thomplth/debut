@@ -1,5 +1,4 @@
 import Foundation
-import os.log
 
 /// Controls whether an event survives a restart. Input and hover events fire
 /// dozens of times per second, so only lifecycle events earn durable storage.
@@ -35,7 +34,6 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         Bundle.main.bundleIdentifier == "com.thomplth.Debut"
     }
 
-    private let logger = Logger(subsystem: "com.thomplth.Debut", category: "diagnostic")
     private let directory: URL
     private let rotationByteLimit: Int
     private let performanceRecorder: PerformanceRecorder

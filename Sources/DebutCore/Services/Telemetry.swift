@@ -134,11 +134,6 @@ public protocol TelemetryClient: Sendable {
     func send(_ payload: TelemetryPayload) async throws
 }
 
-public struct NoOpTelemetryClient: TelemetryClient {
-    public init() {}
-    public func send(_ payload: TelemetryPayload) async throws {}
-}
-
 public struct UnavailableTelemetryClient: TelemetryClient {
     public init() {}
     public func send(_ payload: TelemetryPayload) async throws {

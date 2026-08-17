@@ -1,4 +1,3 @@
-import Darwin
 import Dispatch
 
 protocol ProcessExitMonitoring: AnyObject, Sendable {
