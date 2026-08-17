@@ -28,7 +28,7 @@ public final class StateStore: Sendable {
             .statePersistence,
             workload: .init(
                 stages: manager.stages.count,
-                windows: manager.stages.reduce(0) { $0 + $1.windows.count },
+                windows: manager.liveWindowCount,
                 dormantWindows: manager.dormantWindowAssignments.count
             )
         )

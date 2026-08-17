@@ -1,4 +1,3 @@
-import AppKit
 import CoreGraphics
 
 public struct WindowInfo: Sendable, Equatable {

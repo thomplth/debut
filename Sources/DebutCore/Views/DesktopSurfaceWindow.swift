@@ -496,10 +496,11 @@ public struct DesktopSurfacePlan: Equatable, Sendable {
 }
 
 /// Owns one surface per connected display so inactive windows are occluded on every screen.
+@MainActor
 public final class DesktopSurfaceCoordinator {
     private var surfaces: [CGDirectDisplayID: DesktopSurfaceWindow] = [:]
     private var surfaceFrames: [CGDirectDisplayID: CGRect] = [:]
-    private var screenParametersToken: NSObjectProtocol?
+    nonisolated(unsafe) private var screenParametersToken: NSObjectProtocol?
     private let onFileDragEntered: @MainActor () -> Void
 
     public init(onFileDragEntered: @escaping @MainActor () -> Void = {}) {
@@ -509,7 +510,9 @@ public final class DesktopSurfaceCoordinator {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.reconcileConnectedScreens()
+            MainActor.assumeIsolated {
+                self?.reconcileConnectedScreens()
+            }
         }
         reconcileConnectedScreens()
     }

@@ -1,4 +1,3 @@
-import AppKit
 import Carbon.HIToolbox
 
 public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingService, @unchecked Sendable {

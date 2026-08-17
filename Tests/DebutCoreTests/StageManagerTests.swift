@@ -10,6 +10,27 @@ struct StageManagerTests {
         let sm = StageManager()
         #expect(sm.stages.count == 1)
         #expect(sm.activeStageID == sm.stages[0].id)
+        #expect(sm.liveWindowCount == 0)
+    }
+
+    @Test("Live window count spans every stage and excludes dormant assignments")
+    func liveWindowCount() {
+        var sm = StageManager()
+        let firstStageID = sm.activeStageID
+        sm.createStage(position: .below)
+        let secondStageID = sm.activeStageID
+        sm.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One"),
+            toStageID: firstStageID
+        )
+        sm.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Two", ownerPID: 20),
+            toStageID: secondStageID
+        )
+
+        #expect(sm.liveWindowCount == 2)
+        _ = sm.makeWindowsDormant(forOwnerPID: 20)
+        #expect(sm.liveWindowCount == 1)
     }
 
     @Test("Create stage below active")

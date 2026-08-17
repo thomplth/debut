@@ -12,17 +12,26 @@ struct StageWindowTests {
         #expect(window.windowID == 101)
         #expect(window.ownerBundleID == "com.apple.Safari")
         #expect(window.windowTitle == "Google")
-        #expect(window.isShared == false)
     }
 
-    @Test("Window is Codable")
+    @Test("Window is Codable and ignores the retired shared-window field")
     func windowCodable() throws {
-        let window = StageWindow(windowID: 101, ownerBundleID: "com.apple.Safari", ownerName: "Safari", windowTitle: "Google", isShared: true)
+        let window = StageWindow(
+            windowID: 101,
+            ownerBundleID: "com.apple.Safari",
+            ownerName: "Safari",
+            windowTitle: "Google"
+        )
         let data = try JSONEncoder().encode(window)
-        let decoded = try JSONDecoder().decode(StageWindow.self, from: data)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["isShared"] == nil)
+
+        var legacyObject = object
+        legacyObject["isShared"] = true
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let decoded = try JSONDecoder().decode(StageWindow.self, from: legacyData)
         #expect(decoded.ownerBundleID == window.ownerBundleID)
         #expect(decoded.windowID == 101)
-        #expect(decoded.isShared == true)
     }
 
     @Test("Window equality by windowID")

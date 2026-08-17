@@ -51,7 +51,8 @@ let package = Package(
         .testTarget(
             name: "DebutCoreTests",
             dependencies: ["DebutCore"],
-            path: "Tests/DebutCoreTests"
+            path: "Tests/DebutCoreTests",
+            exclude: ["Screenshots"]
         ),
     ]
 )

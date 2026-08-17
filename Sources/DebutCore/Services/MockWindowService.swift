@@ -20,10 +20,6 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
         captureLock.withLock { recordedCaptureRequests }
     }
 
-    public var capturedWindowIDs: [CGWindowID] {
-        captureRequests.flatMap { $0 }
-    }
-
     public init() {}
 
     public func listRunningApps() -> [AppInfo] { apps }

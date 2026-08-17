@@ -317,7 +317,7 @@ struct WallpaperChangeObserverTests {
     /// Polls rather than sleeping a fixed span, so a loaded machine slows the test down instead
     /// of failing it.
     private func waitUntil(
-        timeout: Duration = .seconds(5),
+        timeout: Duration = .seconds(10),
         _ condition: @MainActor () -> Bool
     ) async -> Bool {
         let deadline = ContinuousClock.now + timeout

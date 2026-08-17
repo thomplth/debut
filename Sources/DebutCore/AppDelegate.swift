@@ -107,7 +107,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             .windowReconciliation,
             workload: .init(
                 stages: stageManager.stages.count,
-                windows: stageManager.stages.reduce(0) { $0 + $1.windows.count },
+                windows: stageManager.liveWindowCount,
                 dormantWindows: stageManager.dormantWindowAssignments.count
             )
         )
@@ -424,7 +424,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
         let workload = PerformanceWorkload(
             stages: stageController.stageManager.stages.count,
-            windows: stageController.stageManager.stages.reduce(0) { $0 + $1.windows.count }
+            windows: stageController.stageManager.liveWindowCount
         )
         if let overlayPresentation {
             stageController.markOverlayPresentation(.preparationBegan, context: overlayPresentation)
@@ -808,7 +808,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             ?? pendingStageManager
             ?? (try? stateStore?.load())
             ?? StageManager()
-        let previousLiveCount = previousManager.stages.reduce(0) { $0 + $1.windows.count }
+        let previousLiveCount = previousManager.liveWindowCount
         let previousDormantCount = previousManager.dormantWindowAssignments.count
 
         diag.report("window_cache_reset_started", details: [
@@ -972,15 +972,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 latency[operation] = TelemetryLatencyBucket(milliseconds: summary.p95Milliseconds)
             }
         }
-        let windowCount = stageController?.stageManager.stages.reduce(0) { $0 + $1.windows.count } ?? 0
+        let windowCount = stageController?.stageManager.liveWindowCount ?? 0
         let workload: TelemetryWorkload = windowCount >= 50 ? .stress : (windowCount >= 21 ? .busy : .typical)
+        let anomalyCount = performance.recent.reduce(into: 0) { count, observation in
+            if PerformanceAnomalyPolicy.shouldReport(observation) { count += 1 }
+        }
         return .sessionSummary(
             appVersion: DebutCore.version,
             operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
             workload: workload,
             operationCounts: counts,
             latencyBuckets: latency,
-            anomalyCount: performance.recent.filter(PerformanceAnomalyPolicy.shouldReport).count
+            anomalyCount: anomalyCount
         )
     }
 
