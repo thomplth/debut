@@ -121,22 +121,35 @@ struct PlateMotionTests {
         #expect(PlateMotion.plateScale(distanceFromFocus: 20, inactiveScale: 0.8) == 0.08)
     }
 
-    @Test("Plate surface uses scaled dimensions instead of a transformed glass layer")
-    func plateSurfaceDimensions() {
-        #expect(
-            PlateMotion.plateSurfaceSize(
-                width: 400,
-                height: 180,
-                scale: 0.8
-            ) == CGSize(width: 320, height: 144)
+    @Test("Plates occupy a fixed-height slot and reach their center by offset")
+    func plateSlotOffsetCentersEachPlate() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 1,
+            plateHeight: 180,
+            spacing: 20,
+            inactiveScale: 0.8
         )
+        for index in 0..<3 {
+            let offset = PlateMotion.plateSlotOffset(
+                layout: layout,
+                index: index,
+                plateHeight: 180
+            )
+            #expect(abs(offset + 90 - layout.centers[index]) < 0.001)
+        }
     }
 
-    @Test("Plate surface corner radius scales with its dimensions")
-    func plateSurfaceCornerRadius() {
-        #expect(PlateMotion.plateSurfaceCornerRadius(radius: 22, scale: 1) == 22)
-        #expect(PlateMotion.plateSurfaceCornerRadius(radius: 22, scale: 0.8) == 17.6)
-        #expect(PlateMotion.plateSurfaceCornerRadius(radius: 22, scale: 0.08) == 1.76)
+    @Test("Plate slot offset is zero for an out-of-range index")
+    func plateSlotOffsetOutOfRange() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 2,
+            focusIndex: 0,
+            plateHeight: 180,
+            spacing: 20,
+            inactiveScale: 0.8
+        )
+        #expect(PlateMotion.plateSlotOffset(layout: layout, index: 5, plateHeight: 180) == 0)
     }
 
     @Test("Plate opacity stays solid until scale falls below twenty percent")
