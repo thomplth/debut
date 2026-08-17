@@ -178,7 +178,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // An empty snapshot while regular apps are running usually means AX window
         // enumeration failed. Treating it as authoritative would erase every saved
         // stage assignment, so leave persisted state intact for runtime PID cleanup.
-        let persistedWindowCount = stageManager.stages.reduce(0) { $0 + $1.windows.count }
+        let persistedWindowCount = stageManager.liveWindowCount
         if liveWindows.isEmpty,
            persistedWindowCount > 0,
            !runningApps.isEmpty {
@@ -250,16 +250,6 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
            front.bundleIdentifier != "com.thomplth.Debut" {
             installFocusObserver(for: front.processIdentifier)
         }
-    }
-
-    public func stopObserving() {
-        NSWorkspace.shared.notificationCenter.removeObserver(self)
-        removeFocusObserver()
-        for pid in Array(perAppObservers.keys) {
-            removeAppObserver(for: pid)
-        }
-        processExitMonitor.stopMonitoringAll()
-        monitoredProcessIDs.removeAll()
     }
 
     /// Clears runtime-only observer and process caches without unregistering
@@ -648,8 +638,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &windowRef) == .success else {
             return nil
         }
+        guard let windowRef else { return nil }
+        let window = windowRef as! AXUIElement
         var cgWindowID: CGWindowID = 0
-        guard _AXUIElementGetWindow(windowRef as! AXUIElement, &cgWindowID) == .success else {
+        guard _AXUIElementGetWindow(window, &cgWindowID) == .success else {
             return nil
         }
         return cgWindowID

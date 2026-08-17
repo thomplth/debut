@@ -1,4 +1,3 @@
-import Foundation
 import Carbon.HIToolbox
 
 public enum ConflictType: Sendable {

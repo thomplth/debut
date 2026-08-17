@@ -52,6 +52,10 @@ public struct StageManager: Codable, Sendable {
         stages.first(where: { $0.id == activeStageID }) ?? stages[0]
     }
 
+    public var liveWindowCount: Int {
+        stages.reduce(into: 0) { $0 += $1.windows.count }
+    }
+
     public func stage(atIndex index: Int) -> Stage? {
         guard stages.indices.contains(index) else { return nil }
         return stages[index]
@@ -291,11 +295,6 @@ public struct StageManager: Codable, Sendable {
     public mutating func bringWindowToFront(windowID: CGWindowID, inStageID stageID: UUID) {
         guard let index = stages.firstIndex(where: { $0.id == stageID }) else { return }
         stages[index].bringWindowToFront(windowID: windowID)
-    }
-
-    public mutating func markWindowShared(windowID: CGWindowID, inStageID stageID: UUID) {
-        guard let stageIndex = stages.firstIndex(where: { $0.id == stageID }) else { return }
-        stages[stageIndex].markShared(windowID: windowID)
     }
 
     public mutating func updateWindowTitle(windowID: CGWindowID, title: String) {

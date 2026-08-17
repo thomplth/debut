@@ -39,11 +39,6 @@ public struct Stage: Codable, Identifiable, Equatable, Sendable {
         return previousCount - windows.count
     }
 
-    public mutating func markShared(windowID: CGWindowID) {
-        guard let index = windows.firstIndex(where: { $0.windowID == windowID }) else { return }
-        windows[index].isShared = true
-    }
-
     public mutating func updateWindow(at index: Int, windowID: CGWindowID, ownerPID: pid_t?, windowTitle: String? = nil) {
         guard windows.indices.contains(index) else { return }
         windows[index].windowID = windowID

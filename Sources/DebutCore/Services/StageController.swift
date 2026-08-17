@@ -243,9 +243,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     public func switchToStage(id targetID: UUID, raiseWindowID: CGWindowID? = nil) {
+        let targetStage = stageManager.stages.first(where: { $0.id == targetID })
         let workload = PerformanceWorkload(
             stages: stageManager.stages.count,
-            windows: stageManager.stages.first(where: { $0.id == targetID })?.windows.count ?? 0
+            windows: targetStage?.windows.count ?? 0
         )
         let performanceID = PerformanceRecorder.shared.begin(.stageSwitch, workload: workload)
         defer { PerformanceRecorder.shared.end(performanceID) }
@@ -257,13 +258,14 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         if previousID != targetID {
             let fromLabel = stageLabel(forID: previousID)
             let toLabel = stageLabel(forID: targetID)
-            let targetStage = stageManager.stages.first(where: { $0.id == targetID })
 
             self.previousStageID = previousID
             stageManager.activateStage(id: targetID)
 
             // 1. Bring desktop surfaces to front — covers all inactive windows
-            desktopSurfaces?.orderToFront()
+            if let desktopSurfaces {
+                MainActor.assumeIsolated { desktopSurfaces.orderToFront() }
+            }
 
             // 2. Raise all windows in the target stage above the surface (no app activation yet)
             let raiseID = PerformanceRecorder.shared.begin(
@@ -285,7 +287,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         // Focus the selected window and activate its app (single activation, no flash)
-        let targetWindows = stageManager.stages.first(where: { $0.id == targetID })?.windows
+        let targetWindows = targetStage?.windows
         let focusWindowID = raiseWindowID ?? targetWindows?.first?.windowID
         if let focusWindowID {
             _ = windowService.raiseWindow(windowID: focusWindowID)
@@ -642,12 +644,18 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             overlayPresentationRecorder.updateEnvironment(
                 for: presentation,
                 previewCache: .classify(cached: cachedCount, assigned: assignedWindowIDs.count),
-                wallpaperState: desktopSurfaces?.overlayWallpaperState ?? .unavailable,
+                wallpaperState: desktopSurfaces.map { surfaces in
+                    MainActor.assumeIsolated { surfaces.overlayWallpaperState }
+                } ?? .unavailable,
                 workload: workload,
                 cachedPreviewCount: cachedCount
             )
         }
-        desktopSurfaces?.refreshWallpaper(overlayPresentation: presentation)
+        if let desktopSurfaces {
+            MainActor.assumeIsolated {
+                desktopSurfaces.refreshWallpaper(overlayPresentation: presentation)
+            }
+        }
         scheduleOverlayPresentation()
     }
 

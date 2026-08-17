@@ -1,5 +1,3 @@
-import Foundation
-
 public final class MockKeyboardService: KeyboardService, @unchecked Sendable {
     public private(set) var isRunning: Bool = false
     public private(set) weak var delegate: KeyboardEventDelegate?

@@ -1,4 +1,3 @@
-import Foundation
 import ScreenCaptureKit
 
 /// Serves one recent value to every caller, and lets callers that arrive during
@@ -35,9 +34,6 @@ actor RecentValueCache<Value: Sendable> {
         return value
     }
 
-    func invalidate() {
-        cached = nil
-    }
 }
 
 /// `SCShareableContent` is not `Sendable`, and it only ever crosses isolation
