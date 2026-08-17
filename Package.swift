@@ -10,6 +10,7 @@ let package = Package(
         .executable(name: "DebutE2E", targets: ["DebutE2E"]),
         .executable(name: "DebutPerformanceFixture", targets: ["DebutPerformanceFixture"]),
         .executable(name: "DebutBenchmarks", targets: ["DebutBenchmarks"]),
+        .executable(name: "DebutGlassLab", targets: ["DebutGlassLab"]),
         .library(name: "DebutCore", targets: ["DebutCore"]),
     ],
     targets: [
@@ -47,6 +48,11 @@ let package = Package(
             name: "DebutBenchmarks",
             dependencies: ["DebutCore"],
             path: "Sources/DebutBenchmarks"
+        ),
+        .executableTarget(
+            name: "DebutGlassLab",
+            dependencies: ["DebutCore"],
+            path: "Sources/DebutGlassLab"
         ),
         .testTarget(
             name: "DebutCoreTests",
