@@ -110,6 +110,7 @@ public struct OverlayPresentationTrace: Codable, Equatable, Sendable {
     public let configuredDelayMilliseconds: Double
     public var presentationDelayMilliseconds: Double?
     public var presentationDelayOvershootMilliseconds: Double?
+    public var inputLatencyMilliseconds: Double?
     public var phases: [OverlayPresentationPhaseMark]
     public var environment: OverlayPresentationEnvironment
 
@@ -135,6 +136,7 @@ public final class OverlayPresentationRecorder: @unchecked Sendable {
         let startedAt: Date
         let startedNanoseconds: UInt64
         var configuredDelayMilliseconds: Double
+        let inputLatencyMilliseconds: Double?
         var phases: [OverlayPresentationPhaseMark]
         var environment: OverlayPresentationEnvironment
     }
@@ -145,6 +147,7 @@ public final class OverlayPresentationRecorder: @unchecked Sendable {
     private let performanceRecorder: PerformanceRecorder
     private let now: @Sendable () -> UInt64
     private let wallNow: @Sendable () -> Date
+    private let inputLatencyClock: InputLatencyClock
     private let capacity: Int
     private let launchedNanoseconds: UInt64
     private var active: [UUID: Active] = [:]
@@ -155,19 +158,28 @@ public final class OverlayPresentationRecorder: @unchecked Sendable {
         performanceRecorder: PerformanceRecorder = .shared,
         now: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
         wallNow: @escaping @Sendable () -> Date = Date.init,
+        inputLatencyClock: InputLatencyClock = InputLatencyClock(),
         capacity: Int = 20
     ) {
         self.performanceRecorder = performanceRecorder
         self.now = now
         self.wallNow = wallNow
+        self.inputLatencyClock = inputLatencyClock
         self.capacity = max(1, capacity)
         self.launchedNanoseconds = now()
     }
 
     @discardableResult
-    public func begin(configuredDelayMilliseconds: Double) -> OverlayPresentationContext {
-        finalizeAll(outcome: .superseded)
+    public func begin(
+        configuredDelayMilliseconds: Double,
+        eventTimestamp: UInt64 = 0
+    ) -> OverlayPresentationContext {
         let started = now()
+        let inputLatency = inputLatencyClock.latencyMilliseconds(
+            eventTimestamp: eventTimestamp,
+            arrivalNanoseconds: started
+        )
+        finalizeAll(outcome: .superseded)
         let context = OverlayPresentationContext()
         lock.lock()
         let processUse: OverlayProcessUse = attemptCount == 0 ? .firstAttempt : .laterAttempt
@@ -186,6 +198,7 @@ public final class OverlayPresentationRecorder: @unchecked Sendable {
             startedAt: wallNow(),
             startedNanoseconds: started,
             configuredDelayMilliseconds: max(0, configuredDelayMilliseconds),
+            inputLatencyMilliseconds: inputLatency,
             phases: [.init(phase: .activationRecognized, elapsedMilliseconds: 0)],
             environment: environment
         )
@@ -299,6 +312,7 @@ public final class OverlayPresentationRecorder: @unchecked Sendable {
             presentationDelayOvershootMilliseconds: delay.map {
                 max(0, $0 - trace.configuredDelayMilliseconds)
             },
+            inputLatencyMilliseconds: trace.inputLatencyMilliseconds,
             phases: trace.phases,
             environment: trace.environment,
             startedMonotonicNanoseconds: trace.startedNanoseconds

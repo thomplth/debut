@@ -112,6 +112,50 @@ struct OverlayPresentationTelemetryTests {
         #expect(trace.durationMilliseconds == 20)
     }
 
+    @Test("Input latency before the tap callback lands on the trace")
+    func inputLatency() throws {
+        let clock = Clock()
+        clock.advance(milliseconds: 10)
+        let recorder = OverlayPresentationRecorder(
+            performanceRecorder: PerformanceRecorder(
+                resourceReader: UnavailableProcessResourceReader(),
+                now: { clock.nanoseconds }
+            ),
+            now: { clock.nanoseconds },
+            wallNow: { clock.date },
+            inputLatencyClock: InputLatencyClock(timebaseNumerator: 1, timebaseDenominator: 1)
+        )
+
+        let context = recorder.begin(
+            configuredDelayMilliseconds: 0,
+            eventTimestamp: 6_000_000
+        )
+        clock.advance(milliseconds: 20)
+        recorder.complete(context, outcome: .presented)
+
+        let trace = try #require(recorder.snapshot().completed.last)
+        #expect(trace.inputLatencyMilliseconds == 4)
+        #expect(trace.durationMilliseconds == 20)
+    }
+
+    @Test("An unstamped activation leaves input latency absent")
+    func missingInputLatency() throws {
+        let clock = Clock()
+        let recorder = OverlayPresentationRecorder(
+            performanceRecorder: PerformanceRecorder(
+                resourceReader: UnavailableProcessResourceReader(),
+                now: { clock.nanoseconds }
+            ),
+            now: { clock.nanoseconds },
+            wallNow: { clock.date }
+        )
+
+        let context = recorder.begin(configuredDelayMilliseconds: 0)
+        recorder.complete(context, outcome: .presented)
+
+        #expect(recorder.snapshot().completed.last?.inputLatencyMilliseconds == nil)
+    }
+
     @Test("Cache and process temperature are orthogonal")
     func temperatureDimensions() {
         #expect(OverlayPreviewCacheState.classify(cached: 0, assigned: 8) == .empty)
