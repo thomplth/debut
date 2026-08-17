@@ -302,7 +302,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                     globalAction.toKeyEvent()
                 }
                 let presentation = !isAutoRepeat && !overlayVisible
-                    ? overlayPresentationRecorder.begin(configuredDelayMilliseconds: 0)
+                    ? overlayPresentationRecorder.begin(
+                        configuredDelayMilliseconds: 0,
+                        eventTimestamp: event.timestamp
+                    )
                     : nil
                 if let presentation {
                     performanceRecorder.updateTraceID(
