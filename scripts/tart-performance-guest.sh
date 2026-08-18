@@ -26,6 +26,17 @@ grant_post_event() {
     sqlite3 "$USER_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServicePostEvent','$escaped_client',1,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
+# The E2E driver is granted Accessibility alongside PostEvent; match it so the two
+# input drivers cannot differ in permissions when one of them fails to deliver.
+grant_accessibility() {
+    local client="$1" requirement csreq_hex escaped_client timestamp
+    requirement="$(codesign -d -r- "$client" 2>&1 | awk -F ' => ' '/designated/{print $2}')"
+    csreq_hex="$(printf '%s' "$requirement" | csreq -r- -b /dev/stdout | xxd -p | tr -d '\n')"
+    escaped_client="${client//\'/\'\'}"
+    timestamp="$(date +%s)"
+    sudo sqlite3 "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+'kTCCServiceAccessibility','$escaped_client',1,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+}
 cleanup() {
     local ready_file fixture_pid
     shopt -s nullglob
@@ -42,6 +53,7 @@ rm -rf "$RESULTS" "$APP"
 mkdir -p "$RESULTS"
 ditto -x -k "$APP_ARCHIVE" /Applications
 grant_post_event "$FIXTURE"
+grant_accessibility "$FIXTURE"
 sudo killall tccd 2>/dev/null || true
 as_console rm -f /tmp/debut-performance-fixture-*.ready.json
 for ((index=0; index<processes; index++)); do
@@ -66,6 +78,30 @@ as_console open "$APP"
 sleep 8
 diagnostic="$console_home/Library/Application Support/Debut/diagnostic.json"
 as_console "$FIXTURE" --drive "$RESULTS/input-$PROFILE.jsonl"
+
+# Stage cycling is profiled on its own: it is the interaction the jank report is
+# about, and the Cmd+Tab driver above never performs it.
+debut_pid="$(pgrep -f '/Applications/Debut.app/Contents/MacOS/Debut' | head -1)"
+if [[ -n "$debut_pid" ]]; then
+    # The Ctrl+digit driver above leaves a main-queue backlog whose frames are
+    # indistinguishable from stage cycling in the profile. Let it drain first, or the
+    # sample attributes quickSwitchToStage work to the plate-cycle gesture.
+    sleep 10
+    sample "$debut_pid" 10 1 -file "$RESULTS/sample-plate-cycle-$PROFILE.txt" >/dev/null 2>&1 &
+    sample_pid=$!
+    as_console "$FIXTURE" --drive-plate-cycle "$RESULTS/plate-cycle-$PROFILE.jsonl" \
+        --passes 6 --forward 8 --backward 4 --tap-interval 0.09
+    wait "$sample_pid" 2>/dev/null || true
+    # Undelivered input is indistinguishable from a fast app: both produce an idle
+    # profile. Fail instead of publishing a clean-looking result.
+    if ! jq -e '[.events[] | select(.event == "key_event")] | length > 0' "$diagnostic" >/dev/null 2>&1; then
+        echo "Plate-cycle input was never delivered to Debut; profile is meaningless" >&2
+        exit 1
+    fi
+else
+    echo "Debut is not running; skipping plate-cycle profile" >&2
+fi
+
 for scenario in launch-restore overlay-end-to-end-visible overlay-render-submission first-preview all-previews preview-1 preview-5 preview-10 preview-21 preview-50 selection-cycle stage-switch hidden-idle-45s cycles-100 process-exit title-change ax-timeout wallpaper-capture wallpaper-cancellation; do
     start="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
     case "$scenario" in
