@@ -1,5 +1,70 @@
 import AppKit
+import DebutInputDriver
 import Foundation
+
+/// Drives the stage-cycling gesture the overlay jank report is about: Command and
+/// Option held down while Tab is tapped. `InputDriver` never exercised this, so the
+/// VM suite measured window cycling instead.
+private enum PlateCycleDriver {
+    static func run() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let outputIndex = arguments.firstIndex(of: "--drive-plate-cycle"),
+              arguments.indices.contains(outputIndex + 1)
+        else { return }
+        let outputURL = URL(fileURLWithPath: arguments[outputIndex + 1])
+        let passes = Int(value(after: "--passes", in: arguments) ?? "") ?? 6
+        let forward = Int(value(after: "--forward", in: arguments) ?? "") ?? 8
+        let backward = Int(value(after: "--backward", in: arguments) ?? "") ?? 4
+        let tapInterval = Double(value(after: "--tap-interval", in: arguments) ?? "") ?? 0.09
+
+        var records: [String] = []
+        for pass in 1...max(1, passes) {
+            let events = PlateCycleSequence.events(forward: forward, backward: backward)
+            let started = DispatchTime.now().uptimeNanoseconds
+            for event in events {
+                post(event)
+                // Only pace the Tab release; modifier transitions belong to the
+                // same instant as the tap they bracket.
+                if case .key(PlateCycleKey.tab, down: false) = event.kind {
+                    Thread.sleep(forTimeInterval: tapInterval)
+                } else {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+            }
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+            let steps = forward + backward
+            records.append(
+                "{\"scenario\":\"plate-cycle-input\",\"iteration\":\(pass),"
+                + "\"steps\":\(steps),\"durationMilliseconds\":\(elapsed),"
+                + "\"millisecondsPerStep\":\(elapsed / Double(max(steps, 1)))}"
+            )
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+        try? (records.joined(separator: "\n") + "\n").write(to: outputURL, atomically: true, encoding: .utf8)
+    }
+
+    /// Posts to the session tap, which is where Debut's own tap listens.
+    private static func post(_ event: SyntheticKeyEvent) {
+        let cgEvent: CGEvent?
+        switch event.kind {
+        case .key(let keyCode, let down):
+            cgEvent = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: down)
+        case .flagsChanged:
+            cgEvent = CGEvent(source: nil)
+            cgEvent?.type = .flagsChanged
+        }
+        guard let cgEvent else { return }
+        cgEvent.flags = event.flags
+        cgEvent.post(tap: .cgSessionEventTap)
+    }
+
+    private static func value(after flag: String, in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else {
+            return nil
+        }
+        return arguments[index + 1]
+    }
+}
 
 private enum InputDriver {
     static func run() {
@@ -154,6 +219,11 @@ private final class FixtureDelegate: NSObject, NSApplicationDelegate {
         guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]
     }
+}
+
+if ProcessInfo.processInfo.arguments.contains("--drive-plate-cycle") {
+    PlateCycleDriver.run()
+    exit(EXIT_SUCCESS)
 }
 
 if ProcessInfo.processInfo.arguments.contains("--drive") {
