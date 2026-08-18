@@ -40,8 +40,13 @@ let package = Package(
                 .linkedFramework("ApplicationServices"),
             ]
         ),
+        .target(
+            name: "DebutInputDriver",
+            path: "Sources/DebutInputDriver"
+        ),
         .executableTarget(
             name: "DebutPerformanceFixture",
+            dependencies: ["DebutInputDriver"],
             path: "Sources/DebutPerformanceFixture"
         ),
         .executableTarget(
@@ -56,7 +61,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DebutCoreTests",
-            dependencies: ["DebutCore"],
+            dependencies: ["DebutCore", "DebutInputDriver"],
             path: "Tests/DebutCoreTests",
             exclude: ["Screenshots"]
         ),

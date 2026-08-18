@@ -29,6 +29,23 @@ if ! tart exec "$VM_NAME" /usr/bin/true >/dev/null 2>&1; then
     for _ in {1..90}; do tart exec "$VM_NAME" /usr/bin/true >/dev/null 2>&1 && break; sleep 2; done
 fi
 
-tart exec "$VM_NAME" /bin/bash "/Volumes/My Shared Files/tart-performance-guest-$artifact_id.sh" \
+SSH_KEY="$SHARE_DIR/id_ed25519"
+[[ -f "$SSH_KEY" ]] || ssh-keygen -q -t ed25519 -N "" -C "debut-tart-performance" -f "$SSH_KEY"
+tart exec "$VM_NAME" /bin/bash -c '
+    set -e
+    umask 077
+    mkdir -p "$HOME/.ssh"
+    touch "$HOME/.ssh/authorized_keys"
+    grep -qxF "$1" "$HOME/.ssh/authorized_keys" || printf "%s\n" "$1" >> "$HOME/.ssh/authorized_keys"
+' _ "$(<"$SSH_KEY.pub")"
+
+# The guest script has to run over SSH. Under `tart exec` the TCC-responsible
+# process is tart-guest-agent, which holds no PostEvent grant, so WindowServer
+# answers every synthesized event with "Sender is prohibited from synthesizing
+# events" and the suite silently profiles an idle app.
+printf -v remote_command '/bin/bash %q %q %q %q' \
+    "/Volumes/My Shared Files/tart-performance-guest-$artifact_id.sh" \
     "Debut-performance-$artifact_id.app.zip" "DebutPerformanceFixture-$artifact_id" "$PROFILE"
+ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+    -o UserKnownHostsFile="$SHARE_DIR/known_hosts" "admin@$(tart ip "$VM_NAME")" "$remote_command"
 echo "Performance evidence: $SHARE_DIR/performance-results"
