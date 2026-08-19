@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>06 · The overlay — Debut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a class="current" href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Chapter 06</p>
+<h1>The overlay</h1>
+<p class="lede">
+The only part of Debut a user actually looks at. An AppKit window hosting a
+SwiftUI tree, laid out by hand-written geometry, animated as a pure render
+transform, and rebuilt by assignment rather than observation.
+</p>
+
+<h2>The window</h2>
+
+<p>
+<code>OverlayWindow</code>&nbsp;<span class="src">Views/OverlayWindow.swift:4</span>
+is borderless, at <code>.statusBar</code> level, non-opaque with a clear
+background and no shadow, and its collection behaviour is
+<code>[.canJoinAllSpaces, .fullScreenAuxiliary]</code>.
+</p>
+
+<div class="note">
+  <span class="label">Opposite of the desktop surface</span>
+  <p>
+  Note the contrast with chapter 4: the desktop surface must <em>not</em> join all
+  Spaces, because following you into a full-screen Space would cover the app. The
+  overlay must, because it should be reachable wherever you are.
+  </p>
+</div>
+
+<p>
+It never becomes key, and the comment explains why that is a decision rather than
+an oversight:
+</p>
+
+<blockquote>
+A borderless window cannot become key, and Debut is an accessory app that is
+inactive when the overlay opens. Asking for key status buys nothing and makes the
+ordering conditional on app activation.
+<cite>OverlayWindow.swift:63</cite>
+</blockquote>
+
+<p>
+So it uses <code>orderFrontRegardless()</code> plus a 0.15&nbsp;s ease-out alpha
+ramp to reveal, and a 0.1&nbsp;s ease-in ramp to hide. Keyboard input never goes
+through the window at all — it arrives via the event tap.
+</p>
+
+<h3>Attaching and detaching the hosting view</h3>
+
+<p>
+Hiding the overlay does not just order the window out; it removes the
+<code>NSHostingView</code> entirely and nils it.
+</p>
+
+<div class="warn">
+  <span class="label">The 50% CPU bug</span>
+  <p>
+  SwiftUI keeps running layout passes on a hosting view attached to an
+  ordered-out window. Leaving it attached measured as more than half a core
+  consumed while the overlay was invisible. Removing the hosting view on hide and
+  recreating it on show is not an optimisation — it is the fix.
+  </p>
+</div>
+
+<p>
+<code>update(viewModel:)</code> returns a <code>Bool</code> meaning "I had to
+create the hosting view", which the caller feeds into presentation telemetry as
+<code>created</code> versus <code>reused</code>. That single bit is one of the
+strongest predictors of cold-versus-warm overlay latency, which is why it is
+recorded rather than inferred. Every update also re-synchronises the window frame
+to the main screen first.
+</p>
+
+<h3>No observation anywhere</h3>
+
+<p>
+<code>OverlayViewModel</code>&nbsp;<span class="src">Views/OverlayViewModel.swift:20</span>
+is a plain <code>Sendable</code> struct — not <code>@Observable</code>, not
+<code>ObservableObject</code>. Its <code>plates</code> property is computed on
+every access by mapping the stage model into <code>PlateData</code> and
+<code>PlateWindowData</code>. Refresh means: build a whole new value, assign it as
+<code>rootView</code>. The only <code>@Observable</code> type in the UI is the
+onboarding view model, where the reactive ergonomics are worth it and the
+performance is irrelevant.
+</p>
+
+<h2>Layout mathematics</h2>
+
+<p>
+Static geometry lives in <code>PlateConstants</code>&nbsp;<span class="src">Views/PlateView.swift:615</span>;
+the values governing the stack's depth falloff live in <code>PlateMotion</code>
+<span class="src">:57</span>. The important ones:
+</p>
+
+<table>
+  <tr><th>Constant</th><th>Value</th><th>Role</th></tr>
+  <tr><td>thumbnail</td><td>160 × 100</td><td>Maximum preview size; aspect ratio 1.6 is fixed</td></tr>
+  <tr><td><code>windowSpacing</code></td><td>12</td><td>Between previews inside a plate</td></tr>
+  <tr><td><code>padding</code></td><td>24</td><td>Plate inset; top and bottom padding are equal by design</td></tr>
+  <tr><td><code>minPlateWidth</code></td><td>300</td><td>Floor for a nearly empty stage</td></tr>
+  <tr><td><code>badgeSize</code></td><td>40</td><td>App icon badge on each preview</td></tr>
+  <tr><td><code>stageSpacing</code></td><td>34 / 14</td><td>Vertical gap — the larger value only when the active plate shows footer hints</td></tr>
+  <tr><td><code>PlateMotion.minimumPlateScale</code></td><td>0.08</td><td>Floor so distant plates never collapse to nothing</td></tr>
+</table>
+
+<h3>Horizontal: fitting the widest plate</h3>
+
+<p>
+<code>thumbnailSize(forWindowCount:screenWidth:)</code> divides the available
+width by the window count, subtracts per-card padding and title allowance, and
+clamps the result to 80…160, deriving the height from the fixed aspect ratio. A
+plate's width then exactly fits its own cards; each plate is a different width,
+and that is intentional — plate width communicates how many windows a stage
+holds.
+</p>
+
+<h3>Vertical: the stack</h3>
+
+<p>
+<code>PlateMotion.stackLayout(stageCount:focusIndex:plateHeight:spacing:inactiveScale:)</code>&nbsp;<span class="src">PlateView.swift:139</span>
+is a pure function — which is why there are 44 unit tests for the motion maths and
+no need to render anything to check them.
+</p>
+
+<pre><code>scale(i)   = max(pow(inactiveScale, |i - focusIndex|), 0.08)
+height(i)  = plateHeight * scale(i)
+centers    accumulate top-down with `spacing` between them
+opacity(i) = 1, until scale drops below 0.2, then fades quadratically to 0.12</code></pre>
+
+<p>
+Scale <em>compounds</em> with distance rather than being a two-state
+active/inactive value, which is what gives the stack its depth.
+</p>
+
+<h3>Anchoring: why hovering does not shove the stack</h3>
+
+<p>
+The body computes the layout <strong>twice</strong>: a baseline layout focused on
+the <em>active</em> stage, and a visual layout focused on the currently
+<em>focused</em> index (which may be a hovered or drag-targeted plate). It then
+finds where the focused plate sits in the baseline and offsets the visual layout
+so it lands exactly on that anchor.
+</p>
+
+<p>
+The effect: hovering an inactive plate expands it <em>in place</em> instead of
+displacing everything else. The focus index itself is a small precedence chain —
+drag target, then retained drag target, then hover, then active.
+</p>
+
+<h2>Animation, and the render-transform rewrite</h2>
+
+<p>
+Stage focus changes animate as <code>.spring(duration: 0.26, bounce: 0.08)</code>;
+window reordering uses a slightly longer, flatter spring. Under Reduce Motion both
+become short fades, and the transition strategy changes wholesale — the subtree
+gets an identity keyed on the active stage index with an opacity transition rather
+than spatial motion.
+</p>
+
+<div class="why">
+  <span class="label">Scaling used to be a layout change</span>
+  <p>
+  Originally each plate's <code>.frame</code> was set to
+  <code>plateHeight × scale</code>, and the glass surface size and corner radius
+  were pre-multiplied by scale too. Every interpolated frame of the spring
+  therefore changed layout <em>inputs</em>, forcing SwiftUI to re-solve the tree
+  on every tick of the animation.
+  </p>
+  <p>
+  Now every plate lays out in an identical <em>unscaled</em> slot inside a
+  top-aligned <code>ZStack</code>, and an offset shifts that slot so the scaled
+  plate lands on its stack centre. Scale is applied as
+  <code>.scaleEffect</code> — a render transform the compositor handles, with no
+  layout involvement. Measured result: 1.88&nbsp;ms → 1.49&nbsp;ms per layout
+  pass, and 1405 versus 1124 frames delivered in the same wall time, with
+  byte-identical rendered output.
+  </p>
+</div>
+
+<p>
+The modifier order matters and is easy to break:
+</p>
+
+<pre><code>.background(PlateSurfaceView(unscaled size, unscaled radius))
+.background(GeometryReader -> PlateFramePreferenceKey)
+.scaleEffect(scale)
+.shadow(...)
+.opacity(...)
+.offset(y: plateSlotOffset)</code></pre>
+
+<p>
+The geometry reader sits <em>beneath</em> <code>scaleEffect</code>, so the frames
+it publishes are still the on-screen scaled rectangles. That is what keeps hit
+testing correct for the pointer and the drag targets after the rewrite.
+</p>
+
+<h2>Window previews</h2>
+
+<p>
+Capture itself is chapter 3. What lives here is the caching policy, in
+<code>windowIDsNeedingCapture()</code>&nbsp;<span class="src">Services/StageController.swift:762</span>:
+</p>
+
+<p>
+The whole policy is gated on <code>previewRefreshPolicy == .lastActiveOnly</code>
+<span class="src">:764</span>. Under any other policy every assigned window is
+re-captured, and the rules below do not apply. When the policy is active:
+</p>
+
+<ul>
+  <li><strong>Always</strong> re-capture the active stage's front window — the one
+  that was just being used, and therefore the one most likely to look stale.</li>
+  <li>Re-capture when the window's title has changed since the cached image.</li>
+  <li>Re-capture past the cache TTL (default 60&nbsp;s, configurable 5–600).</li>
+</ul>
+
+<blockquote>
+Dirty tracking alone goes stale for windows that change without ever being
+activated — video, chat, dashboards.
+<cite>StageController.swift:770</cite>
+</blockquote>
+
+<p>
+Windows with no preview render a rounded rectangle with a 32&nbsp;pt application
+icon. <code>AppIconImage</code> is an <code>NSViewRepresentable</code> around
+<code>NSImageView</code> that resolves the icon from the bundle identifier and
+falls back to drawing a two-letter monogram. Note that each card can render two
+of these — the badge and the placeholder — and that these representables are
+currently the dominant cost when cycling plates.
+</p>
+
+<h2>Pointer interaction</h2>
+
+<h3>Selecting</h3>
+
+<p>
+A press below 6&nbsp;pt of movement is treated as a click and selects the window;
+beyond that it becomes a drag. Both come from one
+<code>DragGesture(minimumDistance: 0)</code> in a named coordinate space, attached
+as a high-priority gesture.
+</p>
+
+<div class="note">
+  <span class="label">The stationary pointer problem</span>
+  <p>
+  The overlay appears under wherever the cursor happens to be resting. Without
+  care, that immediately hijacks the keyboard selection.
+  <code>PointerMovementGate</code>&nbsp;<span class="src">PlateView.swift:591</span>
+  seeds itself with the mouse location at view construction and swallows hover
+  events until the physical mouse actually moves. There is both a unit test and an
+  E2E scenario for it.
+  </p>
+</div>
+
+<p>
+Hover also has hysteresis: focus is retained while the pointer is in the vertical
+gap between two plates and inside a horizontal corridor interpolated between their
+widths, so moving diagonally between plates does not flicker.
+</p>
+
+<h3>Dragging a window between stages</h3>
+
+<p>
+The drop target is the first plate whose frame contains the point; the insertion
+index comes from comparing the pointer's x against each remaining card's midpoint.
+Live feedback is offset-only — gaps open and close, the shrinking source plate
+re-centres, and plate widths pre-adjust to their post-drop window counts — so
+nothing in the model changes until release.
+</p>
+
+<p>
+Release is a three-phase handoff, and the phases exist because the model update is
+asynchronous:
+</p>
+
+<div class="diagram">1. animate the dragged preview to its destination position
+2. on completion: store a "settling" state, then call onWindowMoved
+       -> the delegate mutates the model and rebuilds the view model
+3. clear the drag state only once the layout preference key proves the
+   move actually applied, inside a transaction with animations disabled
+       -> without this the card animates twice, once per representation</div>
+
+<p>
+The target plate stays magnified across that gap via a retained focus index. On
+the delegate side, the overlay rebuild is deliberately deferred by one run-loop
+hop: "let SwiftUI finish the drag transaction before replacing its root view."
+</p>
+
+<h3>Reordering stages</h3>
+
+<p>
+Reordering is <strong>handle-only</strong>. Hovering within 24&nbsp;pt of a plate's
+leading edge reveals a drag handle; while revealed, the reveal width of
+36&nbsp;pt is <em>added</em> to the hover width, so the hotspot grows to
+60&nbsp;pt as hysteresis&nbsp;<span class="src">PlateView.swift:393</span>. Dragging the handle maps vertical translation to an
+index delta using the stride between plates. Dragging the plate body does
+<em>not</em> reorder, and the E2E suite asserts that negative explicitly.
+</p>
+
+<p>
+Both drag paths emit diagnostic events — <code>window_moved_by_drag</code> and
+<code>stage_reordered_by_drag</code> — which is how the E2E harness verifies them
+without reading pixels.
+</p>
+
+<h2>Liquid Glass</h2>
+
+<p>
+Production glass is one modifier: <code>.glassEffect(.clear or .regular, in:
+.rect(cornerRadius:))</code> on macOS 26, falling back to a semi-transparent
+ultra-thin material. Which of the two styles is used is a user setting.
+</p>
+
+<p>
+<code>DebutGlassLab</code> is a separate executable that exists because choosing
+between glass recipes by reading documentation does not work.
+<code>GlassLabRecipe</code>&nbsp;<span class="src">Views/GlassLabRecipe.swift:48</span>
+enumerates twelve recipes across six families, each mapped to a SwiftUI or AppKit
+implementation — including private <code>NSGlassEffectView</code> styles reached
+by <code>unsafeBitCast</code> of a raw value, with the UI stamped "RESEARCH ONLY".
+The lab renders them side by side, captures them, and validates each capture with
+<code>GlassLabCaptureValidator.containsVisibleContent</code>, which downsamples to
+64×64 grayscale and rejects an image where every pixel is within 1 of the first.
+</p>
+
+<div class="why">
+  <span class="label">Why a blank-capture guard</span>
+  <p>
+  A screen capture that silently returns a uniform grey looks like a successful
+  capture. Chapter 11 covers the measurement that made this a standing rule: never
+  treat a non-nil capture as proof of content. The same assertion appears in the
+  E2E suite for window previews.
+  </p>
+</div>
+
+<p>
+The lab's findings are written up in <code>docs/KHA-422-liquid-glass-lab.md</code>
+and deliberately left the production overlay unchanged.
+</p>
+
+<h2>Settings and onboarding</h2>
+
+<p>
+The Settings window is a 700×500 panel with a full-size content view, hidden
+title, and transparent titlebar. The sidebar is a <code>NavigationSplitView</code>
+whose selection drives a <code>ScrollViewReader</code> — every section carries an
+id and selecting one scrolls to it. It is one continuous scrolling document, not a
+set of panes, so the sidebar highlight follows the scroll position as much as it
+drives it.
+</p>
+
+<p>
+Live apply is a single <code>onChange</code> on the whole settings value at the
+root: any mutation persists and fans out to discovery exclusions, key bindings,
+presentation delay, preview policy and TTL, quick-switch modifiers, and telemetry.
+Nothing requires a restart.
+</p>
+
+<p>
+Onboarding uses an injected permission client protocol so the flow is testable
+without touching TCC, and re-polls permissions on
+<code>didBecomeActiveNotification</code> — that is how returning from System
+Settings updates the cards. Starting the tutorial requires <em>both</em>
+Accessibility and Screen Recording; Screen Recording is marked required because it
+feeds the wallpaper capture as well as previews. A launch policy migrates the
+legacy "has launched before" flag so existing users never see a first-run screen.
+</p>
+
+<h2>Things that will surprise you</h2>
+
+<div class="warn">
+  <span class="label">Three appearance settings are dead</span>
+  <p>
+  <code>selectionOpacity</code>, <code>selectionBorderWidth</code>, and
+  <code>selectionBorderOpacity</code> are persisted and have working sliders, but
+  nothing in <code>Sources/</code> reads them. Selection is drawn as a 1.06×
+  magnification plus a shadow — the test is literally named "selected windows
+  magnify instead of using a selection indicator". <code>animationsEnabled</code>
+  is likewise never read on the render path, which uses the system Reduce Motion
+  environment value instead. <code>spec/settings.md</code> deliberately declines
+  to restate individual controls, so it does not flag the gap either — it lists
+  Appearance as covering "the plate and selection geometry the overlay renders
+  with", which reads as if all of it were live.
+  </p>
+</div>
+
+<ul>
+  <li><strong>Dark mode shadows are not just inverted.</strong> Dark uses 0.5
+  opacity / 14 radius / 6 offset against light's 0.24 / 8 / 4, with the comment
+  that "a black shadow over the dark plate behind it needs more density and spread
+  to read as depth than it does in light mode."</li>
+
+  <li><strong>Stage spacing depends on hint visibility.</strong> Turning command
+  hints off changes the vertical geometry of the whole stack, from 34&nbsp;pt to
+  14&nbsp;pt.</li>
+
+  <li><strong><code>PlateConstants.plateCenterY</code> is a second implementation
+  of the stacking maths</strong>, deliberately independent of the layout path and
+  kept for tests and the E2E harness to verify against. If you change the layout
+  algorithm, change both — that redundancy is the check.</li>
+</ul>
+
+<div class="pager">
+  <a href="05-keyboard.html"><span class="dir">Previous</span>&larr; 05 · Keyboard</a>
+  <a href="07-persistence.html"><span class="dir">Next</span>07 · Persistence &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>

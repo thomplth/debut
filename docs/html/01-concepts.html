@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01 · Concepts — Debut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a class="current" href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Chapter 01</p>
+<h1>Concepts</h1>
+<p class="lede">
+The vocabulary the whole codebase is written in. Everything here is behaviour and
+data model — no implementation yet. If you read only one chapter before touching
+the code, read this one.
+</p>
+
+<h2>The problem</h2>
+
+<p>
+On macOS the set of open windows is flat. Cmd+Tab walks applications, Cmd+backtick
+walks the windows of one application, and both walk <em>all</em> of them. If you
+have a code editor, two terminals, and a simulator open for one project, and a
+browser, a chat client, and a document open for something else, the switcher
+mixes them. The cost is not the extra keystrokes; it is that switching context
+between tasks requires reconstructing a window arrangement by hand every time.
+</p>
+
+<p>
+The system's own answers are Spaces and the built-in Stage Manager. Spaces
+partition windows but bind that partition to a full-screen desktop with an
+animated transition and their own switching gestures. The built-in Stage Manager
+groups windows but keeps a single global switcher. Neither makes the guarantee
+Debut is built around:
+</p>
+
+<div class="note">
+  <span class="label">The central guarantee</span>
+  <p><strong>No keyboard-driven window switch ever crosses a stage boundary.</strong>
+  The switcher, the same-app cycler, and the number shortcuts are all scoped to
+  the active stage. Leaving a stage is always a deliberate act.</p>
+</div>
+
+<h2>Stage</h2>
+
+<p>
+A <strong>stage</strong> is a workspace: a set of windows scoped to one task.
+Exactly one stage is active at any moment.
+</p>
+
+<p>
+Two properties make stages cheap. First, a stage is not a desktop — windows in
+inactive stages are not moved, resized, minimised, or sent to another Space. They
+stay exactly where they are and are simply <em>occluded</em> by a full-screen
+window Debut owns. Switching stages therefore has no animation to wait for and
+cannot disturb your layout. Second, a stage has <strong>no name</strong>. Its
+label is its 1-based position in the list, computed on demand. Creating,
+deleting, reordering, and swapping stages therefore require no bookkeeping at
+all: after any of those operations the labels are already correct, because they
+were never stored.
+</p>
+
+<div class="why">
+  <span class="label">Why no names</span>
+  <p>
+  Rename was implemented and then removed. A stored name is state that must be
+  migrated, displayed, edited, validated, and kept consistent with position-based
+  shortcuts. A derived label is none of those things. The position numbers still
+  drive the jump and quick-switch shortcuts, but they are deliberately not drawn
+  on the plates — the stack's vertical order is the affordance.
+  </p>
+</div>
+
+<h2>Window</h2>
+
+<p>
+Debut tracks individual <strong>windows</strong>, not applications. A stage holds
+window entries, so one application can own windows in several stages at once —
+one editor window per project, one terminal per project. This is the single most
+consequential modelling decision in the product, and it is what forces most of
+the complexity in chapters 3 and 7.
+</p>
+
+<p>
+A window has two identities, and keeping them apart matters:
+</p>
+
+<dl>
+  <dt>Runtime identity — the <code>CGWindowID</code></dt>
+  <dd>A number the window server assigns. It is unique while the window lives and
+  meaningless afterwards. It changes when the owning application restarts, and it
+  is never written to disk as a durable key.</dd>
+
+  <dt>Persistent identity — (bundle&nbsp;ID, window&nbsp;title)</dt>
+  <dd>The pair used to recognise a window across sessions. It is the best
+  available key and it is still not reliable: terminal prompts, browser tabs, and
+  chat channels all change the title while the window is the same window.</dd>
+</dl>
+
+<p>
+Because the persistent key is unreliable, matching a saved assignment to a live
+window is a <em>ranked</em> operation with fallbacks rather than a lookup. Chapter
+7 covers the algorithm.
+</p>
+
+<h4>What counts as a window</h4>
+
+<p>
+Only real, non-modal windows are tracked. In Accessibility terms that means the
+element's role is a window and its subrole is either a standard window or a
+dialog, and it is not modal. Modal sheets, floating palettes, toolbars, shadows,
+and unclassifiable popups are excluded. A window whose owning application is not
+a regular foreground application, or which has no bundle identifier, never enters
+the model.
+</p>
+
+<h2>Plate</h2>
+
+<p>
+A <strong>plate</strong> is a stage's representation inside the overlay: a
+horizontal row of window previews, each badged with its application icon and
+captioned with its title. Plates stack vertically, the active one centred at full
+scale, the others scaled down by a configurable factor that compounds with
+distance.
+</p>
+
+<p>
+A plate carries no title of its own, because a stage has no name. There is no
+full-screen backdrop and no background blur behind the stack — the plates float
+directly over whatever is on the desktop. The selection is expressed by
+magnifying the selected preview rather than by drawing a selection chrome around
+it.
+</p>
+
+<h2>Session</h2>
+
+<p>
+The activation shortcut is not a toggle. It starts a <strong>session</strong>
+bounded by a held modifier, and the session and the overlay are two separate
+pieces of state:
+</p>
+
+<ul>
+  <li><strong>Tap</strong> — press and release before the presentation delay
+  elapses. The overlay never appears; Debut switches to the most recently used
+  window in the active stage. This is the "flip to the previous window" gesture,
+  and it must feel instant.</li>
+
+  <li><strong>Hold</strong> — keep the modifier down past the delay. The overlay
+  appears and further keypresses navigate it.</li>
+
+  <li><strong>Escape</strong> — closes the overlay but <em>leaves the session
+  alive</em>. A further navigation keypress reopens it. This is why "overlay
+  visible" and "session active" cannot be the same boolean.</li>
+
+  <li><strong>Release the modifier</strong> — commits the current selection and
+  ends the session.</li>
+</ul>
+
+<p>
+Quick switch is the exception that proves the model: the number chords switch
+stage immediately, with no session and no overlay, and they dismiss the overlay
+first if it happens to be open.
+</p>
+
+<div class="warn">
+  <span class="label">Suppressed entirely</span>
+  <p>
+  While the frontmost application is full-screen, the overlay is not shown at all.
+  Debut's occlusion technique does not apply inside a full-screen Space, so
+  pretending otherwise would produce a switcher that visibly does nothing.
+  </p>
+  <p>
+  The keystroke is still swallowed. The event tap has no notion of full-screen
+  state and has already returned <code>nil</code>; the suppression happens later,
+  in <code>setupOverlay()</code>&nbsp;<span class="src">StageController.swift:604</span>,
+  which probes for a full-screen app and returns early, completing the
+  presentation trace with outcome <code>fullscreen_rejected</code>.
+  </p>
+</div>
+
+<h2>MRU ordering</h2>
+
+<p>
+Within a stage, windows are ordered by recency — index 0 is the most recently
+focused. This ordering is not a decoration; it is the model's only ordering, and
+several behaviours read directly off it:
+</p>
+
+<ul>
+  <li>A tap of the activation shortcut targets index 1, the <em>second</em> most
+  recent window, which is what makes tap-to-flip work — unless the frontmost app
+  is excluded, in which case it targets index 0, because from an excluded app the
+  "previous window" is the stage's most recent one&nbsp;<span class="src">StageController.swift:568</span>.</li>
+  <li>Opening the overlay preselects index 1 for the same reason, so a single
+  activation lands on the previous window — subject to the same exclusion rule,
+  and to the stage holding at least two windows&nbsp;<span class="src">:580</span>.</li>
+  <li>Changing stage inside the overlay resets the selection to that stage's index
+  0 — its own most recent window.</li>
+  <li>Quick switch focuses the destination stage's index 0, or, in the same-app
+  variant, that stage's most recent window belonging to the application you were
+  already using.</li>
+</ul>
+
+<p>
+Recency is maintained strictly from events — focus changes within an application
+and activation notifications across applications. Nothing polls.
+</p>
+
+<h2>Assignment rules</h2>
+
+<p>
+Every tracked window belongs to exactly one stage. There is no sharing and no
+duplication. Three rules cover how a window gets there:
+</p>
+
+<table>
+  <tr>
+    <th>Situation</th>
+    <th>Result</th>
+  </tr>
+  <tr>
+    <td>A brand-new window appears (Cmd+N, <code>code&nbsp;.</code>)</td>
+    <td>It joins the <strong>active stage</strong>, even if the same application already has windows in other stages. New work belongs where you are.</td>
+  </tr>
+  <tr>
+    <td>An existing window is activated from outside Debut (Dock, Spotlight)</td>
+    <td>Debut <strong>switches to the stage that already owns it</strong>. The window does not move. Activation is a navigation act, not a re-assignment.</td>
+  </tr>
+  <tr>
+    <td>The window belongs to an excluded application</td>
+    <td>It is invisible to the whole system, filtered at every layer.</td>
+  </tr>
+</table>
+
+<h4>Exclusions</h4>
+
+<p>
+There are two independent exclusion lists, and conflating them is a common
+mistake:
+</p>
+
+<dl>
+  <dt>Excluded apps</dt>
+  <dd>The application is not tracked at all. Its windows never appear on a plate
+  and never take part in switching. The filter must be applied in discovery, in
+  launch handling, in activation handling, in reconciliation, and in the
+  Accessibility observer — missing any one layer lets the application back in
+  through that path.</dd>
+
+  <dt>Quick-switch exclusions</dt>
+  <dd>The application <em>is</em> tracked normally, but while it is frontmost it
+  keeps its own number shortcuts. This exists so that an app which binds Ctrl+1..9
+  itself is not shadowed by Debut's stage jumps.</dd>
+</dl>
+
+<h2>Dormancy</h2>
+
+<p>
+This is the concept most often missed on a first read, and it is the reason Debut
+survives a reboot usefully.
+</p>
+
+<p>
+When an application exits, its windows leave the live stage view — but their
+stage and their position within it are retained as <strong>dormant
+assignments</strong>. When that application launches again, Debut reclaims those
+positions: first by exact bundle-and-title match, then, for applications whose
+titles are dynamic, by a complete one-to-one match of the remaining windows of
+that bundle.
+</p>
+
+<p>
+Two properties are deliberate and both are load-bearing:
+</p>
+
+<ul>
+  <li><strong>There is no time-based expiry.</strong> A dormant assignment is not
+  a cache entry. It survives an app being quit deliberately, being restarted by
+  an updater, and the machine being rebooted, because macOS does not reliably let
+  Debut distinguish those cases anyway.</li>
+
+  <li><strong>Absence is never proof of destruction.</strong> A window missing
+  from an Accessibility or window-server snapshot may merely be hidden or ordered
+  out. Only a real lifecycle event — a destroy notification, an explicit
+  exclusion or reset, or the deletion of the containing stage — removes an
+  assignment.</li>
+</ul>
+
+<div class="why">
+  <span class="label">Why this rule is absolute</span>
+  <p>
+  The tempting shortcut is to treat "not in the current snapshot" as "closed" and
+  clean up. Doing so deletes a user's layout on any transient failure, and
+  transient failures are routine: an app still warming up can momentarily report
+  a standard window as a dialog. A misreport that produces dormancy is
+  self-healing on the next snapshot. A misreport that produces deletion is
+  permanent layout loss.
+  </p>
+</div>
+
+<h2>What is persisted</h2>
+
+<p>
+State survives restarts and reboots. Persisted: the list of stages and their
+order, the window-to-stage assignments (keyed by bundle ID and title), the
+dormant assignments, the active stage, and all settings. Not persisted: anything
+ephemeral — window IDs, process IDs, and the runtime tracking tables, all of
+which are rebuilt from scratch on launch.
+</p>
+
+<p>
+On launch Debut loads the snapshot, reconciles it against the live window list,
+adds any live windows the snapshot did not know about, prunes empty stages that
+hold no dormant assignments, and then activates the stage owning the currently
+focused window rather than always starting at stage 1.
+</p>
+
+<h2>Vocabulary summary</h2>
+
+<table>
+  <tr><th>Term</th><th>Meaning</th></tr>
+  <tr><td><strong>Stage</strong></td><td>A workspace holding windows. Unnamed; labelled by position. Exactly one is active.</td></tr>
+  <tr><td><strong>Plate</strong></td><td>A stage as drawn in the overlay: one horizontal row of previews.</td></tr>
+  <tr><td><strong>Session</strong></td><td>The period a Debut activation modifier is held down. Distinct from overlay visibility.</td></tr>
+  <tr><td><strong>Desktop surface</strong></td><td>The full-screen window Debut owns that occludes inactive stages.</td></tr>
+  <tr><td><strong>MRU</strong></td><td>Most-recently-used ordering of windows inside a stage; index 0 is most recent.</td></tr>
+  <tr><td><strong>Dormant assignment</strong></td><td>A remembered stage and position for a window whose application has exited.</td></tr>
+  <tr><td><strong>Arming</strong></td><td>Successfully registering the Accessibility notifications that let Debut learn a window closed.</td></tr>
+  <tr><td><strong>Quick switch</strong></td><td>Number-chord stage switching with no session and no overlay.</td></tr>
+</table>
+
+<div class="pager">
+  <a href="index.html"><span class="dir">Previous</span>&larr; Overview</a>
+  <a href="02-architecture.html"><span class="dir">Next</span>02 · Architecture &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>

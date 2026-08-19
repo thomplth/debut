@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>10 · Build &amp; release — Debut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a class="current" href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Chapter 10</p>
+<h1>Build, install, release</h1>
+<p class="lede">
+There is no Xcode project. A shell script turns a SwiftPM executable into a signed
+<code>.app</code>, and the certificate it signs with is the reason Accessibility
+permission survives a rebuild.
+</p>
+
+<h2>The package</h2>
+
+<p>
+<code>Package.swift</code> declares <code>swift-tools-version: 6.2</code> and
+<code>platforms: [.macOS(.v26)]</code>, with no external dependencies at all —
+every line of third-party code in this project is zero lines. Five executables and
+one library:
+</p>
+
+<table>
+  <tr><th>Product</th><th>Target</th><th>Purpose</th></tr>
+  <tr><td><code>Debut</code></td><td><code>DebutApp</code></td><td>The shipped app. A thin <code>main</code> over <code>DebutCore</code>.</td></tr>
+  <tr><td>—</td><td><code>DebutCore</code></td><td>Everything. Depends on <code>AXPrivate</code>.</td></tr>
+  <tr><td>—</td><td><code>AXPrivate</code></td><td>C shim exposing <code>_AXUIElementGetWindow</code>; links <code>ApplicationServices</code>.</td></tr>
+  <tr><td><code>DebutE2E</code></td><td><code>DebutE2E</code></td><td>The end-to-end harness (chapter 9).</td></tr>
+  <tr><td><code>DebutBenchmarks</code></td><td><code>DebutBenchmarks</code></td><td>Emits the benchmark JSON the budget gate consumes.</td></tr>
+  <tr><td><code>DebutPerformanceFixture</code></td><td>—</td><td>Drives repeatable input via <code>DebutInputDriver</code>.</td></tr>
+  <tr><td><code>DebutGlassLab</code></td><td>—</td><td>The Liquid Glass comparison lab (chapter 6).</td></tr>
+  <tr><td>—</td><td><code>DebutInputDriver</code></td><td>Shared input sequences; used by the fixture <em>and</em> the test target.</td></tr>
+</table>
+
+<p>
+The test target excludes <code>Screenshots</code>&nbsp;<span class="src">Package.swift:66</span>
+— those are PNG outputs sitting inside the sources directory, and SwiftPM would
+otherwise complain about unhandled resources.
+</p>
+
+<div class="warn">
+<p>
+<strong>This machine has a broken Swift Wasm toolchain earlier in <code>PATH</code>.</strong>
+A bare <code>swift build</code> or <code>swift test</code> will pick it up and fail
+in confusing ways. Always use:
+</p>
+<pre><code>TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift</code></pre>
+<p>
+Every script in <code>scripts/</code> already does this. The prefix is only needed
+when invoking Swift by hand.
+</p>
+</div>
+
+<h2>Assembling the bundle</h2>
+
+<p>
+<code>scripts/build-app.sh</code> is short enough to read in full, and does five
+things in order:
+</p>
+
+<ol>
+  <li><strong>Build release.</strong> <code>swift build -c release</code> produces
+  <code>.build/release/Debut</code>.</li>
+  <li><strong>Lay out the bundle.</strong> Create
+  <code>.build/Debut.app/Contents/{MacOS,Resources}</code>, copy the binary,
+  <code>Info.plist</code>, and <code>PrivacyInfo.xcprivacy</code>.</li>
+  <li><strong>Generate an icon.</strong> <code>sips</code> resizes the system
+  <code>GenericApplicationIcon.icns</code> into an iconset at six sizes plus their
+  <code>@2x</code> variants, and <code>iconutil</code> packs it. Every step is
+  <code>|| true</code>-guarded; a missing icon is not a build failure. There is no
+  designed app icon yet.</li>
+  <li><strong>Sign.</strong> See below.</li>
+  <li><strong>Print the install command.</strong> The script never touches
+  <code>/Applications</code> itself.</li>
+</ol>
+
+<h3>Info.plist</h3>
+
+<table>
+  <tr><th>Key</th><th>Value</th><th>Why it matters</th></tr>
+  <tr><td><code>CFBundleIdentifier</code></td><td><code>com.thomplth.Debut</code></td><td>The gate that switches diagnostics and the resource reader into production mode (chapter 8)</td></tr>
+  <tr><td><code>LSUIElement</code></td><td><code>true</code></td><td>No Dock icon, no menu bar. Debut is an agent — this is what lets the overlay appear without a visible host app</td></tr>
+  <tr><td><code>NSSupportsAutomaticTermination</code></td><td><code>false</code></td><td>macOS must not reclaim the process while idle; the event tap has to stay alive</td></tr>
+  <tr><td><code>NSSupportsSuddenTermination</code></td><td><code>false</code></td><td>State must be flushed on terminate (chapter 7), so the process needs to run its shutdown</td></tr>
+  <tr><td><code>NSHighResolutionCapable</code></td><td><code>true</code></td><td>Required for correct Retina capture and rendering</td></tr>
+  <tr><td><code>LSMinimumSystemVersion</code></td><td><code>14.0</code></td><td><strong>Inconsistent with the package.</strong> See below</td></tr>
+  <tr><td><code>CFBundleShortVersionString</code></td><td><code>0.1.0</code>, build <code>1</code></td><td>Hand-edited; nothing automates it</td></tr>
+  <tr><td><code>TelemetryDeckNamespace</code> / <code>AppID</code></td><td>empty</td><td>No telemetry destination in the stock build (chapter 8)</td></tr>
+</table>
+
+<div class="warn">
+<p>
+<strong>The two minimum-version declarations disagree.</strong>
+<code>Package.swift</code> targets <code>.macOS(.v26)</code>; <code>Info.plist</code>
+declares <code>LSMinimumSystemVersion</code> 14.0. The plist is the looser of the
+two and is what Launch Services enforces, so a macOS 14 machine will happily launch
+a binary compiled against the 26 SDK — and then fail at whichever API is missing.
+</p>
+<p>
+This is not purely cosmetic: AGENTS.md notes that
+<code>CGWindowListCreateImage</code> "only still compiles because the package
+targets macOS 14", which suggests the deployment target moved and the plist did
+not follow. If you intend to support 14, the package target is wrong; if you intend
+26-only, the plist is. Do not silently change either without deciding which.
+</p>
+</div>
+
+<h3>Code signing</h3>
+
+<pre><code>SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Debut Dev" | head -1 | awk '{print $2}' || true)
+if [ -n "$SIGN_IDENTITY" ]; then
+    codesign --force --deep --sign "$SIGN_IDENTITY" --entitlements … "$APP_BUNDLE"
+else
+    codesign --force --deep --sign - --entitlements … "$APP_BUNDLE"
+fi</code></pre>
+
+<div class="why">
+<p>
+<strong>Why a self-signed certificate rather than ad-hoc signing.</strong> TCC
+records an Accessibility grant against the app's <em>designated requirement</em>,
+derived from its signature. An ad-hoc signature (<code>--sign -</code>) is
+different on every build, so every rebuild looks like a new app and the permission
+resets — meaning you re-approve Debut in System Settings, and restart it, on every
+single iteration. A stable "Debut Dev" identity in the login keychain keeps the
+requirement constant, so the grant survives. The script says exactly this in its
+fallback message.
+</p>
+<p>
+It is also what makes the E2E TCC pre-seeding in chapter 9 work at all: the
+<code>csreq</code> blob written into <code>TCC.db</code> has to keep matching the
+rebuilt binary.
+</p>
+</div>
+
+<p>
+If the certificate is missing, AGENTS.md carries the exact
+<code>openssl</code> / <code>security import</code> / <code>add-trusted-cert</code>
+recipe to recreate it. Note the entitlements file is passed in both branches — the
+sandbox must be explicitly disabled either way (chapter 8).
+</p>
+
+<h2>The install loop</h2>
+
+<pre><code>TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test
+./scripts/build-app.sh
+pkill -f "Debut.app" || true
+rm -rf /Applications/Debut.app
+cp -R .build/Debut.app /Applications/Debut.app
+open /Applications/Debut.app</code></pre>
+
+<p>
+<code>scripts/rebuild.sh</code> is exactly the last five of those steps, with a
+one-second pause after <code>pkill</code> so the old process releases its event tap
+before the new one asks for one. It builds, installs, and launches — it never runs
+E2E.
+</p>
+
+<div class="warn">
+<p>
+<strong>Never leave code changes uninstalled.</strong> The installed app must always
+match the source. E2E runs against <code>/Applications/Debut.app</code>, and so
+does every manual observation; a stale bundle produces confident, wrong
+conclusions. This is a standing rule in AGENTS.md, not a suggestion.
+</p>
+</div>
+
+<p>
+<code>rm -rf</code> before <code>cp -R</code> matters: copying over an existing
+bundle can leave orphaned files from the previous version inside it, which
+invalidates the signature.
+</p>
+
+<h2>Performance runs</h2>
+
+<p>
+<code>scripts/performance-test.sh</code> is the gate described in chapter 8, wired
+end to end:
+</p>
+
+<div class="diagram">swift build -c release --product DebutBenchmarks
+        |
+        v
+.build/release/DebutBenchmarks  >  benchmarks-&lt;UTC timestamp&gt;.json
+        |
+        +--> jq -e .            (fail fast if the JSON is malformed)
+        +--> copy to benchmarks-latest.json
+        |
+        v
+check-performance-regression.sh PerformanceBudgets.json &lt;artifact&gt;</div>
+
+<p>
+Artefacts land in <code>.build/performance-results/</code> by default, overridable
+with <code>DEBUT_PERFORMANCE_RESULTS</code>. Timestamped names mean runs accumulate
+rather than overwrite, so a regression can be bisected against real historical
+measurements instead of remembered ones. There are Tart variants
+(<code>tart-performance.sh</code>, <code>tart-performance-guest.sh</code>) for
+running the same thing in the VM.
+</p>
+
+<p>
+<code>scripts/profile.sh</code> wraps <code>xcrun xctrace record</code> against the
+installed app, defaulting to the Time Profiler template, with SwiftUI, Animation
+Hitches, Allocations, Leaks, System Trace, Swift Concurrency and App Launch also
+offered. Traces are timestamped into <code>.build/profile-results/</code>. It
+requires the app to be installed — another reason the install step is not
+optional.
+</p>
+
+<h2>Release checklist</h2>
+
+<p>
+<code>docs/privacy-release-checklist.md</code> is short and specific. Paraphrased:
+</p>
+
+<ul>
+  <li>Confirm <code>PrivacyInfo.xcprivacy</code> matches the actual binary and dependency inventory.</li>
+  <li>Snapshot the exact enabled payload and compare every key against <code>TelemetryPayload</code> — verify the allowlist empirically rather than trusting the type.</li>
+  <li>Verify disabled mode produces zero DNS, TCP and HTTP telemetry traffic. Not "no payloads sent" — no packets.</li>
+  <li>Verify opt-out deletes the on-disk queue <em>without restarting</em>.</li>
+  <li>Search the payload evidence for the documented denylist and for stable identifiers.</li>
+  <li>Confirm endpoint region, 90-day retention, dashboard access, and the daily cap.</li>
+  <li>Review dependency updates for automatically-added fields, capture, identity, replay, or endpoint changes.</li>
+  <li>Archive the payload snapshot, network trace, manifest, diagnostics, benchmark JSON and a selected Instruments trace with the release evidence.</li>
+</ul>
+
+<p>
+The theme is that every privacy claim must be verified from outside the code. The
+type system prevents a window title from being encoded; the checklist requires you
+to prove it on the wire anyway.
+</p>
+
+<h2>Script reference</h2>
+
+<table>
+  <tr><th>Script</th><th>Does</th><th>Safe while working?</th></tr>
+  <tr><td><code>build-app.sh</code></td><td>Build + bundle + sign</td><td>Yes</td></tr>
+  <tr><td><code>rebuild.sh</code></td><td>Build, install, launch. No E2E</td><td>Yes — restarts Debut</td></tr>
+  <tr><td><code>tart-e2e.sh</code></td><td>Headless VM E2E: <code>prepare</code> / <code>run</code> / <code>run-all</code> / <code>status</code> / <code>stop</code></td><td>Yes — input stays in the guest</td></tr>
+  <tr><td><code>tart-e2e-guest.sh</code></td><td>Runs inside the guest: installs the app, seeds TCC</td><td>Guest only; refuses to run on the host</td></tr>
+  <tr><td><code>ci-e2e.sh</code></td><td>GitHub-hosted runner entry point</td><td>CI only</td></tr>
+  <tr><td><code>e2e-test.sh</code></td><td>Foreground E2E against the live desktop</td><td><strong>No</strong> — takes over input and screen. Warn first</td></tr>
+  <tr><td><code>performance-test.sh</code></td><td>Benchmarks + budget gate</td><td>Yes, but results are noisy under load</td></tr>
+  <tr><td><code>check-performance-regression.sh</code></td><td>Compares an artefact to the budgets</td><td>Yes — pure</td></tr>
+  <tr><td><code>profile.sh</code></td><td><code>xctrace</code> record / triage / templates</td><td>Yes</td></tr>
+  <tr><td><code>build-glass-lab.sh</code>, <code>tart-glass-lab*.sh</code></td><td>The Liquid Glass comparison lab</td><td>Yes</td></tr>
+</table>
+
+<h2>What is not automated</h2>
+
+<p>
+Worth knowing before you look for it:
+</p>
+
+<ul>
+  <li><strong>No notarisation, no distribution.</strong> The app is self-signed for
+  local development. Shipping it to another machine would need a Developer ID and a
+  notarisation step that does not exist here.</li>
+  <li><strong>No version bumping.</strong> <code>CFBundleShortVersionString</code>
+  is hand-edited.</li>
+  <li><strong>No unit-test CI.</strong> The only workflow is <code>e2e.yml</code>.
+  Unit and screenshot tests run locally, per the AGENTS.md workflow.</li>
+  <li><strong>No designed icon.</strong> The build borrows a system icon.</li>
+  <li><strong>No dependency management</strong>, because there are no dependencies.</li>
+</ul>
+
+<div class="pager">
+  <a href="09-verification.html"><span class="dir">Previous</span>&larr; 09 · Verification</a>
+  <a href="11-platform-notes.html"><span class="dir">Next</span>11 · Platform notes &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>

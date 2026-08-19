@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02 · Architecture — Debut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a class="current" href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Chapter 02</p>
+<h1>Architecture</h1>
+<p class="lede">
+How the program is put together: the package targets, the composition root, who
+depends on whom, how the layers talk, and which thread everything runs on.
+</p>
+
+<h2>Package layout</h2>
+
+<p>
+Everything is SwiftPM. There is no Xcode project, no storyboard, and no
+<code>@main</code> attribute. <span class="src">Package.swift</span> declares two
+plain library targets, a C shim, and five executables — with only
+<code>DebutCore</code> exposed as a public product:
+</p>
+
+<table>
+  <tr><th>Target</th><th>Kind</th><th>Purpose</th></tr>
+  <tr><td><code>DebutCore</code></td><td>library</td><td>Everything: models, services, views. All logic lives here so it can be unit-tested without launching an app.</td></tr>
+  <tr><td><code>AXPrivate</code></td><td>C target</td><td>A one-line shim declaring <code>_AXUIElementGetWindow</code> so Swift can see a symbol ApplicationServices already exports.</td></tr>
+  <tr><td><code>DebutApp</code></td><td>executable</td><td>The shipped app. Seven lines of <code>main.swift</code>.</td></tr>
+  <tr><td><code>DebutE2E</code></td><td>executable</td><td>The end-to-end harness. Drives the <em>installed</em> app with synthesized input.</td></tr>
+  <tr><td><code>DebutBenchmarks</code></td><td>executable</td><td>In-process CPU benchmarks gated against budgets.</td></tr>
+  <tr><td><code>DebutPerformanceFixture</code></td><td>executable</td><td>Spawns synthetic windows and drives input, for profiling under controlled load.</td></tr>
+  <tr><td><code>DebutGlassLab</code></td><td>executable</td><td>A research harness comparing Liquid Glass material recipes side by side.</td></tr>
+  <tr><td><code>DebutInputDriver</code></td><td>library</td><td>The synthesized-input sequence shared by the fixture and its tests.</td></tr>
+</table>
+
+<p>
+Inside <code>DebutCore</code> the folders are the layers: <code>Models/</code>
+holds value types with no side effects, <code>Services/</code> holds everything
+that talks to the system, and <code>Views/</code> holds AppKit windows and
+SwiftUI views.
+</p>
+
+<div class="note">
+  <span class="label">Mocks ship in the library</span>
+  <p>
+  <code>MockWindowService</code> and <code>MockKeyboardService</code> live in
+  <code>Sources/DebutCore/Services/</code> as <code>public</code> production
+  files, not in the test target. That is deliberate: the protocol seams and their
+  doubles are part of the library's contract, and the executables can use them
+  too.
+  </p>
+</div>
+
+<h2>The composition root</h2>
+
+<p>
+<span class="src">Sources/DebutApp/main.swift</span> creates
+<code>NSApplication.shared</code>, assigns an <code>AppDelegate</code>, and calls
+<code>run()</code>. Everything else is assembled by
+<code>AppDelegate</code>&nbsp;<span class="src">Sources/DebutCore/AppDelegate.swift:7</span>,
+which is <code>@MainActor</code> and holds every long-lived object as an optional
+property. It is the only place in the codebase where concrete types are chosen.
+</p>
+
+<h3>Phase 1 — <code>applicationDidFinishLaunching</code></h3>
+
+<p><span class="srcline">AppDelegate.swift:44</span></p>
+
+<ol>
+  <li><code>NSApp.setActivationPolicy(.accessory)</code>. Combined with
+  <code>LSUIElement</code> in the Info.plist, this is what makes Debut an agent
+  with no Dock icon and no menu bar of its own.</li>
+
+  <li>Report <code>app_launched</code> to diagnostics.</li>
+
+  <li>Build the <code>StateStore</code>, wrap it in a <code>DebouncedSaver</code>,
+  and load both files. Both loads fall back to defaults on failure, so a corrupt
+  file degrades to a fresh start rather than a crash.</li>
+
+  <li>Configure telemetry.</li>
+
+  <li>Construct <code>AccessibilityWindowService</code>,
+  <code>EventTapKeyboardService</code>, <code>OverlayWindow</code>, and the menu
+  bar item.</li>
+
+  <li><strong>The permission gate.</strong> If <code>AXIsProcessTrusted()</code>
+  is already true, continue to phase 2 immediately. Otherwise register for
+  activation notifications and wait — either for onboarding to finish or for the
+  user to grant Accessibility in System Settings. Everything in phase 2 is
+  useless without that permission.</li>
+
+  <li>Report <code>app_ready</code> and open the <code>hiddenIdle</code>
+  performance span, which stays open until the first overlay appears.</li>
+</ol>
+
+<h3>Phase 2 — <code>setupController()</code></h3>
+
+<p><span class="srcline">AppDelegate.swift:89</span></p>
+
+<p>
+This is the interesting half, and its order encodes several constraints:
+</p>
+
+<ol>
+  <li>Create <code>WindowDiscoveryService</code> over the window service.</li>
+
+  <li>Wire <code>windowService.windowElementResolver</code> <em>back</em> into
+  discovery. This is a deliberate cycle, broken with a weak reference: it lets
+  <code>raiseWindow</code> reuse the Accessibility element discovery already
+  cached instead of rescanning every application on every raise.</li>
+
+  <li>Apply the exclusion list before anything is discovered.</li>
+
+  <li>Reconcile the persisted stage manager against live windows, inside a
+  <code>windowReconciliation</code> performance span.</li>
+
+  <li>Remove excluded bundles, prune empty stages, and populate a default stage
+  <em>only</em> if everything is empty <strong>and</strong> there are no dormant
+  assignments. A user who has quit every tracked app still has a layout worth
+  keeping.</li>
+
+  <li>Determine the starting stage from the currently focused window rather than
+  defaulting to stage 1.</li>
+
+  <li>Create the <code>DesktopSurfaceCoordinator</code> and order it to front
+  <em>before</em> the controller exists, so the controller's first stage switch
+  can raise windows above a surface that is already in place.</li>
+
+  <li>Construct <code>StageController</code>. Its initialiser starts the event tap
+  and installs the diagnostic state provider.</li>
+
+  <li>Attach the discovery callbacks and call <code>startObserving()</code>.</li>
+</ol>
+
+<h2>The dependency graph</h2>
+
+<div class="diagram">                    AppDelegate            @MainActor
+                    (composition root, StageControllerDelegate)
+                          |
+     owns ----------------+----------------------------- owns
+      |         |            |             |               |
+      v         v            v             v               v
+  StateStore  WindowDis-  Overlay      DesktopSurface   StageController
+  + Debounced covery      Window       Coordinator          |
+    Saver     Service                                       | owns
+                 |                                          v
+                 | closures                            StageManager
+                 | (onAppLaunched, onWindowClosed,     (pure value type)
+                 |  onFrontmostAppChanged, ...)             |
+                 v                                          | uses
+        AccessibilityWindowService  <---------------- WindowService
+        + ProcessExitMonitor                          KeyboardService
+                                                      (protocol seams)
+                                                            |
+                                            weak delegate   |
+                          AppDelegate  <--------------------+</div>
+
+<p>
+Two things to notice. <code>WindowDiscoveryService</code> never talks to
+<code>StageController</code> directly — it exposes closures that
+<code>AppDelegate</code> attaches, so policy decisions about what a discovery
+event <em>means</em> live in one place. And <code>StageController</code> reaches
+the user interface only through a weak
+<code>StageControllerDelegate</code>&nbsp;<span class="src">StageController.swift:119</span>,
+implemented by <code>AppDelegate</code>; it never imports a view.
+</p>
+
+<h2>How the layers communicate</h2>
+
+<p>
+There is no Combine, no <code>@Observable</code> on the hot path, and no reactive
+graph. The mechanisms, in the order you will meet them:
+</p>
+
+<table>
+  <tr><th>Direction</th><th>Mechanism</th></tr>
+  <tr>
+    <td>Keyboard → controller</td>
+    <td><code>StageController</code> <em>is</em> the <code>KeyboardEventDelegate</code>. The tap delivers a <code>DebutKeyEvent</code> enum value into one large switch.</td>
+  </tr>
+  <tr>
+    <td>Discovery → policy</td>
+    <td>Assignable closures on the discovery service (<code>onAppTerminated</code>, <code>onFrontmostAppChanged</code>, and so on), attached by <code>AppDelegate</code>.</td>
+  </tr>
+  <tr>
+    <td>Controller → UI</td>
+    <td>A weak delegate protocol with seven methods — including paired overloads of <code>DidOpenOverlay</code> and <code>DidCloseOverlay</code> that carry an <code>OverlayPresentationContext</code> — plus two escaping closures for the cases that did not justify a method.</td>
+  </tr>
+  <tr>
+    <td>Controller → keyboard</td>
+    <td>Direct property write. The controller mirrors <code>overlayVisible</code> into the tap service so the tap can decide whether to consume an event without asking anyone.</td>
+  </tr>
+  <tr>
+    <td>Model → view</td>
+    <td>Push. The delegate builds a whole new <code>OverlayViewModel</code> value and assigns it as the SwiftUI root view. There is no observation.</td>
+  </tr>
+</table>
+
+<div class="why">
+  <span class="label">Why push instead of observation</span>
+  <p>
+  <code>OverlayViewModel</code> is a plain <code>Sendable</code> struct whose
+  <code>plates</code> property is computed on access. Rebuilding and reassigning
+  it is a single diff for SwiftUI, and it makes overlay refreshes explicit and
+  countable — which matters because the overlay's presentation latency is
+  measured phase by phase (chapter 8). An observation graph would scatter those
+  refreshes across the code and make them impossible to attribute.
+  </p>
+</div>
+
+<h2>The protocol seams</h2>
+
+<p>
+Two protocols carry essentially all of the untestable system surface, and every
+other type is written against them:
+</p>
+
+<dl>
+  <dt><code>WindowService</code> <span class="src">Services/WindowService.swift:107</span></dt>
+  <dd>Listing running apps and windows, classifying untrackable window IDs,
+  capturing preview images, raising a window, activating an app, and checking
+  Accessibility. Real implementation: <code>AccessibilityWindowService</code>.
+  Double: <code>MockWindowService</code>.</dd>
+
+  <dt><code>KeyboardService</code> <span class="src">Services/KeyboardService.swift</span></dt>
+  <dd>Starting and stopping the global tap and delivering
+  <code>DebutKeyEvent</code>s to a delegate. Real implementation:
+  <code>EventTapKeyboardService</code>. Double:
+  <code>MockKeyboardService</code>, which can synthesize any event
+  synchronously.</dd>
+</dl>
+
+<p>
+A third category of seam is not a protocol but an injectable closure with a
+production default — for example the clock used for preview cache expiry, the
+launch-discovery delay (set to zero in tests to make discovery synchronous), and
+several Accessibility scan overrides documented as "production leaves this nil".
+This keeps the protocol surface small while still letting a test drive an
+otherwise unreachable branch.
+</p>
+
+<h2>Threading</h2>
+
+<p>
+The model is best described as "main thread by construction, with two deliberate
+exceptions".
+</p>
+
+<ul>
+  <li><code>AppDelegate</code> is <code>@MainActor</code>. Everything it does is
+  main-thread by isolation.</li>
+
+  <li><code>WindowDiscoveryService</code> is <code>@unchecked Sendable</code> with
+  plain unguarded dictionaries. Its safety argument is not locking but entry
+  points: every way in — workspace notifications, Accessibility observer
+  callbacks attached to the main run loop, and a process-exit dispatch source
+  targeting the main queue — is already on the main thread.</li>
+
+  <li><strong>Exception 1: the event tap.</strong> It runs on its own dedicated
+  thread with its own run loop, because a tap that blocks is a tap the system
+  disables. It hops to the main queue to deliver events, and its own session state
+  is unguarded precisely because only that one thread touches it.</li>
+
+  <li><strong>Exception 2: capture and image analysis.</strong> Screen captures
+  run concurrently in a task group, and preview luminance analysis is pushed off
+  the main queue to keep the render path free.</li>
+
+  <li><code>StageController</code> is <code>@unchecked Sendable</code> rather than
+  <code>@MainActor</code>, and uses <code>MainActor.assumeIsolated</code> at the
+  three points where it touches the desktop surface&nbsp;<span class="src">StageController.swift:267, 648, 655</span>.</li>
+</ul>
+
+<div class="warn">
+  <span class="label">The rule that shapes everything</span>
+  <p>
+  No workspace or cross-process Accessibility call may happen inside the event-tap
+  callback. Those calls block keyboard delivery and can cause the system to
+  disable the tap outright. This is why the frontmost application's bundle ID is
+  <em>cached</em> from activation notifications and why the tap's exclusion check
+  is a plain set lookup.
+  </p>
+</div>
+
+<h2>A keypress, end to end</h2>
+
+<p>
+The path below is the spine of the runtime. Each stage is covered in detail in a
+later chapter.
+</p>
+
+<div class="diagram">  physical key
+      │
+      ▼
+ ┌─────────────────────┐   dedicated thread, own run loop
+ │ CGEventTap callback │   opens a performance span + presentation trace
+ └──────────┬──────────┘   decides: consume (nil) or pass through
+            │ DebutKeyEvent
+            ▼
+ ┌─────────────────────┐   main queue
+ │ StageController     │   session state, selection, stage mutation
+ │ .handleKeyEvent     │   probes for a full-screen frontmost app
+ └──────────┬──────────┘
+            │ delegate call
+            ▼
+ ┌─────────────────────┐   builds a fresh OverlayViewModel
+ │ AppDelegate         │   attaches/reuses the NSHostingView
+ └──────────┬──────────┘   arms the main-queue stall watchdog
+            │
+            ▼
+ ┌─────────────────────┐   orderFrontRegardless, alpha ramp
+ │ OverlayWindow       │   displayIfNeeded + CATransaction.flush
+ └──────────┬──────────┘   marks render_submitted on the trace
+            │
+            ▼
+ ┌─────────────────────┐   AFTER the first frame, never before
+ │ preview capture     │   ScreenCaptureKit, concurrent, coalesced flush
+ └─────────────────────┘</div>
+
+<h2>Lifecycle hooks</h2>
+
+<dl>
+  <dt><code>applicationDidBecomeActive</code></dt>
+  <dd>Re-checks permissions, which is how returning from System Settings advances
+  the onboarding state.</dd>
+
+  <dt><code>applicationShouldTerminateAfterLastWindowClosed</code></dt>
+  <dd>Returns <code>false</code>. Debut has no primary window; closing Settings
+  must not quit it.</dd>
+
+  <dt><code>applicationWillTerminate</code> <span class="src">AppDelegate.swift:346</span></dt>
+  <dd>Finalises any in-flight presentation traces, <strong>synchronously flushes
+  the debounced state save</strong>, and gives telemetry at most half a second to
+  drain before returning. The Info.plist disables both sudden and automatic
+  termination, which is what makes this hook reliable enough to be the only save
+  barrier.</dd>
+
+  <dt>Menu bar</dt>
+  <dd>An <code>NSStatusItem</code> with three items — Settings, Tutorial, Quit.
+  Its visibility is a user setting.</dd>
+</dl>
+
+<h2>Where to start reading the code</h2>
+
+<ol class="tight">
+  <li><code>Models/StageManager.swift</code> — the entire domain model, pure, ~318 lines. Read this first.</li>
+  <li><code>AppDelegate.swift:44</code> — launch order and wiring.</li>
+  <li><code>Services/StageController.swift:399</code> — <code>handleKeyEvent</code>, the switch every interaction passes through.</li>
+  <li><code>Services/EventTapKeyboardService.swift:188</code> — the tap decision tree.</li>
+  <li><code>Views/PlateView.swift</code> — the overlay. Large; start at the layout maths, not the top.</li>
+</ol>
+
+<div class="pager">
+  <a href="01-concepts.html"><span class="dir">Previous</span>&larr; 01 · Concepts</a>
+  <a href="03-window-tracking.html"><span class="dir">Next</span>03 · Window tracking &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>

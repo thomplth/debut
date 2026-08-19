@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>08 · Observability — Debut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a class="current" href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Chapter 08</p>
+<h1>Observability: diagnostics, performance, telemetry</h1>
+<p class="lede">
+Debut runs in the background, reacts to keystrokes in single-digit milliseconds,
+and manipulates windows it does not own. Almost none of that is observable by
+looking at the screen. This chapter covers the three separate instrumentation
+systems that make it observable instead — and the incidents that shaped each of
+them.
+</p>
+
+<p>
+The three systems have genuinely different jobs, and conflating them is the
+easiest way to misread the code:
+</p>
+
+<table>
+  <tr><th>System</th><th>Question it answers</th><th>Where it goes</th></tr>
+  <tr><td><strong>Diagnostics</strong><br><code>DiagnosticReporter</code></td><td>What happened, in what order, and what is the session's state right now?</td><td><code>diagnostic.json</code>, <code>diagnostic.jsonl</code> on this machine</td></tr>
+  <tr><td><strong>Performance</strong><br><code>PerformanceRecorder</code></td><td>How long did that take, and did the process burn CPU or block?</td><td><code>os_signpost</code> + in-memory buffers, surfaced in the snapshot</td></tr>
+  <tr><td><strong>Telemetry</strong><br><code>TelemetryExporter</code></td><td>Is this slow for other people too?</td><td>Off the machine — but only if credentials are configured, which they are not in the stock build</td></tr>
+</table>
+
+<h2>Diagnostics</h2>
+
+<h3>Two levels, one of which survives a restart</h3>
+
+<p>
+Every reported event is tagged with a <code>DiagnosticLevel</code>&nbsp;<span class="src">Services/DiagnosticReporter.swift:5</span>,
+and the doc comment states the whole design rule:
+</p>
+
+<blockquote>
+Controls whether an event survives a restart. Input and hover events fire dozens
+of times per second, so only lifecycle events earn durable storage.
+<cite>DiagnosticReporter.swift:3</cite>
+</blockquote>
+
+<p>
+So <code>.lifecycle</code> events (stage switches, window discovery, reconciliation,
+app launches and exits, assignment changes) append to the durable log.
+<code>.transient</code> events (a held Tab stepping the selection, pointer hover,
+per-frame work) land in the in-memory ring and the live snapshot only. Both
+levels refresh the state block — see the warning below for why that matters.
+</p>
+
+<h3>Three files</h3>
+
+<table>
+  <tr><th>File</th><th>Shape</th><th>Lifetime</th></tr>
+  <tr><td><code>diagnostic.json</code></td><td>Single JSON object: <code>state</code> block, recent events, <code>performance</code> snapshot, <code>overlayPresentation</code> traces</td><td>Overwritten on every report — always describes <em>now</em></td></tr>
+  <tr><td><code>diagnostic.jsonl</code></td><td>One JSON object per line, append-only</td><td>Grows until rotation</td></tr>
+  <tr><td><code>diagnostic.jsonl.1</code></td><td>Same</td><td>Exactly one previous generation; older data is gone</td></tr>
+</table>
+
+<p>
+Rotation is size-triggered and deliberately primitive
+(<code>rotateIfNeeded(incomingByteCount:)</code>&nbsp;<span class="src">DiagnosticReporter.swift:225</span>):
+if the current file plus the incoming line would exceed <code>rotationByteLimit</code>
+(default <code>2_000_000</code>&nbsp;<span class="src">:67</span>), delete
+<code>.jsonl.1</code>, move <code>.jsonl</code> onto it, and start fresh. There is
+no compression and no third generation. The cap on retained history is therefore
+between 2 MB and 4 MB, which for lifecycle-only events is a long session.
+</p>
+
+<p>
+Writes go through a serial <code>DispatchQueue</code> labelled
+<code>com.thomplth.Debut.diagnostic</code>. Appends use a <code>FileHandle</code>
+seeking to end-of-file; only the very first write of a generation uses
+<code>write(to:options:.atomic)</code>. A shared <code>ISO8601DateFormatter</code> is
+held as <code>nonisolated(unsafe)</code> and touched only on that queue, with the
+reason spelled out in place:
+</p>
+
+<blockquote>
+Allocating a formatter per event is measurable on the input path. Only touched on
+<code>queue</code>, which serializes the access the type itself does not guarantee.
+<cite>DiagnosticReporter.swift:43</cite>
+</blockquote>
+
+<h3>The bundle-identifier gate</h3>
+
+<p>
+<code>DiagnosticReporter.shared</code> is a singleton, and test suites that exercise
+<code>StageController</code> report through it. If those reports landed in the real
+Application Support directory they would pollute the log that a live session is
+diagnosed from. So the default directory branches on a positive identification of
+the shipped app&nbsp;<span class="src">DiagnosticReporter.swift:32-34</span>:
+</p>
+
+<pre><code>private static var isHostedByDebutApp: Bool {
+    Bundle.main.bundleIdentifier == "com.thomplth.Debut"
+}</code></pre>
+
+<p>
+When false, diagnostics are written to
+<code>$TMPDIR/DebutDiagnostics-&lt;pid&gt;/</code> instead. The comment explains why
+it is not written as a test-detection check:
+</p>
+
+<blockquote>
+Identifies the shipped app positively. Test runners expose neither an
+<code>.xctest</code> bundle nor <code>XCTestConfigurationFilePath</code> under
+swift-testing, so detecting them by absence is unreliable.
+<cite>DiagnosticReporter.swift:29-31</cite>
+</blockquote>
+
+<div class="note">
+<p>
+<code>PerformanceRecorder</code> uses the <em>same</em> gate for a different reason
+— see <a href="#resource-reader">the resource reader</a> below. If you ever change
+the bundle identifier, both of these silently flip behaviour.
+</p>
+</div>
+
+<h3>The state provider, and the stall it caused</h3>
+
+<p>
+The <code>state</code> block in <code>diagnostic.json</code> is produced by a closure
+registered with <code>setStateProvider(_:runsOnMainQueue:)</code>&nbsp;<span class="src">DiagnosticReporter.swift:122</span>.
+It is the only mechanism by which the E2E suite can observe a running session, so
+the contract around it is load-bearing.
+</p>
+
+<p>
+The naive implementation — call the provider synchronously at report time — is
+wrong when the reporter is invoked off the main thread and the provider reads
+main-queue-owned state. Hopping to main and waiting charges the caller for
+whatever unrelated work main is already doing. That produced a memorable false
+diagnosis:
+</p>
+
+<blockquote>
+Waiting on the main queue here charged the caller for unrelated main work: a 3.1s
+overlay render stall was billed to a preview capture that had not started. Hand
+the refresh to main and use the last snapshot.
+<cite>DiagnosticReporter.swift:157-159</cite>
+</blockquote>
+
+<p>
+So <code>currentState()</code>&nbsp;<span class="src">:162</span> does this instead:
+</p>
+
+<ul>
+  <li>If the provider does not need the main queue, or we are already on it, call it directly and publish the result.</li>
+  <li>Otherwise, schedule a coalesced refresh on main and return <code>publishedState</code> — the last known good snapshot.</li>
+</ul>
+
+<p>
+The refresh writes its own snapshot file when it completes, otherwise the state
+block would stay one report behind forever for any code path that only reports off
+the main thread. The scheduling flag is guarded by an <code>NSLock</code> that is
+deliberately <em>separate</em> from the write queue, so reading state never waits
+behind pending file I/O.
+</p>
+
+<div class="warn">
+<p>
+<strong>Every reported event must refresh the state block — including
+<code>.transient</code> ones.</strong> Long stretches of an E2E scenario (a held
+Tab, for example) emit nothing but transient events. If those skip the state
+provider, the block goes stale, E2E assertions read yesterday's truth, and unit
+tests stay green the whole time. This is the failure mode that AGENTS.md calls out
+explicitly.
+</p>
+</div>
+
+<p>
+<code>flush()</code>&nbsp;<span class="src">:144</span> is just
+<code>queue.sync {}</code> — a barrier that gives tests a deterministic point at
+which the files on disk reflect every reported event.
+</p>
+
+<h3>Exporting a bundle</h3>
+
+<p>
+<code>DiagnosticExporter</code>&nbsp;<span class="src">Services/DiagnosticExporter.swift:134</span>
+produces a single self-contained JSON file (named
+<code>Debut-Diagnostics-yyyy-MM-dd-HHmmss.json</code>&nbsp;<span class="src">AppDelegate.swift:918</span>)
+containing:
+</p>
+
+<ul>
+  <li>the parsed contents of <code>state.json</code> and <code>settings.json</code>;</li>
+  <li>both lifecycle log generations, parsed line by line;</li>
+  <li>a <code>runtime</code> object: every window with owner, title, and frame; running apps; screens; and the <code>WindowTrackingDiagnosticSnapshot</code> of armed-versus-known window IDs;</li>
+  <li>metadata: app version, OS version, permission states.</li>
+</ul>
+
+<div class="why">
+<p>
+<strong>Note the privacy inversion.</strong> The local export deliberately includes
+window <em>titles</em>&nbsp;<span class="src">DiagnosticExporter.swift:215</span>,
+because a reconciliation bug is unreadable without them. Telemetry, which leaves
+the machine, has no field capable of carrying one. The two systems point in
+opposite directions on purpose: maximum detail locally, structurally-enforced
+minimum remotely.
+</p>
+</div>
+
+<h2>Performance</h2>
+
+<h3>The operation vocabulary</h3>
+
+<p>
+<code>PerformanceOperation</code>&nbsp;<span class="src">Services/PerformanceObservability.swift:6</span>
+is a closed enum of 17 raw-value-stable cases. It is the shared key across
+signposts, sample buffers, the diagnostic snapshot, the budget file, and telemetry:
+</p>
+
+<table>
+  <tr><th>Group</th><th>Cases</th></tr>
+  <tr><td>Input path</td><td><code>event_tap</code>, <code>main_queue_delivery</code></td></tr>
+  <tr><td>Overlay</td><td><code>overlay_preparation</code>, <code>overlay_render_submission</code>, <code>overlay_end_to_end_visible</code></td></tr>
+  <tr><td>Previews</td><td><code>preview_enumeration</code>, <code>preview_first</code>, <code>preview_all</code>, <code>preview_capture</code></td></tr>
+  <tr><td>Windows</td><td><code>window_discovery</code>, <code>window_classification</code>, <code>window_reconciliation</code></td></tr>
+  <tr><td>Stages</td><td><code>stage_switch</code>, <code>stage_raise</code></td></tr>
+  <tr><td>Other</td><td><code>wallpaper_capture</code>, <code>state_persistence</code>, <code>hidden_idle</code></td></tr>
+</table>
+
+<h3>Recording a span</h3>
+
+<p>
+<code>PerformanceRecorder</code>&nbsp;<span class="src">PerformanceObservability.swift:250</span>
+is an <code>@unchecked Sendable</code> class behind an <code>NSLock</code>, not an
+actor — spans begin and end on whichever thread does the work, including the event
+tap thread, and an actor hop there is exactly what must not happen.
+</p>
+
+<p>
+<code>begin(_:workload:)</code>&nbsp;<span class="src">:292</span> returns a
+correlation <code>UUID</code>, emits an <code>os_signpost</code> interval begin on
+subsystem <code>com.thomplth.Debut</code> / category <code>performance</code>, and
+samples the process resource counters. <code>end(_:)</code>&nbsp;<span class="src">:319</span>
+computes the duration, the resource delta, appends to a
+<code>PerformanceSampleBuffer</code> (which retains percentiles&nbsp;<span class="src">:86</span>)
+and a bounded recent-observations list, and hands the observation to the
+registered handler. <code>cancel(_:)</code>&nbsp;<span class="src">:395</span> drops
+a span without recording, which is what an aborted presentation uses.
+</p>
+
+<p>
+Two mutators exist because facts about a span arrive after it starts:
+<code>updateWorkload(_:for:)</code> (the window count is not known until discovery
+completes) and <code>updateTraceID(_:for:)</code> (which stitches a span into an
+overlay presentation trace).
+</p>
+
+<div class="why">
+<p>
+<strong>Why <code>resourceDelta</code> is per-span and never process-wide:</strong>
+</p>
+<blockquote>
+Measured across this span alone. A process-wide delta shared between operations is
+overwritten by whichever one ends last, which makes it unusable as evidence about
+any of them.
+<cite>PerformanceObservability.swift:229-231</cite>
+</blockquote>
+</div>
+
+<h3 id="resource-reader">The resource reader</h3>
+
+<p>
+<code>SystemProcessResourceReader</code>&nbsp;<span class="src">:180</span> reads
+<code>proc_pid_rusage(getpid(), RUSAGE_INFO_V4, …)</code> for CPU time, physical
+footprint, wakeups, disk bytes and page-ins, then calls <code>task_threads</code>
+for the live thread count — carefully <code>vm_deallocate</code>-ing the returned
+array, which is a Mach allocation the caller owns.
+</p>
+
+<p>
+That is not free, and it runs on the boundary of every span. Hence the same bundle
+gate as diagnostics&nbsp;<span class="src">:266</span>:
+</p>
+
+<blockquote>
+Unit and screenshot suites create many controllers concurrently. They test injected
+readers separately and must not turn every synthetic operation into a Mach task
+scan.
+<cite>PerformanceObservability.swift:264-265</cite>
+</blockquote>
+
+<p>
+Outside the shipped app, <code>UnavailableProcessResourceReader</code> returns
+<code>nil</code> and every <code>resourceDelta</code> is absent. Tests that care
+inject a real or fake reader explicitly.
+</p>
+
+<h3>Overlay presentation traces</h3>
+
+<p>
+Timing the overlay as one number tells you it was slow and nothing else. So
+<code>OverlayPresentationRecorder</code>&nbsp;<span class="src">Services/OverlayPresentationRecorder.swift</span>
+records a trace of 14 named phases&nbsp;<span class="src">:11</span>, in causal order:
+</p>
+
+<div class="diagram">activation_recognized      keystroke classified in the tap callback
+main_actor_dequeued        handoff to main completed
+fullscreen_probe_completed is a fullscreen Space in the way?
+controller_accepted        StageController agreed to present
+presentation_scheduled     deferred presentation armed
+presentation_deadline_fired
+preparation_began
+preparation_completed      view model built
+window_ordered             NSWindow ordered front
+render_submitted           SwiftUI submitted a frame
+reveal_completed           user can see it
+first_preview_completed    asynchronous, after reveal
+all_previews_completed     asynchronous, after reveal
+wallpaper_completed        asynchronous, after reveal</div>
+
+<p>
+The last four intentionally land after the overlay is already visible; the overlay
+does not wait for its own thumbnails. Each trace also carries an outcome
+<span class="src">:28</span> — <code>presented</code>,
+<code>released_before_presentation</code>, <code>fullscreen_rejected</code>,
+<code>superseded</code>, <code>hidden_before_reveal</code>,
+<code>app_terminated</code> — so an abandoned presentation is distinguishable from a
+slow one rather than just vanishing.
+</p>
+
+<p>
+Context enums accompany each trace and exist to answer "why was <em>this</em> one
+slow": <code>OverlayProcessUse</code> (first attempt vs later),
+<code>OverlayPreviewCacheState</code> (empty / partial / complete),
+<code>OverlayWallpaperState</code>, <code>OverlayHostingViewState</code>
+(created / reused — see chapter 6) and <code>OverlayProcessAge</code>. A trace ID
+is propagated into <code>PerformanceRecorder</code> spans via
+<code>updateTraceID</code>, so a signpost interval and a presentation phase can be
+correlated after the fact.
+</p>
+
+<h3>Budgets</h3>
+
+<p>
+<code>PerformanceBudgets.json</code> at the repository root is a small file with a
+dual gate per operation:
+</p>
+
+<pre><code>"window_reconciliation": {
+  "baselineP95Milliseconds": 0.35,
+  "absoluteBudgetMilliseconds": 2.0,
+  "regressionPercent": 25
+}</code></pre>
+
+<p>
+The gate is enforced by <code>scripts/check-performance-regression.sh</code>, and
+the condition is an <strong>AND</strong>, not an or&nbsp;<span class="src">check-performance-regression.sh:12</span>:
+</p>
+
+<pre><code>exit ! (current &gt; absolute &amp;&amp; current &gt; baseline * (1 + percent / 100))</code></pre>
+
+<p>
+A measurement fails only when it breaches the absolute budget <em>and</em> sits
+more than <code>regressionPercent</code> above the recorded baseline. That
+combination is what makes the check usable in CI: a run that is 40 % above a
+0.05 ms baseline is noise and stays silent because it is nowhere near the 1.0 ms
+cap, while a run that creeps toward the cap without moving off baseline is
+measurement drift rather than a regression. Only a genuine, large move trips both.
+Three operations are gated today — <code>overlay_preparation</code>
+(0.05 / 1.0 ms), <code>window_reconciliation</code> (0.35 / 2.0 ms) and
+<code>state_persistence</code> (0.10 / 2.0 ms) — all at 25 %. A benchmark that is
+missing from the current results is a failure in its own right
+<span class="src">:10</span>, so deleting a measurement is not a way to pass.
+</p>
+
+<h3>The main-queue stall watchdog</h3>
+
+<p>
+<code>MainQueueStallWatchdog</code>&nbsp;<span class="src">Services/MainQueueStallWatchdog.swift:13</span>
+solves a problem that after-the-fact timing cannot:
+</p>
+
+<blockquote>
+A stall is only visible after the fact as a long duration, which does not say
+whether the main thread was busy or waiting. Sampling the process counters at the
+deadline answers that: CPU near zero with page-ins points at faulting or a lock,
+and CPU near a full core points at work.
+<cite>MainQueueStallWatchdog.swift:5-9</cite>
+</blockquote>
+
+<p>
+It is armed <em>across</em> an enqueue — before work is handed to main — and
+disarmed when that work completes. If the 250 ms deadline
+<span class="src">:37</span> fires first, it reports while the stall is still
+happening, with a resource delta measured across it. A generation counter makes a
+late deadline harmless, and the armed state is cleared in
+<code>checkDeadline</code> rather than in <code>disarm</code> so an already-fired
+deadline cannot resurrect.
+</p>
+
+<p>
+Crucially: "Nothing is scheduled unless a presentation is in flight, so an idle
+Debut still runs no timers"&nbsp;<span class="src">:11-12</span>. This is the same
+no-polling rule that governs the rest of the codebase.
+</p>
+
+<h2>Telemetry</h2>
+
+<h3>Nothing leaves the machine in the stock build</h3>
+
+<p>
+<code>setupTelemetry()</code>&nbsp;<span class="src">AppDelegate.swift:925</span>
+resolves a TelemetryDeck namespace and app ID from the environment
+(<code>DEBUT_TELEMETRYDECK_NAMESPACE</code>, <code>DEBUT_TELEMETRYDECK_APP_ID</code>),
+falling back to <code>Info.plist</code> keys, falling back to the empty string. Both
+plist values ship empty&nbsp;<span class="src">Resources/Info.plist:5-8</span>, so:
+</p>
+
+<pre><code>let client: any TelemetryClient = namespace.isEmpty || appID.isEmpty
+    ? UnavailableTelemetryClient()
+    : TelemetryDeckClient(namespace: namespace, appID: appID)</code></pre>
+
+<p>
+A build made from this repository as-is has no network destination at all. The
+entire pipeline still runs, still enforces quotas, and still drops everything on
+the floor at the client boundary. That is a deliberate arrangement: the code path
+is exercised, the data is not sent.
+</p>
+
+<h3>The payload is an allowlist</h3>
+
+<p>
+<code>TelemetryPayload</code>&nbsp;<span class="src">Services/Telemetry.swift:113</span>
+has a hand-written <code>CodingKeys</code> enumerating every field that can be
+encoded: <code>schemaVersion</code>, <code>event</code>, <code>appVersion</code>,
+<code>operatingSystemMajor</code>, <code>workload</code>, <code>temperature</code>,
+<code>operationCounts</code>, <code>latencyBuckets</code>, <code>anomalyCount</code>,
+<code>operation</code>, <code>latency</code>. There is no field for a window title,
+bundle identifier, app name, file path, or user identifier — the shape of the type
+prevents them rather than a policy discouraging them. Even the client sends
+<code>"clientUser": ""</code>&nbsp;<span class="src">:197</span>.
+</p>
+
+<p>
+Continuous values are bucketed before they are ever assembled into a payload:
+</p>
+
+<table>
+  <tr><th>Dimension</th><th>Values</th></tr>
+  <tr><td><code>TelemetryLatencyBucket</code>&nbsp;<span class="srcline">:30</span></td><td><code>lt_10ms</code>, <code>10_25ms</code>, <code>25_50ms</code>, <code>50_100ms</code>, <code>100_250ms</code>, <code>250_500ms</code>, <code>gte_500ms</code></td></tr>
+  <tr><td><code>TelemetryWorkload</code>&nbsp;<span class="srcline">:3</span></td><td><code>typical</code> (&lt; 21 windows), <code>busy</code> (21–49), <code>stress</code> (≥ 50)&nbsp;<span class="srcline">AppDelegate.swift:946</span></td></tr>
+  <tr><td><code>TelemetryTemperature</code>&nbsp;<span class="srcline">:9</span></td><td><code>process_first</code>, <code>cache_cold</code>, <code>warm</code></td></tr>
+  <tr><td><code>Event</code>&nbsp;<span class="srcline">:54</span></td><td><code>session_summary</code>, <code>anomaly</code></td></tr>
+</table>
+
+<h3>What counts as an anomaly</h3>
+
+<p>
+<code>PerformanceAnomalyPolicy</code>&nbsp;<span class="src">Telemetry.swift:17</span>
+is four lines and worth reading directly:
+</p>
+
+<pre><code>public static let minimumDurationMilliseconds = 500.0
+
+public static func shouldReport(_ observation: PerformanceObservation) -> Bool {
+    observation.operation != .hiddenIdle
+        && observation.durationMilliseconds >= minimumDurationMilliseconds
+}</code></pre>
+
+<p>
+Half a second is the floor — nothing routine is ever a candidate.
+<code>hiddenIdle</code> is excluded because it measures how long the overlay stayed
+hidden, which is unbounded by design and would otherwise be reported constantly.
+<code>shouldRetain</code> applies the same exclusion at the queue, so a payload that
+predates the rule gets dropped rather than sent.
+</p>
+
+<h3>Quotas</h3>
+
+<p>
+<code>TelemetryExporter</code>&nbsp;<span class="src">Telemetry.swift:325</span> is an
+actor with two daily limits: <code>dailyEventLimit</code> = 20 and
+<code>dailyPerOperationLimit</code> = 2&nbsp;<span class="src">:337-338</span>. The
+per-operation limit is what stops one pathological operation from consuming the
+entire budget and hiding everything else.
+</p>
+
+<p>
+There is also a reservation, which is easy to miss:
+</p>
+
+<pre><code>let summaryReservation = dailyEventLimit > 1 && payload.event == .anomaly ? 1 : 0
+guard quota.sent + payloads.count &lt; dailyEventLimit - summaryReservation else { … }</code></pre>
+
+<p>
+Anomalies may fill at most 19 of the 20 slots, so the session summary always has
+room. Without it, a bad day produces 20 anomaly reports and no context to interpret
+them against. Dropped payloads are counted in the quota record rather than silently
+discarded.
+</p>
+
+<p>
+The queue is behind a protocol with two implementations:
+<code>InMemoryTelemetryQueue</code>&nbsp;<span class="src">:253</span> for tests and
+<code>DiskTelemetryQueue</code>&nbsp;<span class="src">:264</span> writing
+<code>telemetry-queue.json</code> in Application Support. Quota decoding uses
+<code>decodeIfPresent</code> with defaults&nbsp;<span class="src">:243</span>, so an
+older quota file does not throw. <code>setEnabled(false)</code> clears the queue
+immediately&nbsp;<span class="src">:348</span> — turning telemetry off discards what
+was pending, it does not merely stop adding to it.
+</p>
+
+<p>
+<code>TelemetryDeckClient.send</code>&nbsp;<span class="src">:163</span> POSTs to
+<code>https://nom.telemetrydeck.com/v2/namespace/&lt;namespace&gt;/</code> and treats
+anything outside <code>200..&lt;300</code> as
+<code>TelemetryError.rejected(statusCode:)</code>; a missing namespace or app ID is
+<code>.invalidConfiguration</code>. Latency buckets are flattened into dimension
+keys of the form <code>Debut.operation.&lt;op&gt;.latencyBucket</code>&nbsp;<span class="src">:193</span>.
+</p>
+
+<h2>Privacy posture</h2>
+
+<p>
+Three artefacts describe what Debut can reach:
+</p>
+
+<ul>
+  <li><strong><code>Resources/Debut.entitlements</code></strong> contains exactly one
+  key: <code>com.apple.security.app-sandbox</code> = <code>false</code>. Nothing
+  else is claimed. Debut cannot be sandboxed and do its job — the Accessibility API
+  and ScreenCaptureKit both operate across process boundaries.</li>
+  <li><strong>Runtime TCC prompts</strong> are the actual permission surface:
+  Accessibility and Screen Recording, both requested at first use and both
+  revocable in System Settings. Chapter 3 covers how the app behaves when they are
+  denied.</li>
+  <li><strong><code>Resources/PrivacyInfo.xcprivacy</code></strong> declares
+  <code>NSPrivacyTracking</code> false with no tracking domains, and two collected
+  data types — <code>ProductInteraction</code> and <code>PerformanceData</code> —
+  both marked not-linked, not-for-tracking, and used for
+  <code>Analytics</code>.</li>
+</ul>
+
+<h2>Reading the instrumentation in practice</h2>
+
+<ol>
+  <li><strong>"What was the app doing?"</strong> — <code>diagnostic.json</code>,
+  <code>state</code> block. It is current as of the last report from the main
+  queue.</li>
+  <li><strong>"What led up to it?"</strong> — <code>diagnostic.jsonl</code>. Grep
+  for the reason codes from chapter 7; check <code>.jsonl.1</code> if the session
+  was long.</li>
+  <li><strong>"Why was the overlay slow?"</strong> — the
+  <code>overlayPresentation</code> traces in the snapshot. Find the phase pair with
+  the large gap before assuming anything about the cause; the phase names are the
+  hypothesis space.</li>
+  <li><strong>"Was it blocked or busy?"</strong> — the <code>resourceDelta</code> on
+  the span, or a watchdog stall report. CPU near zero means waiting.</li>
+  <li><strong>"Is this only me?"</strong> — it is, as far as this build is
+  concerned. Telemetry has no destination configured.</li>
+</ol>
+
+<div class="note">
+<p>
+When instrumenting new code, the ordering rule from chapter 2 still applies: no
+workspace or cross-process Accessibility calls inside the event-tap callback,
+including from a reporter. Report the fact, let the main queue enrich it.
+</p>
+</div>
+
+<div class="pager">
+  <a href="07-persistence.html"><span class="dir">Previous</span>&larr; 07 · Persistence</a>
+  <a href="09-verification.html"><span class="dir">Next</span>09 · Verification &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>

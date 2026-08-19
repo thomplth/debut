@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>09 · Verification — Debut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a class="current" href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Chapter 09</p>
+<h1>Verification</h1>
+<p class="lede">
+Debut's correctness lives in places a unit test cannot reach: the Accessibility
+API, a live event tap, real window z-order. The test strategy is therefore
+layered, and each layer exists because the one below it cannot see something.
+</p>
+
+<h2>The four layers</h2>
+
+<table>
+  <tr><th>Layer</th><th>What it proves</th><th>What it cannot see</th></tr>
+  <tr><td><strong>Unit</strong> — 382 <code>@Test</code> cases in 34 suites</td><td>Model logic, reconciliation decisions, keyboard interpretation, persistence round-trips</td><td>Anything requiring a real window server or another process</td></tr>
+  <tr><td><strong>Screenshot</strong> — <code>ScreenshotTests.swift</code></td><td>SwiftUI actually renders, and geometry matches expectations</td><td>Whether the overlay window was ordered in front of anything</td></tr>
+  <tr><td><strong>E2E in a VM</strong> — <code>scripts/tart-e2e.sh</code></td><td>A real signed app, real permissions, real event tap, real windows</td><td>Synthetic drag gestures — virtualized macOS does not deliver them</td></tr>
+  <tr><td><strong>E2E in the foreground</strong> — <code>scripts/e2e-test.sh</code></td><td>Physical drag delivery</td><td>Nothing, but it takes over the developer's desktop</td></tr>
+</table>
+
+<div class="warn">
+<p>
+AGENTS.md decides <em>when</em> each layer runs. E2E is for high-risk changes only
+— global keyboard handling, Accessibility integration, window discovery or
+lifecycle, stage switching, overlay presentation, persistence reconciliation, app
+installation, code signing. Routine model, settings, copy, and styling changes use
+unit and screenshot tests. Running E2E on a copy change is not thoroughness, it is
+a 10-minute detour.
+</p>
+</div>
+
+<h2>Unit tests</h2>
+
+<h3>swift-testing throughout</h3>
+
+<p>
+There is no XCTest anywhere in <code>Tests/</code>. Everything uses
+<code>@Suite</code> / <code>@Test</code> / <code>#expect</code> from swift-testing.
+The single string <code>XCTest</code> in the whole repository is in a comment in
+<code>DiagnosticReporter.swift</code>, explaining why test detection by
+environment variable does not work under swift-testing (chapter 8).
+</p>
+
+<pre><code>TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test</code></pre>
+
+<p>
+The <code>TOOLCHAINS</code> prefix is mandatory on this machine — see chapter 10.
+The 28 test files map roughly one-to-one onto the subsystems in chapters 3–8.
+</p>
+
+<h3>Serialized suites</h3>
+
+<p>
+Three suites are marked <code>.serialized</code>:
+</p>
+
+<ul>
+  <li><code>@Suite("StageController", .serialized)</code>&nbsp;<span class="src">StageControllerTests.swift:151</span></li>
+  <li><code>@Suite("Overlay window", .serialized)</code>&nbsp;<span class="src">OverlayWindowTests.swift:5</span></li>
+  <li><code>@Suite("Keyboard shortcut customization", .serialized)</code>&nbsp;<span class="src">KeyboardShortcutCustomizationTests.swift:7</span></li>
+</ul>
+
+<p>
+All three touch process-global state — real <code>NSWindow</code> instances, the
+shared <code>DiagnosticReporter</code>, settings on disk. swift-testing runs tests
+in parallel by default, and these would interfere. If you add a test that creates
+a window or a controller, it belongs in one of these suites rather than a new
+parallel one.
+</p>
+
+<h3>Mocks are shipped, not test-only</h3>
+
+<p>
+<code>MockWindowService</code> and <code>MockKeyboardService</code> live in
+<code>Sources/DebutCore/Services/</code>, not in the test target. They are
+<code>public</code> types in the library.
+</p>
+
+<div class="why">
+<p>
+<strong>Why ship a mock?</strong> Because <code>DebutE2E</code> and the benchmark
+and fixture executables are separate targets that also need them, and a test
+target's contents are not importable. The cost is a slightly larger library; the
+benefit is that every harness drives the same seam with the same fake.
+</p>
+</div>
+
+<p>
+<code>MockWindowService</code>&nbsp;<span class="src">Services/MockWindowService.swift:4</span>
+is a plain settable-property fake: <code>apps</code>, <code>windowList</code>,
+<code>untrackableWindowIDList</code>, <code>allWindowIDList</code> (optional, so a
+test can simulate a <em>failed</em> snapshot rather than an empty one),
+<code>capturedImages</code>, <code>accessibilityEnabled</code>. It records
+<code>raisedWindowIDs</code>, <code>activatedBundleID</code>, and
+<code>captureRequests</code> so a test can assert on ordering and on which windows
+were asked for.
+</p>
+
+<p>
+<code>MockKeyboardService</code>&nbsp;<span class="src">Services/MockKeyboardService.swift:1</span>
+is smaller: it holds a weak delegate and exposes
+<code>simulateEvent(_:)</code>&nbsp;<span class="src">:19</span>, which pushes a
+<code>DebutKeyEvent</code> straight into the delegate. Every keyboard behaviour in
+chapter 5 is testable through that one method, without a tap, without permissions,
+and without stealing the developer's keystrokes.
+</p>
+
+<h3>Tests as an incident record</h3>
+
+<p>
+The reconciler suite is the clearest example of tests-as-documentation. Its test
+names are not descriptions of methods; they are statements of invariants, most of
+which exist because something once went wrong:
+</p>
+
+<ul>
+  <li><code>"CG absence never removes a window without a lifecycle event"</code>&nbsp;<span class="src">RuntimeWindowReconcilerTests.swift:83</span></li>
+  <li><code>"A window snapshot never substitutes for a termination event"</code>&nbsp;<span class="src">:116</span></li>
+  <li><code>"Repeated non-empty partial AX snapshots preserve omitted windows"</code>&nbsp;<span class="src">:176</span></li>
+  <li><code>"A later replacement reclaims the retained assignment without a timeout"</code>&nbsp;<span class="src">:332</span></li>
+  <li><code>"Dormant recovery does not steal an established assigned window"</code>&nbsp;<span class="src">:542</span></li>
+  <li><code>"A replaced Dia window returns to its own stage, not the active stage"</code>&nbsp;<span class="src">:692</span></li>
+  <li><code>"Repeated reconciles never drift a settled Dia window between stages"</code>&nbsp;<span class="src">:715</span></li>
+  <li><code>"A stale assignment does not strand every other Dia window in the active stage"</code>&nbsp;<span class="src">:741</span></li>
+</ul>
+
+<p>
+The last four name a specific application because the bug was found with it. That
+is deliberate: the reproduction is encoded, not paraphrased. A non-flapping test
+that runs reconciliation repeatedly and asserts nothing moves is the only way to
+catch the class of bug where each individual pass looks defensible and the
+sequence does not.
+</p>
+
+<div class="note">
+<p>
+When fixing a reconciliation bug, write the test at the level of the invariant
+that was violated, not the line that was wrong. "Does not drift between stages
+across repeated reconciles" survives a rewrite of the matching tiers; "phase 2
+returns index 3" does not.
+</p>
+</div>
+
+<h2>Screenshot tests</h2>
+
+<p>
+<code>ScreenshotTests</code>&nbsp;<span class="src">Tests/DebutCoreTests/ScreenshotTests.swift:8</span>
+is <code>@MainActor</code> and renders real SwiftUI through an
+<code>NSHostingView</code> into an <code>NSImage</code>, writing PNGs beside the
+test source:
+</p>
+
+<pre><code>static let outputDir: URL = {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Screenshots")
+}()</code></pre>
+
+<p>
+They are <strong>not</strong> golden-image comparison tests. Nothing diffs the PNG
+against a reference. The images are evidence for a human; the assertions are on
+geometry. Three private helpers extract layout facts from a render:
+</p>
+
+<table>
+  <tr><th>Helper</th><th>Returns</th><th>Used for</th></tr>
+  <tr><td><code>renderPlateFrames</code>&nbsp;<span class="srcline">:33</span></td><td><code>[Int: CGRect]</code> keyed by plate index</td><td>Plate stack position and scale</td></tr>
+  <tr><td><code>renderWindowFrames</code>&nbsp;<span class="srcline">:44</span></td><td><code>[WindowFrameID: CGRect]</code></td><td>Drag-slot anchor stability</td></tr>
+  <tr><td><code>renderPlateSurfaceFrames</code>&nbsp;<span class="srcline">:55</span></td><td><code>[Int: CGRect]</code></td><td>The rendered plate surface, distinct from its layout frame</td></tr>
+</table>
+
+<p>
+These are what make claims like <code>"Dragging a window preview does not shift the
+plate stack"</code>&nbsp;<span class="src">:151</span> and <code>"Window frame
+preferences remain stable drag-slot anchors"</code>&nbsp;<span class="src">:174</span>
+checkable. Both encode the double-layout anchoring trick from chapter 6: the
+stack's baseline geometry must not move when the visual focus does. A golden-image
+test would fail on an unrelated colour change and pass on a broken anchor; a frame
+assertion does the opposite, which is the right way round.
+</p>
+
+<p>
+The suite also covers the depth gradient at nine plates, selection state,
+cross-stage drag growth and surface resizing, and the three onboarding screens —
+with a <code>MockOnboardingPermissionClient</code>&nbsp;<span class="src">:325</span>
+standing in for the real TCC prompts.
+</p>
+
+<h2>End-to-end</h2>
+
+<h3>The harness</h3>
+
+<p>
+<code>Sources/DebutE2E/main.swift</code> is a ~1,240-line top-level executable, not
+a test framework. It has a hand-rolled <code>test(_:_:)</code>&nbsp;<span class="src">DebutE2E/main.swift:40</span>
+that increments counters and prints ANSI-coloured PASS / FAIL / SKIP lines, and it
+observes the running app entirely through the diagnostic files:
+</p>
+
+<pre><code>func readState() -> [String: String] {
+    guard let data = try? Data(contentsOf: diagnosticFile),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let state = json["state"] as? [String: String]
+    else { return [:] }
+    return state
+}</code></pre>
+
+<p>
+This is the concrete reason chapter 8's state-provider rule matters. The
+<code>state</code> block in <code>diagnostic.json</code> is the entire observation
+channel. There is no IPC, no test hook, no injected harness inside the app — the
+E2E binary drives the real app with synthetic input and reads a file. An event that
+does not refresh the state block is, from here, invisible.
+</p>
+
+<h3>The 37 scenarios</h3>
+
+<p>
+They run in ordered groups, each depending on the previous having left the app in a
+known state:
+</p>
+
+<div class="diagram">reachability     App is reachable via diagnostics / Event tap is running / Windows discovered
+desktop surface  wallpaper refresh; visible during stage management;
+                 yields to Mission Control and App Expose, and returns after each
+overlay          visible; previews contain non-uniform pixels; selection moves and
+                 moves back; command hint usage follows real dispatch; overlay closes
+tab semantics    held Tab remains on the last window; a fresh Tab press wraps to first
+stage mode       overlay visible in stage mode; closes after stage commit
+pointer          stationary pointer does not select or magnify;
+                 movement enables hover selection; click commits
+drag             stage handle reveal and reorder; window drop across stages;
+                 immediate reverse drag; cleanup restores original stages
+settings         a persisted custom shortcut replaces Command-Tab activation;
+                 command hints use contextual placements and purpose icons
+windows          forced first launch presents onboarding; relaunch is normal;
+                 Settings integrates controls into transparent titlebar chrome</div>
+
+<p>
+Note <code>"Window previews contain non-uniform captured pixels"</code>&nbsp;<span class="src">:622</span>.
+That is the AGENTS.md rule about silent capture corruption made executable: a
+non-nil capture proves nothing, so the assertion is that the image contains more
+than one distinct luminance value.
+</p>
+
+<p>
+Note also the cleanup scenarios — <code>"E2E prepared an empty destination stage
+without losing source windows"</code>&nbsp;<span class="src">:879</span>,
+<code>"Window-drop E2E cleanup restores the original stages"</code>&nbsp;<span class="src">:1091</span>,
+and the two <code>"Debut relaunches normally after …"</code> checks. The suite runs
+against the developer's or the VM's real session, so it is responsible for putting
+the session back.
+</p>
+
+<h3>The drag skip</h3>
+
+<p>
+Four scenarios are named in a set at the top of the file&nbsp;<span class="src">:16</span>:
+</p>
+
+<pre><code>let hostedDragTests: Set&lt;String&gt; = [
+    "Dragging the revealed handle reorders the stage",
+    "A reverse handle drag restores the original stage order",
+    "Dropping a window updates the source and destination stage models",
+    "The refreshed destination plate supports an immediate reverse drag",
+]</code></pre>
+
+<p>
+They are skipped when <code>GITHUB_ACTIONS=true</code> or
+<code>DEBUT_SKIP_VIRTUALIZED_DRAGS=1</code>&nbsp;<span class="src">:13-15</span>,
+and the skip prints an explanation that differs by environment: GitHub-hosted macOS
+"does not deliver synthetic drag gestures; run this check locally", versus
+virtualized macOS "use Tart run-all to diagnose"&nbsp;<span class="src">:34-37</span>.
+</p>
+
+<div class="why">
+<p>
+<strong>These are skips, not deletions, and the distinction is the point.</strong>
+A deleted test is an invariant that no longer exists. A skipped test with a printed
+reason is an invariant that this environment cannot check — the count still appears
+in the summary line (<code>"N/M passed, K skipped, F failed"</code>&nbsp;<span class="src">:1237</span>),
+so the gap stays visible. The drag loops also collapse to zero iterations under the
+skip flag&nbsp;<span class="src">:953, :1030</span>, so no time is spent moving a
+pointer that nothing will observe.
+</p>
+</div>
+
+<h2>Running E2E</h2>
+
+<h3>Tart, first choice</h3>
+
+<pre><code>brew install cirruslabs/cli/tart
+./scripts/tart-e2e.sh prepare   # one time; clones and sizes the VM
+./scripts/tart-e2e.sh run       # the normal loop
+./scripts/tart-e2e.sh run-all   # diagnose the drag skips only
+./scripts/tart-e2e.sh status
+./scripts/tart-e2e.sh stop</code></pre>
+
+<p>
+<code>prepare</code> clones the Tahoe base image and sets it to 6 CPUs, 8 GB, and a
+1440×900 display&nbsp;<span class="src">scripts/tart-e2e.sh:50</span>. The VM is
+started with every host input path detached:
+</p>
+
+<pre><code>tart run --no-graphics --no-audio --no-clipboard --no-pointer --no-keyboard \
+         --dir="$SHARE_DIR" "$VM_NAME"</code></pre>
+
+<p>
+That is what makes it safe to run while working: synthetic keystrokes and pointer
+moves stay inside the guest. Building stays on the host for fast incremental
+iteration — only compressed, cache-busted <code>Debut.app</code> and
+<code>DebutE2E</code> artefacts cross the shared directory (default
+<code>~/Library/Caches/Debut/TartE2E</code>). Xcode is deliberately not installed
+in the guest. Later runs reuse the warm VM and its GUI session, which is the
+difference between a 30-second loop and a boot.
+</p>
+
+<div class="warn">
+<p>
+The script's own output is the authority on how many scenarios pass. Do not encode
+a pass count in your head or in a commit message — the skip set changes with the
+environment.
+</p>
+</div>
+
+<h3>Permissions inside the guest</h3>
+
+<p>
+A guest cannot click "Allow" in a TCC dialog, so
+<code>scripts/tart-e2e-guest.sh</code> writes the grants directly. For each of
+<code>kTCCServiceAccessibility</code>, <code>kTCCServiceScreenCapture</code> and
+<code>kTCCServicePostEvent</code>, it extracts the app's designated requirement
+from <code>codesign -d -r-</code>&nbsp;<span class="src">tart-e2e-guest.sh:55</span>,
+converts it to the binary <code>csreq</code> blob TCC stores, and
+<code>INSERT OR REPLACE</code>s a row into the system TCC database at
+<code>/Library/Application Support/com.apple.TCC/TCC.db</code> — and, for the two
+user-scoped services, into the per-user database as well.
+</p>
+
+<p>
+This works only because SIP is off in the guest and the app is signed with a stable
+self-signed certificate, so the <code>csreq</code> continues to match across
+rebuilds. The script refuses to run outside the guest&nbsp;<span class="src">:22</span>,
+since it replaces <code>/Applications/Debut.app</code> and rewrites TCC.
+</p>
+
+<h3>GitHub-hosted, fallback</h3>
+
+<p>
+<code>.github/workflows/e2e.yml</code> runs on <code>macos-26</code> and does three
+things: verify the workflow contract, run <code>./scripts/ci-e2e.sh</code>, and
+upload evidence as an artefact even on failure. Use it when Tart is unavailable or
+as remote confirmation — not as a routine trigger.
+</p>
+
+<h3>Foreground, last resort</h3>
+
+<p>
+<code>./scripts/e2e-test.sh</code> is the only local way to exercise physical drag
+delivery. It displays the overlay, injects global keyboard and mouse events, and
+captures the live desktop. <strong>Warn the user before running it</strong>, and
+only when the drag scenarios are material to the change.
+</p>
+
+<h2>Tests about the tests</h2>
+
+<p>
+<code>Tests/CI/</code> holds four shell scripts that are not unit tests but
+contract checks over the verification machinery itself:
+</p>
+
+<table>
+  <tr><th>Script</th><th>Checks</th></tr>
+  <tr><td><code>E2EWorkflowTests.sh</code></td><td>The workflow, <code>ci-e2e.sh</code>, and the E2E source agree — including <code>expect_not_contains</code> assertions, i.e. things that must <em>not</em> reappear</td></tr>
+  <tr><td><code>E2EDocumentationTests.sh</code></td><td><code>docs/local-e2e.md</code> and AGENTS.md still describe the scripts that exist</td></tr>
+  <tr><td><code>TartE2ETests.sh</code></td><td>The Tart scripts' interface and guest contract</td></tr>
+  <tr><td><code>PerformanceObservabilityTests.sh</code></td><td>The performance pipeline and budget wiring from chapter 8</td></tr>
+</table>
+
+<p>
+<code>E2EWorkflowTests.sh</code> runs as the first step of the CI job, before the
+suite it validates. Documentation drift about how to run E2E is itself a failure
+condition here, which is unusual and worth respecting when editing those files.
+</p>
+
+<h2>The workflow AGENTS.md mandates</h2>
+
+<p>
+For completeness, since it governs every change in this repository:
+</p>
+
+<ol>
+  <li>Work in a clean, isolated git worktree — never the primary checkout. One task per worktree.</li>
+  <li>Write or update the tests <strong>first</strong>. Run them. Confirm they fail for the expected reason — a test that passes before the fix proves nothing.</li>
+  <li>Implement, then run until green.</li>
+  <li>Run the relevant unit and screenshot tests; run E2E only if the change is high-risk.</li>
+  <li>Commit with the Linear issue ID as a prefix, merge to <code>main</code>, remove the worktree and branch.</li>
+  <li>Build, install to <code>/Applications/Debut.app</code>, push <code>main</code>.</li>
+</ol>
+
+<p>
+Step 6 is not optional bookkeeping: <em>the installed app must always match the
+source</em>. A stale <code>/Applications/Debut.app</code> makes every subsequent
+manual observation untrustworthy, and E2E runs against the installed bundle.
+</p>
+
+<div class="pager">
+  <a href="08-observability.html"><span class="dir">Previous</span>&larr; 08 · Observability</a>
+  <a href="10-build-release.html"><span class="dir">Next</span>10 · Build &amp; release &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>
