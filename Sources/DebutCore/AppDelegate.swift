@@ -526,7 +526,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             activeStageIndex: stageController.selectedStageIndex,
             selectedWindowIndex: stageController.selectedWindowIndex,
             windowPreviews: stageController.windowPreviews,
-            appearance: currentSettings
+            appearance: currentSettings,
+            wallpaperLuminance: desktopSurfaces?.wallpaperLuminance(
+                forDisplay: NSScreen.main?.displayID
+            )
         )
         reportCommandHintLayout(viewModel: vm)
         let createdHostingView = overlayWindow.update(viewModel: vm)
@@ -627,7 +630,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             activeStageIndex: stageController.selectedStageIndex,
             selectedWindowIndex: stageController.selectedWindowIndex,
             windowPreviews: stageController.windowPreviews,
-            appearance: currentSettings
+            appearance: currentSettings,
+            wallpaperLuminance: desktopSurfaces?.wallpaperLuminance(
+                forDisplay: NSScreen.main?.displayID
+            )
         )
         overlayWindow.update(viewModel: vm)
     }
