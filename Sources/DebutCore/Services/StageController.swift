@@ -482,6 +482,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             moveWindow(direction: .up)
         case .moveWindowDown:
             moveWindow(direction: .down)
+        case .moveWindowLeft:
+            moveWindowWithinStage(offset: -1)
+        case .moveWindowRight:
+            moveWindowWithinStage(offset: 1)
         case .swapStageUp:
             swapStage(direction: .up)
         case .swapStageDown:
@@ -1063,6 +1067,26 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         selectedStageIndex = targetStageIndex
         let targetWindows = stageManager.stages[targetStageIndex].windows
         selectedWindowIndex = targetWindows.firstIndex(where: { $0.windowID == window.windowID }) ?? 0
+
+        delegate?.stageControllerDidMutateState(self)
+        notifyOverlayUpdated()
+    }
+
+    private func moveWindowWithinStage(offset: Int) {
+        guard isStageManagerVisible,
+              stageManager.stages.indices.contains(selectedStageIndex) else { return }
+        let stage = stageManager.stages[selectedStageIndex]
+        guard stage.windows.indices.contains(selectedWindowIndex) else { return }
+        let targetIndex = selectedWindowIndex + offset
+        guard stage.windows.indices.contains(targetIndex) else { return }
+
+        stageManager.moveWindow(
+            windowID: stage.windows[selectedWindowIndex].windowID,
+            fromStageID: stage.id,
+            toStageID: stage.id,
+            at: targetIndex
+        )
+        selectedWindowIndex = targetIndex
 
         delegate?.stageControllerDidMutateState(self)
         notifyOverlayUpdated()

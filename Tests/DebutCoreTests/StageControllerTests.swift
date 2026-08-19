@@ -827,6 +827,35 @@ struct StageControllerTests {
         #expect(controller.selectedWindowIndex == 0) // release and press Tab again
     }
 
+    @Test("Left and right arrows reorder the selected window inside its stage")
+    func reorderWindowWithinStage() {
+        let (controller, _, keyboardSvc) = makeController()
+        let stageID = controller.stageManager.stages[0].id
+        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageID)
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(controller.selectedWindowIndex == 1)
+
+        keyboardSvc.simulateEvent(.moveWindowRight)
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 303, 202])
+        #expect(controller.selectedWindowIndex == 2)
+
+        keyboardSvc.simulateEvent(.moveWindowRight)
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 303, 202])
+        #expect(controller.selectedWindowIndex == 2)
+
+        keyboardSvc.simulateEvent(.moveWindowLeft)
+        keyboardSvc.simulateEvent(.moveWindowLeft)
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [202, 101, 303])
+        #expect(controller.selectedWindowIndex == 0)
+
+        keyboardSvc.simulateEvent(.moveWindowLeft)
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [202, 101, 303])
+        #expect(controller.selectedWindowIndex == 0)
+    }
+
     @Test("Held backward Tab stops at the first window and a fresh press wraps")
     func backwardTabCycle() {
         let (controller, _, keyboardSvc) = makeController()
