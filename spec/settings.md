@@ -54,6 +54,12 @@ Command hints annotate the overlay's available commands. `Automatic` retires eac
 hint once its command has been used more than three times, `Never` hides them
 all, and `Always` keeps them visible. Learned usage counts can be reset.
 
+Transitive commands are excluded from hints in every mode, including `Always`.
+A transitive command reaches through the overlay to act on the app under the
+selection rather than on Debut — quitting the selected app is the only one today.
+Hints teach Debut's own vocabulary, so they stay silent about what the overlay
+does to someone else's app.
+
 **Troubleshooting** — exports a diagnostic snapshot covering window assignments,
 Accessibility tracking, lifecycle events, and persisted state (it includes app
 and window names and window titles), and resets the window cache when closed or

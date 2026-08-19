@@ -180,19 +180,21 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let commandHintRetirementUses = 3
 
     public func shouldShowCommandHint(for action: KeyAction) -> Bool {
+        guard !action.isTransitive else { return false }
         switch commandHintVisibility {
         case .automatic:
-            (commandUsageCounts[action] ?? 0) < Self.commandHintRetirementUses
+            return (commandUsageCounts[action] ?? 0) < Self.commandHintRetirementUses
         case .never:
-            false
+            return false
         case .always:
-            true
+            return true
         }
     }
 
     /// Records only the uses needed by automatic mode. Returns whether state changed.
     @discardableResult
     public mutating func recordCommandUsage(_ action: KeyAction) -> Bool {
+        guard !action.isTransitive else { return false }
         let currentCount = commandUsageCounts[action] ?? 0
         guard currentCount < Self.commandHintRetirementUses else { return false }
         commandUsageCounts[action] = currentCount + 1

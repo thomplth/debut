@@ -86,6 +86,16 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         }
     }
 
+    /// A transitive command reaches through the overlay and acts on the app under the
+    /// selection rather than on Debut. Hints teach Debut's own vocabulary, so these stay out
+    /// of them: the overlay has no business advertising what it does to someone else's app.
+    public var isTransitive: Bool {
+        switch self {
+        case .quitSelectedApp: true
+        default: false
+        }
+    }
+
     public func toKeyEvent() -> DebutKeyEvent {
         switch self {
         case .activateNextWindow: .cmdTabHold
