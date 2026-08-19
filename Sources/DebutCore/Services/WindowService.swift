@@ -119,6 +119,9 @@ public protocol WindowService: Sendable {
     ) async
     func raiseWindow(windowID: CGWindowID) -> Bool
     func activateApp(bundleID: String) -> Bool
+    /// Addressed by PID, not bundle ID, so a second instance of the same app is not quit
+    /// alongside the one the user selected.
+    func terminateApp(pid: pid_t) -> Bool
     func isAccessibilityEnabled() -> Bool
 }
 

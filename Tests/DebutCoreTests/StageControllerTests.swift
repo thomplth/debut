@@ -46,6 +46,7 @@ private final class DelayedCaptureWindowService: WindowService, @unchecked Senda
 
     func raiseWindow(windowID: CGWindowID) -> Bool { true }
     func activateApp(bundleID: String) -> Bool { true }
+    func terminateApp(pid: pid_t) -> Bool { true }
     func isAccessibilityEnabled() -> Bool { true }
 }
 
@@ -868,6 +869,37 @@ struct StageControllerTests {
         keyboardService.simulateEvent(.cmdShiftBacktickRepeat)
 
         #expect(windowService.raisedWindowID == 101)
+    }
+
+    @Test("Quit terminates the app owning the selected window, not the frontmost app")
+    func quitSelectedApp() {
+        let (controller, windowService, keyboardService) = makeController()
+        let stageID = controller.stageManager.activeStageID
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 11),
+            toStageID: stageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2", ownerPID: 22),
+            toStageID: stageID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(controller.selectedWindowIndex == 1)
+        keyboardService.simulateEvent(.quitSelectedApp)
+
+        #expect(windowService.terminatedPIDs == [22])
+        #expect(controller.isStageManagerVisible)
+    }
+
+    @Test("Quit does nothing when the stage has no windows")
+    func quitSelectedAppWithoutSelection() {
+        let (controller, windowService, keyboardService) = makeController()
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.quitSelectedApp)
+
+        #expect(windowService.terminatedPIDs.isEmpty)
     }
 
     @Test("Held app-window shortcut stops at the last window")
