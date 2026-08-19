@@ -961,6 +961,57 @@ struct StageControllerTests {
         #expect(windowService.terminatedPIDs.isEmpty)
     }
 
+    @Test("A quit app's windows leave the open overlay and pull the selection back in range")
+    func liveWindowRemovalRefreshesOpenOverlay() {
+        let (controller, _, keyboardService) = makeController()
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+        let stageID = controller.stageManager.activeStageID
+        for (windowID, pid) in [(CGWindowID(101), pid_t(11)), (202, 22), (303, 22)] {
+            controller.stageManager.addWindow(
+                StageWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.a",
+                    ownerName: "A",
+                    windowTitle: "T\(windowID)",
+                    ownerPID: pid
+                ),
+                toStageID: stageID
+            )
+        }
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.nextWindow)
+        #expect(controller.selectedWindowIndex == 2)
+
+        _ = controller.stageManager.makeWindowsDormant(forOwnerPID: 22)
+        controller.handleLiveWindowsRemoved()
+
+        #expect(controller.selectedWindowIndex == 0)
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
+    }
+
+    @Test("Removing the last window leaves the selection at zero rather than negative")
+    func liveWindowRemovalOfEveryWindow() {
+        let (controller, _, keyboardService) = makeController()
+        let stageID = controller.stageManager.activeStageID
+        controller.stageManager.addWindow(
+            StageWindow(
+                windowID: 101,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "T1",
+                ownerPID: 11
+            ),
+            toStageID: stageID
+        )
+        keyboardService.simulateEvent(.cmdTabHold)
+
+        _ = controller.stageManager.makeWindowsDormant(forOwnerPID: 11)
+        controller.handleLiveWindowsRemoved()
+
+        #expect(controller.selectedWindowIndex == 0)
+    }
+
     @Test("Held app-window shortcut stops at the last window")
     func heldAppWindowCycleStopsAtEnd() {
         let (controller, windowService, keyboardService) = makeController()

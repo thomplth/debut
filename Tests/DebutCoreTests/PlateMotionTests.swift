@@ -49,6 +49,18 @@ struct PlateMotionTests {
         )
     }
 
+    @Test("A departing window shrinks out rather than snapping")
+    func windowRemovalUsesShrinkingMotion() {
+        #expect(
+            PlateMotion.windowRemovalTransition(reduceMotion: false)
+                == .spring(duration: 0.28, bounce: 0)
+        )
+        #expect(
+            PlateMotion.windowRemovalTransition(reduceMotion: true)
+                == .fade(duration: 0.12)
+        )
+    }
+
     @Test("Window reorder motion stops when drag state is cleared")
     func windowReorderMotionEndsWithDrag() {
         #expect(
