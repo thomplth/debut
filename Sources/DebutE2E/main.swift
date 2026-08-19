@@ -699,9 +699,14 @@ wait(0.1)
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
 wait(0.5)
 
+// Held cycling is rate limited, so repeats posted back to back are deliberately dropped.
+// Pacing them above that interval is what makes this a test of the clamp rather than of
+// the limiter.
+let heldTabRepeatInterval = AppSettings.defaultHeldCycleMinimumInterval * 1.3
 let heldTabWindowCount = Int(readState()["windowsInActiveStage"] ?? "0") ?? 0
 for _ in 0..<(heldTabWindowCount + 2) {
     postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand], isAutoRepeat: true)
+    wait(heldTabRepeatInterval)
 }
 wait(0.3)
 
