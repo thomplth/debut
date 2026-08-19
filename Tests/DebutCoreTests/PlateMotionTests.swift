@@ -983,6 +983,86 @@ struct PlateMotionTests {
         ) == 0)
     }
 
+    @Test("The add-stage affordance reveals just beyond the first and last plate edges")
+    func stageInsertionEdgeReveal() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [200, 300, 200]
+        let firstTop = layout.centers[0] - layout.heights[0] / 2
+        let lastBottom = layout.centers[2] + layout.heights[2] / 2
+        let edge: (CGPoint) -> StageInsertionEdge? = {
+            PlateInteraction.stageInsertionEdge(
+                at: $0,
+                containerWidth: 500,
+                stackOffset: 0,
+                plateWidths: widths,
+                layout: layout
+            )
+        }
+
+        #expect(edge(CGPoint(x: 250, y: firstTop - 10)) == .top)
+        #expect(edge(CGPoint(x: 250, y: lastBottom + 10)) == .bottom)
+        #expect(edge(CGPoint(x: 250, y: layout.centers[1])) == nil)
+        #expect(edge(CGPoint(
+            x: 250,
+            y: firstTop - PlateConstants.stageInsertHoverHeight - 1
+        )) == nil)
+        #expect(edge(CGPoint(x: 20, y: firstTop - 10)) == nil)
+    }
+
+    @Test("The add-stage button sits inside the band that reveals it")
+    func stageInsertButtonSitsInsideItsHoverBand() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 2,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [300, 240]
+
+        for insertionEdge in [StageInsertionEdge.top, .bottom] {
+            let center = PlateMotion.stageInsertButtonCenter(
+                edge: insertionEdge,
+                containerWidth: 500,
+                stackOffset: 40,
+                layout: layout
+            )
+            #expect(center?.x == 250)
+            #expect(PlateInteraction.stageInsertionEdge(
+                at: center ?? .zero,
+                containerWidth: 500,
+                stackOffset: 40,
+                plateWidths: widths,
+                layout: layout
+            ) == insertionEdge)
+        }
+    }
+
+    @Test("An empty stack offers no add-stage affordance")
+    func stageInsertionEdgeRequiresPlates() {
+        let empty = PlateStackLayout(scales: [], heights: [], centers: [], totalHeight: 0)
+
+        #expect(PlateInteraction.stageInsertionEdge(
+            at: .zero,
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [],
+            layout: empty
+        ) == nil)
+        #expect(PlateMotion.stageInsertButtonCenter(
+            edge: .top,
+            containerWidth: 500,
+            stackOffset: 0,
+            layout: empty
+        ) == nil)
+    }
+
     @Test("A stale pointer exit cannot clear the newly hovered window")
     func stalePointerExitDoesNotClearSelection() {
         let first = PointerSelection(stageIndex: 0, windowIndex: 0)
