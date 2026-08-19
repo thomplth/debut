@@ -63,7 +63,8 @@ public struct ShortcutModifiers: Codable, Sendable, Equatable, Hashable {
 }
 
 public struct AppSettings: Codable, Sendable, Equatable {
-    public static let defaultOverlayPresentationDelay: TimeInterval = 0.08
+    /// Sits on the hold-delay slider's 25ms step grid, so the first drag does not shift it.
+    public static let defaultOverlayPresentationDelay: TimeInterval = 0.075
     public static let defaultPreviewCacheTTL: TimeInterval = 60
     /// Paces held cycling independently of the user's key-repeat rate.
     public static let defaultHeldCycleMinimumInterval: TimeInterval = 0.06
@@ -94,13 +95,13 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var commandUsageCounts: [KeyAction: Int]
 
     public init() {
-        self.launchAtLogin = false
+        self.launchAtLogin = true
         self.excludedBundleIDs = []
         self.shareAnonymousTelemetry = true
 
         self.glassStyle = .clear
-        self.plateCornerRadius = 22
-        self.inactivePlateScale = 0.8
+        self.plateCornerRadius = 40
+        self.inactivePlateScale = 0.7
 
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
         self.heldCycleMinimumInterval = Self.defaultHeldCycleMinimumInterval
