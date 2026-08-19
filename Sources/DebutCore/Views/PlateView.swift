@@ -1354,7 +1354,7 @@ public struct OverlaySwiftUIView: View {
                     stackOffset: yOffset,
                     layout: visualLayout
                 ) {
-                    StageInsertButton()
+                    StageInsertButton(appearance: viewModel.appearance)
                         .position(center)
                         .allowsHitTesting(false)
                         .transition(.opacity)
@@ -1869,21 +1869,40 @@ struct PlateSwiftUIView: View {
     }
 }
 
-private struct StageInsertButton: View {
+/// Both stage affordances float free of the plates, so they carry the plate's own glass to
+/// read as part of the overlay rather than as chrome painted on top of it.
+private struct StageOverlayButton: View {
+    let systemName: String
+    let glyphSize: CGFloat
+    let diameter: CGFloat
+    let label: String
+    let appearance: AppSettings
+
     var body: some View {
-        Image(systemName: "plus")
-            .font(.system(size: 12, weight: .semibold))
+        Image(systemName: systemName)
+            .font(.system(size: glyphSize, weight: .semibold))
             .foregroundStyle(.white.opacity(0.92))
-            .frame(
-                width: PlateConstants.stageInsertButtonSize,
-                height: PlateConstants.stageInsertButtonSize
-            )
-            .background(.black.opacity(0.55), in: Circle())
+            .frame(width: diameter, height: diameter)
+            .modifier(LiquidGlassModifier(cornerRadius: diameter / 2, appearance: appearance))
             .overlay {
                 Circle().stroke(.white.opacity(0.16), lineWidth: 0.5)
             }
-            .help("Add stage")
-            .accessibilityLabel("Add stage")
+            .help(label)
+            .accessibilityLabel(label)
+    }
+}
+
+private struct StageInsertButton: View {
+    let appearance: AppSettings
+
+    var body: some View {
+        StageOverlayButton(
+            systemName: "plus",
+            glyphSize: 12,
+            diameter: PlateConstants.stageInsertButtonSize,
+            label: "Add stage",
+            appearance: appearance
+        )
     }
 }
 
@@ -1891,17 +1910,13 @@ private struct StageCloseButton: View {
     let appearance: AppSettings
 
     var body: some View {
-        let size = PlateConstants.stageCloseButtonSize
-        Image(systemName: "minus")
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(.white.opacity(0.92))
-            .frame(width: size, height: size)
-            .modifier(LiquidGlassModifier(cornerRadius: size / 2, appearance: appearance))
-            .overlay {
-                Circle().stroke(.white.opacity(0.16), lineWidth: 0.5)
-            }
-            .help("Delete stage")
-            .accessibilityLabel("Delete stage")
+        StageOverlayButton(
+            systemName: "minus",
+            glyphSize: 11,
+            diameter: PlateConstants.stageCloseButtonSize,
+            label: "Delete stage",
+            appearance: appearance
+        )
     }
 }
 
