@@ -61,7 +61,7 @@ struct StateStoreTests {
         let store = StateStore(directory: dir)
         var settings = AppSettings()
         settings.launchAtLogin = true
-        settings.confirmStageDeletion = false
+        settings.plateCornerRadius = 30
         settings.overlayPresentationDelay = 0.25
         settings.quickSwitchExcludedBundleIDs = ["com.tinyspeck.slackmacgap"]
         settings.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
@@ -72,7 +72,7 @@ struct StateStoreTests {
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
         #expect(loaded.launchAtLogin == true)
-        #expect(loaded.confirmStageDeletion == false)
+        #expect(loaded.plateCornerRadius == 30)
         #expect(loaded.overlayPresentationDelay == 0.25)
         #expect(loaded.quickSwitchExcludedBundleIDs == ["com.tinyspeck.slackmacgap"])
         #expect(loaded.quickSwitchModifiers == ShortcutModifiers(control: true, option: true))
@@ -178,6 +178,38 @@ struct StateStoreTests {
         #expect(decoded.commandUsageCounts.isEmpty)
     }
 
+    @Test("Settings files written before the option audit still load")
+    func legacySettingsIgnoreRemovedOptions() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var settings = AppSettings()
+        settings.launchAtLogin = true
+        settings.plateCornerRadius = 12
+        let encoded = try JSONEncoder().encode(settings)
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        for removed in [
+            "showInMenuBar",
+            "newStagePlacement",
+            "confirmStageDeletion",
+            "animationsEnabled",
+            "selectionOpacity",
+            "selectionBorderWidth",
+            "selectionBorderOpacity",
+        ] {
+            #expect(object[removed] == nil, "\(removed) should no longer be written")
+            object[removed] = "legacy"
+        }
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+
+        #expect(decoded.launchAtLogin == true)
+        #expect(decoded.plateCornerRadius == 12)
+    }
+
     @Test("Settings defaults when no file")
     func settingsDefaults() throws {
         let dir = try makeTempDirectory()
@@ -186,6 +218,6 @@ struct StateStoreTests {
         let store = StateStore(directory: dir)
         let settings = try store.loadSettings()
         #expect(settings.launchAtLogin == false)
-        #expect(settings.showInMenuBar == true)
+        #expect(settings.glassStyle == .clear)
     }
 }

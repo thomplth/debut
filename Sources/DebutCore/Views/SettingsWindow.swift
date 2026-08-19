@@ -116,22 +116,31 @@ public struct SettingsView: View {
             Text("Appearance")
                 .font(.title2.bold())
 
-            HStack {
-                Text("Glass style")
-                Spacer()
-                Picker("", selection: $viewModel.settings.glassStyle) {
-                    Text("Clear").tag(GlassStyle.clear)
-                    Text("Regular").tag(GlassStyle.regular)
+            Text("The overlay draws one plate per stage. The selected window is shown by magnifying it, so there is no separate selection colour to configure.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Glass style")
+                    Spacer()
+                    Picker("", selection: $viewModel.settings.glassStyle) {
+                        Text("Clear").tag(GlassStyle.clear)
+                        Text("Regular").tag(GlassStyle.regular)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 150)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 150)
+                Text("Clear lets more of the wallpaper through. Regular frosts the plate for more contrast over busy backgrounds.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Corner radius")
+                    Text("Plate corner radius")
                     Spacer()
-                    Text("\(Int(viewModel.settings.plateCornerRadius))")
+                    Text("\(Int(viewModel.settings.plateCornerRadius)) pt")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
@@ -142,48 +151,14 @@ public struct SettingsView: View {
                 HStack {
                     Text("Inactive plate scale")
                     Spacer()
-                    Text("\(viewModel.settings.inactivePlateScale, specifier: "%.2f")")
+                    Text("\(Int((viewModel.settings.inactivePlateScale * 100).rounded()))%")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(value: $viewModel.settings.inactivePlateScale, in: 0.4...1.0, step: 0.05)
-            }
-
-            Text("Selection")
-                .font(.headline)
-                .padding(.top, 8)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Fill opacity")
-                    Spacer()
-                    Text("\(viewModel.settings.selectionOpacity, specifier: "%.2f")")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(value: $viewModel.settings.selectionOpacity, in: 0...0.5, step: 0.01)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Border width")
-                    Spacer()
-                    Text("\(viewModel.settings.selectionBorderWidth, specifier: "%.1f")")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(value: $viewModel.settings.selectionBorderWidth, in: 0...4, step: 0.5)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Border opacity")
-                    Spacer()
-                    Text("\(viewModel.settings.selectionBorderOpacity, specifier: "%.2f")")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(value: $viewModel.settings.selectionBorderOpacity, in: 0...0.5, step: 0.01)
+                Text("How far stages other than the current one shrink. Smaller values make the current stage stand out more.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Text("Window previews")
@@ -315,22 +290,17 @@ public struct SettingsView: View {
             Text("App")
                 .font(.title2.bold())
 
-            settingsToggle("Launch at login", isOn: $viewModel.settings.launchAtLogin)
-            settingsToggle("Show in menu bar", isOn: $viewModel.settings.showInMenuBar)
-
-            HStack {
-                Text("New stage placement")
-                Spacer()
-                Picker("", selection: $viewModel.settings.newStagePlacement) {
-                    Text("Above").tag(StageInsertPosition.above)
-                    Text("Below").tag(StageInsertPosition.below)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 150)
+            VStack(alignment: .leading, spacing: 4) {
+                settingsToggle("Launch at login", isOn: $viewModel.settings.launchAtLogin)
+                Text("Debut has no Dock icon and only manages windows while it is running, so it is worth starting with your session. Reach it any time from the menu bar icon.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            settingsToggle("Confirm stage deletion", isOn: $viewModel.settings.confirmStageDeletion)
-            settingsToggle("Stage Manager animations", isOn: $viewModel.settings.animationsEnabled)
+            Text("Debut follows the system Reduce Motion setting for overlay animations. Turn it on in System Settings ▸ Accessibility ▸ Display to remove them.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
         }
     }
 
