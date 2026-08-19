@@ -238,13 +238,16 @@ enum PlateMotion {
 
     /// The close button straddles the plate's top-right corner, the way macOS and iOS place a
     /// delete badge, and is centered in the square zone that reveals it so the pointer can
-    /// reach it without the reveal collapsing.
+    /// reach it without the reveal collapsing. A rounded plate has no corner point to sit on,
+    /// so the button rides the 45° point of the corner arc instead — the plate draws its radius
+    /// at the plate's own scale, so the inset shrinks with it.
     static func stageCloseButtonCenter(
         at index: Int,
         containerWidth: CGFloat,
         stackOffset: CGFloat,
         plateWidths: [CGFloat],
-        layout: PlateStackLayout
+        layout: PlateStackLayout,
+        cornerRadius: CGFloat
     ) -> CGPoint? {
         guard plateWidths.count == layout.centers.count,
               layout.scales.count == layout.centers.count,
@@ -258,7 +261,9 @@ enum PlateMotion {
             plateWidths: plateWidths,
             layout: layout
         )
-        return CGPoint(x: frame.maxX, y: frame.minY)
+        let radius = max(0, cornerRadius) * layout.scales[index]
+        let inset = radius * (1 - 1 / 2.0.squareRoot())
+        return CGPoint(x: frame.maxX - inset, y: frame.minY + inset)
     }
 
     static func stageInsertButtonCenter(
@@ -674,14 +679,15 @@ enum PlateInteraction {
             <= PlateConstants.stageInsertButtonSize / 2
     }
 
-    /// A square centred on each plate's top-right corner — the same point the button is drawn
+    /// A square centred on each plate's corner button — the same point the button is drawn
     /// at, so reaching for the button cannot leave the zone that revealed it.
     static func revealedStageCloseIndex(
         at location: CGPoint,
         containerWidth: CGFloat,
         stackOffset: CGFloat,
         plateWidths: [CGFloat],
-        layout: PlateStackLayout
+        layout: PlateStackLayout,
+        cornerRadius: CGFloat
     ) -> Int? {
         for index in layout.centers.indices {
             guard let center = PlateMotion.stageCloseButtonCenter(
@@ -689,7 +695,8 @@ enum PlateInteraction {
                 containerWidth: containerWidth,
                 stackOffset: stackOffset,
                 plateWidths: plateWidths,
-                layout: layout
+                layout: layout,
+                cornerRadius: cornerRadius
             ) else { return nil }
             let reach = PlateConstants.stageCloseHoverSize / 2
             if abs(location.x - center.x) <= reach,
@@ -1488,7 +1495,8 @@ public struct OverlaySwiftUIView: View {
                             containerWidth: geo.size.width,
                             stackOffset: yOffset,
                             plateWidths: plateWidths,
-                            layout: visualLayout
+                            layout: visualLayout,
+                            cornerRadius: CGFloat(viewModel.appearance.plateCornerRadius)
                         )
                         : nil
                 case .ended:
@@ -1647,7 +1655,8 @@ public struct OverlaySwiftUIView: View {
             containerWidth: containerWidth,
             stackOffset: stackOffset,
             plateWidths: plateWidths,
-            layout: layout
+            layout: layout,
+            cornerRadius: CGFloat(viewModel.appearance.plateCornerRadius)
         )
     }
 
