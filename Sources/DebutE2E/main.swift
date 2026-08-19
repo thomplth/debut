@@ -20,6 +20,13 @@ let hostedDragTests: Set<String> = [
     "The refreshed destination plate supports an immediate reverse drag",
 ]
 
+// Disposable runners tell the app to skip live capture, so these assertions can only ever see
+// empty previews there. Running them anyway is what kept the hosted suite permanently red.
+let previewsDisabled = environment["DEBUT_DISABLE_WINDOW_PREVIEWS"] == "1"
+let previewCaptureTests: Set<String> = [
+    "Window previews contain non-uniform captured pixels",
+]
+
 func color(_ text: String, _ code: Int) -> String { "\u{001B}[\(code)m\(text)\u{001B}[0m" }
 func pass(_ msg: String) { print(color("  PASS", 32) + "  \(msg)") }
 func fail(_ msg: String) { print(color("  FAIL", 31) + "  \(msg)") }
@@ -27,20 +34,37 @@ func skip(_ msg: String) { print(color("  SKIP", 33) + "  \(msg)") }
 func info(_ msg: String) { print(color("  INFO", 36) + "  \(msg)") }
 func header(_ msg: String) { print("\n" + color("=== \(msg) ===", 1)) }
 
-func skipTest(_ name: String) {
+func skipTest(_ name: String, reason: String) {
     totalCount += 1
     skipCount += 1
     skip(name)
+    info("  \(reason)")
+}
+
+func skipDragTest(_ name: String) {
     if isGitHubHosted {
-        info("  GitHub-hosted macOS does not deliver synthetic drag gestures; run this check locally")
+        skipTest(
+            name,
+            reason: "GitHub-hosted macOS does not deliver synthetic drag gestures; run this check locally"
+        )
     } else {
-        info("  Virtualized macOS does not deliver synthetic drag gestures; use Tart run-all to diagnose")
+        skipTest(
+            name,
+            reason: "Virtualized macOS does not deliver synthetic drag gestures; use Tart run-all to diagnose"
+        )
     }
 }
 
 func test(_ name: String, _ body: () -> Bool) {
     if skipsSyntheticDrags && hostedDragTests.contains(name) {
-        skipTest(name)
+        skipDragTest(name)
+        return
+    }
+    if previewsDisabled && previewCaptureTests.contains(name) {
+        skipTest(
+            name,
+            reason: "Live preview capture is disabled in this environment; run this check locally"
+        )
         return
     }
     totalCount += 1
@@ -1076,7 +1100,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         }
     } else {
         if skipsSyntheticDrags {
-            skipTest("The refreshed destination plate supports an immediate reverse drag")
+            skipDragTest("The refreshed destination plate supports an immediate reverse drag")
         } else {
             fail("Could not calculate the reverse window-drop path")
         }
