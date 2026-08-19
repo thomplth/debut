@@ -400,18 +400,16 @@ legacy "has launched before" flag so existing users never see a first-run screen
 <h2>Things that will surprise you</h2>
 
 <div class="warn">
-  <span class="label">Three appearance settings are dead</span>
+  <span class="label">There is no selection colour to configure</span>
   <p>
-  <code>selectionOpacity</code>, <code>selectionBorderWidth</code>, and
-  <code>selectionBorderOpacity</code> are persisted and have working sliders, but
-  nothing in <code>Sources/</code> reads them. Selection is drawn as a 1.06×
-  magnification plus a shadow — the test is literally named "selected windows
-  magnify instead of using a selection indicator". <code>animationsEnabled</code>
-  is likewise never read on the render path, which uses the system Reduce Motion
-  environment value instead. <code>spec/settings.md</code> deliberately declines
-  to restate individual controls, so it does not flag the gap either — it lists
-  Appearance as covering "the plate and selection geometry the overlay renders
-  with", which reads as if all of it were live.
+  Selection is drawn as a 1.06× magnification plus a shadow — the test is
+  literally named "selected windows magnify instead of using a selection
+  indicator". Earlier builds shipped <code>selectionOpacity</code>,
+  <code>selectionBorderWidth</code> and <code>selectionBorderOpacity</code>
+  sliders that nothing ever read; they were removed in the settings audit, along
+  with <code>animationsEnabled</code>, because the render path honours the system
+  Reduce Motion environment value instead. Old <code>settings.json</code> files
+  still carry the keys and still decode — the decoder simply ignores them.
   </p>
 </div>
 

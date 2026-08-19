@@ -28,15 +28,20 @@ window uses the native macOS settings visual style.
 Individual controls, their ranges, and their default values are defined in
 `SettingsWindow.swift` and `AppSettings` and are deliberately not restated here.
 
-**Appearance** — glass style, plus the plate and selection geometry the overlay
-renders with.
+**Appearance** — glass style, plate geometry, and the window preview refresh
+policy. Selection has no controls of its own: the overlay indicates it by
+magnifying the selected window rather than tinting or outlining it.
 
 **Excluded Apps** — a picker over running regular apps and the resulting
 exclusion list. Adding an app removes it from every stage and filters it out of
 discovery immediately.
 
-**App** — launch at login, menu bar visibility, new-stage placement, stage
-deletion confirmation, and the animation toggle.
+**App** — launch at login, registered through `SMAppService`. Overlay animation
+follows the system Reduce Motion setting rather than a Debut toggle.
+
+Every control in Settings must be wired to behaviour. Options that no code reads
+are removed rather than left visible; `AppSettings` ignores unknown keys, so
+files written by an older build keep loading.
 
 **Keyboard Shortcuts** — an editable binding for every `KeyAction`, recorded by
 clicking a row and pressing the combination. Conflicts are detected inline and
