@@ -51,7 +51,10 @@ sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceAccessibility','com.thomplth.Debut',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sudo killall tccd 2>/dev/null || true
 
+# launchctl reaches the app, which `open` spawns through launchd; the export reaches the suite,
+# which this shell spawns directly. Both need to agree that previews are off.
 launchctl setenv DEBUT_DISABLE_WINDOW_PREVIEWS 1
+export DEBUT_DISABLE_WINDOW_PREVIEWS=1
 
 echo "Preparing deterministic fixture windows..."
 rm -rf "$HOME/Library/Application Support/Debut"
