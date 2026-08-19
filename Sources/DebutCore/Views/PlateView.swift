@@ -216,6 +216,51 @@ enum PlateMotion {
         return edge == .top ? center - halfHeight : center + halfHeight
     }
 
+    static func plateFrame(
+        at index: Int,
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        plateWidths: [CGFloat],
+        layout: PlateStackLayout
+    ) -> CGRect {
+        let width = plateWidths[index] * layout.scales[index]
+        let center = CGPoint(
+            x: containerWidth / 2,
+            y: stackOffset + layout.centers[index]
+        )
+        return CGRect(
+            x: center.x - width / 2,
+            y: center.y - layout.heights[index] / 2,
+            width: width,
+            height: layout.heights[index]
+        )
+    }
+
+    /// The close button straddles the plate's top-right corner, the way macOS and iOS place a
+    /// delete badge, and is centered in the square zone that reveals it so the pointer can
+    /// reach it without the reveal collapsing.
+    static func stageCloseButtonCenter(
+        at index: Int,
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        plateWidths: [CGFloat],
+        layout: PlateStackLayout
+    ) -> CGPoint? {
+        guard plateWidths.count == layout.centers.count,
+              layout.scales.count == layout.centers.count,
+              layout.heights.count == layout.centers.count,
+              layout.centers.indices.contains(index)
+        else { return nil }
+        let frame = plateFrame(
+            at: index,
+            containerWidth: containerWidth,
+            stackOffset: stackOffset,
+            plateWidths: plateWidths,
+            layout: layout
+        )
+        return CGPoint(x: frame.maxX, y: frame.minY)
+    }
+
     static func stageInsertButtonCenter(
         edge: StageInsertionEdge,
         containerWidth: CGFloat,
@@ -562,7 +607,7 @@ enum PlateInteraction {
         else { return nil }
 
         for index in layout.centers.indices {
-            let frame = plateFrame(
+            let frame = PlateMotion.plateFrame(
                 at: index,
                 containerWidth: containerWidth,
                 stackOffset: stackOffset,
@@ -625,6 +670,37 @@ enum PlateInteraction {
             <= PlateConstants.stageInsertButtonSize / 2
     }
 
+    /// A square centred on each plate's top-right corner — the same point the button is drawn
+    /// at, so reaching for the button cannot leave the zone that revealed it.
+    static func revealedStageCloseIndex(
+        at location: CGPoint,
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        plateWidths: [CGFloat],
+        layout: PlateStackLayout
+    ) -> Int? {
+        for index in layout.centers.indices {
+            guard let center = PlateMotion.stageCloseButtonCenter(
+                at: index,
+                containerWidth: containerWidth,
+                stackOffset: stackOffset,
+                plateWidths: plateWidths,
+                layout: layout
+            ) else { return nil }
+            let reach = PlateConstants.stageCloseHoverSize / 2
+            if abs(location.x - center.x) <= reach,
+               abs(location.y - center.y) <= reach {
+                return index
+            }
+        }
+        return nil
+    }
+
+    static func isStageCloseButtonHit(_ location: CGPoint, center: CGPoint) -> Bool {
+        hypot(location.x - center.x, location.y - center.y)
+            <= PlateConstants.stageCloseButtonSize / 2
+    }
+
     static func pointerSelection(
         current: PointerSelection?,
         target: PointerSelection,
@@ -680,14 +756,14 @@ enum PlateInteraction {
 
         for upperIndex in currentLayout.centers.indices.dropLast() {
             let lowerIndex = upperIndex + 1
-            let upperFrame = plateFrame(
+            let upperFrame = PlateMotion.plateFrame(
                 at: upperIndex,
                 containerWidth: containerWidth,
                 stackOffset: currentStackOffset,
                 plateWidths: plateWidths,
                 layout: currentLayout
             )
-            let lowerFrame = plateFrame(
+            let lowerFrame = PlateMotion.plateFrame(
                 at: lowerIndex,
                 containerWidth: containerWidth,
                 stackOffset: currentStackOffset,
@@ -710,26 +786,6 @@ enum PlateInteraction {
         return nil
     }
 
-    private static func plateFrame(
-        at index: Int,
-        containerWidth: CGFloat,
-        stackOffset: CGFloat,
-        plateWidths: [CGFloat],
-        layout: PlateStackLayout
-    ) -> CGRect {
-        let width = plateWidths[index] * layout.scales[index]
-        let center = CGPoint(
-            x: containerWidth / 2,
-            y: stackOffset + layout.centers[index]
-        )
-        return CGRect(
-            x: center.x - width / 2,
-            y: center.y - layout.heights[index] / 2,
-            width: width,
-            height: layout.heights[index]
-        )
-    }
-
     /// The plate plus the gutter its drag handle lives in. Hit testing uses this so reaching
     /// for the handle never reads as leaving the plate.
     private static func plateHitFrame(
@@ -739,7 +795,7 @@ enum PlateInteraction {
         plateWidths: [CGFloat],
         layout: PlateStackLayout
     ) -> CGRect {
-        let frame = plateFrame(
+        let frame = PlateMotion.plateFrame(
             at: index,
             containerWidth: containerWidth,
             stackOffset: stackOffset,
@@ -802,6 +858,8 @@ public struct PlateConstants {
     public static let edgeScrollMargin: CGFloat = 28
     public static let stageInsertHoverHeight: CGFloat = 44
     public static let stageInsertButtonSize: CGFloat = 26
+    public static let stageCloseButtonSize: CGFloat = 22
+    public static let stageCloseHoverSize: CGFloat = 48
 
     public static func thumbnailSize(forWindowCount count: Int, screenWidth: CGFloat) -> (width: CGFloat, height: CGFloat) {
         let maxWidth = screenWidth - screenMargin * 2
@@ -873,6 +931,7 @@ public struct OverlaySwiftUIView: View {
     public var onStageReordered: ((Int, Int) -> Void)?
     public var onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?
     public var onStageInsertRequested: ((StageInsertionEdge) -> Void)?
+    public var onStageDeleteRequested: ((Int) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onDesktopSelected: (() -> Void)?
 
@@ -886,6 +945,7 @@ public struct OverlaySwiftUIView: View {
     @State private var plateFrames: [Int: CGRect] = [:]
     @State private var windowFrames: [WindowFrameID: CGRect] = [:]
     @State private var revealedStageHandleIndex: Int?
+    @State private var revealedStageCloseIndex: Int?
     @State private var hoveredStageIndex: Int?
     @State private var hoverPointerY: CGFloat?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -897,6 +957,7 @@ public struct OverlaySwiftUIView: View {
         onStageReordered: ((Int, Int) -> Void)? = nil,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
         onStageInsertRequested: ((StageInsertionEdge) -> Void)? = nil,
+        onStageDeleteRequested: ((Int) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
         onDesktopSelected: (() -> Void)? = nil
     ) {
@@ -910,6 +971,7 @@ public struct OverlaySwiftUIView: View {
             onStageReordered: onStageReordered,
             onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
             onStageInsertRequested: onStageInsertRequested,
+            onStageDeleteRequested: onStageDeleteRequested,
             onPointerSelectionChanged: onPointerSelectionChanged,
             onDesktopSelected: onDesktopSelected
         )
@@ -986,16 +1048,38 @@ public struct OverlaySwiftUIView: View {
         )
     }
 
+    init(
+        viewModel: OverlayViewModel,
+        initialStageCloseIndex: Int
+    ) {
+        self.init(
+            viewModel: viewModel,
+            initialWindowDrag: nil,
+            initialStageDrag: nil,
+            initialStageInsertionEdge: nil,
+            initialStageCloseIndex: Int?(initialStageCloseIndex),
+            onWindowSelected: nil,
+            onWindowMoved: nil,
+            onStageReordered: nil,
+            onStageHandleVisibilityChanged: nil,
+            onStageInsertRequested: nil,
+            onPointerSelectionChanged: nil,
+            onDesktopSelected: nil
+        )
+    }
+
     private init(
         viewModel: OverlayViewModel,
         initialWindowDrag: WindowDragState?,
         initialStageDrag: StageDragState?,
         initialStageInsertionEdge: StageInsertionEdge?,
+        initialStageCloseIndex: Int? = nil,
         onWindowSelected: ((Int, Int) -> Void)?,
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?,
         onStageReordered: ((Int, Int) -> Void)?,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?,
         onStageInsertRequested: ((StageInsertionEdge) -> Void)?,
+        onStageDeleteRequested: ((Int) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)?,
         onDesktopSelected: (() -> Void)?
     ) {
@@ -1005,11 +1089,13 @@ public struct OverlaySwiftUIView: View {
         self.onStageReordered = onStageReordered
         self.onStageHandleVisibilityChanged = onStageHandleVisibilityChanged
         self.onStageInsertRequested = onStageInsertRequested
+        self.onStageDeleteRequested = onStageDeleteRequested
         self.onPointerSelectionChanged = onPointerSelectionChanged
         self.onDesktopSelected = onDesktopSelected
         _windowDrag = State(initialValue: initialWindowDrag)
         _stageDrag = State(initialValue: initialStageDrag)
         _revealedStageInsertionEdge = State(initialValue: initialStageInsertionEdge)
+        _revealedStageCloseIndex = State(initialValue: initialStageCloseIndex)
         _pointerMovementGate = State(
             initialValue: PointerMovementGate(initialLocation: NSEvent.mouseLocation)
         )
@@ -1274,7 +1360,21 @@ public struct OverlaySwiftUIView: View {
                         .transition(.opacity)
                 }
             }
+            .overlay(alignment: .topLeading) {
+                if let center = stageCloseButtonCenter(
+                    containerWidth: geo.size.width,
+                    stackOffset: yOffset,
+                    plateWidths: plateWidths,
+                    layout: visualLayout
+                ) {
+                    StageCloseButton(appearance: viewModel.appearance)
+                        .position(center)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
+            }
             .animation(.easeOut(duration: 0.14), value: revealedStageInsertionEdge)
+            .animation(.easeOut(duration: 0.14), value: revealedStageCloseIndex)
             .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeStageIndex)
             .transition(focusTransition.usesSpatialMotion ? .identity : .opacity)
             .animation(focusTransition.animation, value: layoutAnimationKey)
@@ -1296,6 +1396,20 @@ public struct OverlaySwiftUIView: View {
                            ),
                            PlateInteraction.isStageInsertButtonHit(event.location, center: center) {
                             onStageInsertRequested?(edge)
+                            return
+                        }
+                        // The close button straddles the plate's corner, so a tap on its outer
+                        // half would otherwise read as a desktop click.
+                        if let index = revealedStageCloseIndex,
+                           let center = stageCloseButtonCenter(
+                               containerWidth: geo.size.width,
+                               stackOffset: yOffset,
+                               plateWidths: plateWidths,
+                               layout: visualLayout
+                           ),
+                           PlateInteraction.isStageCloseButtonHit(event.location, center: center) {
+                            revealedStageCloseIndex = nil
+                            onStageDeleteRequested?(index)
                             return
                         }
                         guard PlateInteraction.isDesktopArea(
@@ -1348,10 +1462,20 @@ public struct OverlaySwiftUIView: View {
                             layout: visualLayout
                         )
                         : nil
+                    revealedStageCloseIndex = windowDrag == nil && stageDrag == nil
+                        ? PlateInteraction.revealedStageCloseIndex(
+                            at: location,
+                            containerWidth: geo.size.width,
+                            stackOffset: yOffset,
+                            plateWidths: plateWidths,
+                            layout: visualLayout
+                        )
+                        : nil
                 case .ended:
                     hoverPointerY = nil
                     hoveredStageIndex = nil
                     revealedStageInsertionEdge = nil
+                    revealedStageCloseIndex = nil
                     updateRevealedStageHandle(nil)
                 }
             }
@@ -1487,6 +1611,22 @@ public struct OverlaySwiftUIView: View {
             edge: edge,
             containerWidth: containerWidth,
             stackOffset: stackOffset,
+            layout: layout
+        )
+    }
+
+    private func stageCloseButtonCenter(
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        plateWidths: [CGFloat],
+        layout: PlateStackLayout
+    ) -> CGPoint? {
+        guard let index = revealedStageCloseIndex else { return nil }
+        return PlateMotion.stageCloseButtonCenter(
+            at: index,
+            containerWidth: containerWidth,
+            stackOffset: stackOffset,
+            plateWidths: plateWidths,
             layout: layout
         )
     }
@@ -1744,6 +1884,24 @@ private struct StageInsertButton: View {
             }
             .help("Add stage")
             .accessibilityLabel("Add stage")
+    }
+}
+
+private struct StageCloseButton: View {
+    let appearance: AppSettings
+
+    var body: some View {
+        let size = PlateConstants.stageCloseButtonSize
+        Image(systemName: "minus")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(.white.opacity(0.92))
+            .frame(width: size, height: size)
+            .modifier(LiquidGlassModifier(cornerRadius: size / 2, appearance: appearance))
+            .overlay {
+                Circle().stroke(.white.opacity(0.16), lineWidth: 0.5)
+            }
+            .help("Delete stage")
+            .accessibilityLabel("Delete stage")
     }
 }
 

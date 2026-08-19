@@ -1063,6 +1063,92 @@ struct PlateMotionTests {
         ) == nil)
     }
 
+    @Test("The close affordance reveals near a plate's top-right corner")
+    func stageCloseReveal() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [200, 300, 200]
+        let closeIndex: (CGPoint) -> Int? = {
+            PlateInteraction.revealedStageCloseIndex(
+                at: $0,
+                containerWidth: 500,
+                stackOffset: 0,
+                plateWidths: widths,
+                layout: layout
+            )
+        }
+        let secondCorner = CGPoint(
+            x: 250 + widths[1] * layout.scales[1] / 2,
+            y: layout.centers[1] - layout.heights[1] / 2
+        )
+
+        #expect(closeIndex(secondCorner) == 1)
+        #expect(closeIndex(CGPoint(x: 250, y: layout.centers[1])) == nil)
+        #expect(closeIndex(CGPoint(
+            x: secondCorner.x - PlateConstants.stageCloseHoverSize,
+            y: secondCorner.y
+        )) == nil)
+    }
+
+    @Test("The close button sits inside the corner zone that reveals it")
+    func stageCloseButtonSitsInsideItsHoverZone() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 2,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [300, 240]
+
+        for index in 0..<2 {
+            let center = PlateMotion.stageCloseButtonCenter(
+                at: index,
+                containerWidth: 500,
+                stackOffset: 40,
+                plateWidths: widths,
+                layout: layout
+            )
+            #expect(center?.x == 250 + widths[index] * layout.scales[index] / 2)
+            #expect(PlateInteraction.revealedStageCloseIndex(
+                at: center ?? .zero,
+                containerWidth: 500,
+                stackOffset: 40,
+                plateWidths: widths,
+                layout: layout
+            ) == index)
+            #expect(PlateInteraction.isStageCloseButtonHit(
+                center ?? .zero,
+                center: center ?? .zero
+            ))
+        }
+    }
+
+    @Test("An empty stack offers no close affordance")
+    func stageCloseRequiresPlates() {
+        let empty = PlateStackLayout(scales: [], heights: [], centers: [], totalHeight: 0)
+
+        #expect(PlateInteraction.revealedStageCloseIndex(
+            at: .zero,
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [],
+            layout: empty
+        ) == nil)
+        #expect(PlateMotion.stageCloseButtonCenter(
+            at: 0,
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [],
+            layout: empty
+        ) == nil)
+    }
+
     @Test("A stale pointer exit cannot clear the newly hovered window")
     func stalePointerExitDoesNotClearSelection() {
         let first = PointerSelection(stageIndex: 0, windowIndex: 0)
