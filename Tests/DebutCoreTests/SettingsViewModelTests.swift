@@ -9,8 +9,7 @@ struct SettingsViewModelTests {
     func defaults() {
         let vm = SettingsViewModel()
         #expect(vm.settings.launchAtLogin == false)
-        #expect(vm.settings.showInMenuBar == true)
-        #expect(vm.settings.confirmStageDeletion == true)
+        #expect(vm.settings.glassStyle == .clear)
         #expect(vm.settings.overlayPresentationDelay == 0.08)
         #expect(vm.settings.quickSwitchExcludedBundleIDs.isEmpty)
         #expect(vm.settings.commandHintVisibility == .automatic)

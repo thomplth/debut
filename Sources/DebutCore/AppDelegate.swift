@@ -17,6 +17,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var windowDiscovery: WindowDiscoveryService?
     private let diag = DiagnosticReporter.shared
     private let onboardingPermissionClient = SystemOnboardingPermissionClient()
+    private let launchAtLogin = LaunchAtLoginCoordinator()
 
     private var windowService: AccessibilityWindowService?
     private var keyboardService: EventTapKeyboardService?
@@ -50,6 +51,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         debouncedSaver = DebouncedSaver(store: store)
         pendingStageManager = (try? store.load()) ?? StageManager()
         currentSettings = (try? store.loadSettings()) ?? AppSettings()
+        launchAtLogin.apply(enabled: currentSettings.launchAtLogin)
         setupTelemetry()
 
         windowService = AccessibilityWindowService()
@@ -744,6 +746,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             DispatchQueue.main.async {
                 guard let self else { return }
                 let telemetryChanged = self.currentSettings.shareAnonymousTelemetry != newSettings.shareAnonymousTelemetry
+                self.launchAtLogin.apply(enabled: newSettings.launchAtLogin)
                 self.currentSettings = newSettings
                 try? self.stateStore?.saveSettings(newSettings)
                 self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
