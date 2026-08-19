@@ -447,7 +447,7 @@ public struct SettingsView: View {
                 .frame(width: 250)
             }
 
-            Text("Automatic hides each hint after its command is used more than three times. Never hides every hint; Always keeps them visible.")
+            Text("Automatic hides each hint once you have used that command three times. Never hides every hint; Always keeps them visible.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

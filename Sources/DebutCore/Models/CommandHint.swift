@@ -51,7 +51,14 @@ public enum CommandHintCatalog {
         ]
         if hasSelectedWindow {
             groups.append(("Move window", [.moveWindowUp, .moveWindowDown], "arrow.up.and.down"))
+            groups.append((
+                "Reorder window",
+                [.moveWindowLeft, .moveWindowRight],
+                "arrow.left.arrow.right"
+            ))
+            groups.append(("Quit app", [.quitSelectedApp], "power"))
         }
+        groups.append(("Close overlay", [.dismissOverlay], "escape"))
         return groups.compactMap { label, actions, iconSystemName in
             hint(
                 label: label,

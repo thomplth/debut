@@ -11,24 +11,87 @@ struct CommandHintTests {
         #expect(PlateConstants.stageSpacing(hasVisibleFooterHints: true) == 34)
     }
 
-    @Test("Automatic hints retire only after a fourth use")
+    @Test("Automatic hints retire after the third use of that command")
     func automaticThreshold() {
         var settings = AppSettings()
         #expect(settings.commandHintVisibility == .automatic)
         #expect(settings.shouldShowCommandHint(for: .newStageBelow))
 
-        for _ in 0..<3 {
+        for _ in 0..<2 {
             let didRecord = settings.recordCommandUsage(.newStageBelow)
             #expect(didRecord)
         }
         #expect(settings.shouldShowCommandHint(for: .newStageBelow))
 
-        let didRecordFourthUse = settings.recordCommandUsage(.newStageBelow)
-        #expect(didRecordFourthUse)
+        let didRecordThirdUse = settings.recordCommandUsage(.newStageBelow)
+        #expect(didRecordThirdUse)
         #expect(!settings.shouldShowCommandHint(for: .newStageBelow))
-        let didRecordFifthUse = settings.recordCommandUsage(.newStageBelow)
-        #expect(!didRecordFifthUse)
-        #expect(settings.commandUsageCounts[.newStageBelow] == 4)
+        // A sibling command keeps its own count, so retiring one never retires the other.
+        #expect(settings.shouldShowCommandHint(for: .newStageAbove))
+
+        let didRecordFourthUse = settings.recordCommandUsage(.newStageBelow)
+        #expect(!didRecordFourthUse)
+        #expect(settings.commandUsageCounts[.newStageBelow] == 3)
+    }
+
+    @Test("Every footer command retires, collapsing the stage spacing")
+    func footerHintsRetireCompletely() {
+        var settings = AppSettings()
+        let footerActions = CommandHintCatalog.plateFooterHints(
+            stageIndex: 0,
+            isActive: true,
+            hasSelectedWindow: true,
+            settings: settings
+        ).flatMap(\.actions)
+        #expect(!footerActions.isEmpty)
+
+        for action in footerActions {
+            for _ in 0..<3 { _ = settings.recordCommandUsage(action) }
+        }
+
+        let remaining = CommandHintCatalog.plateFooterHints(
+            stageIndex: 0,
+            isActive: true,
+            hasSelectedWindow: true,
+            settings: settings
+        )
+        #expect(remaining.isEmpty)
+        #expect(
+            PlateConstants.stageSpacing(hasVisibleFooterHints: !remaining.isEmpty)
+                == PlateConstants.compactStageSpacing
+        )
+    }
+
+    @Test("Footer hints cover every command the overlay accepts on a selected window")
+    func footerHintsCoverWindowCommands() {
+        let settings = AppSettings()
+        let hints = CommandHintCatalog.plateFooterHints(
+            stageIndex: 0,
+            isActive: true,
+            hasSelectedWindow: true,
+            settings: settings
+        )
+        let actions = Set(hints.flatMap(\.actions))
+
+        #expect(actions.isSuperset(of: [.moveWindowLeft, .moveWindowRight]))
+        #expect(actions.contains(.quitSelectedApp))
+        #expect(actions.contains(.dismissOverlay))
+    }
+
+    @Test("Hints that need a window disappear when the stage has none")
+    func footerHintsWithoutSelection() {
+        let settings = AppSettings()
+        let hints = CommandHintCatalog.plateFooterHints(
+            stageIndex: 0,
+            isActive: true,
+            hasSelectedWindow: false,
+            settings: settings
+        )
+        let actions = Set(hints.flatMap(\.actions))
+
+        #expect(!actions.contains(.quitSelectedApp))
+        #expect(!actions.contains(.moveWindowLeft))
+        #expect(actions.contains(.dismissOverlay))
     }
 
     @Test("Never and always modes override automatic usage")
@@ -128,7 +191,7 @@ struct CommandHintTests {
     @Test("A hidden action is omitted from its contextual group")
     func partiallyRetiredGroup() {
         var settings = AppSettings()
-        settings.commandUsageCounts[.moveWindowUp] = 4
+        settings.commandUsageCounts[.moveWindowUp] = 3
 
         let hints = CommandHintCatalog.plateFooterHints(
             stageIndex: 0,
@@ -148,6 +211,7 @@ struct CommandHintTests {
         #expect(DebutKeyEvent.cmdOptionTabHold.commandHintAction == .nextStage)
         #expect(DebutKeyEvent.newStageBelow.commandHintAction == .newStageBelow)
         #expect(DebutKeyEvent.jumpToLastStage.commandHintAction == .jumpToStage9)
+        #expect(DebutKeyEvent.escape.commandHintAction == .dismissOverlay)
         #expect(DebutKeyEvent.nextWindowRepeat.commandHintAction == nil)
         #expect(DebutKeyEvent.cmdRelease.commandHintAction == nil)
     }
