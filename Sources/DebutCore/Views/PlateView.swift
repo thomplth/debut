@@ -632,8 +632,11 @@ enum PlateInteraction {
     }
 
     /// A band just outside each end of the stack. The button is centered in its own band, so
-    /// travelling out to it can never leave the region that revealed it.
+    /// travelling out to it can never leave the region that revealed it. Once revealed the band
+    /// also reaches back inside the plate: entering it magnifies that plate, whose edge then
+    /// grows past the still-stationary pointer and would otherwise swallow the affordance.
     static func stageInsertionEdge(
+        previous: StageInsertionEdge?,
         at location: CGPoint,
         containerWidth: CGFloat,
         stackOffset: CGFloat,
@@ -652,13 +655,14 @@ enum PlateInteraction {
             ) else { return nil }
             let index = edge == .top ? 0 : layout.centers.count - 1
             let halfWidth = plateWidths[index] * layout.scales[index] / 2
+            let depth = previous == edge ? PlateConstants.stageInsertStickyDepth : 0
             let band = CGRect(
                 x: containerWidth / 2 - halfWidth,
                 y: edge == .top
                     ? boundary - PlateConstants.stageInsertHoverHeight
-                    : boundary,
+                    : boundary - depth,
                 width: halfWidth * 2,
-                height: PlateConstants.stageInsertHoverHeight
+                height: PlateConstants.stageInsertHoverHeight + depth
             )
             if band.contains(location) { return edge }
         }
@@ -783,6 +787,19 @@ enum PlateInteraction {
                 return previous
             }
         }
+
+        // Reaching for the add-stage button has to keep the end plate magnified, or the stack
+        // re-lays out under the pointer and the button moves out from under the click.
+        if let edge = stageInsertionEdge(
+            previous: nil,
+            at: location,
+            containerWidth: containerWidth,
+            stackOffset: currentStackOffset,
+            plateWidths: plateWidths,
+            layout: currentLayout
+        ) {
+            return edge == .top ? 0 : currentLayout.centers.count - 1
+        }
         return nil
     }
 
@@ -858,6 +875,7 @@ public struct PlateConstants {
     public static let edgeScrollMargin: CGFloat = 28
     public static let stageInsertHoverHeight: CGFloat = 44
     public static let stageInsertButtonSize: CGFloat = 26
+    public static let stageInsertStickyDepth: CGFloat = 28
     public static let stageCloseButtonSize: CGFloat = 22
     public static let stageCloseHoverSize: CGFloat = 48
 
@@ -1395,6 +1413,7 @@ public struct OverlaySwiftUIView: View {
                                layout: visualLayout
                            ),
                            PlateInteraction.isStageInsertButtonHit(event.location, center: center) {
+                            revealedStageInsertionEdge = nil
                             onStageInsertRequested?(edge)
                             return
                         }
@@ -1455,6 +1474,7 @@ public struct OverlaySwiftUIView: View {
                     )
                     revealedStageInsertionEdge = windowDrag == nil && stageDrag == nil
                         ? PlateInteraction.stageInsertionEdge(
+                            previous: revealedStageInsertionEdge,
                             at: location,
                             containerWidth: geo.size.width,
                             stackOffset: yOffset,
