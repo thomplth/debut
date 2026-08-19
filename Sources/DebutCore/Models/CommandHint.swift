@@ -56,6 +56,8 @@ public enum CommandHintCatalog {
                 [.moveWindowLeft, .moveWindowRight],
                 "arrow.left.arrow.right"
             ))
+            // Transitive, so `shouldShowCommandHint` drops it. Listed anyway to keep this a
+            // full inventory of the commands the footer covers.
             groups.append(("Quit app", [.quitSelectedApp], "power"))
         }
         groups.append(("Close overlay", [.dismissOverlay], "escape"))

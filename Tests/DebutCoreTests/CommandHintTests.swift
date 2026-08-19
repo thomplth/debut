@@ -74,8 +74,47 @@ struct CommandHintTests {
         let actions = Set(hints.flatMap(\.actions))
 
         #expect(actions.isSuperset(of: [.moveWindowLeft, .moveWindowRight]))
-        #expect(actions.contains(.quitSelectedApp))
         #expect(actions.contains(.dismissOverlay))
+    }
+
+    @Test("Quitting the selected app is the only transitive command")
+    func quitIsTheTransitiveCommand() {
+        let transitive = KeyAction.allCases.filter(\.isTransitive)
+        #expect(transitive == [.quitSelectedApp])
+    }
+
+    @Test("Transitive commands never earn a hint in any visibility mode")
+    func transitiveCommandsAreNeverHinted() {
+        var settings = AppSettings()
+        #expect(!settings.shouldShowCommandHint(for: .quitSelectedApp))
+
+        settings.commandHintVisibility = .always
+        #expect(!settings.shouldShowCommandHint(for: .quitSelectedApp))
+        #expect(settings.shouldShowCommandHint(for: .dismissOverlay))
+    }
+
+    @Test("A transitive command's usage is never recorded")
+    func transitiveCommandUsageIsNotRecorded() {
+        var settings = AppSettings()
+
+        let didRecord = settings.recordCommandUsage(.quitSelectedApp)
+
+        #expect(!didRecord)
+        #expect(settings.commandUsageCounts[.quitSelectedApp] == nil)
+    }
+
+    @Test("The footer never offers to quit the selected app")
+    func footerOmitsQuitHint() {
+        var settings = AppSettings()
+        settings.commandHintVisibility = .always
+        let hints = CommandHintCatalog.plateFooterHints(
+            stageIndex: 0,
+            isActive: true,
+            hasSelectedWindow: true,
+            settings: settings
+        )
+
+        #expect(!hints.flatMap(\.actions).contains(.quitSelectedApp))
     }
 
     @Test("Hints that need a window disappear when the stage has none")
