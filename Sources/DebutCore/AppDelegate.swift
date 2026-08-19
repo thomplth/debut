@@ -500,6 +500,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             self.updateOverlay()
         }
 
+        overlayWindow.onStageDeleteRequested = { [weak self] index in
+            guard let self, let ctrl = self.stageController else { return }
+            ctrl.deleteStage(atIndex: index)
+            self.diag.report("stage_deleted_from_overlay", details: [
+                "stageIndex": "\(index)",
+                "stageCount": "\(ctrl.stageManager.stages.count)",
+            ])
+            self.updateOverlay()
+        }
+
         overlayWindow.onPointerSelectionChanged = { [weak self] stageIndex, windowIndex in
             self?.diag.report("overlay_pointer_selection_changed", level: .transient, details: [
                 "stageIndex": stageIndex.map(String.init) ?? "none",
