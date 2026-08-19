@@ -1,0 +1,64 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which version number to raise
+        required: true
+        type: choice
+        default: minor
+        options:
+          - minor
+          - major
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      previous_tag: ${{ steps.plan.outputs.previous_tag }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # No change requirement: a human asking for this release has already decided it is wanted.
+      - name: Plan the release
+        id: plan
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: ./scripts/release-plan.sh "$BUMP" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Summarise the plan
+        run: |
+          echo "Releasing v${{ steps.plan.outputs.version }} (${{ inputs.bump }} bump from ${{ steps.plan.outputs.previous_tag }})." \
+              >> "$GITHUB_STEP_SUMMARY"
+
+  ci:
+    needs: [plan]
+    uses: ./.github/workflows/ci.yml
+
+  e2e:
+    needs: [plan]
+    uses: ./.github/workflows/e2e.yml
+
+  publish:
+    needs: [plan, ci, e2e]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-publish.yml
+    with:
+      version: ${{ needs.plan.outputs.version }}
+      previous_tag: ${{ needs.plan.outputs.previous_tag }}

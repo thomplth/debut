@@ -1,0 +1,63 @@
+name: Daily Release
+
+on:
+  schedule:
+    # 02:00 UTC, clear of the working day in every timezone the project is used from.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      previous_tag: ${{ steps.plan.outputs.previous_tag }}
+      should_release: ${{ steps.plan.outputs.should_release }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Plan the patch release
+        id: plan
+        run: ./scripts/release-plan.sh patch --require-changes | tee -a "$GITHUB_OUTPUT"
+
+      - name: Summarise the plan
+        run: |
+          if [[ "${{ steps.plan.outputs.should_release }}" == "true" ]]; then
+              echo "Releasing v${{ steps.plan.outputs.version }}." >> "$GITHUB_STEP_SUMMARY"
+          else
+              echo "No commits since ${{ steps.plan.outputs.previous_tag }}; nothing to release." \
+                  >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  ci:
+    needs: [plan]
+    if: needs.plan.outputs.should_release == 'true'
+    uses: ./.github/workflows/ci.yml
+
+  e2e:
+    needs: [plan]
+    if: needs.plan.outputs.should_release == 'true'
+    uses: ./.github/workflows/e2e.yml
+
+  publish:
+    needs: [plan, ci, e2e]
+    if: needs.plan.outputs.should_release == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-publish.yml
+    with:
+      version: ${{ needs.plan.outputs.version }}
+      previous_tag: ${{ needs.plan.outputs.previous_tag }}

@@ -4,14 +4,17 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: e2e-${{ github.ref }}
-  cancel-in-progress: true
+  # Keyed on the calling workflow too, so a release gate and a push run never cancel each other.
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  # Superseded pull request runs are worth cancelling; a run gating a release is not.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   e2e:

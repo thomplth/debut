@@ -1,5 +1,9 @@
 # Debut
 
+[![CI](https://github.com/thomplth/debut/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/thomplth/debut/actions/workflows/ci.yml)
+[![E2E](https://github.com/thomplth/debut/actions/workflows/e2e.yml/badge.svg?branch=main)](https://github.com/thomplth/debut/actions/workflows/e2e.yml)
+[![Daily Release](https://github.com/thomplth/debut/actions/workflows/release-daily.yml/badge.svg)](https://github.com/thomplth/debut/actions/workflows/release-daily.yml)
+
 A stage-based workspace manager for macOS. Debut replaces the native app switcher
 with isolated workspaces: Cmd+Tab and Cmd+\` cycle only within the active stage,
 never across stages.
@@ -36,3 +40,14 @@ Architecture constraints, the toolchain, and the task workflow live in
 Unit and screenshot tests are the default development loop. E2E is reserved for
 high-risk changes — see [AGENTS.md](AGENTS.md) for the policy and
 [docs/local-e2e.md](docs/local-e2e.md) for running it headlessly.
+
+## Releases
+
+Releases are automated and always gated on the full CI and E2E suites. Release
+notes are the commit subjects between the previous tag and the new one, and each
+release attaches a `Debut.dmg`.
+
+- **Daily** — a scheduled run bumps the patch number and publishes whenever
+  `main` has moved since the last tag. It skips silently when nothing has landed.
+- **Manual** — run the *Manual Release* workflow and choose a `minor` or `major`
+  bump. Human triggered, and never skipped for want of new commits.
