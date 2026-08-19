@@ -490,6 +490,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             ])
         }
 
+        overlayWindow.onStageInsertRequested = { [weak self] edge in
+            guard let self, let ctrl = self.stageController else { return }
+            ctrl.insertStage(atEdge: edge)
+            self.diag.report("stage_inserted_from_overlay", details: [
+                "edge": "\(edge)",
+                "stageCount": "\(ctrl.stageManager.stages.count)",
+            ])
+            self.updateOverlay()
+        }
+
         overlayWindow.onPointerSelectionChanged = { [weak self] stageIndex, windowIndex in
             self?.diag.report("overlay_pointer_selection_changed", level: .transient, details: [
                 "stageIndex": stageIndex.map(String.init) ?? "none",

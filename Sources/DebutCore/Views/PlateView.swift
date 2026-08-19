@@ -201,6 +201,39 @@ enum PlateMotion {
         return layout.centers[index] - plateHeight / 2
     }
 
+    /// The outer edge of the whole stack: the top of the first plate or the bottom of the last.
+    static func stackBoundary(
+        edge: StageInsertionEdge,
+        stackOffset: CGFloat,
+        layout: PlateStackLayout
+    ) -> CGFloat? {
+        guard !layout.centers.isEmpty,
+              layout.heights.count == layout.centers.count
+        else { return nil }
+        let index = edge == .top ? 0 : layout.centers.count - 1
+        let center = stackOffset + layout.centers[index]
+        let halfHeight = layout.heights[index] / 2
+        return edge == .top ? center - halfHeight : center + halfHeight
+    }
+
+    static func stageInsertButtonCenter(
+        edge: StageInsertionEdge,
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        layout: PlateStackLayout
+    ) -> CGPoint? {
+        guard let boundary = stackBoundary(
+            edge: edge,
+            stackOffset: stackOffset,
+            layout: layout
+        ) else { return nil }
+        let reach = PlateConstants.stageInsertHoverHeight / 2
+        return CGPoint(
+            x: containerWidth / 2,
+            y: edge == .top ? boundary - reach : boundary + reach
+        )
+    }
+
     static func anchoredOffset(
         layout: PlateStackLayout,
         anchorIndex: Int,
@@ -553,6 +586,45 @@ enum PlateInteraction {
         return nil
     }
 
+    /// A band just outside each end of the stack. The button is centered in its own band, so
+    /// travelling out to it can never leave the region that revealed it.
+    static func stageInsertionEdge(
+        at location: CGPoint,
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        plateWidths: [CGFloat],
+        layout: PlateStackLayout
+    ) -> StageInsertionEdge? {
+        guard plateWidths.count == layout.centers.count,
+              layout.scales.count == layout.centers.count
+        else { return nil }
+
+        for edge in [StageInsertionEdge.top, .bottom] {
+            guard let boundary = PlateMotion.stackBoundary(
+                edge: edge,
+                stackOffset: stackOffset,
+                layout: layout
+            ) else { return nil }
+            let index = edge == .top ? 0 : layout.centers.count - 1
+            let halfWidth = plateWidths[index] * layout.scales[index] / 2
+            let band = CGRect(
+                x: containerWidth / 2 - halfWidth,
+                y: edge == .top
+                    ? boundary - PlateConstants.stageInsertHoverHeight
+                    : boundary,
+                width: halfWidth * 2,
+                height: PlateConstants.stageInsertHoverHeight
+            )
+            if band.contains(location) { return edge }
+        }
+        return nil
+    }
+
+    static func isStageInsertButtonHit(_ location: CGPoint, center: CGPoint) -> Bool {
+        hypot(location.x - center.x, location.y - center.y)
+            <= PlateConstants.stageInsertButtonSize / 2
+    }
+
     static func pointerSelection(
         current: PointerSelection?,
         target: PointerSelection,
@@ -728,6 +800,8 @@ public struct PlateConstants {
     public static let stageHandleGutterWidth: CGFloat = 40
     public static let edgeHoverRegion: CGFloat = 56
     public static let edgeScrollMargin: CGFloat = 28
+    public static let stageInsertHoverHeight: CGFloat = 44
+    public static let stageInsertButtonSize: CGFloat = 26
 
     public static func thumbnailSize(forWindowCount count: Int, screenWidth: CGFloat) -> (width: CGFloat, height: CGFloat) {
         let maxWidth = screenWidth - screenMargin * 2
@@ -798,9 +872,11 @@ public struct OverlaySwiftUIView: View {
     public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
     public var onStageReordered: ((Int, Int) -> Void)?
     public var onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?
+    public var onStageInsertRequested: ((StageInsertionEdge) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onDesktopSelected: (() -> Void)?
 
+    @State private var revealedStageInsertionEdge: StageInsertionEdge?
     @State private var windowDrag: WindowDragState?
     @State private var settlingWindowDrop: WindowDropSettlingState?
     @State private var retainedWindowDragFocusStageIndex: Int?
@@ -820,6 +896,7 @@ public struct OverlaySwiftUIView: View {
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
         onStageReordered: ((Int, Int) -> Void)? = nil,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
+        onStageInsertRequested: ((StageInsertionEdge) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
         onDesktopSelected: (() -> Void)? = nil
     ) {
@@ -827,10 +904,12 @@ public struct OverlaySwiftUIView: View {
             viewModel: viewModel,
             initialWindowDrag: nil,
             initialStageDrag: nil,
+            initialStageInsertionEdge: nil,
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
             onStageReordered: onStageReordered,
             onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
+            onStageInsertRequested: onStageInsertRequested,
             onPointerSelectionChanged: onPointerSelectionChanged,
             onDesktopSelected: onDesktopSelected
         )
@@ -843,6 +922,7 @@ public struct OverlaySwiftUIView: View {
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
         onStageReordered: ((Int, Int) -> Void)? = nil,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
+        onStageInsertRequested: ((StageInsertionEdge) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
         onDesktopSelected: (() -> Void)? = nil
     ) {
@@ -850,10 +930,12 @@ public struct OverlaySwiftUIView: View {
             viewModel: viewModel,
             initialWindowDrag: WindowDragState?(initialWindowDrag),
             initialStageDrag: nil,
+            initialStageInsertionEdge: nil,
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
             onStageReordered: onStageReordered,
             onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
+            onStageInsertRequested: onStageInsertRequested,
             onPointerSelectionChanged: onPointerSelectionChanged,
             onDesktopSelected: onDesktopSelected
         )
@@ -866,6 +948,7 @@ public struct OverlaySwiftUIView: View {
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
         onStageReordered: ((Int, Int) -> Void)? = nil,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
+        onStageInsertRequested: ((StageInsertionEdge) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
         onDesktopSelected: (() -> Void)? = nil
     ) {
@@ -873,12 +956,33 @@ public struct OverlaySwiftUIView: View {
             viewModel: viewModel,
             initialWindowDrag: nil,
             initialStageDrag: StageDragState?(initialStageDrag),
+            initialStageInsertionEdge: nil,
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
             onStageReordered: onStageReordered,
             onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
+            onStageInsertRequested: onStageInsertRequested,
             onPointerSelectionChanged: onPointerSelectionChanged,
             onDesktopSelected: onDesktopSelected
+        )
+    }
+
+    init(
+        viewModel: OverlayViewModel,
+        initialStageInsertionEdge: StageInsertionEdge
+    ) {
+        self.init(
+            viewModel: viewModel,
+            initialWindowDrag: nil,
+            initialStageDrag: nil,
+            initialStageInsertionEdge: StageInsertionEdge?(initialStageInsertionEdge),
+            onWindowSelected: nil,
+            onWindowMoved: nil,
+            onStageReordered: nil,
+            onStageHandleVisibilityChanged: nil,
+            onStageInsertRequested: nil,
+            onPointerSelectionChanged: nil,
+            onDesktopSelected: nil
         )
     }
 
@@ -886,10 +990,12 @@ public struct OverlaySwiftUIView: View {
         viewModel: OverlayViewModel,
         initialWindowDrag: WindowDragState?,
         initialStageDrag: StageDragState?,
+        initialStageInsertionEdge: StageInsertionEdge?,
         onWindowSelected: ((Int, Int) -> Void)?,
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?,
         onStageReordered: ((Int, Int) -> Void)?,
         onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?,
+        onStageInsertRequested: ((StageInsertionEdge) -> Void)?,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)?,
         onDesktopSelected: (() -> Void)?
     ) {
@@ -898,10 +1004,12 @@ public struct OverlaySwiftUIView: View {
         self.onWindowMoved = onWindowMoved
         self.onStageReordered = onStageReordered
         self.onStageHandleVisibilityChanged = onStageHandleVisibilityChanged
+        self.onStageInsertRequested = onStageInsertRequested
         self.onPointerSelectionChanged = onPointerSelectionChanged
         self.onDesktopSelected = onDesktopSelected
         _windowDrag = State(initialValue: initialWindowDrag)
         _stageDrag = State(initialValue: initialStageDrag)
+        _revealedStageInsertionEdge = State(initialValue: initialStageInsertionEdge)
         _pointerMovementGate = State(
             initialValue: PointerMovementGate(initialLocation: NSEvent.mouseLocation)
         )
@@ -1154,6 +1262,19 @@ public struct OverlaySwiftUIView: View {
                     .allowsHitTesting(false)
                 }
             }
+            .overlay(alignment: .topLeading) {
+                if let center = stageInsertButtonCenter(
+                    containerWidth: geo.size.width,
+                    stackOffset: yOffset,
+                    layout: visualLayout
+                ) {
+                    StageInsertButton()
+                        .position(center)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.14), value: revealedStageInsertionEdge)
             .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeStageIndex)
             .transition(focusTransition.usesSpatialMotion ? .identity : .opacity)
             .animation(focusTransition.animation, value: layoutAnimationKey)
@@ -1165,6 +1286,18 @@ public struct OverlaySwiftUIView: View {
             .simultaneousGesture(
                 SpatialTapGesture(coordinateSpace: .named("overlay"))
                     .onEnded { event in
+                        // The insert button lives outside every plate frame, so it has to be
+                        // claimed here or the same tap would read as a desktop click.
+                        if let edge = revealedStageInsertionEdge,
+                           let center = stageInsertButtonCenter(
+                               containerWidth: geo.size.width,
+                               stackOffset: yOffset,
+                               layout: visualLayout
+                           ),
+                           PlateInteraction.isStageInsertButtonHit(event.location, center: center) {
+                            onStageInsertRequested?(edge)
+                            return
+                        }
                         guard PlateInteraction.isDesktopArea(
                             event.location,
                             plateFrames: plateFrames
@@ -1206,9 +1339,19 @@ public struct OverlaySwiftUIView: View {
                             layout: visualLayout
                         )
                     )
+                    revealedStageInsertionEdge = windowDrag == nil && stageDrag == nil
+                        ? PlateInteraction.stageInsertionEdge(
+                            at: location,
+                            containerWidth: geo.size.width,
+                            stackOffset: yOffset,
+                            plateWidths: plateWidths,
+                            layout: visualLayout
+                        )
+                        : nil
                 case .ended:
                     hoverPointerY = nil
                     hoveredStageIndex = nil
+                    revealedStageInsertionEdge = nil
                     updateRevealedStageHandle(nil)
                 }
             }
@@ -1332,6 +1475,20 @@ public struct OverlaySwiftUIView: View {
         stageDrag = nil
         guard drag.destinationIndex != drag.stageIndex else { return }
         onStageReordered?(drag.stageIndex, drag.destinationIndex)
+    }
+
+    private func stageInsertButtonCenter(
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        layout: PlateStackLayout
+    ) -> CGPoint? {
+        guard let edge = revealedStageInsertionEdge else { return nil }
+        return PlateMotion.stageInsertButtonCenter(
+            edge: edge,
+            containerWidth: containerWidth,
+            stackOffset: stackOffset,
+            layout: layout
+        )
     }
 
     private func updateRevealedStageHandle(_ index: Int?) {
@@ -1569,6 +1726,24 @@ struct PlateSwiftUIView: View {
             plateFrames: plateFrames,
             windowFrames: windowFrames
         )
+    }
+}
+
+private struct StageInsertButton: View {
+    var body: some View {
+        Image(systemName: "plus")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.92))
+            .frame(
+                width: PlateConstants.stageInsertButtonSize,
+                height: PlateConstants.stageInsertButtonSize
+            )
+            .background(.black.opacity(0.55), in: Circle())
+            .overlay {
+                Circle().stroke(.white.opacity(0.16), lineWidth: 0.5)
+            }
+            .help("Add stage")
+            .accessibilityLabel("Add stage")
     }
 }
 

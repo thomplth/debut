@@ -6,6 +6,12 @@ public enum StageInsertPosition: Codable, Sendable {
     case below
 }
 
+/// Either end of the plate stack, addressed absolutely rather than relative to the active stage.
+public enum StageInsertionEdge: Sendable, Equatable {
+    case top
+    case bottom
+}
+
 public enum SwapDirection: Sendable {
     case up
     case down
@@ -75,6 +81,12 @@ public struct StageManager: Codable, Sendable {
             stages.insert(newStage, at: activeIndex + 1)
         }
 
+        activeStageID = newStage.id
+    }
+
+    public mutating func createStage(atEdge edge: StageInsertionEdge) {
+        let newStage = Stage()
+        stages.insert(newStage, at: edge == .top ? 0 : stages.count)
         activeStageID = newStage.id
     }
 

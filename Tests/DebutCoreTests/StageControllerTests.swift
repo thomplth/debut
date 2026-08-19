@@ -886,6 +886,34 @@ struct StageControllerTests {
         #expect(controller.selectedStageIndex == 1)
     }
 
+    @Test("An overlay edge insert adds a stage at that end and focuses it")
+    func insertStageAtEdge() {
+        let (controller, _, keyboardSvc) = makeController()
+        let originalID = controller.stageManager.stages[0].id
+        keyboardSvc.simulateEvent(.cmdTabHold)
+
+        controller.insertStage(atEdge: .top)
+
+        #expect(controller.stageManager.stages.count == 2)
+        #expect(controller.stageManager.stages[1].id == originalID)
+        #expect(controller.selectedStageIndex == 0)
+        #expect(controller.selectedWindowIndex == 0)
+
+        controller.insertStage(atEdge: .bottom)
+
+        #expect(controller.stageManager.stages.count == 3)
+        #expect(controller.selectedStageIndex == 2)
+    }
+
+    @Test("Edge inserts are ignored while the overlay is closed")
+    func insertStageRequiresVisibleOverlay() {
+        let (controller, _, _) = makeController()
+
+        controller.insertStage(atEdge: .bottom)
+
+        #expect(controller.stageManager.stages.count == 1)
+    }
+
     @Test("Held backward Tab stops at the first window and a fresh press wraps")
     func backwardTabCycle() {
         let (controller, _, keyboardSvc) = makeController()
