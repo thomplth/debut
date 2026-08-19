@@ -227,6 +227,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 if let sm = self.stageController?.stageManager {
                     self.debouncedSaver?.scheduleSave(sm)
                 }
+                self.stageController?.handleLiveWindowsRemoved()
             }
         }
         discovery.onWindowTitleChanged = { [weak self] windowID, newTitle in
@@ -281,6 +282,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                     ])
                     let sm = controller.stageManager
                     self.debouncedSaver?.scheduleSave(sm)
+                    controller.handleLiveWindowsRemoved()
                 }
             }
         }
