@@ -320,12 +320,29 @@ hop: "let SwiftUI finish the drag transaction before replacing its root view."
 <h3>Reordering stages</h3>
 
 <p>
-Reordering is <strong>handle-only</strong>. Hovering within 24&nbsp;pt of a plate's
-leading edge reveals a drag handle; while revealed, the reveal width of
-36&nbsp;pt is <em>added</em> to the hover width, so the hotspot grows to
-60&nbsp;pt as hysteresis&nbsp;<span class="src">PlateView.swift:393</span>. Dragging the handle maps vertical translation to an
-index delta using the stride between plates. Dragging the plate body does
-<em>not</em> reorder, and the E2E suite asserts that negative explicitly.
+Reordering is <strong>handle-only</strong>. The reveal zone is computed from the
+stack's own geometry rather than from the plate's local coordinate space: measuring
+hover inside a space that the reveal itself expands is a feedback loop, and it made
+the handle boomerang under a still cursor. Each plate's hit frame is widened on the
+leading edge by a 40&nbsp;pt gutter (scaled with the plate), so drifting left toward
+the handle keeps the plate magnified instead of dropping focus and hiding the very
+handle the pointer is heading for. Within a plate's vertical band, the reveal zone
+runs from the gutter's outer edge through 24&nbsp;pt of hover width; while that plate
+is already revealed the reach grows by the 36&nbsp;pt reveal width as hysteresis&nbsp;<span class="src">PlateView.swift:511</span>.
+</p>
+
+<p>
+The drag itself is <strong>slot-based, not pointer-following</strong>. Vertical
+translation maps to a destination index using the stride between plates, and
+<code>PlateMotion.stageDragSlots</code> then renders the whole stack as the
+already-reordered arrangement&nbsp;<span class="src">PlateView.swift:126</span>. Three properties fall out of that one
+decision: the held plate is the focus index, so it stays at full size rather than
+shrinking as it passes over its neighbours; the other plates shift the instant the
+destination changes; and there is no horizontal offset to leak, so the held plate
+stays column-aligned with the stack. Committing a move also moves focus — the moved
+stage becomes both the selection and the active stage&nbsp;<span class="src">StageController.reorderStage</span>.
+Dragging the plate body does <em>not</em> reorder, and the E2E suite asserts that
+negative explicitly.
 </p>
 
 <p>

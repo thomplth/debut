@@ -119,7 +119,9 @@ on plates.
 
 A window preview can be dragged onto another plate to move that window between
 stages, and a plate's handle can be dragged to reorder stages within the stack.
-Both paths emit diagnostic events — `window_moved_by_drag` and
+A held plate travels by slot: it keeps its column and its full size while the rest
+of the stack reflows around its current destination, and committing the drag makes
+the moved stage the active one. Both paths emit diagnostic events — `window_moved_by_drag` and
 `stage_reordered_by_drag` — which the E2E suite asserts against. Virtualized and
 GitHub-hosted macOS do not deliver synthetic drags; see docs/local-e2e.md.
 

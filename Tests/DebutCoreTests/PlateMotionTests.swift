@@ -472,14 +472,6 @@ struct PlateMotionTests {
         )
     }
 
-    @Test("Stage drag handle hotspot uses hysteresis while revealed")
-    func stageDragHandleHotspot() {
-        #expect(PlateInteraction.isStageHandleHotspot(locationX: 12, isRevealed: false))
-        #expect(!PlateInteraction.isStageHandleHotspot(locationX: 40, isRevealed: false))
-        #expect(PlateInteraction.isStageHandleHotspot(locationX: 58, isRevealed: true))
-        #expect(!PlateInteraction.isStageHandleHotspot(locationX: 80, isRevealed: true))
-    }
-
     @Test("Plate centers use the distance-based layout scale")
     func plateCentersFollowDepthLayout() {
         let activeCenter = PlateConstants.plateCenterY(
@@ -800,6 +792,183 @@ struct PlateMotionTests {
             plateStride: 100,
             stageCount: 3
         ) == nil)
+    }
+
+    @Test("A held plate keeps every slot filled as it travels")
+    func stageDragSlots() {
+        #expect(PlateMotion.stageDragSlots(stageCount: 3, from: 1, to: 0) == [1, 0, 2])
+        #expect(PlateMotion.stageDragSlots(stageCount: 3, from: 0, to: 2) == [2, 0, 1])
+        #expect(PlateMotion.stageDragSlots(stageCount: 3, from: 1, to: 1) == [0, 1, 2])
+        #expect(PlateMotion.stageDragSlots(stageCount: 4, from: 3, to: 1) == [0, 2, 3, 1])
+    }
+
+    @Test("An out-of-range hold leaves the stack in its resting order")
+    func stageDragSlotsRejectInvalidMoves() {
+        #expect(PlateMotion.stageDragSlots(stageCount: 3, from: 5, to: 0) == [0, 1, 2])
+        #expect(PlateMotion.stageDragSlots(stageCount: 3, from: 0, to: 9) == [0, 1, 2])
+        #expect(PlateMotion.stageDragSlots(stageCount: 0, from: 0, to: 0) == [])
+    }
+
+    /// The held plate is the focus wherever it currently sits, so it renders at full size for
+    /// the whole gesture instead of shrinking as it passes over the stages it displaces.
+    @Test("A held plate stays full size and the stack magnifies around its position")
+    func heldPlateKeepsFocusScale() {
+        let stageCount = 3
+        let source = 2
+        let destination = 1
+        let slots = PlateMotion.stageDragSlots(
+            stageCount: stageCount,
+            from: source,
+            to: destination
+        )
+        let layout = PlateMotion.stackLayout(
+            stageCount: stageCount,
+            focusIndex: PlateMotion.focusedStageIndex(
+                active: 0,
+                hovered: nil,
+                dragTarget: destination,
+                retainedDragTarget: nil
+            ),
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+
+        #expect(layout.scales[slots[source]] == 1)
+        #expect(layout.scales[slots[0]] < layout.scales[slots[source]])
+        #expect(layout.scales[slots[1]] < layout.scales[slots[source]])
+    }
+
+    @Test("Horizontal movement never moves a held plate")
+    func stageDragIgnoresHorizontalMovement() {
+        let straight = PlateInteraction.stageDragDestination(
+            from: 1,
+            translation: CGSize(width: 0, height: 120),
+            plateStride: 100,
+            stageCount: 4
+        )
+        let swerving = PlateInteraction.stageDragDestination(
+            from: 1,
+            translation: CGSize(width: 400, height: 120),
+            plateStride: 100,
+            stageCount: 4
+        )
+
+        #expect(straight == 2)
+        #expect(swerving == straight)
+    }
+
+    @Test("A hold that has not travelled a full slot keeps its own position")
+    func stageDragDestinationHoldsSourceSlot() {
+        #expect(PlateInteraction.stageDragDestination(
+            from: 1,
+            translation: CGSize(width: 0, height: 20),
+            plateStride: 100,
+            stageCount: 4
+        ) == 1)
+        #expect(PlateInteraction.stageDragDestination(
+            from: 1,
+            translation: CGSize(width: 0, height: -900),
+            plateStride: 100,
+            stageCount: 4
+        ) == 0)
+    }
+
+    @Test("The drag handle gutter still counts as the plate for magnification")
+    func hoverFocusCoversHandleGutter() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let leadingEdge: CGFloat = 500 / 2 - 300 / 2
+
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: nil,
+            at: CGPoint(x: leadingEdge - 10, y: layout.centers[1]),
+            containerWidth: 500,
+            currentStackOffset: 0,
+            plateWidths: [200, 300, 200],
+            currentLayout: layout
+        ) == 1)
+        #expect(PlateInteraction.hoveredStageIndex(
+            previous: nil,
+            at: CGPoint(
+                x: leadingEdge - PlateConstants.stageHandleGutterWidth - 10,
+                y: layout.centers[1]
+            ),
+            containerWidth: 500,
+            currentStackOffset: 0,
+            plateWidths: [200, 300, 200],
+            currentLayout: layout
+        ) == nil)
+    }
+
+    @Test("The drag handle reveals from the gutter of any plate, not just the current one")
+    func stageHandleRevealFollowsPlateGeometry() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let inactiveWidth: CGFloat = 200 * layout.scales[2]
+        let inactiveLeadingEdge: CGFloat = 500 / 2 - inactiveWidth / 2
+
+        #expect(PlateInteraction.revealedStageHandleIndex(
+            previous: nil,
+            at: CGPoint(x: inactiveLeadingEdge - 6, y: layout.centers[2]),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [200, 300, 200],
+            layout: layout
+        ) == 2)
+        #expect(PlateInteraction.revealedStageHandleIndex(
+            previous: nil,
+            at: CGPoint(x: 250, y: layout.centers[2]),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [200, 300, 200],
+            layout: layout
+        ) == nil)
+    }
+
+    /// Revealing the handle widens the plate, which slides the pointer deeper into it. Without
+    /// hysteresis that immediately fails the reveal test and the handle flickers.
+    @Test("A revealed handle survives the plate growing under a still pointer")
+    func stageHandleRevealHoldsThroughExpansion() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 2,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let leadingEdge: CGFloat = 500 / 2 - 300 / 2
+        let deeperIn = CGPoint(
+            x: leadingEdge + PlateConstants.stageHandleHoverWidth + 8,
+            y: layout.centers[0]
+        )
+
+        #expect(PlateInteraction.revealedStageHandleIndex(
+            previous: nil,
+            at: deeperIn,
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [300, 300],
+            layout: layout
+        ) == nil)
+        #expect(PlateInteraction.revealedStageHandleIndex(
+            previous: 0,
+            at: deeperIn,
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: [300, 300],
+            layout: layout
+        ) == 0)
     }
 
     @Test("A stale pointer exit cannot clear the newly hovered window")

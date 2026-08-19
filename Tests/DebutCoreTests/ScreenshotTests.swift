@@ -194,6 +194,30 @@ struct ScreenshotTests {
         ) < 0.5)
     }
 
+    @Test("A held plate takes its destination slot without drifting sideways")
+    func heldPlateTakesDestinationSlot() throws {
+        let vm = makeSampleViewModel(stageCount: 3, windowsPerStage: [3, 4, 2], activeIndex: 1)
+        let size = NSSize(width: 1200, height: 600)
+        let drag = StageDragState(
+            stageIndex: 2,
+            stageID: vm.plates[2].id,
+            verticalTranslation: -260,
+            destinationIndex: 0
+        )
+        let idle = renderPlateFrames(OverlaySwiftUIView(viewModel: vm), size: size)
+        let dragging = renderPlateFrames(
+            OverlaySwiftUIView(viewModel: vm, initialStageDrag: drag),
+            size: size
+        )
+
+        guard let idleHeld = idle[2], let heldPlate = dragging[2],
+              let displaced = dragging[0]
+        else { throw ScreenshotError.renderFailed }
+
+        #expect(heldPlate.midY < displaced.midY)
+        #expect(abs(heldPlate.midX - idleHeld.midX) < 0.5)
+    }
+
     @Test("Cross-stage drag grows the target plate before drop")
     func crossStageDragFocusesTargetPlate() throws {
         let vm = makeSampleViewModel(stageCount: 2, windowsPerStage: [2, 2], activeIndex: 0)
