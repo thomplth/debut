@@ -65,8 +65,8 @@ public struct ShortcutModifiers: Codable, Sendable, Equatable, Hashable {
 public struct AppSettings: Codable, Sendable, Equatable {
     public static let defaultOverlayPresentationDelay: TimeInterval = 0.08
     public static let defaultPreviewCacheTTL: TimeInterval = 60
-    /// Matches the pace the system switcher holds regardless of the user's key-repeat rate.
-    public static let defaultHeldCycleMinimumInterval: TimeInterval = 0.1
+    /// Paces held cycling independently of the user's key-repeat rate.
+    public static let defaultHeldCycleMinimumInterval: TimeInterval = 0.06
 
     public var launchAtLogin: Bool
     public var excludedBundleIDs: [String]
