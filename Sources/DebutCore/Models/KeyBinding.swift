@@ -181,6 +181,21 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         self == .nextAppWindow || self == .previousAppWindow
     }
 
+    /// Actions that step a selection one place along a list. Only these are paced while held:
+    /// swallowing repeats of something like "delete stage" would drop keystrokes the user meant.
+    public var isCycling: Bool {
+        switch self {
+        case .activateNextWindow, .activatePreviousWindow,
+             .activateNextStage, .activatePreviousStage, .activatePreviousStageAlternate,
+             .nextAppWindow, .previousAppWindow,
+             .nextWindow, .previousWindow, .previousWindowAlternate,
+             .nextStage, .previousStage:
+            true
+        default:
+            false
+        }
+    }
+
     public static let activationActions: [KeyAction] = [
         .activateNextWindow, .activatePreviousWindow,
         .activateNextStage, .activatePreviousStage, .activatePreviousStageAlternate,

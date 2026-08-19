@@ -408,6 +408,29 @@ public struct SettingsView: View {
                 )
             }
 
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Held cycling pace")
+                    Spacer()
+                    Text(
+                        viewModel.settings.heldCycleMinimumInterval > 0
+                            ? "\(Int((viewModel.settings.heldCycleMinimumInterval * 1000).rounded())) ms"
+                            : "Off"
+                    )
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                }
+                Slider(
+                    value: $viewModel.settings.heldCycleMinimumInterval,
+                    in: 0...0.3,
+                    step: 0.01
+                )
+                Text("Shortest gap between steps while a cycling shortcut is held, so a fast key-repeat setting cannot race the selection past what you can follow. Off falls back to your system key-repeat rate.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text("Command hints")
                 .font(.headline)
                 .padding(.top, 8)

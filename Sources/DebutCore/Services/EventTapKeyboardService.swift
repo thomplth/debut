@@ -31,6 +31,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     )
     private var shortcutRecordingHandler: (@MainActor @Sendable (KeyCombo?) -> Void)?
     private var shortcutRecordingKeysDown: Set<Int64> = []
+    private var storedHeldCycleMinimumInterval: TimeInterval =
+        AppSettings.defaultHeldCycleMinimumInterval
+    private var lastAcceptedCycleNanoseconds: UInt64?
+    private let monotonicNanoseconds: @Sendable () -> UInt64
     private let overlayPresentationRecorder: OverlayPresentationRecorder
     private let performanceRecorder: PerformanceRecorder
 
@@ -55,12 +59,44 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         set { configurationLock.withLock { storedQuickSwitchSameApplicationModifiers = newValue } }
     }
 
+    public var heldCycleMinimumInterval: TimeInterval {
+        get { configurationLock.withLock { storedHeldCycleMinimumInterval } }
+        set { configurationLock.withLock { storedHeldCycleMinimumInterval = newValue } }
+    }
+
     public init(
         overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
-        performanceRecorder: PerformanceRecorder = .shared
+        performanceRecorder: PerformanceRecorder = .shared,
+        monotonicNanoseconds: @escaping @Sendable () -> UInt64 = {
+            DispatchTime.now().uptimeNanoseconds
+        }
     ) {
         self.overlayPresentationRecorder = overlayPresentationRecorder
         self.performanceRecorder = performanceRecorder
+        self.monotonicNanoseconds = monotonicNanoseconds
+    }
+
+    /// A key-repeat rate set near zero would otherwise blur through every window on a single
+    /// held Tab. Repeats arriving inside the pacing window are dropped rather than deferred, so
+    /// the selection lands wherever the key was actually released.
+    ///
+    /// The clock is read outside the lock: it is a plain monotonic counter, and holding the
+    /// configuration lock across it would put it on the event tap's critical path.
+    private func shouldPaceHeldCycle(_ action: KeyAction, isAutoRepeat: Bool) -> Bool {
+        guard action.isCycling else { return false }
+        let now = monotonicNanoseconds()
+        return configurationLock.withLock {
+            let minimum = UInt64(max(0, storedHeldCycleMinimumInterval) * 1_000_000_000)
+            if isAutoRepeat,
+               minimum > 0,
+               let last = lastAcceptedCycleNanoseconds,
+               now >= last,
+               now - last < minimum {
+                return true
+            }
+            lastAcceptedCycleNanoseconds = now
+            return false
+        }
     }
 
     public func beginShortcutRecording(
@@ -295,6 +331,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             if globalAction.isOverlayActivation {
                 beginSession(using: globalAction)
                 let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                if shouldPaceHeldCycle(globalAction, isAutoRepeat: isAutoRepeat) { return nil }
                 let keyEvent = globalAction.toKeyEvent(autoRepeat: isAutoRepeat)
                 let presentation = !isAutoRepeat && !overlayVisible
                     ? overlayPresentationRecorder.begin(
@@ -319,8 +356,11 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             if globalAction.isSameAppCycle && !overlayVisible {
                 beginSession(using: globalAction)
                 let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-                let keyEvent = globalAction.toKeyEvent(autoRepeat: isAutoRepeat)
-                deliver(keyEvent, asynchronously: deliverAsynchronously)
+                if shouldPaceHeldCycle(globalAction, isAutoRepeat: isAutoRepeat) { return nil }
+                deliver(
+                    globalAction.toKeyEvent(autoRepeat: isAutoRepeat),
+                    asynchronously: deliverAsynchronously
+                )
                 return nil
             }
         }
@@ -356,6 +396,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
 
         if let sessionAction {
             let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            if shouldPaceHeldCycle(sessionAction, isAutoRepeat: isAutoRepeat) { return nil }
             deliver(
                 sessionAction.toKeyEvent(autoRepeat: isAutoRepeat),
                 asynchronously: deliverAsynchronously
