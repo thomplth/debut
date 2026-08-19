@@ -914,6 +914,44 @@ struct StageControllerTests {
         #expect(controller.stageManager.stages.count == 1)
     }
 
+    @Test("An overlay close button deletes that stage and clamps the selection")
+    func deleteStageAtIndex() {
+        let (controller, _, keyboardSvc) = makeController()
+        let originalID = controller.stageManager.stages[0].id
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        controller.insertStage(atEdge: .bottom)
+        controller.insertStage(atEdge: .bottom)
+        #expect(controller.stageManager.stages.count == 3)
+
+        controller.deleteStage(atIndex: 2)
+
+        #expect(controller.stageManager.stages.count == 2)
+        #expect(controller.stageManager.stages[0].id == originalID)
+        #expect(controller.selectedStageIndex == 1)
+        #expect(controller.selectedWindowIndex == 0)
+
+        controller.deleteStage(atIndex: 0)
+
+        #expect(controller.stageManager.stages.count == 1)
+        #expect(controller.stageManager.stages[0].id != originalID)
+        #expect(controller.selectedStageIndex == 0)
+    }
+
+    @Test("Stage deletes are ignored while the overlay is closed or out of range")
+    func deleteStageRequiresVisibleOverlayAndValidIndex() {
+        let (controller, _, keyboardSvc) = makeController()
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        controller.insertStage(atEdge: .bottom)
+        let order = controller.stageManager.stages.map(\.id)
+
+        controller.deleteStage(atIndex: 5)
+        #expect(controller.stageManager.stages.map(\.id) == order)
+
+        keyboardSvc.simulateEvent(.escape)
+        controller.deleteStage(atIndex: 0)
+        #expect(controller.stageManager.stages.map(\.id) == order)
+    }
+
     @Test("Held backward Tab stops at the first window and a fresh press wraps")
     func backwardTabCycle() {
         let (controller, _, keyboardSvc) = makeController()

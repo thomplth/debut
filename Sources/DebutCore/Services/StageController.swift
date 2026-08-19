@@ -1041,6 +1041,16 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         notifyOverlayUpdated()
     }
 
+    public func deleteStage(atIndex index: Int) {
+        guard isStageManagerVisible,
+              stageManager.stages.indices.contains(index) else { return }
+        stageManager.deleteStage(id: stageManager.stages[index].id)
+        selectedStageIndex = min(selectedStageIndex, stageManager.stages.count - 1)
+        selectedWindowIndex = 0
+        delegate?.stageControllerDidMutateState(self)
+        notifyOverlayUpdated()
+    }
+
     private func deleteSelectedStage() {
         guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
