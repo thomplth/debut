@@ -1151,7 +1151,8 @@ struct PlateMotionTests {
                 containerWidth: 500,
                 stackOffset: 0,
                 plateWidths: widths,
-                layout: layout
+                layout: layout,
+                cornerRadius: 0
             )
         }
         let secondCorner = CGPoint(
@@ -1184,21 +1185,62 @@ struct PlateMotionTests {
                 containerWidth: 500,
                 stackOffset: 40,
                 plateWidths: widths,
-                layout: layout
+                layout: layout,
+                cornerRadius: 40
             )
-            #expect(center?.x == 250 + widths[index] * layout.scales[index] / 2)
             #expect(PlateInteraction.revealedStageCloseIndex(
                 at: center ?? .zero,
                 containerWidth: 500,
                 stackOffset: 40,
                 plateWidths: widths,
-                layout: layout
+                layout: layout,
+                cornerRadius: 40
             ) == index)
             #expect(PlateInteraction.isStageCloseButtonHit(
                 center ?? .zero,
                 center: center ?? .zero
             ))
         }
+    }
+
+    /// The button has to ride the plate's visible border, so a rounded corner pulls it down and
+    /// to the left along the arc; a square corner leaves it exactly on the corner point.
+    @Test("The close button follows the plate corner radius")
+    func stageCloseButtonFollowsCornerRadius() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 2,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.5
+        )
+        let widths: [CGFloat] = [300, 240]
+        let center: (Int, CGFloat) -> CGPoint? = {
+            PlateMotion.stageCloseButtonCenter(
+                at: $0,
+                containerWidth: 500,
+                stackOffset: 0,
+                plateWidths: widths,
+                layout: layout,
+                cornerRadius: $1
+            )
+        }
+        let sharpCorner: (Int) -> CGPoint = { index in
+            CGPoint(
+                x: 250 + widths[index] * layout.scales[index] / 2,
+                y: layout.centers[index] - layout.heights[index] / 2
+            )
+        }
+
+        #expect(center(0, 0) == sharpCorner(0))
+
+        let inset = 40 * (1 - 1 / 2.0.squareRoot())
+        #expect(abs((center(0, 40)?.x ?? 0) - (sharpCorner(0).x - inset)) < 0.001)
+        #expect(abs((center(0, 40)?.y ?? 0) - (sharpCorner(0).y + inset)) < 0.001)
+
+        // The scaled-down plate draws a scaled-down radius, so its inset shrinks to match.
+        #expect(abs((center(1, 40)?.x ?? 0) - (sharpCorner(1).x - inset * layout.scales[1])) < 0.001)
+        #expect(abs((center(1, 40)?.y ?? 0) - (sharpCorner(1).y + inset * layout.scales[1])) < 0.001)
     }
 
     @Test("An empty stack offers no close affordance")
@@ -1210,14 +1252,16 @@ struct PlateMotionTests {
             containerWidth: 500,
             stackOffset: 0,
             plateWidths: [],
-            layout: empty
+            layout: empty,
+            cornerRadius: 0
         ) == nil)
         #expect(PlateMotion.stageCloseButtonCenter(
             at: 0,
             containerWidth: 500,
             stackOffset: 0,
             plateWidths: [],
-            layout: empty
+            layout: empty,
+            cornerRadius: 0
         ) == nil)
     }
 
