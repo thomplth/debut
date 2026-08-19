@@ -159,7 +159,7 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.heldCycleMinimumInterval == AppSettings.defaultHeldCycleMinimumInterval)
-        #expect(AppSettings.defaultHeldCycleMinimumInterval == 0.1)
+        #expect(AppSettings.defaultHeldCycleMinimumInterval == 0.06)
     }
 
     @Test("Older settings default command hints to automatic with no usage")
