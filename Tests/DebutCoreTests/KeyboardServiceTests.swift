@@ -770,9 +770,12 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdOptionShiftTabHold])
     }
 
-    @Test("Cmd+Q passes through while the overlay is visible")
-    func commandQPassesThroughVisibleOverlay() {
+    @Test("Cmd+Q quits the overlay's selected app instead of the frontmost one")
+    func commandQQuitsSelectedAppVisibleOverlay() {
         let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
 
         let tabDown = CGEvent(
             keyboardEventSource: nil,
@@ -796,8 +799,35 @@ struct KeyboardServiceTests {
         )!
         qUp.flags = .maskCommand
 
+        #expect(service.handleCGEvent(type: .keyDown, event: qDown) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: qUp) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .quitSelectedApp])
+    }
+
+    @Test("Cmd+Q reaches the frontmost app when the quit command is unbound")
+    func commandQPassesThroughWhenUnbound() {
+        let service = EventTapKeyboardService()
+        var bindings = KeyBindings()
+        bindings.bindings.removeValue(forKey: .quitSelectedApp)
+        service.keyBindings = bindings
+
+        let tabDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        tabDown.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: tabDown) == nil)
+        service.overlayVisible = true
+
+        let qDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Q),
+            keyDown: true
+        )!
+        qDown.flags = .maskCommand
+
         #expect(service.handleCGEvent(type: .keyDown, event: qDown) === qDown)
-        #expect(service.handleCGEvent(type: .keyUp, event: qUp) === qUp)
     }
 
     @Test("Plain Q remains consumed while the overlay is visible")

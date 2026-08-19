@@ -46,6 +46,13 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return app.activate()
     }
 
+    /// `terminate` sends the standard quit request, so an app with unsaved work still gets to
+    /// put up its own save prompt.
+    public func terminateApp(pid: pid_t) -> Bool {
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return false }
+        return app.terminate()
+    }
+
     public func isAccessibilityEnabled() -> Bool {
         AXIsProcessTrusted()
     }
