@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04 · Stages &amp; switching — Debut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a class="current" href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Chapter 04</p>
+<h1>Stages and switching</h1>
+<p class="lede">
+The model that holds the stages, the controller that acts on the system, the
+exact sequence that makes a stage switch look instantaneous, and the full-screen
+window that makes the whole approach possible.
+</p>
+
+<h2>A pure model and an impure controller</h2>
+
+<p>
+The split here is the cleanest boundary in the codebase and worth internalising
+before reading either file.
+</p>
+
+<table>
+  <tr><th></th><th><code>StageManager</code></th><th><code>StageController</code></th></tr>
+  <tr>
+    <td>Kind</td>
+    <td><code>struct … Codable, Sendable</code> <span class="src">Models/StageManager.swift:14</span></td>
+    <td><code>final class … @unchecked Sendable</code> <span class="src">Services/StageController.swift:151</span></td>
+  </tr>
+  <tr>
+    <td>Imports</td>
+    <td>Foundation, CoreGraphics. Nothing else.</td>
+    <td>AppKit, Accessibility, the window and keyboard services.</td>
+  </tr>
+  <tr>
+    <td>Holds</td>
+    <td><code>stages</code>, <code>activeStageID</code>, <code>dormantWindowAssignments</code></td>
+    <td>The <code>StageManager</code> value, services, preview cache, overlay state, and the <em>selection</em></td>
+  </tr>
+  <tr>
+    <td>Methods</td>
+    <td>Queries (<code>activeStage</code>, <code>stage(atIndex:)</code>, <code>stageContainingWindow</code>) plus <code>mutating func</code>s that touch nothing outside the struct</td>
+    <td>Side effects on real windows</td>
+  </tr>
+</table>
+
+<p>
+The distinction that trips people up: the model tracks the <strong>committed</strong>
+active stage; the controller tracks the <strong>tentative</strong> overlay
+selection, in <code>selectedStageIndex</code> and <code>selectedWindowIndex</code>.
+While the overlay is open those two disagree, and that is the point — moving the
+selection must not switch stages. They reconcile in <code>commitSelection()</code>
+when the modifier is released.
+</p>
+
+<p>
+Because the model is a struct stored on a class, external code mutates it through
+an <code>inout</code> reference to a property. That creates one real hazard, which
+the code names:
+</p>
+
+<blockquote>
+Rebuild into a local copy so discovery diagnostics can read controller state
+without an overlapping exclusive access.
+<cite>paraphrasing StageController.swift:306</cite>
+</blockquote>
+
+<p>
+There is a regression test called <code>windowCacheResetAvoidsExclusiveAccessCrash</code>
+guarding exactly that.
+</p>
+
+<h2>The activation sequence</h2>
+
+<p>
+<code>switchToStage(id:raiseWindowID:)</code>&nbsp;<span class="src">StageController.swift:245</span>
+is the single entry point for becoming a different stage, and its ordering is the
+core trick of the product.
+</p>
+
+<div class="diagram">1. Clear any in-flight same-app cycle state.
+
+   -- everything below only if the target differs from the current stage --
+
+2. Record previousStageID; stageManager.activateStage(id:)
+       the model flips first, so anything reading state sees the new truth
+
+3. desktopSurfaces.orderToFront()
+       the full-screen surface jumps above EVERY window: total occlusion
+
+4. For each window in the target stage: windowService.raiseWindow(windowID:)
+       AX-raises them back above the surface, in MRU order
+
+5. Emit the stage_switched diagnostic
+
+   -- always, even for a same-stage commit --
+
+6. Focus one window: raise it, bringWindowToFront in the model,
+   then exactly ONE NSRunningApplication.activate(bundleID:)</div>
+
+<p>
+Three details make it work:
+</p>
+
+<ul>
+  <li><strong>Surface first, then raise.</strong> Occlusion is achieved purely by
+  z-order. No window is moved, resized, minimised, or hidden, so there is no
+  animation to wait for and no layout to restore. This is the whole reason the
+  desktop surface exists.</li>
+
+  <li><strong>One activation, at the end.</strong> An Accessibility raise only
+  reorders a window within its own application's stack — it does not bring the
+  application forward. The trailing <code>activateApp</code> does that. Doing it
+  per window would produce a visible flash of each app in turn; the code comment
+  is simply "single activation, no flash".</li>
+
+  <li><strong>Steps 2–5 are skipped for a same-stage commit.</strong> The whole
+  block, from recording <code>previousStageID</code> through raising the stage's
+  windows, sits behind a <code>previousID != targetID</code> guard&nbsp;<span class="src">StageController.swift:263</span>.
+  Choosing a different window inside the current stage must not reshuffle z-order
+  for everything else.</li>
+</ul>
+
+<h2>MRU is the array</h2>
+
+<p>
+There is no separate recency list. <code>Stage.windows</code> <em>is</em> the MRU
+order, most recent first, and the only mutator is
+<code>Stage.bringWindowToFront(windowID:)</code>&nbsp;<span class="src">Models/Stage.swift:54</span>,
+which removes and reinserts at index 0.
+</p>
+
+<p>Four events promote a window:</p>
+
+<ul class="tight">
+  <li><code>recordWindowActivation</code> when the window is already in the active stage</li>
+  <li>a tap of the activation shortcut</li>
+  <li>committing a same-app cycle (the cycle raises windows live but only commits MRU on release)</li>
+  <li>the focus step of <code>switchToStage</code></li>
+</ul>
+
+<p>
+Selection defaults read straight off that ordering.
+<code>openOverlay(selectNextWindow:)</code>&nbsp;<span class="src">StageController.swift:577</span>
+sets the selected index to 1 — the second most recent window — unless the stage
+has fewer than two windows, <em>or</em> the frontmost application is excluded from
+Debut. In the excluded case there is nothing to skip past, so index 0 is correct.
+The exclusion flag is pushed in from the delegate, never queried.
+</p>
+
+<h2>Assignment: the three-branch core</h2>
+
+<p>
+<code>recordWindowActivation(windowID:)</code>&nbsp;<span class="src">StageController.swift:323</span>
+is where the assignment rules from chapter 1 actually live:
+</p>
+
+<pre><code>owner stage == active stage   ->  promote in MRU, nothing else
+owner stage != active stage   ->  switchToStage(id: ownerStageID, raiseWindowID: windowID)
+no owner at all               ->  look the window up in the window service,
+                                  build a StageWindow, add it to the ACTIVE stage</code></pre>
+
+<p>
+The third branch is annotated with its motivating case: <code>code .</code>
+creating a new editor window while other windows of that editor live in a
+different stage. The new window belongs where you are, not where its siblings
+are.
+</p>
+
+<p>
+There is one short-circuit at the top: while a same-app cycle is in flight,
+activations of windows inside that cycle are ignored, so the Accessibility focus
+callbacks the cycle itself generates cannot scramble the MRU order mid-cycle.
+</p>
+
+<h2>Stage mutations</h2>
+
+<dl>
+  <dt>Create <span class="src">StageManager.swift:66</span></dt>
+  <dd>Inserts at the active index (above) or after it (below) and immediately
+  activates the new stage. The controller first activates the <em>selected</em>
+  stage, because insertion is relative to <code>activeStageID</code> and the
+  overlay selection may have moved.</dd>
+
+  <dt>Delete <span class="src">StageManager.swift:81</span></dt>
+  <dd>Deleting the only stage wipes and recreates a fresh default rather than
+  leaving zero stages. Otherwise the overflow target is index 1 when deleting
+  index 0, and <code>index - 1</code> in every other case; the windows are
+  appended to that stage before the removal, and the active stage follows
+  them.</dd>
+
+  <dt>Move a window <span class="src">StageManager.swift:276</span></dt>
+  <dd><code>moveWindow(windowID:fromStageID:toStageID:at:)</code> appends when
+  <code>at</code> is nil and inserts at an index otherwise — which is how a drag
+  preserves the position you dropped at. Its guard permits a same-stage move
+  precisely when an index is supplied, which is what makes in-stage reordering by
+  drag possible.</dd>
+
+  <dt>Swap and reorder <span class="src">StageManager.swift:109</span></dt>
+  <dd>Neither touches <code>activeStageID</code>. Because labels are positional,
+  reordering needs no further bookkeeping — but the controller must fix up its own
+  <code>selectedStageIndex</code>, and the drag path re-finds the index by stage
+  ID afterwards.</dd>
+
+  <dt>Prune <span class="src">StageManager.swift:138</span></dt>
+  <dd><code>removeEmptyStages()</code> keeps any stage holding dormant
+  assignments, and keeps everything if all stages are empty. There is always at
+  least one stage.</dd>
+</dl>
+
+<div class="note">
+  <span class="label">Known rough edge</span>
+  <p>
+  In <code>deleteStage</code>&nbsp;<span class="src">StageManager.swift:94</span>,
+  the new active index is computed as
+  <code>min(overflowIndex, stages.count - 1)</code> against <em>post-removal</em>
+  indices, while <code>overflowIndex</code> was computed <em>pre-removal</em>.
+  </p>
+  <p>
+  Deleting the stage at index <strong>0</strong> when three or more stages exist
+  sets <code>overflowIndex = 1</code>, moves the windows into that stage, then
+  removes index 0 — which shifts the overflow destination down to index 0.
+  <code>min(1, count-1)</code> then activates the stage <em>after</em> the one that
+  received the windows. Deleting any non-zero index is correct, because
+  <code>index - 1</code> is unaffected by the removal, and deleting index 0 of
+  exactly two stages is correct by coincidence of the <code>min</code>.
+  </p>
+  <p>
+  <code>StageManagerTests.swift</code> has three <code>deleteStage</code> tests
+  (:55, :360) and none of them asserts <code>activeStageID</code> for this case.
+  <code>spec/stage-manager.md:105</code> says the active stage should follow the
+  overflow, so the code looks wrong — but verify against the spec before you
+  "fix" it.
+  </p>
+</div>
+
+<h2>The desktop surface</h2>
+
+<p>
+<code>DesktopSurfaceWindow</code>&nbsp;<span class="src">Views/DesktopSurfaceWindow.swift:276</span>
+is an <code>NSWindow</code> subclass, one per display, coordinated by a
+<code>DesktopSurfaceCoordinator</code>. The add/remove/reframe decision when
+displays change is a pure function, <code>DesktopSurfacePlan.plan(existing:screens:)</code>,
+so multi-monitor behaviour is unit-testable without monitors.
+</p>
+
+<h3>Configuration, and why each line is there</h3>
+
+<table>
+  <tr><th>Property</th><th>Value</th><th>Reason</th></tr>
+  <tr><td><code>level</code></td><td><code>.normal</code></td><td>It must sit <em>between</em> ordinary windows in z-order, not above them. A higher level would cover the active stage too.</td></tr>
+  <tr><td><code>collectionBehavior</code></td><td><code>[.transient, .ignoresCycle]</code></td><td>Keeps it out of Mission Control and out of Cmd+Tab.</td></tr>
+  <tr><td>&nbsp;</td><td><strong>not</strong> <code>.canJoinAllSpaces</code></td><td>Joining all Spaces makes the surface follow you into a full-screen Space and cover the app you went there to use.</td></tr>
+  <tr><td><code>canBecomeKey</code> / <code>canBecomeMain</code></td><td><code>false</code></td><td>It must never steal focus from the windows it is occluding.</td></tr>
+  <tr><td><code>mouseDown</code></td><td>overridden empty</td><td>Clicks land on it harmlessly instead of falling through.</td></tr>
+  <tr><td><code>isMovable</code></td><td><code>false</code></td><td>It is scenery, not a window.</td></tr>
+  <tr><td><code>isOpaque</code>, black background, no shadow</td><td>—</td><td>It renders the wallpaper; a shadow would give the illusion away.</td></tr>
+</table>
+
+<h3>Yielding to a file drag</h3>
+
+<p>
+The surface covers the real desktop, which means it also covers Finder's drop
+target. Dragging a file "to the desktop" would otherwise silently do nothing.
+</p>
+
+<p>
+The content view registers for <code>.fileURL</code> drags only. On
+<code>draggingEntered</code> with a file URL it fires a callback exactly once
+(latched, so a drag moving in and out does not retrigger) and reports
+<code>.copy</code>. <code>performDragOperation</code> then deliberately returns
+<code>false</code>: "the surface yields during <code>draggingEntered</code> so
+Finder handles the actual drop." The yield itself is ordering the surfaces out
+and hiding other applications, so the real desktop is exposed <em>while the drag
+is still in flight</em>. The latch is reset the next time the surface is ordered
+to front.
+</p>
+
+<h3>Wallpaper</h3>
+
+<p>
+The surface has to draw the wallpaper itself, and the wallpaper cannot be read
+from configuration — modern providers generate images and expose no file, so both
+the wallpaper store and <code>desktopImageURL</code> are dead ends. Debut captures
+the pixels macOS already rendered, via a ScreenCaptureKit filter that excludes all
+UI windows.
+</p>
+
+<p>Two hard-won behaviours around it:</p>
+
+<ul>
+  <li><strong>A failed capture keeps the last good image.</strong> "Clearing here
+  would flash the surface black on a transient failure, which is the very symptom
+  this window exists to avoid."</li>
+
+  <li><strong>Change detection is a filesystem watch, not a notification.</strong>
+  The old <code>com.apple.desktop</code> notification is dead. The wallpaper
+  store's plist is <em>replaced</em> rather than modified, so the watch descriptor
+  must be on the containing directory, and a two-second settle window collapses
+  the three writes macOS emits per change into one refresh.</li>
+</ul>
+
+<h2>Talking to the rest of the app</h2>
+
+<p>
+Downward, the controller uses a weak <code>StageControllerDelegate</code> with six
+methods. Two of them have overloads carrying an
+<code>OverlayPresentationContext?</code> so a UI update can be correlated with the
+trace that caused it; protocol-extension defaults forward the context-free
+versions, so a conforming type only implements what it needs. Two further hooks —
+"a command was used" and "reveal the desktop" — are plain closures, because they
+did not justify protocol methods.
+</p>
+
+<p>
+Upward, the controller <em>is</em> the keyboard delegate.
+<code>handleKeyEvent(_:overlayPresentation:)</code>&nbsp;<span class="src">StageController.swift:399</span>
+is one switch over the <code>DebutKeyEvent</code> enum, and it is where every
+interaction in chapter 5 lands.
+</p>
+
+<p>
+Overlay visibility is mirrored back into the tap by direct property assignment at
+five call sites — setup, commit, discard, desktop reveal, and quick switch. That
+mirror is what lets the tap decide whether to consume a key without asking the
+main thread anything.
+</p>
+
+<h2>Performance-shaped decisions</h2>
+
+<p>
+Three pieces of this file exist in their current form because of measurements,
+not taste. They are documented in the source and repeated here because they are
+easy to "simplify" back into a regression.
+</p>
+
+<div class="why">
+  <span class="label">Capture strictly after the first frame</span>
+  <p>
+  Preview capture is kicked off <em>after</em> the delegate has been told to open
+  the overlay. Capturing earlier puts ScreenCaptureKit enumeration, capture
+  completions, and the resulting view rebuilds on the main queue ahead of the
+  overlay's first frame — measured at roughly 37&nbsp;ms of added
+  render-submission delay for a two-line change.
+  </p>
+</div>
+
+<div class="why">
+  <span class="label">Preview results are coalesced</span>
+  <p>
+  Completions are batched into one rebuild per ~16&nbsp;ms frame. Without it, a
+  15-window refresh becomes 15 full SwiftUI diffs.
+  </p>
+</div>
+
+<div class="why">
+  <span class="label">The full-screen probe has a per-element timeout</span>
+  <p>
+  Before showing the overlay, the controller asks whether the frontmost app is
+  full-screen. An unresponsive app would hang that question, so the Accessibility
+  messaging timeout is bounded at 50&nbsp;ms — and it must be set on
+  <strong>both</strong> the application element and the focused-window element,
+  because "it is scoped to the element ref it is set on, not to the app's
+  connection."
+  </p>
+</div>
+
+<p>
+Finally, preview pruning follows the same rule as assignments: only previews
+whose window has no assignment at all are dropped, because a missing capture can
+mean the window is merely hidden.
+</p>
+
+<div class="pager">
+  <a href="03-window-tracking.html"><span class="dir">Previous</span>&larr; 03 · Window tracking</a>
+  <a href="05-keyboard.html"><span class="dir">Next</span>05 · Keyboard &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>
