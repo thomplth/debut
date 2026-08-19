@@ -181,6 +181,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         keyboardService.quickSwitchModifiers = currentSettings.quickSwitchModifiers
         keyboardService.quickSwitchSameApplicationModifiers =
             currentSettings.quickSwitchSameApplicationModifiers
+        keyboardService.heldCycleMinimumInterval = currentSettings.heldCycleMinimumInterval
 
         // Raise active stage windows above the desktop surface
         controller.switchToStage(id: stageManager.activeStageID)
@@ -766,6 +767,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.keyboardService?.quickSwitchModifiers = newSettings.quickSwitchModifiers
                 self.keyboardService?.quickSwitchSameApplicationModifiers =
                     newSettings.quickSwitchSameApplicationModifiers
+                self.keyboardService?.heldCycleMinimumInterval =
+                    newSettings.heldCycleMinimumInterval
                 if telemetryChanged, let exporter = self.telemetryExporter {
                     Task {
                         await exporter.setEnabled(newSettings.shareAnonymousTelemetry)

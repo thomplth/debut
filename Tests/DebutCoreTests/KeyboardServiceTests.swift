@@ -36,6 +36,19 @@ final class SlowKeyboardDelegate: KeyboardEventDelegate, @unchecked Sendable {
     }
 }
 
+final class TestMonotonicClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var nanoseconds: UInt64 = 0
+
+    func advance(milliseconds: Double) {
+        lock.withLock { nanoseconds += UInt64(milliseconds * 1_000_000) }
+    }
+
+    func read() -> UInt64 {
+        lock.withLock { nanoseconds }
+    }
+}
+
 final class RecordedComboBox: @unchecked Sendable {
     private let lock = NSLock()
     private var storedCombo: KeyCombo?
@@ -567,6 +580,7 @@ struct KeyboardServiceTests {
     @Test("Held backtick inside the overlay auto-repeats as a backward window step")
     func sessionBacktickAutoRepeat() {
         let service = EventTapKeyboardService()
+        service.heldCycleMinimumInterval = 0 // pacing is covered separately
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -609,6 +623,122 @@ struct KeyboardServiceTests {
 
         #expect(service.handleCGEvent(type: .keyDown, event: repeatedBacktick) == nil)
         #expect(delegate.receivedEvents == [.cmdShiftBacktickRepeat])
+    }
+
+    /// Builds a service whose held-cycle pacing is driven by `clock` rather than wall time.
+    private func makeThrottledService(
+        clock: TestMonotonicClock,
+        interval: TimeInterval
+    ) -> EventTapKeyboardService {
+        let service = EventTapKeyboardService(monotonicNanoseconds: { clock.read() })
+        service.heldCycleMinimumInterval = interval
+        return service
+    }
+
+    private func tabEvent(autoRepeat: Bool, flags: CGEventFlags = .maskCommand) -> CGEvent {
+        let event = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        event.flags = flags
+        event.setIntegerValueField(.keyboardEventAutorepeat, value: autoRepeat ? 1 : 0)
+        return event
+    }
+
+    @Test("Held cycling is paced to the configured minimum interval")
+    func heldCycleRateLimit() {
+        let clock = TestMonotonicClock()
+        let service = makeThrottledService(clock: clock, interval: 0.1)
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: false)) == nil)
+        clock.advance(milliseconds: 10)
+        #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: true)) == nil)
+        clock.advance(milliseconds: 10)
+        #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: true)) == nil)
+        clock.advance(milliseconds: 100)
+        #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: true)) == nil)
+
+        // The two repeats inside the interval are swallowed, not merely delayed.
+        #expect(delegate.receivedEvents == [.cmdTabHold, .nextWindowRepeat])
+    }
+
+    @Test("A fresh press is never paced, however fast it follows the last one")
+    func freshPressBypassesRateLimit() {
+        let clock = TestMonotonicClock()
+        let service = makeThrottledService(clock: clock, interval: 0.1)
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: false)) == nil)
+        clock.advance(milliseconds: 1)
+        #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: false)) == nil)
+
+        #expect(delegate.receivedEvents == [.cmdTabHold, .cmdTabHold])
+    }
+
+    @Test("Held stage cycling is paced on the same budget as window cycling")
+    func heldStageCycleRateLimit() {
+        let clock = TestMonotonicClock()
+        let service = makeThrottledService(clock: clock, interval: 0.1)
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let stageFlags: CGEventFlags = [.maskCommand, .maskAlternate]
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: tabEvent(autoRepeat: false, flags: stageFlags)
+        ) == nil)
+        clock.advance(milliseconds: 5)
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: tabEvent(autoRepeat: true, flags: stageFlags)
+        ) == nil)
+
+        #expect(delegate.receivedEvents == [.cmdOptionTabHold])
+    }
+
+    @Test("A zero interval turns the rate limit off")
+    func zeroIntervalDisablesRateLimit() {
+        let clock = TestMonotonicClock()
+        let service = makeThrottledService(clock: clock, interval: 0)
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: false)) == nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: true)) == nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: true)) == nil)
+
+        #expect(delegate.receivedEvents == [.cmdTabHold, .nextWindowRepeat, .nextWindowRepeat])
+    }
+
+    @Test("Non-cycling commands are exempt from held-cycle pacing")
+    func nonCyclingCommandsAreNotPaced() {
+        let clock = TestMonotonicClock()
+        let service = makeThrottledService(clock: clock, interval: 0.1)
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: false)) == nil)
+        service.overlayVisible = true
+
+        let downArrow = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_DownArrow),
+            keyDown: true
+        )!
+        downArrow.flags = .maskCommand
+        downArrow.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+        #expect(service.handleCGEvent(type: .keyDown, event: downArrow) == nil)
+
+        #expect(delegate.receivedEvents == [.cmdTabHold, .moveWindowDown])
     }
 
     @Test("Cmd+Option+Tab event")

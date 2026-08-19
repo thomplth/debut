@@ -65,6 +65,8 @@ public struct ShortcutModifiers: Codable, Sendable, Equatable, Hashable {
 public struct AppSettings: Codable, Sendable, Equatable {
     public static let defaultOverlayPresentationDelay: TimeInterval = 0.08
     public static let defaultPreviewCacheTTL: TimeInterval = 60
+    /// Matches the pace the system switcher holds regardless of the user's key-repeat rate.
+    public static let defaultHeldCycleMinimumInterval: TimeInterval = 0.1
 
     public var launchAtLogin: Bool
     public var showInMenuBar: Bool
@@ -84,6 +86,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
 
     // Keyboard
     public var overlayPresentationDelay: TimeInterval
+    public var heldCycleMinimumInterval: TimeInterval
     public var keyBindings: KeyBindings
     public var quickSwitchExcludedBundleIDs: [String]
     public var quickSwitchModifiers: ShortcutModifiers
@@ -114,6 +117,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.inactivePlateScale = 0.8
 
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
+        self.heldCycleMinimumInterval = Self.defaultHeldCycleMinimumInterval
         self.keyBindings = KeyBindings()
         self.quickSwitchExcludedBundleIDs = []
         self.quickSwitchModifiers = .control
@@ -149,6 +153,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
             TimeInterval.self,
             forKey: .overlayPresentationDelay
         ) ?? Self.defaultOverlayPresentationDelay
+        heldCycleMinimumInterval = try container.decodeIfPresent(
+            TimeInterval.self,
+            forKey: .heldCycleMinimumInterval
+        ) ?? Self.defaultHeldCycleMinimumInterval
         keyBindings = try container.decodeIfPresent(KeyBindings.self, forKey: .keyBindings) ?? KeyBindings()
         quickSwitchExcludedBundleIDs = try container.decodeIfPresent(
             [String].self,
