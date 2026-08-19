@@ -117,7 +117,7 @@ struct StateStoreTests {
         #expect(decoded.quickSwitchExcludedBundleIDs.isEmpty)
     }
 
-    @Test("Older settings default overlay presentation delay to 80ms")
+    @Test("Older settings default overlay presentation delay to 75ms")
     func legacySettingsDefaultOverlayPresentationDelay() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
@@ -128,7 +128,7 @@ struct StateStoreTests {
 
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
-        #expect(decoded.overlayPresentationDelay == 0.08)
+        #expect(decoded.overlayPresentationDelay == 0.075)
     }
 
     @Test("Older settings default the preview cache to last-active refreshes")
@@ -217,7 +217,7 @@ struct StateStoreTests {
 
         let store = StateStore(directory: dir)
         let settings = try store.loadSettings()
-        #expect(settings.launchAtLogin == false)
+        #expect(settings.launchAtLogin == true)
         #expect(settings.glassStyle == .clear)
     }
 }
