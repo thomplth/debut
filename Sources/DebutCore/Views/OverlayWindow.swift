@@ -7,6 +7,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
     public var onStageReordered: ((Int, Int) -> Void)?
     public var onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?
+    public var onStageInsertRequested: ((StageInsertionEdge) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onDesktopSelected: (() -> Void)?
 
@@ -36,6 +37,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
             onWindowMoved: onWindowMoved,
             onStageReordered: onStageReordered,
             onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
+            onStageInsertRequested: onStageInsertRequested,
             onPointerSelectionChanged: onPointerSelectionChanged,
             onDesktopSelected: onDesktopSelected
         )
