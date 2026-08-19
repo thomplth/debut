@@ -124,6 +124,20 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         }
     }
 
+    /// Held cycling clamps at the end it is travelling toward instead of wrapping, so an
+    /// auto-repeat resolves to a distinct event from a fresh press of the same shortcut.
+    public func toKeyEvent(autoRepeat: Bool) -> DebutKeyEvent {
+        guard autoRepeat else { return toKeyEvent() }
+        return switch self {
+        case .activateNextWindow, .nextWindow: .nextWindowRepeat
+        case .activatePreviousWindow, .previousWindow, .previousWindowAlternate:
+            .previousWindowRepeat
+        case .nextAppWindow: .cmdBacktickRepeat
+        case .previousAppWindow: .cmdShiftBacktickRepeat
+        default: toKeyEvent()
+        }
+    }
+
     public var shortcutScope: ShortcutScope {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,

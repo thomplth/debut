@@ -295,11 +295,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             if globalAction.isOverlayActivation {
                 beginSession(using: globalAction)
                 let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-                let keyEvent: DebutKeyEvent = if isAutoRepeat && globalAction == .activateNextWindow {
-                    .nextWindowRepeat
-                } else {
-                    globalAction.toKeyEvent()
-                }
+                let keyEvent = globalAction.toKeyEvent(autoRepeat: isAutoRepeat)
                 let presentation = !isAutoRepeat && !overlayVisible
                     ? overlayPresentationRecorder.begin(
                         configuredDelayMilliseconds: 0,
@@ -323,11 +319,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             if globalAction.isSameAppCycle && !overlayVisible {
                 beginSession(using: globalAction)
                 let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-                let keyEvent: DebutKeyEvent = if isAutoRepeat && globalAction == .nextAppWindow {
-                    .cmdBacktickRepeat
-                } else {
-                    globalAction.toKeyEvent()
-                }
+                let keyEvent = globalAction.toKeyEvent(autoRepeat: isAutoRepeat)
                 deliver(keyEvent, asynchronously: deliverAsynchronously)
                 return nil
             }
@@ -364,12 +356,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
 
         if let sessionAction {
             let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-            let keyEvent: DebutKeyEvent = if isAutoRepeat && sessionAction == .nextWindow {
-                .nextWindowRepeat
-            } else {
-                sessionAction.toKeyEvent()
-            }
-            deliver(keyEvent, asynchronously: deliverAsynchronously)
+            deliver(
+                sessionAction.toKeyEvent(autoRepeat: isAutoRepeat),
+                asynchronously: deliverAsynchronously
+            )
         }
 
         // Always consume — never let keyboard events leak to the active app
