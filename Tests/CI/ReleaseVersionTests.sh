@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 plan="$repo_root/scripts/release-plan.sh"
 notes="$repo_root/scripts/release-notes.sh"
 apply="$repo_root/scripts/apply-version.sh"
+verify="$repo_root/scripts/verify-release-commit.sh"
 failures=0
 
 fail() {
@@ -38,7 +39,7 @@ field() {
     grep "^$key=" <<< "$output" | cut -d= -f2-
 }
 
-for script in "$plan" "$notes" "$apply"; do
+for script in "$plan" "$notes" "$apply" "$verify"; do
     [[ -x "$script" ]] || fail "missing executable $script"
 done
 
@@ -184,6 +185,55 @@ PLIST
         fail "apply-version must fail when it cannot find the version to rewrite"
     fi
     rm -rf "$repo"
+fi
+
+if [[ -x "$verify" ]]; then
+    # An "origin" plus a checkout of one commit from it reproduces what the publish job sees: a
+    # detached HEAD at the commit the gates tested, and a main branch that stayed open meanwhile.
+    make_origin_and_clone() {
+        local origin clone
+        origin="$(mktemp -d)/origin.git"
+        git init --quiet --bare --initial-branch=main "$origin"
+        clone="$(mktemp -d)"
+        git clone --quiet "$origin" "$clone" 2>/dev/null
+        git -C "$clone" config user.email "test@example.com"
+        git -C "$clone" config user.name "Release Tests"
+        git -C "$clone" commit --quiet --allow-empty -m "Initial commit"
+        git -C "$clone" push --quiet origin main 2>/dev/null
+        echo "$clone"
+    }
+
+    clone="$(make_origin_and_clone)"
+    sha="$(git -C "$clone" rev-parse HEAD)"
+    git -C "$clone" checkout --quiet --detach "$sha"
+    (cd "$clone" && "$verify" "$sha" >/dev/null 2>&1) \
+        || fail "verify-release-commit must accept the commit main still points at"
+
+    # The failure that actually happened: main moved during the gate window, so the tested commit
+    # is no longer what a release would ship.
+    worker="$(mktemp -d)"
+    git clone --quiet "$(git -C "$clone" remote get-url origin)" "$worker" 2>/dev/null
+    git -C "$worker" config user.email "test@example.com"
+    git -C "$worker" config user.name "Release Tests"
+    git -C "$worker" commit --quiet --allow-empty -m "Landed during the gate window"
+    git -C "$worker" push --quiet origin main 2>/dev/null
+    if (cd "$clone" && "$verify" "$sha" >/dev/null 2>&1); then
+        fail "verify-release-commit must refuse once main has advanced past the tested commit"
+    fi
+    rm -rf "$worker"
+
+    # A checkout that silently landed somewhere else must not be published either.
+    clone2="$(make_origin_and_clone)"
+    other="$(git -C "$clone2" rev-parse HEAD)"
+    if (cd "$clone2" && "$verify" "${other//[0-9a-f]/a}" >/dev/null 2>&1); then
+        fail "verify-release-commit must refuse when HEAD is not the commit it was told to release"
+    fi
+
+    # A refusal that says nothing leaves whoever re-runs the release guessing.
+    output="$(cd "$clone" && "$verify" "$sha" 2>&1 || true)"
+    grep -q "$sha" <<< "$output" \
+        || fail "verify-release-commit must name the tested commit when it refuses"
+    rm -rf "$clone" "$clone2"
 fi
 
 if (( failures > 0 )); then
