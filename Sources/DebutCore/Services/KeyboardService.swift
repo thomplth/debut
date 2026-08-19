@@ -24,6 +24,8 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case deleteStage            // Delete/Forward Delete
     case moveWindowUp           // Up Arrow
     case moveWindowDown         // Down Arrow
+    case moveWindowLeft         // Left Arrow — reorder within the stage
+    case moveWindowRight        // Right Arrow — reorder within the stage
     case swapStageUp            // Option+Up Arrow
     case swapStageDown          // Option+Down Arrow
     case quitSelectedApp        // Cmd+Q — quit the app owning the selected window
@@ -59,6 +61,10 @@ public enum DebutKeyEvent: Equatable, Sendable {
             .moveWindowUp
         case .moveWindowDown:
             .moveWindowDown
+        case .moveWindowLeft:
+            .moveWindowLeft
+        case .moveWindowRight:
+            .moveWindowRight
         case .swapStageUp:
             .swapStageUp
         case .swapStageDown:

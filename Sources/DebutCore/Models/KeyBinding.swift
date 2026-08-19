@@ -32,6 +32,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case deleteStageForward
     case moveWindowUp
     case moveWindowDown
+    case moveWindowLeft
+    case moveWindowRight
     case swapStageUp
     case swapStageDown
     case quitSelectedApp
@@ -75,6 +77,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .deleteStageForward: "Delete stage (forward delete)"
         case .moveWindowUp: "Move window up"
         case .moveWindowDown: "Move window down"
+        case .moveWindowLeft: "Move window left in stage"
+        case .moveWindowRight: "Move window right in stage"
         case .swapStageUp: "Swap stage up"
         case .swapStageDown: "Swap stage down"
         case .quitSelectedApp: "Quit selected app"
@@ -120,6 +124,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .deleteStageForward: .deleteStage
         case .moveWindowUp: .moveWindowUp
         case .moveWindowDown: .moveWindowDown
+        case .moveWindowLeft: .moveWindowLeft
+        case .moveWindowRight: .moveWindowRight
         case .swapStageUp: .swapStageUp
         case .swapStageDown: .swapStageDown
         case .quitSelectedApp: .quitSelectedApp
@@ -396,6 +402,8 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .deleteStageForward: KeyCombo(keyCode: kVK_ForwardDelete),
             .moveWindowUp: KeyCombo(keyCode: kVK_UpArrow),
             .moveWindowDown: KeyCombo(keyCode: kVK_DownArrow),
+            .moveWindowLeft: KeyCombo(keyCode: kVK_LeftArrow),
+            .moveWindowRight: KeyCombo(keyCode: kVK_RightArrow),
             .swapStageUp: KeyCombo(keyCode: kVK_UpArrow, option: true),
             .swapStageDown: KeyCombo(keyCode: kVK_DownArrow, option: true),
             // Session combos are matched with the held primary modifier stripped, so this is
