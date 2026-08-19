@@ -1043,6 +1043,21 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         notifyOverlayUpdated()
     }
 
+    /// A committed plate drag also moves focus: the plate the user was holding is the one they
+    /// are looking at, and the magnification during the drag already promised it would stay.
+    public func reorderStage(fromIndex: Int, toIndex: Int) {
+        guard stageManager.stages.indices.contains(fromIndex),
+              stageManager.stages.indices.contains(toIndex),
+              fromIndex != toIndex else { return }
+        let movedID = stageManager.stages[fromIndex].id
+        stageManager.moveStage(fromIndex: fromIndex, toIndex: toIndex)
+        stageManager.activateStage(id: movedID)
+        selectedStageIndex = stageManager.stages.firstIndex(where: { $0.id == movedID }) ?? toIndex
+        selectedWindowIndex = 0
+        delegate?.stageControllerDidMutateState(self)
+        notifyOverlayUpdated()
+    }
+
     private func moveWindow(direction: SwapDirection) {
         guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }

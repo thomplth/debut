@@ -121,6 +121,21 @@ enum PlateMotion {
         )
     }
 
+    /// Maps every stage index to the slot it occupies while one plate is held, so the stack
+    /// stays a complete arrangement instead of leaving a hole where the held plate started.
+    static func stageDragSlots(stageCount: Int, from source: Int, to destination: Int) -> [Int] {
+        let identity = Array(0..<max(0, stageCount))
+        guard identity.indices.contains(source), identity.indices.contains(destination)
+        else { return identity }
+
+        return identity.map { index in
+            if index == source { return destination }
+            if source < destination, index > source, index <= destination { return index - 1 }
+            if destination < source, index >= destination, index < source { return index + 1 }
+            return index
+        }
+    }
+
     static func plateOpacity(scale: CGFloat) -> Double {
         guard scale < opacityScaleThreshold else { return 1 }
         let progress = Double(scale / opacityScaleThreshold)
@@ -386,15 +401,6 @@ enum PlateMotion {
 enum PlateInteraction {
     static let minimumWindowDragDistance: CGFloat = 6
 
-    static func isStageHandleHotspot(
-        locationX: CGFloat,
-        isRevealed: Bool
-    ) -> Bool {
-        let hoverWidth = PlateConstants.stageHandleHoverWidth
-            + (isRevealed ? PlateConstants.stageHandleRevealWidth : 0)
-        return locationX >= 0 && locationX <= hoverWidth
-    }
-
     static func isWindowClick(
         translation: CGSize,
         minimumDragDistance: CGFloat = minimumWindowDragDistance
@@ -482,6 +488,63 @@ enum PlateInteraction {
         return destination == sourceIndex ? nil : destination
     }
 
+    /// Only vertical travel counts: a plate reorders within a single column, so sideways
+    /// movement during the gesture must not change where it lands.
+    static func stageDragDestination(
+        from sourceIndex: Int,
+        translation: CGSize,
+        plateStride: CGFloat,
+        stageCount: Int
+    ) -> Int {
+        stageDestination(
+            from: sourceIndex,
+            translation: translation.height,
+            plateStride: plateStride,
+            stageCount: stageCount
+        ) ?? sourceIndex
+    }
+
+    /// The drag handle sits in a gutter beside the plate. Treating that gutter as part of the
+    /// plate is what lets the pointer travel out to the handle without the plate losing focus
+    /// and shrinking away underneath it.
+    static func revealedStageHandleIndex(
+        previous: Int?,
+        at location: CGPoint,
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        plateWidths: [CGFloat],
+        layout: PlateStackLayout
+    ) -> Int? {
+        guard plateWidths.count == layout.centers.count,
+              layout.scales.count == layout.centers.count,
+              layout.heights.count == layout.centers.count
+        else { return nil }
+
+        for index in layout.centers.indices {
+            let frame = plateFrame(
+                at: index,
+                containerWidth: containerWidth,
+                stackOffset: stackOffset,
+                plateWidths: plateWidths,
+                layout: layout
+            )
+            guard location.y >= frame.minY, location.y <= frame.maxY else { continue }
+
+            let scale = layout.scales[index]
+            let reach = previous == index
+                ? PlateConstants.stageHandleHoverWidth + PlateConstants.stageHandleRevealWidth
+                : PlateConstants.stageHandleHoverWidth
+            let zone = CGRect(
+                x: frame.minX - PlateConstants.stageHandleGutterWidth * scale,
+                y: frame.minY,
+                width: (PlateConstants.stageHandleGutterWidth + reach) * scale,
+                height: frame.height
+            )
+            if zone.contains(location) { return index }
+        }
+        return nil
+    }
+
     static func pointerSelection(
         current: PointerSelection?,
         target: PointerSelection,
@@ -500,7 +563,7 @@ enum PlateInteraction {
     ) -> Int? {
         guard plateWidths.count == layout.centers.count else { return nil }
         for index in layout.centers.indices {
-            let frame = plateFrame(
+            let frame = plateHitFrame(
                 at: index,
                 containerWidth: containerWidth,
                 stackOffset: stackOffset,
@@ -586,6 +649,31 @@ enum PlateInteraction {
             height: layout.heights[index]
         )
     }
+
+    /// The plate plus the gutter its drag handle lives in. Hit testing uses this so reaching
+    /// for the handle never reads as leaving the plate.
+    private static func plateHitFrame(
+        at index: Int,
+        containerWidth: CGFloat,
+        stackOffset: CGFloat,
+        plateWidths: [CGFloat],
+        layout: PlateStackLayout
+    ) -> CGRect {
+        let frame = plateFrame(
+            at: index,
+            containerWidth: containerWidth,
+            stackOffset: stackOffset,
+            plateWidths: plateWidths,
+            layout: layout
+        )
+        let gutter = PlateConstants.stageHandleGutterWidth * layout.scales[index]
+        return CGRect(
+            x: frame.minX - gutter,
+            y: frame.minY,
+            width: frame.width + gutter,
+            height: frame.height
+        )
+    }
 }
 
 struct PointerMovementGate {
@@ -629,6 +717,7 @@ public struct PlateConstants {
     public static let commandHintFooterOffset: CGFloat = 24
     public static let stageHandleHoverWidth: CGFloat = 24
     public static let stageHandleRevealWidth: CGFloat = 36
+    public static let stageHandleGutterWidth: CGFloat = 40
     public static let edgeHoverRegion: CGFloat = 56
     public static let edgeScrollMargin: CGFloat = 28
 
@@ -729,6 +818,7 @@ public struct OverlaySwiftUIView: View {
         self.init(
             viewModel: viewModel,
             initialWindowDrag: nil,
+            initialStageDrag: nil,
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
             onStageReordered: onStageReordered,
@@ -751,6 +841,30 @@ public struct OverlaySwiftUIView: View {
         self.init(
             viewModel: viewModel,
             initialWindowDrag: WindowDragState?(initialWindowDrag),
+            initialStageDrag: nil,
+            onWindowSelected: onWindowSelected,
+            onWindowMoved: onWindowMoved,
+            onStageReordered: onStageReordered,
+            onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
+            onPointerSelectionChanged: onPointerSelectionChanged,
+            onDesktopSelected: onDesktopSelected
+        )
+    }
+
+    init(
+        viewModel: OverlayViewModel,
+        initialStageDrag: StageDragState,
+        onWindowSelected: ((Int, Int) -> Void)? = nil,
+        onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
+        onStageReordered: ((Int, Int) -> Void)? = nil,
+        onStageHandleVisibilityChanged: ((Int, Bool) -> Void)? = nil,
+        onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
+        onDesktopSelected: (() -> Void)? = nil
+    ) {
+        self.init(
+            viewModel: viewModel,
+            initialWindowDrag: nil,
+            initialStageDrag: StageDragState?(initialStageDrag),
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
             onStageReordered: onStageReordered,
@@ -763,6 +877,7 @@ public struct OverlaySwiftUIView: View {
     private init(
         viewModel: OverlayViewModel,
         initialWindowDrag: WindowDragState?,
+        initialStageDrag: StageDragState?,
         onWindowSelected: ((Int, Int) -> Void)?,
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?,
         onStageReordered: ((Int, Int) -> Void)?,
@@ -778,6 +893,7 @@ public struct OverlaySwiftUIView: View {
         self.onPointerSelectionChanged = onPointerSelectionChanged
         self.onDesktopSelected = onDesktopSelected
         _windowDrag = State(initialValue: initialWindowDrag)
+        _stageDrag = State(initialValue: initialStageDrag)
         _pointerMovementGate = State(
             initialValue: PointerMovementGate(initialLocation: NSEvent.mouseLocation)
         )
@@ -837,10 +953,16 @@ public struct OverlaySwiftUIView: View {
             )
             let dragTargetIndex = layoutWindowDrag?.dropTarget?.stageIndex
                 ?? stageDrag?.destinationIndex
-                ?? stageDrag?.stageIndex
+            let dragSlots = stageDrag.map {
+                PlateMotion.stageDragSlots(
+                    stageCount: plates.count,
+                    from: $0.stageIndex,
+                    to: $0.destinationIndex
+                )
+            }
             let focusedStageIndex = PlateMotion.focusedStageIndex(
                 active: viewModel.activeStageIndex,
-                hovered: hoveredStageIndex,
+                hovered: hoveredStageIndex ?? revealedStageHandleIndex,
                 dragTarget: dragTargetIndex,
                 retainedDragTarget: retainedWindowDragFocusStageIndex
             )
@@ -888,11 +1010,12 @@ public struct OverlaySwiftUIView: View {
                         let stageHandleExpansion = PlateMotion.stageHandleExpansion(
                             isRevealed: isStageHandleRevealed
                         )
-                        let isInteractionTarget = index == focusedStageIndex
-                        let scale = visualLayout.scales[index]
+                        let slotIndex = dragSlots?[safe: index] ?? index
+                        let isInteractionTarget = slotIndex == focusedStageIndex
+                        let scale = visualLayout.scales[slotIndex]
                         let slotOffset = PlateMotion.plateSlotOffset(
                             layout: visualLayout,
-                            index: index,
+                            index: slotIndex,
                             plateHeight: pHeight
                         )
                         let plateOpacity = PlateMotion.plateOpacity(scale: scale)
@@ -948,16 +1071,6 @@ public struct OverlaySwiftUIView: View {
                                         + PlateConstants.windowSpacing
                                 )
                             },
-                            onStageHandleHoverChanged: { isHovering in
-                                if isHovering, revealedStageHandleIndex != index {
-                                    revealedStageHandleIndex = index
-                                    onStageHandleVisibilityChanged?(index, true)
-                                } else if revealedStageHandleIndex == index,
-                                          stageDrag?.stageIndex != index {
-                                    revealedStageHandleIndex = nil
-                                    onStageHandleVisibilityChanged?(index, false)
-                                }
-                            },
                             onStageDragChanged: { translation in
                                 updateStageDrag(
                                     index: index,
@@ -968,10 +1081,6 @@ public struct OverlaySwiftUIView: View {
                             },
                             onStageDragEnded: {
                                 finishStageDrag()
-                                if revealedStageHandleIndex == index {
-                                    revealedStageHandleIndex = nil
-                                    onStageHandleVisibilityChanged?(index, false)
-                                }
                             }
                         )
                         .frame(width: plateWidth + stageHandleExpansion, height: pHeight)
@@ -1001,7 +1110,6 @@ public struct OverlaySwiftUIView: View {
                         )
                         .opacity(plateOpacity * (isStageDragging ? 0.78 : 1.0))
                         .offset(y: slotOffset)
-                        .offset(isStageDragging ? (stageDrag?.offset ?? .zero) : .zero)
                         .zIndex(isStageDragging ? 3 : (isActive || isInteractionTarget ? 2 : 0))
                     }
                 }
@@ -1044,7 +1152,7 @@ public struct OverlaySwiftUIView: View {
             .animation(focusTransition.animation, value: focusedStageIndex)
             .animation(focusTransition.animation, value: pointerSelection)
             .animation(activeWindowReorderTransition?.animation, value: layoutWindowDrag?.dropTarget)
-            .animation(focusTransition.animation, value: stageDrag?.destinationIndex)
+            .animation(focusTransition.animation, value: dragSlots)
             .coordinateSpace(name: "overlay")
             .simultaneousGesture(
                 SpatialTapGesture(coordinateSpace: .named("overlay"))
@@ -1080,9 +1188,20 @@ public struct OverlaySwiftUIView: View {
                         plateWidths: plateWidths,
                         currentLayout: visualLayout
                     )
+                    updateRevealedStageHandle(
+                        PlateInteraction.revealedStageHandleIndex(
+                            previous: revealedStageHandleIndex,
+                            at: location,
+                            containerWidth: geo.size.width,
+                            stackOffset: yOffset,
+                            plateWidths: plateWidths,
+                            layout: visualLayout
+                        )
+                    )
                 case .ended:
                     hoverPointerY = nil
                     hoveredStageIndex = nil
+                    updateRevealedStageHandle(nil)
                 }
             }
             .animation(
@@ -1171,6 +1290,8 @@ public struct OverlaySwiftUIView: View {
         }
     }
 
+    /// The held plate is kept in the stack's own coordinate system: only its slot changes, so
+    /// it can never be dragged out from under the other plates.
     private func updateStageDrag(
         index: Int,
         plate: PlateData,
@@ -1178,9 +1299,9 @@ public struct OverlaySwiftUIView: View {
         plateStride: CGFloat
     ) {
         guard windowDrag == nil else { return }
-        let destination = PlateInteraction.stageDestination(
+        let destination = PlateInteraction.stageDragDestination(
             from: index,
-            translation: translation.height,
+            translation: translation,
             plateStride: plateStride,
             stageCount: viewModel.plates.count
         )
@@ -1189,11 +1310,11 @@ public struct OverlaySwiftUIView: View {
             stageDrag = StageDragState(
                 stageIndex: index,
                 stageID: plate.id,
-                offset: translation,
+                verticalTranslation: translation.height,
                 destinationIndex: destination
             )
         } else {
-            stageDrag?.offset = translation
+            stageDrag?.verticalTranslation = translation.height
             stageDrag?.destinationIndex = destination
         }
     }
@@ -1201,8 +1322,20 @@ public struct OverlaySwiftUIView: View {
     private func finishStageDrag() {
         guard let drag = stageDrag else { return }
         stageDrag = nil
-        if let destination = drag.destinationIndex {
-            onStageReordered?(drag.stageIndex, destination)
+        guard drag.destinationIndex != drag.stageIndex else { return }
+        onStageReordered?(drag.stageIndex, drag.destinationIndex)
+    }
+
+    private func updateRevealedStageHandle(_ index: Int?) {
+        guard index != revealedStageHandleIndex else { return }
+        if let previous = revealedStageHandleIndex {
+            // The plate being dragged keeps its handle: the pointer wanders off it mid-gesture.
+            guard stageDrag?.stageIndex != previous else { return }
+            onStageHandleVisibilityChanged?(previous, false)
+        }
+        revealedStageHandleIndex = index
+        if let index {
+            onStageHandleVisibilityChanged?(index, true)
         }
     }
 }
@@ -1226,7 +1359,6 @@ struct PlateSwiftUIView: View {
     var onPointerSelectionChanged: ((PointerSelection, Bool, CGPoint) -> Void)?
     var onWindowSelected: ((Int, Int) -> Void)?
     var onWindowDropRequested: ((WindowMoveRequest) -> Void)?
-    var onStageHandleHoverChanged: ((Bool) -> Void)?
     var onStageDragChanged: ((CGSize) -> Void)?
     var onStageDragEnded: (() -> Void)?
 
@@ -1347,19 +1479,6 @@ struct PlateSwiftUIView: View {
             if !footerHints.isEmpty {
                 CommandHintStrip(hints: footerHints)
                     .offset(y: PlateConstants.commandHintFooterOffset)
-            }
-        }
-        .onContinuousHover(coordinateSpace: .local) { phase in
-            switch phase {
-            case let .active(location):
-                onStageHandleHoverChanged?(
-                    PlateInteraction.isStageHandleHotspot(
-                        locationX: location.x,
-                        isRevealed: isStageHandleRevealed
-                    )
-                )
-            case .ended:
-                onStageHandleHoverChanged?(false)
             }
         }
         .animation(.easeOut(duration: 0.14), value: isStageHandleRevealed)
