@@ -339,9 +339,13 @@ struct PlateMotionTests {
         )
         let widths: [CGFloat] = [300, 240]
 
+        let top = layout.centers[0] - layout.heights[0] / 2
+        let bottom = layout.centers[1] + layout.heights[1] / 2
+        let reach = PlateConstants.stageInsertHoverHeight
+
         #expect(PlateInteraction.hoveredStageIndex(
             previous: 0,
-            at: CGPoint(x: 250, y: -1),
+            at: CGPoint(x: 250, y: top - reach - 1),
             containerWidth: 500,
             currentStackOffset: 0,
             plateWidths: widths,
@@ -349,7 +353,7 @@ struct PlateMotionTests {
         ) == nil)
         #expect(PlateInteraction.hoveredStageIndex(
             previous: 1,
-            at: CGPoint(x: 250, y: 201),
+            at: CGPoint(x: 250, y: bottom + reach + 1),
             containerWidth: 500,
             currentStackOffset: 0,
             plateWidths: widths,
@@ -997,6 +1001,7 @@ struct PlateMotionTests {
         let lastBottom = layout.centers[2] + layout.heights[2] / 2
         let edge: (CGPoint) -> StageInsertionEdge? = {
             PlateInteraction.stageInsertionEdge(
+                previous: nil,
                 at: $0,
                 containerWidth: 500,
                 stackOffset: 0,
@@ -1013,6 +1018,71 @@ struct PlateMotionTests {
             y: firstTop - PlateConstants.stageInsertHoverHeight - 1
         )) == nil)
         #expect(edge(CGPoint(x: 20, y: firstTop - 10)) == nil)
+    }
+
+    /// Entering the band magnifies the end plate, which grows its edge past the stationary
+    /// pointer. Without stickiness the affordance would vanish before it could be clicked.
+    @Test("A revealed add-stage band survives the plate growing over the pointer")
+    func stageInsertionEdgeStaysRevealedWhenThePlateGrows() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [300, 200, 200]
+        let firstTop = layout.centers[0] - layout.heights[0] / 2
+        let swallowed = CGPoint(x: 250, y: firstTop + 10)
+        let edge: (StageInsertionEdge?, CGPoint) -> StageInsertionEdge? = {
+            PlateInteraction.stageInsertionEdge(
+                previous: $0,
+                at: $1,
+                containerWidth: 500,
+                stackOffset: 0,
+                plateWidths: widths,
+                layout: layout
+            )
+        }
+
+        #expect(edge(nil, swallowed) == nil)
+        #expect(edge(.top, swallowed) == .top)
+        #expect(edge(.bottom, swallowed) == nil)
+        #expect(edge(.top, CGPoint(
+            x: 250,
+            y: firstTop + PlateConstants.stageInsertStickyDepth + 1
+        )) == nil)
+    }
+
+    @Test("The add-stage band keeps the end plate magnified")
+    func hoveredStageIndexFollowsTheInsertBand() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [200, 300, 200]
+        let firstTop = layout.centers[0] - layout.heights[0] / 2
+        let lastBottom = layout.centers[2] + layout.heights[2] / 2
+        let hovered: (CGPoint) -> Int? = {
+            PlateInteraction.hoveredStageIndex(
+                previous: nil,
+                at: $0,
+                containerWidth: 500,
+                currentStackOffset: 0,
+                plateWidths: widths,
+                currentLayout: layout
+            )
+        }
+
+        #expect(hovered(CGPoint(x: 250, y: firstTop - 10)) == 0)
+        #expect(hovered(CGPoint(x: 250, y: lastBottom + 10)) == 2)
+        #expect(hovered(CGPoint(
+            x: 250,
+            y: firstTop - PlateConstants.stageInsertHoverHeight - 1
+        )) == nil)
     }
 
     @Test("The add-stage button sits inside the band that reveals it")
@@ -1035,6 +1105,7 @@ struct PlateMotionTests {
             )
             #expect(center?.x == 250)
             #expect(PlateInteraction.stageInsertionEdge(
+                previous: nil,
                 at: center ?? .zero,
                 containerWidth: 500,
                 stackOffset: 40,
@@ -1049,6 +1120,7 @@ struct PlateMotionTests {
         let empty = PlateStackLayout(scales: [], heights: [], centers: [], totalHeight: 0)
 
         #expect(PlateInteraction.stageInsertionEdge(
+            previous: nil,
             at: .zero,
             containerWidth: 500,
             stackOffset: 0,
