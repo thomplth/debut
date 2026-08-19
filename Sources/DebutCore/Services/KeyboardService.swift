@@ -71,10 +71,12 @@ public enum DebutKeyEvent: Equatable, Sendable {
             .swapStageDown
         case .quitSelectedApp:
             .quitSelectedApp
+        case .escape:
+            .dismissOverlay
         case .cmdTabTap, .cmdRelease, .nextWindowRepeat, .previousWindowRepeat,
              .switchToStage, .switchToStageKeepingCurrentApplication,
              .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick,
-             .cmdShiftBacktickRepeat, .escape:
+             .cmdShiftBacktickRepeat:
             nil
         }
     }

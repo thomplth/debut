@@ -196,10 +196,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
         quickSwitchExcludedBundleIDs.contains(bundleID)
     }
 
+    /// Each command is counted on its own, so a shortcut the user never reaches for keeps its
+    /// hint even after its neighbour in the same footer group has retired.
+    public static let commandHintRetirementUses = 3
+
     public func shouldShowCommandHint(for action: KeyAction) -> Bool {
         switch commandHintVisibility {
         case .automatic:
-            (commandUsageCounts[action] ?? 0) <= 3
+            (commandUsageCounts[action] ?? 0) < Self.commandHintRetirementUses
         case .never:
             false
         case .always:
@@ -207,11 +211,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
         }
     }
 
-    /// Records only the four uses needed by automatic mode. Returns whether state changed.
+    /// Records only the uses needed by automatic mode. Returns whether state changed.
     @discardableResult
     public mutating func recordCommandUsage(_ action: KeyAction) -> Bool {
         let currentCount = commandUsageCounts[action] ?? 0
-        guard currentCount < 4 else { return false }
+        guard currentCount < Self.commandHintRetirementUses else { return false }
         commandUsageCounts[action] = currentCount + 1
         return true
     }
