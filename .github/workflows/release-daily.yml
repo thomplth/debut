@@ -21,12 +21,15 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       previous_tag: ${{ steps.plan.outputs.previous_tag }}
       should_release: ${{ steps.plan.outputs.should_release }}
+      sha: ${{ github.sha }}
 
     steps:
-      - name: Check out main
+      # Pinned to the triggering commit rather than to main, because that is the commit the CI and
+      # E2E gates check out. Planning from a newer main would gate one commit and publish another.
+      - name: Check out the commit to release
         uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Plan the patch release
@@ -61,3 +64,4 @@ jobs:
     with:
       version: ${{ needs.plan.outputs.version }}
       previous_tag: ${{ needs.plan.outputs.previous_tag }}
+      sha: ${{ needs.plan.outputs.sha }}

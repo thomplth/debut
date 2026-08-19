@@ -26,12 +26,15 @@ jobs:
     outputs:
       version: ${{ steps.plan.outputs.version }}
       previous_tag: ${{ steps.plan.outputs.previous_tag }}
+      sha: ${{ github.sha }}
 
     steps:
-      - name: Check out main
+      # Pinned to the dispatch commit rather than to main, because that is the commit the CI and
+      # E2E gates check out. Planning from a newer main would gate one commit and publish another.
+      - name: Check out the commit to release
         uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       # No change requirement: a human asking for this release has already decided it is wanted.
@@ -62,3 +65,4 @@ jobs:
     with:
       version: ${{ needs.plan.outputs.version }}
       previous_tag: ${{ needs.plan.outputs.previous_tag }}
+      sha: ${{ needs.plan.outputs.sha }}

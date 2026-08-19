@@ -73,6 +73,9 @@ for workflow in "$daily" "$manual"; do
         "$name must derive the next version from the shared plan script"
     expect_contains "$workflow" 'concurrency:' \
         "$name must not race a second release"
+    # Without this, anything landing on main during the gate window ships untested.
+    expect_contains "$workflow" 'sha: \$\{\{ needs\.plan\.outputs\.sha \}\}' \
+        "$name must publish the exact commit its gates tested"
 done
 
 if [[ -f "$daily" ]]; then
@@ -106,6 +109,11 @@ if [[ -f "$publish" ]]; then
     expect_contains "$publish" 'scripts/release-notes\.sh' \
         "release notes must come from the commits being released"
     expect_contains "$publish" 'scripts/package-dmg\.sh' "the release must ship a disk image"
+    expect_contains "$publish" '^      sha:' "the publish workflow must take the commit its gates tested"
+    expect_contains "$publish" 'scripts/verify-release-commit\.sh' \
+        "the publish workflow must refuse to release a commit its gates never saw"
+    expect_contains "$publish" 'ref: \$\{\{ inputs\.sha \}\}' \
+        "the publish workflow must check out the tested commit rather than whatever main is now"
     expect_contains "$publish" 'gh release create' "the workflow must create the GitHub release"
     expect_contains "$publish" 'Debut\.dmg' "the release must attach the disk image"
     expect_contains "$publish" 'git tag' "the release must be tagged"
