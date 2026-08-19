@@ -60,6 +60,10 @@ if [[ -f "$runner" ]]; then
         "CI E2E must suppress the hosted runner's screen capture reminder"
     expect_contains "$runner" 'launchctl setenv DEBUT_DISABLE_WINDOW_PREVIEWS 1' \
         "CI E2E must avoid live preview capture in the disposable app"
+    # launchctl setenv only reaches launchd-spawned processes, so the shell-spawned suite would
+    # otherwise assert against previews the app was told not to capture.
+    expect_contains "$runner" 'export DEBUT_DISABLE_WINDOW_PREVIEWS=1' \
+        "CI E2E must tell the suite process that previews are disabled"
     expect_contains "$runner" '/opt/hca/hosted-compute-agent' \
         "CI E2E must suppress capture reminders for the hosted runner process"
     expect_contains "$runner" 'killall replayd' \
@@ -77,6 +81,10 @@ if [[ -f "$e2e_source" ]]; then
         "E2E must isolate unsupported hosted drag assertions"
     expect_contains "$e2e_source" 'GitHub-hosted macOS does not deliver synthetic drag gestures' \
         "E2E must explain hosted drag-only skips"
+    expect_contains "$e2e_source" 'previewCaptureTests' \
+        "E2E must isolate assertions that need live preview capture"
+    expect_contains "$e2e_source" 'Live preview capture is disabled' \
+        "E2E must explain skips caused by disabled preview capture"
     expect_contains "$e2e_source" 'postMouseHover\(to: handleHotspot\)' \
         "E2E must generate continuous movement inside the stage handle hotspot"
     expect_contains "$e2e_source" 'postMouseHover\(to: reverseHotspot\)' \
