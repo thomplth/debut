@@ -26,7 +26,7 @@ For every task:
 
 After any code change, run the relevant unit and screenshot tests, then build, install, and launch the app:
 ```bash
-TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test
+TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test --no-parallel
 ./scripts/build-app.sh
 pkill -f "Debut.app" || true
 rm -rf /Applications/Debut.app
@@ -35,6 +35,8 @@ open /Applications/Debut.app
 ```
 
 Never leave code changes uninstalled — the installed app must always match the source.
+
+`--no-parallel` is required, not a preference. Several suites block the main thread waiting on semaphores or sleeping, which starves main-queue work in whichever suite happens to run alongside them. Parallel runs therefore fail on timing rather than behaviour — the wallpaper-observer test fails almost every time, and the `StageController` suite flakes. Serial runs cost about three seconds and remove that whole class of false failure.
 
 ### Full E2E
 
@@ -55,6 +57,17 @@ Use `./scripts/tart-e2e.sh run-all` only when diagnosing those virtualized drag 
 `./scripts/e2e-test.sh` runs against the foreground developer session and is a last resort for validating physical drag delivery. Warn the user before running it because it displays the overlay, injects global input, and captures the live desktop.
 
 `./scripts/rebuild.sh` only builds, installs, and launches the app locally; it never runs E2E.
+
+## Releases
+
+Releases are automated in GitHub Actions and are never cut by hand. Both paths gate on the full CI suite (`.github/workflows/ci.yml`) and the full E2E suite before anything is tagged or published.
+
+- **Daily** (`release-daily.yml`) — a scheduled run bumps the patch number and publishes when `main` has moved since the last tag, and skips when it has not.
+- **Manual** (`release-manual.yml`) — human triggered with a `minor` or `major` bump, and never skipped for want of new commits.
+
+The next version comes from the tags alone, via `scripts/release-plan.sh`; nothing else records the current version. `scripts/apply-version.sh` then writes it into `Sources/DebutCore/DebutCore.swift` and `Resources/Info.plist`, which is why those two must keep their current shape. Release notes are the commit subjects in the range, so a vague commit message becomes a vague changelog entry.
+
+The version-bump commit the publish workflow makes is the one commit exempt from the Linear issue ID prefix; it is `Release vX.Y.Z`.
 
 ## Toolchain
 

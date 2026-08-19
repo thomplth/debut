@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Superseded pull request runs are worth cancelling; a run gating a release is not.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Select the macOS 26 toolchain
+        run: |
+          echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> "$GITHUB_ENV"
+          echo "TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault" >> "$GITHUB_ENV"
+
+      - name: Verify shell contract tests
+        run: |
+          status=0
+          for test in Tests/CI/*.sh; do
+              echo "--- $test"
+              bash "$test" || status=1
+          done
+          exit $status
+
+      - name: Run unit and screenshot tests
+        # Several suites block the main thread waiting on semaphores, which starves main-queue
+        # work in whichever suite happens to run alongside them. Serial runs are ~3s slower and
+        # remove that whole class of false failure.
+        run: swift test --no-parallel
+
+      - name: Build the release bundle
+        run: ./scripts/build-app.sh
