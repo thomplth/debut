@@ -147,6 +147,21 @@ struct StateStoreTests {
         #expect(decoded.previewCacheTTL == AppSettings.defaultPreviewCacheTTL)
     }
 
+    @Test("Older settings default held cycling to the standard pacing interval")
+    func legacySettingsDefaultHeldCycleInterval() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "heldCycleMinimumInterval")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+
+        #expect(decoded.heldCycleMinimumInterval == AppSettings.defaultHeldCycleMinimumInterval)
+        #expect(AppSettings.defaultHeldCycleMinimumInterval == 0.1)
+    }
+
     @Test("Older settings default command hints to automatic with no usage")
     func legacySettingsDefaultCommandHints() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
