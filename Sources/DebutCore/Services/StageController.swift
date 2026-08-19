@@ -486,6 +486,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             swapStage(direction: .up)
         case .swapStageDown:
             swapStage(direction: .down)
+        case .quitSelectedApp:
+            quitSelectedApp()
         }
     }
 
@@ -1064,6 +1066,33 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
         delegate?.stageControllerDidMutateState(self)
         notifyOverlayUpdated()
+    }
+
+    /// The overlay stays open so the user can keep working through the stage. Assignments are
+    /// left alone here: the process-exit monitor makes them dormant once the app actually goes.
+    private func quitSelectedApp() {
+        guard isStageManagerVisible,
+              stageManager.stages.indices.contains(selectedStageIndex) else { return }
+        let stage = stageManager.stages[selectedStageIndex]
+        guard stage.windows.indices.contains(selectedWindowIndex) else { return }
+        let window = stage.windows[selectedWindowIndex]
+
+        guard let ownerPID = window.ownerPID else {
+            diag.report("quit_selected_app_skipped", details: [
+                "windowID": "\(window.windowID)",
+                "bundleID": window.ownerBundleID,
+                "reason": "no_pid",
+            ])
+            return
+        }
+
+        let requested = windowService.terminateApp(pid: ownerPID)
+        diag.report("quit_selected_app", details: [
+            "windowID": "\(window.windowID)",
+            "bundleID": window.ownerBundleID,
+            "ownerPID": "\(ownerPID)",
+            "requested": "\(requested)",
+        ])
     }
 
     private func swapStage(direction: SwapDirection) {
