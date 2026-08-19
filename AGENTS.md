@@ -65,6 +65,8 @@ Releases are automated in GitHub Actions and are never cut by hand. Both paths g
 - **Daily** (`release-daily.yml`) — a scheduled run bumps the patch number and publishes when `main` has moved since the last tag, and skips when it has not.
 - **Manual** (`release-manual.yml`) — human triggered with a `minor` or `major` bump, and never skipped for want of new commits.
 
+Every job in a release run is pinned to the commit that triggered it, and `scripts/verify-release-commit.sh` aborts the publish if `main` has moved on since. Landing on `main` while a release is gating therefore does not ship an untested commit — it fails that release, and the next run picks the new commit up. Re-run the release rather than trying to rescue a failed one.
+
 The next version comes from the tags alone, via `scripts/release-plan.sh`; nothing else records the current version. `scripts/apply-version.sh` then writes it into `Sources/DebutCore/DebutCore.swift` and `Resources/Info.plist`, which is why those two must keep their current shape. Release notes are the commit subjects in the range, so a vague commit message becomes a vague changelog entry.
 
 The version-bump commit the publish workflow makes is the one commit exempt from the Linear issue ID prefix; it is `Release vX.Y.Z`.
