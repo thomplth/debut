@@ -11,6 +11,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case nextWindow             // Tab
     case nextWindowRepeat       // Held Tab auto-repeat (stops at the last window)
     case previousWindow         // Shift+Tab
+    case previousWindowRepeat   // Held Shift+Tab auto-repeat (stops at the first window)
     case nextStage              // Option+Tab
     case previousStage          // Shift+Option+Tab
     case jumpToStage(Int)       // 1-8 (selects stage within open overlay)
@@ -29,6 +30,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case cmdBacktick            // Cmd+` — next same-app window in stage
     case cmdBacktickRepeat      // Held Cmd+` auto-repeat (stops at the last window)
     case cmdShiftBacktick       // Cmd+Shift+` — previous same-app window in stage
+    case cmdShiftBacktickRepeat // Held Cmd+Shift+` auto-repeat (stops at the first window)
 
     case escape
 
@@ -60,9 +62,10 @@ public enum DebutKeyEvent: Equatable, Sendable {
             .swapStageUp
         case .swapStageDown:
             .swapStageDown
-        case .cmdTabTap, .cmdRelease, .nextWindowRepeat, .switchToStage,
-             .switchToStageKeepingCurrentApplication,
-             .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick, .escape:
+        case .cmdTabTap, .cmdRelease, .nextWindowRepeat, .previousWindowRepeat,
+             .switchToStage, .switchToStageKeepingCurrentApplication,
+             .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick,
+             .cmdShiftBacktickRepeat, .escape:
             nil
         }
     }

@@ -826,6 +826,50 @@ struct StageControllerTests {
         #expect(controller.selectedWindowIndex == 0) // release and press Tab again
     }
 
+    @Test("Held backward Tab stops at the first window and a fresh press wraps")
+    func backwardTabCycle() {
+        let (controller, _, keyboardSvc) = makeController()
+        let stageID = controller.stageManager.stages[0].id
+        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
+        controller.stageManager.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageID)
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(controller.selectedWindowIndex == 1)
+        keyboardSvc.simulateEvent(.previousWindowRepeat)
+        #expect(controller.selectedWindowIndex == 0)
+        keyboardSvc.simulateEvent(.previousWindowRepeat)
+        #expect(controller.selectedWindowIndex == 0) // held backward stops at the first window
+        keyboardSvc.simulateEvent(.previousWindow)
+        #expect(controller.selectedWindowIndex == 2) // a fresh press still wraps
+    }
+
+    @Test("Held backward app-window shortcut stops at the first window")
+    func heldAppWindowCycleStopsAtStart() {
+        let (controller, windowService, keyboardService) = makeController()
+        let stageID = controller.stageManager.activeStageID
+        for windowID in [CGWindowID(101), 202, 303] {
+            controller.stageManager.addWindow(
+                StageWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.example.App",
+                    ownerName: "App",
+                    windowTitle: "Window \(windowID)"
+                ),
+                toStageID: stageID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdShiftBacktick) // wraps to the last window
+        #expect(windowService.raisedWindowID == 303)
+        keyboardService.simulateEvent(.cmdShiftBacktickRepeat)
+        #expect(windowService.raisedWindowID == 202)
+        keyboardService.simulateEvent(.cmdShiftBacktickRepeat)
+        keyboardService.simulateEvent(.cmdShiftBacktickRepeat)
+
+        #expect(windowService.raisedWindowID == 101)
+    }
+
     @Test("Held app-window shortcut stops at the last window")
     func heldAppWindowCycleStopsAtEnd() {
         let (controller, windowService, keyboardService) = makeController()

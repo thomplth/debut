@@ -445,6 +445,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             handleCmdBacktick(reverse: false, wraps: false)
         case .cmdShiftBacktick:
             handleCmdBacktick(reverse: true)
+        case .cmdShiftBacktickRepeat:
+            handleCmdBacktick(reverse: true, wraps: false)
         case .cmdRelease:
             commitBacktickCycle()
             commitSelection()
@@ -456,6 +458,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             cycleWindow(forward: true, wraps: false)
         case .previousWindow:
             cycleWindow(forward: false)
+        case .previousWindowRepeat:
+            cycleWindow(forward: false, wraps: false)
         case .nextStage:
             cycleStage(forward: true)
         case .previousStage:
@@ -974,16 +978,16 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         let stage = stageManager.stages[selectedStageIndex]
         guard !stage.windows.isEmpty else { return }
 
-        if forward {
-            if wraps {
-                selectedWindowIndex = (selectedWindowIndex + 1) % stage.windows.count
-            } else {
-                let nextIndex = min(selectedWindowIndex + 1, stage.windows.count - 1)
-                guard nextIndex != selectedWindowIndex else { return }
-                selectedWindowIndex = nextIndex
-            }
+        if wraps {
+            let step = forward ? 1 : -1
+            selectedWindowIndex =
+                (selectedWindowIndex + step + stage.windows.count) % stage.windows.count
         } else {
-            selectedWindowIndex = (selectedWindowIndex - 1 + stage.windows.count) % stage.windows.count
+            let nextIndex = forward
+                ? min(selectedWindowIndex + 1, stage.windows.count - 1)
+                : max(selectedWindowIndex - 1, 0)
+            guard nextIndex != selectedWindowIndex else { return }
+            selectedWindowIndex = nextIndex
         }
         notifyOverlayUpdated()
     }

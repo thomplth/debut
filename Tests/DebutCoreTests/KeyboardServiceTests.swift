@@ -545,6 +545,72 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdBacktickRepeat])
     }
 
+    @Test("Cmd+Shift+Tab auto-repeat is distinguished from a fresh press")
+    func cmdShiftTabAutoRepeat() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let repeatedTab = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        repeatedTab.flags = [.maskCommand, .maskShift]
+        repeatedTab.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+
+        #expect(service.handleCGEvent(type: .keyDown, event: repeatedTab) == nil)
+        #expect(delegate.receivedEvents == [.previousWindowRepeat])
+    }
+
+    @Test("Held backtick inside the overlay auto-repeats as a backward window step")
+    func sessionBacktickAutoRepeat() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let tabDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        tabDown.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: tabDown) == nil)
+        service.overlayVisible = true
+
+        let repeatedBacktick = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Grave),
+            keyDown: true
+        )!
+        repeatedBacktick.flags = .maskCommand
+        repeatedBacktick.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+
+        #expect(service.handleCGEvent(type: .keyDown, event: repeatedBacktick) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .previousWindowRepeat])
+    }
+
+    @Test("Cmd+Shift+backtick auto-repeat is distinguished from a fresh press")
+    func cmdShiftBacktickAutoRepeat() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let repeatedBacktick = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Grave),
+            keyDown: true
+        )!
+        repeatedBacktick.flags = [.maskCommand, .maskShift]
+        repeatedBacktick.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+
+        #expect(service.handleCGEvent(type: .keyDown, event: repeatedBacktick) == nil)
+        #expect(delegate.receivedEvents == [.cmdShiftBacktickRepeat])
+    }
+
     @Test("Cmd+Option+Tab event")
     func cmdOptionTab() {
         let svc = MockKeyboardService()
