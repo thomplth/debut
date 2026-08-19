@@ -836,6 +836,19 @@ enum PlateInteraction {
     }
 }
 
+enum PlateContrast {
+    /// The sRGB level whose relative luminance is the WCAG crossover between a white and a black
+    /// glyph. sRGB is not linear, so the crossover lands below the 0.5 midpoint rather than on it.
+    static let handleTintThreshold = 0.46
+
+    /// A wallpaper we could not measure is treated as dark, because the desktop surface paints
+    /// black beneath the plates whenever the capture failed.
+    static func handleTintWhiteLevel(backgroundLuminance: Double?) -> Double {
+        guard let backgroundLuminance else { return 1 }
+        return backgroundLuminance < handleTintThreshold ? 1 : 0
+    }
+}
+
 struct PointerMovementGate {
     private var initialLocation: CGPoint?
     private(set) var hasMoved = false
@@ -1262,6 +1275,7 @@ public struct OverlaySwiftUIView: View {
                             thumbnailWidth: tSize.width,
                             thumbnailHeight: tSize.height,
                             appearance: viewModel.appearance,
+                            wallpaperLuminance: viewModel.wallpaperLuminance,
                             stageNumberHint: stageNumberHint,
                             footerHints: footerHints,
                             stageHandleExpansion: stageHandleExpansion,
@@ -1680,6 +1694,7 @@ struct PlateSwiftUIView: View {
     let thumbnailWidth: CGFloat
     let thumbnailHeight: CGFloat
     let appearance: AppSettings
+    let wallpaperLuminance: Double?
     let stageNumberHint: CommandHintPresentation?
     let footerHints: [CommandHintPresentation]
     let stageHandleExpansion: CGFloat
@@ -1807,7 +1822,7 @@ struct PlateSwiftUIView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .overlay(alignment: .leading) {
             if isStageHandleRevealed {
-                StageDragHandle()
+                StageDragHandle(wallpaperLuminance: wallpaperLuminance)
                     .frame(width: PlateConstants.stageHandleRevealWidth)
                     .contentShape(Rectangle())
                     .gesture(stageHandleDragGesture)
@@ -1950,10 +1965,19 @@ private struct StageCloseButton: View {
 }
 
 private struct StageDragHandle: View {
+    let wallpaperLuminance: Double?
+
     var body: some View {
         Image(systemName: "line.3.horizontal")
             .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(.secondary.opacity(0.8))
+            .foregroundStyle(
+                Color(
+                    white: PlateContrast.handleTintWhiteLevel(
+                        backgroundLuminance: wallpaperLuminance
+                    )
+                )
+                .opacity(0.8)
+            )
             .frame(maxHeight: .infinity)
             .help("Drag to reorder stage")
             .accessibilityLabel("Reorder stage")

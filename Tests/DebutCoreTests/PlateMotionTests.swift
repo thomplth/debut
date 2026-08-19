@@ -1265,6 +1265,27 @@ struct PlateMotionTests {
         ) == nil)
     }
 
+    @Test("The drag handle takes whichever tint reads against the wallpaper")
+    func dragHandleTintFollowsBackgroundLuminance() {
+        #expect(PlateContrast.handleTintWhiteLevel(backgroundLuminance: 0) == 1)
+        #expect(PlateContrast.handleTintWhiteLevel(backgroundLuminance: 0.2) == 1)
+        #expect(PlateContrast.handleTintWhiteLevel(backgroundLuminance: 0.8) == 0)
+        #expect(PlateContrast.handleTintWhiteLevel(backgroundLuminance: 1) == 0)
+
+        // The crossover sits below the 0.5 midpoint, so a mid-gray wallpaper takes a dark handle.
+        #expect(PlateContrast.handleTintWhiteLevel(backgroundLuminance: 0.5) == 0)
+        #expect(PlateContrast.handleTintWhiteLevel(
+            backgroundLuminance: PlateContrast.handleTintThreshold - 0.01
+        ) == 1)
+    }
+
+    /// An unmeasured wallpaper must not darken the handle: the desktop surface paints black
+    /// underneath, so a dark glyph there would be invisible.
+    @Test("An unknown background leaves the drag handle light")
+    func dragHandleTintDefaultsToLight() {
+        #expect(PlateContrast.handleTintWhiteLevel(backgroundLuminance: nil) == 1)
+    }
+
     @Test("A stale pointer exit cannot clear the newly hovered window")
     func stalePointerExitDoesNotClearSelection() {
         let first = PointerSelection(stageIndex: 0, windowIndex: 0)
