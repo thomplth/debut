@@ -23,13 +23,16 @@ public struct OverlayViewModel: Sendable {
     public var selectedWindowIndex: Int
     public let windowPreviews: [CGWindowID: CGImage]
     public var appearance: AppSettings
+    /// Mean brightness of the wallpaper the overlay is drawn over, when it could be measured.
+    public var wallpaperLuminance: Double?
 
-    public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings()) {
+    public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil) {
         self.stageManager = stageManager
         self.activeStageIndex = activeStageIndex
         self.selectedWindowIndex = selectedWindowIndex
         self.windowPreviews = windowPreviews
         self.appearance = appearance
+        self.wallpaperLuminance = wallpaperLuminance
     }
 
     public var plates: [PlateData] {

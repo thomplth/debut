@@ -285,6 +285,7 @@ public final class DesktopSurfaceWindow: NSWindow {
 
     public convenience init(
         screen: NSScreen,
+        onLuminanceMeasured: @escaping @MainActor (Double?) -> Void = { _ in },
         onFileDragEntered: @escaping @MainActor () -> Void = {}
     ) {
         self.init(
@@ -292,6 +293,7 @@ public final class DesktopSurfaceWindow: NSWindow {
             wallpaperCapture: SystemDesktopWallpaperCapture(),
             wallpaperChangeObserver: SystemDesktopWallpaperChangeObserver(),
             onWallpaperRefreshed: { outcome in
+                onLuminanceMeasured(outcome.meanLuminance)
                 var details = [
                     "loaded": "\(outcome.loaded)",
                     "reason": outcome.reason.rawValue,
@@ -500,6 +502,7 @@ public struct DesktopSurfacePlan: Equatable, Sendable {
 public final class DesktopSurfaceCoordinator {
     private var surfaces: [CGDirectDisplayID: DesktopSurfaceWindow] = [:]
     private var surfaceFrames: [CGDirectDisplayID: CGRect] = [:]
+    private var wallpaperLuminances: [CGDirectDisplayID: Double] = [:]
     nonisolated(unsafe) private var screenParametersToken: NSObjectProtocol?
     private let onFileDragEntered: @MainActor () -> Void
 
@@ -542,10 +545,20 @@ public final class DesktopSurfaceCoordinator {
             else { continue }
             surfaces[descriptor.displayID] = DesktopSurfaceWindow(
                 screen: screen,
+                onLuminanceMeasured: { [weak self] luminance in
+                    self?.wallpaperLuminances[descriptor.displayID] = luminance
+                },
                 onFileDragEntered: onFileDragEntered
             )
             surfaceFrames[descriptor.displayID] = descriptor.frame
         }
+    }
+
+    /// The last measured wallpaper brightness for a display, or nil while no capture has
+    /// succeeded there yet.
+    public func wallpaperLuminance(forDisplay displayID: CGDirectDisplayID?) -> Double? {
+        guard let displayID else { return nil }
+        return wallpaperLuminances[displayID]
     }
 
     public func orderToFront() {
