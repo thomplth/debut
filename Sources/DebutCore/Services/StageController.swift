@@ -1058,6 +1058,15 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         notifyOverlayUpdated()
     }
 
+    /// Windows can vanish while the overlay is on screen — an app quits, a window closes — and
+    /// the selection is an index, so it has to be pulled back in range before the overlay is
+    /// redrawn against the shorter stage.
+    public func handleLiveWindowsRemoved() {
+        let windowCount = stageManager.stages[safe: selectedStageIndex]?.windows.count ?? 0
+        selectedWindowIndex = max(0, min(selectedWindowIndex, windowCount - 1))
+        notifyOverlayUpdated()
+    }
+
     private func moveWindow(direction: SwapDirection) {
         guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }

@@ -188,6 +188,26 @@ gets an identity keyed on the active stage index with an opacity transition rath
 than spatial motion.
 </p>
 
+<p>
+A window card arriving at or leaving a plate scales and fades over
+<code>.spring(duration: 0.28, bounce: 0)</code> — no bounce, because overshoot on a
+departing card reads as the window trying to come back&nbsp;<span class="src">PlateView.swift:94</span>. That animation is keyed on
+the plate's window <em>count</em>, deliberately not on its window IDs: a drag
+reorder permutes the IDs while holding the count, so keying on IDs would hijack the
+reorder's own motion.
+</p>
+
+<p>
+Getting the card to leave at all needs a push from outside SwiftUI. Neither the
+window-destroyed nor the process-exit path used to refresh a visible overlay, so a
+quit app's card sat there until some unrelated redraw. Both now call
+<code>StageController.handleLiveWindowsRemoved</code>, which clamps
+<code>selectedWindowIndex</code> back into range — it is an index into a list that
+just got shorter — and redraws. Both paths matter: quitting an app usually delivers
+the Accessibility destroyed notification before the process actually exits, so
+whichever lands first has to do the work.
+</p>
+
 <div class="why">
   <span class="label">Scaling used to be a layout change</span>
   <p>

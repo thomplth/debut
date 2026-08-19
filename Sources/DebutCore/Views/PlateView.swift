@@ -89,6 +89,14 @@ enum PlateMotion {
         return windowReorderTransition(reduceMotion: reduceMotion)
     }
 
+    /// A window leaving the plate is the app going away, not a layout tweak, so it settles
+    /// without bounce: overshoot would read as the card trying to come back.
+    static func windowRemovalTransition(reduceMotion: Bool) -> PlateFocusTransition {
+        reduceMotion
+            ? .fade(duration: 0.12)
+            : .spring(duration: 0.28, bounce: 0)
+    }
+
     static func windowLayoutKey(for plates: [PlateData]) -> WindowLayoutKey {
         WindowLayoutKey(stageWindowIDs: plates.map { $0.windows.map(\.windowID) })
     }
@@ -1361,6 +1369,11 @@ struct PlateSwiftUIView: View {
     var onWindowDropRequested: ((WindowMoveRequest) -> Void)?
     var onStageDragChanged: ((CGSize) -> Void)?
     var onStageDragEnded: (() -> Void)?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var removalTransition: PlateFocusTransition {
+        PlateMotion.windowRemovalTransition(reduceMotion: reduceMotion)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1443,9 +1456,15 @@ struct PlateSwiftUIView: View {
                             }
                         }
                         .highPriorityGesture(windowDragGesture(window: window, windowIndex: index))
+                        .transition(
+                            .scale(scale: 0.82).combined(with: .opacity)
+                        )
                     }
                 }
             }
+            // Keyed on the count, not the IDs: a drag reorder keeps the count and must keep
+            // its own motion, while an arrival or departure is what this animates.
+            .animation(removalTransition.animation, value: plate.windows.count)
             .padding(.leading, PlateConstants.padding + stageHandleExpansion)
             .padding(.trailing, PlateConstants.padding)
             .padding(.top, PlateConstants.topPadding)
