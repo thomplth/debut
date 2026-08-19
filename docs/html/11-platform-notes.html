@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>11 · Platform notes — Debut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a class="current" href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Chapter 11 · Appendix</p>
+<h1>Platform notes and glossary</h1>
+<p class="lede">
+Most of Debut's non-obvious code exists because macOS behaves in a way that is not
+documented, or is documented and wrong. This appendix collects those constraints in
+one place, each with the evidence that established it, so a future change can be
+checked against them without re-deriving each one the expensive way.
+</p>
+
+<h2>Window identity</h2>
+
+<div class="warn">
+<p>
+<strong><code>CGWindowID</code>s are ephemeral.</strong> They change between app
+restarts, and a window that is closed and reopened gets a new one. Never persist
+them. The stable cross-session key is <code>(bundleID, windowTitle)</code>, with
+bundle-only matching as a fallback because titles are not stable either
+(chapter 7).
+</p>
+</div>
+
+<div class="warn">
+<p>
+<strong>Absence from a snapshot is not evidence of destruction.</strong> Hidden,
+minimised, and ordered-out windows disappear from both AX and
+<code>CGWindowListCopyWindowInfo</code>. Only
+<code>kAXUIElementDestroyedNotification</code>, explicit exclusion or reset, or
+stage deletion may remove a live assignment. This rule has its own test —
+<em>"CG absence never removes a window without a lifecycle event"</em>.
+</p>
+</div>
+
+<div class="warn">
+<p>
+<strong>AX role and subrole are a snapshot, not a verdict.</strong> An app still
+warming up can report a standard window as a dialog or a panel. An untrackable
+classification must make an assignment <em>dormant</em>, never delete it. Deleting
+turned a momentary misreport into permanent layout loss: it stranded a browser's
+four windows, which returned as <code>reason: new</code> and collapsed into the
+active stage. Dormancy makes the same misreport self-healing on the next snapshot.
+</p>
+</div>
+
+<h2>Window manipulation</h2>
+
+<table>
+  <tr><th>Constraint</th><th>Consequence for Debut</th></tr>
+  <tr><td><strong>AX position clamping.</strong> macOS keeps roughly 40 px of every window on screen on all sides. It cannot be bypassed through AX.</td><td>Position-based hiding is impossible. Hence the desktop surface.</td></tr>
+  <tr><td><strong>SLS/CGS private APIs</strong> (<code>SLSSetWindowAlpha</code>, <code>SLSMoveWindow</code>, …) only affect windows owned by the calling process. They silently no-op on other processes' windows without disabling SIP.</td><td>Not an option. They fail without an error, which is worse than failing.</td></tr>
+  <tr><td><strong>AX raise does not activate.</strong> <code>AXUIElementPerformAction(kAXRaiseAction)</code> only reorders a window within its own app's stack.</td><td>Always pair it with <code>NSRunningApplication.activate()</code> on the target app.</td></tr>
+  <tr><td><strong>Per-element AX messaging can block.</strong></td><td>A 50 ms messaging timeout is set per element; a hung app degrades one window, not the session.</td></tr>
+</table>
+
+<div class="why">
+<p>
+<strong>The desktop surface, restated.</strong> Since windows can be neither moved
+off screen nor made transparent, Debut occludes them: a Debut-owned full-screen
+<code>NSWindow</code> at <code>.normal</code> level, ordered between the active
+stage's windows and everything else. Order the surface to front, then AX-raise the
+active windows above it. No position or minimise manipulation is involved at all.
+</p>
+<p>
+It must <strong>not</strong> set <code>.canJoinAllSpaces</code> — that makes it
+follow into fullscreen Spaces and cover the fullscreen app. The surface only
+matters on the normal desktop.
+</p>
+</div>
+
+<h2>Screen capture</h2>
+
+<div class="warn">
+<p>
+<strong><code>CGWindowListCreateImage</code> corrupts silently and per app.</strong>
+Deprecated in macOS 14, it still compiles only because of the declared deployment
+target. It does not fail cleanly and it does not fail uniformly: measured on macOS
+26.5.2 across 21 live windows, 18 captured real content while one app's windows
+came back as a uniform grey image. Because most windows still look right, the
+failure hides.
+</p>
+<p>
+<strong>Never treat a non-nil capture as proof of content.</strong> Assert that a
+capture contains more than one distinct luminance value — this is exactly what the
+E2E scenario <em>"Window previews contain non-uniform captured pixels"</em> and the
+<code>containsVisibleContent</code> guard do. Use ScreenCaptureKit wherever the
+result must actually contain pixels.
+</p>
+</div>
+
+<div class="why">
+<p>
+<strong>Capture cost is per window, not per pixel.</strong>
+<code>SCScreenshotManager</code> costs 12–17 ms per window regardless of the
+requested size; 400 px thumbnails measured the same as full resolution. Requesting
+smaller images is a memory optimisation, not a latency one.
+</p>
+<p>
+Capture concurrently — 21 windows took 398 ms serially versus 163 ms concurrently —
+but expect sublinear scaling: the same run burned 1.8 s of CPU for 163 ms of wall
+time. <strong>The only large win is capturing fewer windows.</strong> Hence the
+preview cache policy in chapter 6.
+</p>
+</div>
+
+<h3>Wallpaper</h3>
+
+<ul>
+  <li><strong>The wallpaper cannot be resolved from its configuration.</strong>
+  Providers such as <code>com.apple.NeptuneOneExtension</code> and
+  <code>com.apple.wallpaper.extension.photos</code> generate images and expose no
+  file. The wallpaper store and <code>desktopImageURL</code> are both dead ends.
+  Capture the pixels macOS already rendered instead.</li>
+  <li><strong><code>SCShareableContent.excludingDesktopWindows</code> describes the
+  returned list, not your intent.</strong> Pass <code>true</code> so desktop windows
+  stay <em>out</em> of the list, then hand that list to
+  <code>SCContentFilter(display:excludingWindows:)</code> to composite wallpaper
+  without UI. Passing <code>false</code> puts the wallpaper into the list, and
+  excluding it leaves the filter with nothing to composite — which fails at
+  <em>capture</em> time with error <code>-3811</code>, not at filter
+  construction.</li>
+</ul>
+
+<h2>Keyboard and event taps</h2>
+
+<table>
+  <tr><th>Rule</th><th>Why</th></tr>
+  <tr><td><strong>Consume every event while the overlay is active</strong> — return <code>nil</code> for keyDown <em>and</em> keyUp.</td><td>Passing keyUp through leaks it to the active app.</td></tr>
+  <tr><td><strong>Session state and overlay visibility are separate.</strong></td><td>Escape closes the overlay but keeps the held-modifier session alive.</td></tr>
+  <tr><td><strong>Check the Option flag before bare Tab</strong> — historical; no longer a step.</td><td><code>AGENTS.md</code> still lists this, but no such branch exists. Binding lookup is exact <code>KeyCombo</code> equality across all four modifier booleans (<span class="src">EventTapKeyboardService.swift:408</span>, <span class="src">Models/KeyBinding.swift:398</span>), so a combo with Option set can never match the bare-Tab binding.</td></tr>
+  <tr><td><strong>Check quick-switch chords before Cmd-state tracking.</strong></td><td>They are global and must win. Digit 0 does nothing.</td></tr>
+  <tr><td><strong>Handle <code>.tapDisabledByTimeout</code> and <code>.tapDisabledByUserInput</code>.</strong></td><td>macOS disables a slow tap unilaterally. Re-enable it or the app goes deaf.</td></tr>
+</table>
+
+<div class="warn">
+<p>
+<strong>No app queries inside the event-tap callback.</strong> Workspace and
+cross-process Accessibility calls block keyboard delivery for the whole system and
+can get the tap disabled outright. Cache the frontmost bundle ID from
+<code>NSWorkspace.didActivateApplicationNotification</code>; quick-switch app
+priority is then an in-memory set lookup. This applies to diagnostics too — report
+the fact, let the main queue enrich it.
+</p>
+</div>
+
+<h2>Process and lifecycle</h2>
+
+<ul>
+  <li><strong>All three discovery paths must register tracking.</strong> Startup
+  reconciliation, app launch, and focus-change (Cmd+N) all need
+  <code>registerTracking</code> so the window gets
+  <code>kAXUIElementDestroyedNotification</code> and
+  <code>kAXTitleChangedNotification</code>. Missing any path produces ghost
+  windows.</li>
+  <li><strong>Process exit makes assignments dormant, not deleted.</strong> Track
+  every window-owning PID with an event-driven
+  <code>DispatchSource.makeProcessSource(.exit)</code>; keep
+  <code>didTerminateApplicationNotification</code> only as a backup. Both signals
+  funnel into one idempotent cleanup path. PID monitoring must survive AX observer
+  pruning and must not depend on window visibility.</li>
+  <li><strong>There is no time-based expiry</strong> on dormancy. A relaunch
+  restores exact bundle+title matches first, then complete one-to-one bundle
+  matches for dynamic titles.</li>
+  <li><strong>macOS does not reliably distinguish termination reasons</strong>, so
+  dormant assignments must survive deliberate quits and updater relaunches
+  alike.</li>
+  <li><strong>Every destructive assignment change must report a diagnostic
+  event.</strong> A removal that emits nothing is unfalsifiable afterwards. The
+  untrackable-deletion bug above left no trace; the log showed only a
+  harmless-looking <code>windows_reconciled</code> summary and the damage had to be
+  inferred from a later <code>reason: new</code>.</li>
+</ul>
+
+<h2>Performance and SwiftUI</h2>
+
+<div class="warn">
+<p>
+<strong>Never leave an <code>NSHostingView</code> attached while the overlay is
+hidden.</strong> SwiftUI keeps running layout passes on ordered-out windows and
+consumes 50 %+ CPU indefinitely. Remove the hosting view in
+<code>hideOverlay()</code> and recreate it in <code>showOverlay()</code>.
+</p>
+</div>
+
+<ul>
+  <li><strong>No polling, no timers.</strong> Everything is event-driven:
+  <code>AXObserver</code> for focus, <code>NSWorkspace</code> notifications for app
+  lifecycle, <code>DispatchSource</code> for process exit, filesystem watches for
+  the wallpaper directory. Even the stall watchdog schedules nothing unless a
+  presentation is in flight.</li>
+  <li><strong>Observe the frontmost app only.</strong> Move the
+  <code>AXObserver</code> for <code>kAXFocusedWindowChangedNotification</code> when
+  <code>didActivateApplicationNotification</code> fires, rather than observing every
+  app.</li>
+  <li><strong>Scale is a render transform, not a layout change.</strong> Changing
+  layout geometry per frame re-runs layout for the whole stack; a
+  <code>scaleEffect</code> does not (chapter 6, KHA-448).</li>
+</ul>
+
+<h2>Concurrency in this codebase</h2>
+
+<table>
+  <tr><th>Pattern</th><th>Where and why</th></tr>
+  <tr><td><code>@unchecked Sendable</code> + <code>MainActor.assumeIsolated</code></td><td><code>StageController</code>, <code>PerformanceRecorder</code>, <code>DiagnosticReporter</code>. Callbacks arrive from C APIs that carry no isolation information.</td></tr>
+  <tr><td><code>NSLock</code> rather than an actor</td><td>Anything the event-tap thread touches. An actor hop on the input path is exactly what must not happen.</td></tr>
+  <tr><td>Separate locks for separate concerns</td><td><code>DiagnosticReporter</code> guards its state provider with a lock distinct from its write queue, so reading state never waits on file I/O.</td></tr>
+  <tr><td><code>nonisolated(unsafe)</code></td><td>Used sparingly, always with a comment naming the queue that actually serialises the access.</td></tr>
+  <tr><td><code>actor</code></td><td>Only where the work is genuinely asynchronous and off the hot path: the preview cache, the telemetry exporter and queues.</td></tr>
+</table>
+
+<h2>Glossary</h2>
+
+<dl>
+  <dt>Assignment</dt>
+  <dd>The record that a particular window belongs to a particular stage at a
+  particular index. Either <em>live</em> (the window exists now) or <em>dormant</em>.</dd>
+
+  <dt>AX / Accessibility API</dt>
+  <dd>Apple's cross-process UI automation interface. Debut's only supported route
+  to another app's windows. Requires a user-granted TCC permission.</dd>
+
+  <dt>Committed vs tentative selection</dt>
+  <dd>Tentative is what the overlay highlights while you cycle; committed is what
+  actually happened when the session ends. Escape discards a tentative selection.</dd>
+
+  <dt>Desktop surface</dt>
+  <dd>The full-screen Debut-owned window used to occlude inactive stages. Not a
+  wallpaper — it renders the captured wallpaper image so that occlusion looks like
+  an empty desktop.</dd>
+
+  <dt>Dormant assignment</dt>
+  <dd>A stage placement retained for a window that no longer exists — because its
+  app quit, exited, or briefly misreported its AX role. Persistent, with no
+  expiry.</dd>
+
+  <dt>Lifecycle vs transient (diagnostics)</dt>
+  <dd>Lifecycle events are appended to the durable JSONL log; transient events live
+  only in the snapshot. Both refresh the state block.</dd>
+
+  <dt>MRU</dt>
+  <dd>Most-recently-used ordering. In Debut it is simply the order of the array —
+  no timestamps. Index 0 is the current window, so index 1 is the default
+  selection: one Tab press means "the previous window".</dd>
+
+  <dt>Plate</dt>
+  <dd>The visual representation of a stage in the overlay. Stages are the model;
+  plates are the render.</dd>
+
+  <dt>Provisional window ID</dt>
+  <dd>An ID recorded during reconciliation as possibly-replaced, carried forward so
+  a later pass can recognise a replacement without a timeout.</dd>
+
+  <dt>Reason code</dt>
+  <dd>The string on a reconciliation diagnostic event explaining why a window landed
+  where it did — <code>new</code>, dormant restoration, bundle-only recovery, and so
+  on. A cluster of <code>new</code> after a restart means recovery failed.</dd>
+
+  <dt>Session</dt>
+  <dd>The interval during which the activation modifier is held. Separate from
+  overlay visibility.</dd>
+
+  <dt>Stage</dt>
+  <dd>A workspace. Has no name — its label is its 1-based position in the array, so
+  create, delete and reorder need no bookkeeping.</dd>
+
+  <dt>Trackable</dt>
+  <dd>An AX classification: a standard window Debut may manage. The classification
+  is tri-state — trackable, untrackable, or neither (unknown), and the third case
+  must not be collapsed into the second.</dd>
+
+  <dt>Trace ID / correlation ID</dt>
+  <dd>Correlation ID identifies one performance span; trace ID stitches spans into a
+  single overlay presentation. A span joins a trace via
+  <code>updateTraceID</code>.</dd>
+</dl>
+
+<h2>Known rough edges</h2>
+
+<p>
+Documented here so they are not mistaken for intent. Check the spec before
+"fixing" any of them:
+</p>
+
+<ul>
+  <li><strong>Three dead appearance settings.</strong>
+  <code>selectionOpacity</code>, <code>selectionBorderWidth</code>,
+  <code>selectionBorderOpacity</code> and <code>animationsEnabled</code> are
+  persisted and have working sliders in Settings, but nothing reads them
+  (chapter 6).</li>
+  <li><strong><code>deleteStage</code> index arithmetic.</strong>
+  <code>min(overflowIndex, stages.count - 1)</code> mixes a pre-removal index with a
+  post-removal count, and has no test coverage (chapter 4).</li>
+  <li><strong>Deployment-target mismatch.</strong> <code>Package.swift</code> says
+  macOS 26, <code>Info.plist</code> says 14.0 (chapter 10).</li>
+  <li><strong>Duplicated <code>plateCenterY</code> maths</strong> in the overlay,
+  deliberately retained as a cross-check rather than factored out (chapter 6).</li>
+</ul>
+
+<h2>Where to go next</h2>
+
+<div class="cards">
+  <a class="card" href="https://linear.app/kharis"><h3>Linear</h3><p>The source of truth for scope, decisions and acceptance criteria. Issues are prefixed <code>KHA-</code>.</p></a>
+  <a class="card" href="01-concepts.html"><h3>Re-read chapter 1</h3><p>The vocabulary lands differently once you have seen the implementation.</p></a>
+  <a class="card" href="09-verification.html"><h3>The test suites</h3><p>The reconciler and keyboard suites are the densest description of intended behaviour in the repository.</p></a>
+</div>
+
+<div class="pager">
+  <a href="10-build-release.html"><span class="dir">Previous</span>&larr; 10 · Build &amp; release</a>
+  <a href="index.html"><span class="dir">Back to</span>Overview &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>

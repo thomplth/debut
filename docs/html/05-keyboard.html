@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>05 · Keyboard — Debut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a class="current" href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Chapter 05</p>
+<h1>Keyboard and the event tap</h1>
+<p class="lede">
+Debut intercepts the system's own switcher shortcuts before any application sees
+them. That is done with a single CGEventTap, and almost every design decision in
+this layer follows from one fact: a tap that is slow is a tap the system turns
+off.
+</p>
+
+<h2>Creating the tap</h2>
+
+<p>
+<code>EventTapKeyboardService</code>&nbsp;<span class="src">Services/EventTapKeyboardService.swift:3</span>
+conforms to <code>KeyboardService</code> and <code>ShortcutRecordingService</code>,
+is <code>@unchecked Sendable</code>, and guards its mutable configuration with two
+separate <code>NSLock</code>s — one for tap lifecycle, one for bindings and cached
+state. Splitting them means a settings change cannot contend with a tap
+start/stop.
+</p>
+
+<p>
+<code>start(delegate:)</code>&nbsp;<span class="src">EventTapKeyboardService.swift:86</span>
+spawns a dedicated <code>Thread</code> named
+<code>com.thomplth.Debut.event-tap</code> and blocks on a semaphore for up to two
+seconds waiting for it to come up. It returns a <code>Bool</code>, so a tap that
+could not be created — the normal outcome when Accessibility permission is
+missing — surfaces as <code>false</code> rather than as silence. The controller
+reports that as <code>event_tap_created</code> or <code>event_tap_failed</code>,
+and both <code>eventTapRunning</code> and <code>eventTapStarted</code> appear in
+the diagnostic state block.
+</p>
+
+<p>On that thread:</p>
+
+<pre><code>let mask = keyDown | keyUp | flagsChanged
+
+CGEvent.tapCreate(
+    tap: .cgSessionEventTap,       // session-wide, all apps
+    place: .headInsertEventTap,    // before anyone else in the chain
+    options: .defaultTap,          // active: we may modify or swallow events
+    eventsOfInterest: mask,
+    callback: eventTapCallback,    // a file-private C function
+    userInfo: Unmanaged.passUnretained(self).toOpaque()
+)</code></pre>
+<p><span class="srcline">EventTapKeyboardService.swift:110</span></p>
+
+<p>
+The callback is a free function; it recovers <code>self</code> with
+<code>Unmanaged&lt;EventTapKeyboardService&gt;.fromOpaque(userInfo).takeUnretainedValue()</code>.
+The run-loop source is added to <em>this thread's</em> run loop in
+<code>.commonModes</code>, the tap is enabled, and <code>CFRunLoopRun()</code>
+blocks; everything after that call is teardown. <code>stop()</code> disables the
+tap, stops the run loop, and wakes it.
+</p>
+
+<div class="warn">
+  <span class="label">Unretained refcon</span>
+  <p>
+  <code>passUnretained</code> means the service must outlive the tap, and nothing
+  in the type system enforces that. In practice <code>AppDelegate</code> holds it
+  for the process lifetime.
+  </p>
+</div>
+
+<h3>Re-enabling after the system disables it</h3>
+
+<p>
+macOS disables a tap that takes too long, and reports it as a
+<code>.tapDisabledByTimeout</code> or <code>.tapDisabledByUserInput</code> event.
+The callback intercepts both <em>before</em> any Swift dispatch happens, calls
+<code>reenableEventTap()</code>, and passes the event through. There is no
+watchdog timer; this is the only re-arming path.
+</p>
+
+<h3>Never blocking</h3>
+
+<p>
+The production callback sets <code>deliverAsynchronously: true</code>, so
+delivery hops to the main queue and the callback returns immediately. A separate
+synchronous entry point exists purely as a test seam. A test asserts that the tap
+does not run on the main thread, so that "just make it main-actor" cannot be
+reintroduced accidentally.
+</p>
+
+<h2>The decision tree</h2>
+
+<p>
+<code>handleCGEvent(type:event:deliverAsynchronously:)</code>&nbsp;<span class="src">EventTapKeyboardService.swift:188</span>
+is the whole policy. The order is load-bearing at almost every step; reordering it
+is the single easiest way to break Debut subtly.
+</p>
+
+<div class="diagram">  0. open a performance span (closed by defer); read keyCode + flags once
+
+  1. shortcut-recording keyUp drain ................... consume
+  2. shortcut-recording keyDown ....................... consume  (highest priority:
+         steals ANY combination, including Cmd+Tab, while a shortcut is being
+         recorded in Settings; Escape cancels)
+
+  3. quick-switch keyUp drain ......................... consume  (even if the
+         modifier was already released)
+
+  4. modifier-free session commit ..................... consume  (a binding with
+         no modifier ends its session when the trigger key is released)
+
+  5. .flagsChanged ....................................
+         session modifier no longer held -> end session, emit .cmdRelease, consume
+         otherwise -> pass through
+
+  6. QUICK SWITCH ..................................... consume
+         checked BEFORE the configured-binding table and BEFORE session tracking
+
+  7. configured GLOBAL action .........................
+         overlay activation  -> begin session, open a presentation trace, consume
+         same-app cycling    -> only while the overlay is hidden, consume
+
+  8. guard stageManagerActive else ................... pass through
+  9. guard overlayVisible    else ................... pass through
+         (session alive but overlay closed after Escape: only the global
+          activation shortcuts in step 7 can reopen it)
+
+ 10. Cmd+Q escape hatch .............................. pass through
+         unless the user has explicitly bound that combination
+
+ 11. overlay is visible:
+         keyUp   -> consume
+         keyDown -> dispatch the session action, then ALWAYS consume</div>
+
+<p>Several of those steps deserve their reasons spelled out.</p>
+
+<h4>Why quick switch is tested before everything else</h4>
+
+<p>
+Quick-switch chords must work with no session active, and they must not be
+reachable through the ordinary binding table. Step 7 explicitly refuses to
+dispatch any action that carries a quick-switch position — only step 6 can fire
+those. The test <em>"Legacy per-number bindings cannot move quick switch away from
+digit keys"</em>&nbsp;<span class="src">KeyboardShortcutCustomizationTests.swift:128</span>
+pins that.
+</p>
+
+<div class="note">
+  <span class="label">A rule that no longer needs a step</span>
+  <p>
+  AGENTS.md instructs you to "check the Option flag BEFORE bare Tab", so that
+  Cmd+Option+Tab is not swallowed by the Cmd+Tab handler. <strong>No such branch
+  exists in the current code</strong>, and none is needed: binding lookup is exact
+  <code>KeyCombo</code> equality across all four modifier booleans&nbsp;<span class="src">EventTapKeyboardService.swift:408, Models/KeyBinding.swift:398</span>,
+  so a combo with Option set can never match the bare-Tab binding in the first
+  place. The rule describes an ordering hazard that the data model has since made
+  unrepresentable. Preserve the exact-equality matching and the hazard stays gone.
+  </p>
+</div>
+
+<h4>Why everything is consumed while the overlay is visible</h4>
+
+<p>
+Both keyDown and keyUp return <code>nil</code>. Passing keyUp through leaks into
+the active application: you would navigate the overlay and simultaneously type
+into whatever is behind it. The comment is blunt — "Always consume — never let
+keyboard events leak to the active app."
+</p>
+
+<h4>Why Cmd+Q survives</h4>
+
+<blockquote>
+Keep the standard app-quit shortcut available unless the user explicitly assigns
+that physical key combination to a Stage Manager command.
+<cite>EventTapKeyboardService.swift:348</cite>
+</blockquote>
+
+<h2>The session state machine</h2>
+
+<p>
+Three fields hold the whole thing: <code>stageManagerActive</code>,
+<code>sessionPrimaryModifier</code>, and <code>sessionTriggerKeyCode</code>. They
+are deliberately <em>not</em> lock-protected, because only the tap thread ever
+touches them.
+</p>
+
+<p>
+<code>beginSession(using:)</code> is idempotent. It derives the modifier to watch
+from the binding, in priority order command → control → option → shift; a binding
+with no modifier at all stores the trigger key code instead. While a session is
+running, lookups <em>subtract</em> the session modifier from the incoming flags
+before matching — which is how a binding recorded as plain "Tab" resolves while
+Cmd is physically held down.
+</p>
+
+<div class="note">
+  <span class="label">There is no tap-versus-hold timer in the tap</span>
+  <p>
+  This surprises everyone. The tap always begins a session and always opens the
+  logical overlay; the <em>presentation</em> is what is deferred, by the
+  configurable delay (default 80&nbsp;ms), guarded by a monotonically increasing
+  generation counter. Releasing the modifier before the deadline bumps that
+  generation and dismisses the pending presentation with the outcome
+  <code>releasedBeforePresentation</code> — the window switch happens, the overlay
+  simply never appears. A <code>cmdTabTap</code> event type does exist in the
+  enum, but only the mock keyboard service ever emits it.
+  </p>
+</div>
+
+<p>
+Overlay visibility is a separately locked mirror pushed in by the controller.
+Escape closes the overlay and restores the pre-overlay stage but leaves
+<code>stageManagerActive</code> true — the session continues until the modifier is
+released, and same-app cycling stays stage-isolated because it is intercepted at
+step 7, above the overlay gate.
+</p>
+
+<h2>Quick switch</h2>
+
+<p>
+Two independently configurable modifier sets — direct stage switching (default
+Control) and same-app switching (default Control+Option) — are both evaluated on
+every keyDown by <code>quickSwitchStagePosition(keyCode:flags:modifiers:)</code>&nbsp;<span class="src">EventTapKeyboardService.swift:460</span>.
+</p>
+
+<p>
+The match is <strong>exact equality</strong> after masking to the four modifier
+flags, so Ctrl+Shift+1 does not fire Ctrl+1. The event becomes the same-app
+variant whenever the same-app set matched&nbsp;<span class="src">EventTapKeyboardService.swift:282</span>
+— the same-app chord wins outright if both sets somehow match, and the stage
+position is then taken from whichever set produced one. Digits map
+explicitly from 1 to 9; <code>0</code> falls through to the default case and there
+is no action for it. Repeat presses are swallowed by an insert-if-new set, so
+holding the chord neither re-dispatches nor leaks.
+</p>
+
+<p>
+Exclusions are the reason the cached bundle ID exists:
+</p>
+
+<pre><code>// paraphrased; the real guard also requires a non-empty set and a non-nil cached ID
+if !excluded.isEmpty, let bundleID = cachedFrontmostBundleID, excluded.contains(bundleID) {
+    return event   // let the app keep its own Ctrl+digit shortcuts
+}</code></pre>
+
+<p>
+The cache is fed from workspace activation notifications. Asking
+<code>NSWorkspace</code> for the frontmost app inside the callback would be a
+cross-process query on the input path — exactly the thing that gets a tap
+disabled. All four configuration values are read in a single locked tuple to
+minimise time under the lock.
+</p>
+
+<h2>Actions and bindings</h2>
+
+<p>
+<code>KeyAction</code>&nbsp;<span class="src">Models/KeyBinding.swift:3</span> is a
+string-backed <code>CaseIterable</code> enum in four groups:
+</p>
+
+<table>
+  <tr><th>Group</th><th>Scope</th><th>Cases</th></tr>
+  <tr>
+    <td>Activation</td><td>global</td>
+    <td><code>activateNextWindow</code>, <code>activatePreviousWindow</code>, <code>activateNextStage</code>, <code>activatePreviousStage</code>, <code>activatePreviousStageAlternate</code></td>
+  </tr>
+  <tr>
+    <td>Quick switch</td><td>global</td>
+    <td><code>quickSwitchStage1</code> … <code>quickSwitchStage9</code></td>
+  </tr>
+  <tr>
+    <td>Same-app cycling</td><td>global</td>
+    <td><code>nextAppWindow</code>, <code>previousAppWindow</code></td>
+  </tr>
+  <tr>
+    <td>Session</td><td>session</td>
+    <td><code>nextWindow</code>, <code>previousWindow</code>, <code>previousWindowAlternate</code>, <code>nextStage</code>, <code>previousStage</code>, <code>jumpToStage1</code>…<code>9</code>, <code>newStageBelow</code>, <code>newStageAbove</code>, <code>deleteStage</code>, <code>deleteStageForward</code>, <code>moveWindowUp</code>/<code>Down</code>, <code>swapStageUp</code>/<code>Down</code>, <code>dismissOverlay</code></td>
+  </tr>
+</table>
+
+<p>
+Derived properties on the enum carry the semantics the raw cases cannot:
+<code>shortcutScope</code>, <code>isOverlayActivation</code>,
+<code>quickSwitchPosition</code>, <code>isSameAppCycle</code>, and
+<code>toKeyEvent()</code>. Alternates collapse in <code>toKeyEvent()</code> —
+<code>previousWindowAlternate</code> becomes <code>previousWindow</code>,
+<code>deleteStageForward</code> becomes <code>deleteStage</code>, and
+<code>jumpToStage9</code> becomes <code>jumpToLastStage</code>, because the ninth
+slot targets the <em>last</em> stage rather than literally stage 9.
+</p>
+
+<p>
+A <code>KeyCombo</code> is a key code plus four booleans, not raw
+<code>CGEventFlags</code>. Its decoder defaults every missing modifier to
+<code>false</code>, which is one half of the forward-compatibility story; the
+other half is in <code>KeyBindings.init(from:)</code>, which decodes an alternating
+key/value container, silently drops unknown action strings, and then merges the
+result over the shipped defaults. The consequence is worth stating plainly:
+</p>
+
+<div class="note">
+  <span class="label">Binding schema evolution</span>
+  <p>
+  A settings file written by an older build gains defaults for actions added
+  since, and loses actions that were retired, without any migration code. Two
+  tests pin both directions.
+  </p>
+</div>
+
+<p>
+Lookup is scope-qualified — <code>action(for:scope:)</code> iterates
+<code>allCases</code>, which makes match order deterministic and lets the same
+physical combination mean one thing globally and another inside a session.
+</p>
+
+<h3>Recording a shortcut</h3>
+
+<p>
+<code>ShortcutRecorderView</code>&nbsp;<span class="src">Views/ShortcutRecorderView.swift</span>
+records through the tap itself (step 2 of the decision tree) as well as through a
+normal <code>keyDown</code>, so it can capture combinations the system would
+otherwise eat. Pure modifier key codes are ignored, and Escape cancels.
+</p>
+
+<p>
+On capture, <code>ConflictDetector</code>&nbsp;<span class="src">Models/ShortcutConflict.swift:25</span>
+produces one of three conflict kinds:
+</p>
+
+<dl>
+  <dt><code>.internal</code></dt><dd>Another Debut action in the <em>same scope</em> already uses the combination. Resolving it removes the other action's binding entirely, leaving it unbound.</dd>
+  <dt><code>.system</code></dt><dd>Advisory only, for the well-known system combinations, and only for global-scope bindings.</dd>
+  <dt><code>.requirement</code></dt><dd>A global binding with no modifiers would intercept ordinary typing.</dd>
+</dl>
+
+<h2>Command hints</h2>
+
+<p>
+Hints annotate the overlay with the commands available at that moment, and retire
+themselves as you learn them.
+</p>
+
+<pre><code>.automatic -> shown while usageCount <= 3
+.never     -> never shown
+.always    -> always shown</code></pre>
+
+<p>
+The counter stops incrementing at 4. The comment — "Records only the four uses
+needed by automatic mode. Returns whether state changed" — captures both reasons:
+counts cannot grow unbounded, and once saturated the settings write is skipped
+entirely, so a heavily used command costs nothing on the input path.
+</p>
+
+<p>
+The pipeline is: the key event exposes a <code>commandHintAction</code> (nil for
+repeats, modifier release, quick switch, escape, and same-app cycling&nbsp;<span class="src">KeyboardService.swift:63</span>)
+→ the controller's
+<code>onCommandUsed</code> closure → the delegate records usage, reports
+<code>command_hint_usage_observed</code>, and re-renders if the overlay is open.
+The catalogue groups hints into three placements and drops a whole group only
+when every action in it has retired.
+</p>
+
+<h2>Input latency</h2>
+
+<p>
+<code>InputLatencyClock</code>&nbsp;<span class="src">Services/InputLatencyClock.swift</span>
+measures the gap between the timestamp on the CGEvent and its arrival in the tap.
+The implementation looks paranoid until you read the comment:
+</p>
+
+<blockquote>
+<code>CGEventTimestamp</code> is documented as "roughly, nanoseconds since
+startup", but Apple Silicon's mach timebase is 125/3, so a raw tick reading and a
+nanosecond reading of the same field differ by ~41×. Rather than trust the
+header, accept whichever unit puts the event within a plausible window.
+<cite>InputLatencyClock.swift:30</cite>
+</blockquote>
+
+<p>
+So it evaluates both interpretations, discards negatives and anything beyond a
+two-second plausibility limit, and takes the smaller. A keypress cannot have
+waited weeks, so the wrong interpretation discards itself.
+</p>
+
+<h2>Notes for anyone modifying this file</h2>
+
+<ul>
+  <li>The tap passes a <em>zero</em> configured delay when it opens a presentation
+  trace; the controller back-fills the real value. The tap deliberately knows
+  nothing about settings-owned timing.</li>
+
+  <li>The tap retro-links its already-open span to the new trace ID, so a single
+  trace spans recognition through main-actor dequeue. See chapter 8.</li>
+
+  <li>Session fields and the quick-switch key set are unguarded by design.
+  Touching them from anywhere but the tap thread is a data race, not a style
+  issue.</li>
+
+  <li>There is an unscoped <code>action(for:)</code> that uses
+  <code>first(where:)</code> over a dictionary and is therefore
+  order-nondeterministic. It is used only when evicting a conflicting binding,
+  never on the input path. Do not reach for it elsewhere.</li>
+</ul>
+
+<div class="pager">
+  <a href="04-stages.html"><span class="dir">Previous</span>&larr; 04 · Stages &amp; switching</a>
+  <a href="06-overlay.html"><span class="dir">Next</span>06 · The overlay &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>03 · Window tracking — Debut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a class="current" href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Chapter 03</p>
+<h1>Window discovery and tracking</h1>
+<p class="lede">
+Everything upstream of the stage model. How Debut learns that a window exists,
+decides whether it is real, keeps a handle on it, and — the hard part — learns
+that it has gone away.
+</p>
+
+<h2>Two sources of truth, neither sufficient</h2>
+
+<p>
+macOS exposes windows through two unrelated APIs, and Debut needs both.
+</p>
+
+<dl>
+  <dt>The Accessibility API</dt>
+  <dd>Gives structure: which application owns which windows, each window's role
+  and subrole, whether it is modal, and — crucially — <em>notifications</em> when
+  a window is destroyed, retitled, or focused. It does not give you a window ID.</dd>
+
+  <dt><code>CGWindowListCopyWindowInfo</code></dt>
+  <dd>Gives identity and geometry: a numeric <code>CGWindowID</code>, owner PID,
+  bounds, title, on-screen flag. It has no notion of roles, cannot tell a real
+  window from a shadow or a popup, and emits no events.</dd>
+</dl>
+
+<p>
+The bridge between them is a private but linkable symbol,
+<code>_AXUIElementGetWindow</code>, which maps an Accessibility element to a
+<code>CGWindowID</code>. The <code>AXPrivate</code> target exists only to declare
+it. Its <code>.c</code> file is empty apart from a comment:
+</p>
+
+<blockquote>
+Empty — <code>_AXUIElementGetWindow</code> is provided by ApplicationServices at
+link time. This module only declares the symbol so Swift can see it.
+<cite>Sources/AXPrivate/AXPrivate.c</cite>
+</blockquote>
+
+<h2>The discovery pipeline</h2>
+
+<p>
+<code>AccessibilityWindowService.listWindows()</code>&nbsp;<span class="src">Services/AccessibilityWindowService.swift:55</span>
+is Accessibility-first and window-server-second:
+</p>
+
+<div class="diagram">1. NSWorkspace.runningApplications, filtered to .regular
+        |
+        v
+2. For each app: AXUIElementCreateApplication(pid) -> kAXWindowsAttribute
+        |
+        v
+3. For each AX window: read role and subrole
+        |    read fails -> skip entirely: NEITHER set (see below)
+        v
+4. _AXUIElementGetWindow(element) -> CGWindowID
+        |    bridge fails or ID is 0 -> skip: NEITHER set
+        v
+5. Read the modal flag, then classify:
+        |
+        +--> isTrackableAXWindow(role:subrole:isModal:) ?
+                  yes -> trackable set        no -> untrackable set
+        |
+        v
+6. CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements])
+        |
+        v
+7. Keep only IDs in the trackable set; join with PID -> bundle ID / app name
+        |
+        v
+8. [WindowInfo]  (windowID, ownerPID, bundleID, name, title, bounds, isOnScreen)</div>
+
+<h3>The classification predicate</h3>
+
+<p>
+<code>isTrackableAXWindow(role:subrole:isModal:)</code>&nbsp;<span class="src">AccessibilityWindowService.swift:127</span>
+is a static pure function, which is why it can be unit-tested exhaustively
+without a running window server. A window is trackable when its role is
+<code>kAXWindowRole</code>, its subrole is either
+<code>kAXStandardWindowSubrole</code> or <code>kAXDialogSubrole</code>, and it is
+not modal.
+</p>
+
+<div class="note">
+  <span class="label">Three outcomes, not two</span>
+  <p>
+  A window whose role/subrole read <em>fails</em>, or whose window-ID bridge
+  fails, lands in <strong>neither</strong> the trackable nor the untrackable set.
+  That omission is what makes a partial snapshot non-destructive: an unreadable
+  window is simply not mentioned, rather than being asserted to be junk. The
+  distinction matters because an application still warming up will happily report
+  a standard window as a dialog for a few hundred milliseconds.
+  </p>
+</div>
+
+<p>
+The consequence for the stage model is a rule stated in <code>AGENTS.md</code>
+and enforced here: an untrackable classification makes an assignment
+<strong>dormant</strong>, never deleted. Deleting turns a momentary misreport into
+permanent layout loss — it once stranded a browser's four windows, which then
+reappeared as brand-new windows and collapsed into the active stage.
+</p>
+
+<h3>The snapshot that can say "I don't know"</h3>
+
+<p>
+<code>listAllWindowIDs()</code>&nbsp;<span class="src">AccessibilityWindowService.swift:119</span>
+runs the same window-server query with no Accessibility filter and returns an
+<em>optional</em> set. <code>nil</code> means the snapshot failed. This is not
+defensive nicety: the reconciler uses the presence of a window ID in this set as
+evidence that an ID may have been recycled, and a failed snapshot must never be
+read as "every window is gone".
+</p>
+
+<h2>Preview capture</h2>
+
+<p>
+Capture is the only asynchronous part of the window service.
+<code>captureWindowImages(windowIDs:onEnumerated:onCapture:)</code>&nbsp;<span class="src">AccessibilityWindowService.swift:185</span>
+uses ScreenCaptureKit exclusively:
+</p>
+
+<ol>
+  <li>Await a shared <code>SCShareableContent</code> snapshot from
+  <code>ShareableContent.shared</code>.</li>
+  <li>Intersect its window list with the requested IDs and fire
+  <code>onEnumerated</code> immediately, so callers can separate "waiting for
+  ScreenCaptureKit to enumerate" from "waiting for pixels". Those two costs are
+  wildly different and conflating them hides regressions.</li>
+  <li>Issue one <code>SCScreenshotManager.captureImage</code> per window inside a
+  <code>withTaskGroup</code>, each with an
+  <code>SCContentFilter(desktopIndependentWindow:)</code>.</li>
+  <li>Report each success individually through <code>onCapture</code>&nbsp;<span class="src">:249</span>.
+  A failure does not abort the batch and does not call back at all — it is recorded
+  as a diagnostic, so a missing preview is silent to the caller and visible in the
+  log.</li>
+</ol>
+
+<p>
+Images are downsampled to at most 640 pixels on the long edge. The reason is
+memory, not speed, and the code says so: a full-resolution capture of a Retina
+display is roughly 50 MB, and the cache holds one per window. Capture <em>time</em>
+is per-window and essentially independent of the requested size, so asking for a
+smaller image buys nothing but bytes.
+</p>
+
+<h3>The shareable-content cache</h3>
+
+<p>
+<code>ShareableContent</code>&nbsp;<span class="src">Services/ShareableContent.swift</span>
+wraps the enumeration in a <code>RecentValueCache</code> actor that caches for
+500&nbsp;ms and coalesces concurrent loads through a single in-flight
+<code>Task</code>. A failed load is deliberately not cached. The type is also
+where a counter-intuitive API detail is pinned down:
+</p>
+
+<div class="warn">
+  <span class="label">Flag polarity</span>
+  <p>
+  <code>SCShareableContent.excludingDesktopWindows(true, …)</code> describes the
+  <em>returned list</em>, not your intent. Passing <code>true</code> keeps desktop
+  windows out of the list, which is what you want before handing the list to
+  <code>SCContentFilter(display:excludingWindows:)</code> to capture the
+  wallpaper. Passing <code>false</code> puts the wallpaper in the list, and then
+  excluding it leaves the filter with nothing to composite — which fails at
+  capture time with error <code>-3811</code>, not at filter construction.
+  </p>
+</div>
+
+<h2>Observers: knowing when things change</h2>
+
+<p>
+Discovery is a snapshot. Everything after the first snapshot is event-driven —
+there is not a single timer in this layer. Two families of Accessibility observer
+do the work, and they are structured differently on purpose.
+</p>
+
+<h3>The focus observer — one at a time, follows the frontmost app</h3>
+
+<p>
+<code>installFocusObserver(for:)</code>&nbsp;<span class="src">Services/WindowDiscoveryService.swift:448</span>
+creates a single <code>AXObserver</code> on the frontmost application's element
+and registers <code>kAXFocusedWindowChangedNotification</code>. Its run-loop source
+is attached to the <em>main</em> run loop in default mode. It early-returns if the
+observer already belongs to that PID and tears down the previous one otherwise.
+Filtering out Debut itself and excluded bundles happens in the callers&nbsp;<span class="src">:249, :546</span>,
+not in the installer.
+</p>
+
+<p>
+It moves whenever <code>NSWorkspace.didActivateApplicationNotification</code>
+fires. One observer, always on the app you are using. This is what makes MRU
+ordering and "new window joins the active stage" work without polling.
+</p>
+
+<h3>The lifecycle observers — one per PID, registered per window</h3>
+
+<p>
+<code>getOrCreateObserver(for:)</code>&nbsp;<span class="src">WindowDiscoveryService.swift:370</span>
+memoises one observer per process. <code>armWindow(windowID:pid:element:)</code>&nbsp;<span class="src">WindowDiscoveryService.swift:317</span>
+then registers, on the individual window element:
+</p>
+
+<ul>
+  <li><code>kAXUIElementDestroyedNotification</code> — the <em>only</em> proof
+  that a window closed. Registration failure here is a real failure.</li>
+  <li><code>kAXTitleChangedNotification</code> — the result is deliberately
+  discarded, with the comment "A stale title is cosmetic, so it never gates
+  tracking."</li>
+</ul>
+
+<p>
+A retry after a partial failure reports the destroy notification as already
+registered; that error is treated as success.
+</p>
+
+<h3>Arming, and the failure that used to be permanent</h3>
+
+<p>
+"Arming" is the term for successfully registering that destroy notification. The
+state machine around it is small but carries a scar:
+</p>
+
+<pre><code>enum WindowArmingOutcome {
+    case armed
+    case observerUnavailable
+    case elementUnavailable
+    case notificationRejected(Int32)
+}</code></pre>
+<p><span class="srcline">WindowDiscoveryService.swift:8</span></p>
+
+<p>
+On failure, the window ID is inserted into <code>unarmedWindowIDs</code> and
+<em>removed</em> from <code>knownWindowIDs</code>. The comment explains why that
+removal is the point:
+</p>
+
+<blockquote>
+Leaving the window out of <code>armedWindowIDs</code> is what allows the next
+activation to retry. Recording it as tracked regardless is what previously made a
+transient AX failure permanent.
+<cite>WindowDiscoveryService.swift:303</cite>
+</blockquote>
+
+<p>
+Each outcome maps to a distinct <code>tracking_failed</code> diagnostic step, so
+a failure is attributable after the fact rather than inferred. The unarmed set is
+also propagated into the reconciler's snapshot, described there as "windows
+currently assigned without an armed destroy notification, so nothing can ever
+prove they closed" — the reconciler needs to know which assignments are
+structurally unfalsifiable.
+</p>
+
+<h3>Pruning</h3>
+
+<p>
+<code>pruneTracking(runningPIDs:)</code>&nbsp;<span class="src">WindowDiscoveryService.swift:398</span>
+drops observers for processes that are not in the set it is handed. The essential
+hack lives in the caller: <code>handleAppActivation</code>&nbsp;<span class="src">:576</span>
+force-inserts the activating PID before calling it, because Launch Services has
+not necessarily published a freshly activated process into
+<code>runningApplications</code> yet. Without that insertion, the app you just
+switched to can have its observers pruned microseconds after they were installed.
+</p>
+
+<p>
+<code>removeAppObserver(for:)</code> clears the per-window arming records
+<em>before</em> looking up the observer, because "arming records are keyed by
+window, not by observer, so they must be cleared even when no observer was ever
+created for this app."
+</p>
+
+<h2>Process exit monitoring</h2>
+
+<p>
+An Accessibility observer cannot tell you that a process died — the observer dies
+with it. So Debut watches processes directly.
+<code>ProcessExitMonitor</code>&nbsp;<span class="src">Services/ProcessExitMonitor.swift:10</span>
+is 40 lines around one kernel primitive:
+</p>
+
+<pre><code>DispatchSource.makeProcessSource(
+    identifier: pid,
+    eventMask: .exit,
+    queue: .main
+)</code></pre>
+
+<p>
+One source per PID, stored in a dictionary, resumed after the handler is set,
+cancelled on stop and in <code>deinit</code>. Because delivery targets the main
+queue, the handler needs no thread hop.
+</p>
+
+<p>
+<code>NSWorkspace.didTerminateApplicationNotification</code> is kept as a backup
+signal, so both paths funnel into one idempotent method,
+<code>handleProcessExit(pid:)</code>&nbsp;<span class="src">WindowDiscoveryService.swift:616</span>,
+gated on inserting into a <code>handledExitedProcessIDs</code> set. It stops
+monitoring, drops the focus observer if it belonged to that process, removes the
+app observer, and notifies the policy layer — which converts the window
+assignments to dormant rather than deleting them.
+</p>
+
+<div class="note">
+  <span class="label">Ordering that matters</span>
+  <p>
+  PID monitoring is registered <em>before</em> Accessibility arming is attempted.
+  Monitoring must not depend on per-window Accessibility success, or an app whose
+  windows failed to arm would also lose its exit detection — the two failure modes
+  would compound. Two separate tests pin this: that monitoring is registered when
+  arming fails, and that pruning observers does not discard monitoring.
+  </p>
+</div>
+
+<h2>Discovery paths and the ghost-window rule</h2>
+
+<p>
+There are exactly three ways a window enters the model, and all three must
+register tracking. Missing any one produces a "ghost": a window on a plate that
+Debut can never learn has closed.
+</p>
+
+<table>
+  <tr><th>Path</th><th>Trigger</th><th>Notes</th></tr>
+  <tr>
+    <td>Startup reconciliation</td>
+    <td><code>reconcileWindows</code> during <code>setupController</code></td>
+    <td>Matches persisted assignments against the live list. See chapter 7.</td>
+  </tr>
+  <tr>
+    <td>App launch</td>
+    <td><code>NSWorkspace.didLaunchApplicationNotification</code></td>
+    <td>Deferred by <code>launchDiscoveryDelay</code> (0.5&nbsp;s in production, 0 in tests) because a just-launched app has no windows yet.</td>
+  </tr>
+  <tr>
+    <td>Focus change</td>
+    <td><code>kAXFocusedWindowChangedNotification</code></td>
+    <td>The Cmd+N path. A window created outside Debut's awareness gains tracking at the moment it takes focus.</td>
+  </tr>
+</table>
+
+<h3>The empty-snapshot bailout</h3>
+
+<p>
+<code>reconcileWindows</code>&nbsp;<span class="src">WindowDiscoveryService.swift:180</span>
+returns early with a <code>windows_reconcile_skipped</code> diagnostic when the
+live window list comes back empty while persisted windows and running
+applications both exist. As the comment puts it, treating that snapshot as
+authoritative would erase every saved stage assignment. This is the same
+principle as the tri-state classification: an absence of evidence is not
+evidence.
+</p>
+
+<h3>Sampling order on activation</h3>
+
+<p>
+<code>handleAppActivation</code>&nbsp;<span class="src">WindowDiscoveryService.swift:555</span>
+samples the focused window <em>before</em> enumerating windows, so that
+"transient activation windows are not introduced by reconciliation latency". The
+callback order is asserted by test as
+<code>["app:&lt;bundleID&gt;", "snapshot", "focus"]</code>&nbsp;<span class="src">WindowDiscoveryServiceTests.swift:77</span>:
+reconciliation must be published before focus, which is precisely what lets the
+reconciler see a replacement window as still unassigned and match it to the right
+stage.
+</p>
+
+<h2>The runtime tables</h2>
+
+<p>
+<code>WindowDiscoveryService</code> keeps several plain dictionaries and sets, all
+runtime-only. The armed and unarmed sets carry the explanation&nbsp;<span class="src">WindowDiscoveryService.swift:36</span>
+— "every window re-arms from scratch on launch, so this never reaches
+<code>state.json</code>" — and the same reasoning applies to the rest:
+</p>
+
+<table>
+  <tr><th>Table</th><th>Holds</th></tr>
+  <tr><td><code>knownWindowIDs</code></td><td>Windows discovery believes it has seen and tracked.</td></tr>
+  <tr><td><code>armedWindowIDs</code></td><td>Windows with a live destroy notification.</td></tr>
+  <tr><td><code>unarmedWindowIDs</code></td><td>Windows whose arming failed; retried on next activation.</td></tr>
+  <tr><td><code>trackedWindowElements</code></td><td>windowID → <code>AXUIElement</code>. Doubles as the fast path for raising a window without rescanning.</td></tr>
+  <tr><td><code>perAppObservers</code></td><td>PID → <code>AXObserver</code>.</td></tr>
+  <tr><td><code>monitoredProcessIDs</code> / <code>handledExitedProcessIDs</code></td><td>Exit-monitor bookkeeping and its idempotence guard.</td></tr>
+</table>
+
+<p>
+Reverse lookup from an <code>AXUIElement</code> back to a window ID (needed in the
+destroy callback, which receives only the element) is a linear scan comparing
+with <code>CFEqual</code>. It runs once per window close, so the cost never
+mattered enough to index.
+</p>
+
+<p>
+The known, armed, unarmed and monitored-PID sets are exported through
+<code>diagnosticTrackingSnapshot</code>&nbsp;<span class="src">WindowDiscoveryService.swift:43</span>,
+which is how the E2E suite and a bug report can both tell "Debut thinks it is
+tracking this window" apart from "Debut is actually armed on it". The observer and
+element dictionaries are not exported — they hold live
+<code>AXUIElement</code> references with nothing serialisable to say.
+</p>
+
+<h2>The data types</h2>
+
+<pre><code>struct StageWindow: Codable, Identifiable, Equatable, Sendable {
+    let id: UUID            // generated at init, never a stable disk key
+    var windowID: CGWindowID
+    let ownerBundleID: String
+    let ownerName: String
+    var windowTitle: String
+    var ownerPID: pid_t?
+}</code></pre>
+<p><span class="srcline">Models/StageWindow.swift:4</span></p>
+
+<div class="warn">
+  <span class="label">Equality is identity, not content</span>
+  <p>
+  <code>==</code> on <code>StageWindow</code> compares <strong>only
+  <code>windowID</code></strong>. A title change does not make two values unequal,
+  and two different windows with the same ID are the same value. Code that needs
+  to distinguish entries — the reconciler in particular — keys its sets by
+  <code>window.id</code>, not by the value. The same shortcut applies to
+  <code>Stage</code>, whose <code>==</code> compares only its <code>id</code>.
+  </p>
+</div>
+
+<p>
+<code>DormantWindowAssignment</code> is a <code>StageWindow</code> plus the
+<code>stageID</code> and the <code>windowIndex</code> it should return to. It
+forwards its <code>id</code> to the wrapped window's. Chapter 7 covers how it is
+decoded, pruned, and restored.
+</p>
+
+<div class="pager">
+  <a href="02-architecture.html"><span class="dir">Previous</span>&larr; 02 · Architecture</a>
+  <a href="04-stages.html"><span class="dir">Next</span>04 · Stages &amp; switching &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>

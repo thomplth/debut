@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debut — Technical Documentation</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <p class="brand"><a href="index.html">Debut</a></p>
+  <p class="tagline">Technical documentation</p>
+  <h2>Contents</h2>
+  <ol>
+    <li><a class="current" href="index.html"><span class="num">—</span>Overview</a></li>
+    <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
+    <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
+    <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
+    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
+    <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
+    <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
+    <li><a href="08-observability.html"><span class="num">08</span>Observability</a></li>
+    <li><a href="09-verification.html"><span class="num">09</span>Verification</a></li>
+    <li><a href="10-build-release.html"><span class="num">10</span>Build &amp; release</a></li>
+    <li><a href="11-platform-notes.html"><span class="num">11</span>Platform notes</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<p class="eyebrow">Ground-up documentation</p>
+<h1>Debut</h1>
+<p class="lede">
+Debut is a stage-based workspace manager for macOS. It replaces the system app
+switcher with isolated workspaces, so that cycling windows never crosses a
+workspace boundary. This series explains the product from first principles and
+then all the way down into how it is implemented.
+</p>
+
+<h2>What Debut does</h2>
+
+<p>
+macOS gives you one flat list of windows and one switcher that walks all of them.
+Debut partitions that list into <strong>stages</strong>. Exactly one stage is
+active. The window switcher, the same-app cycler, and the number shortcuts all
+operate <em>inside</em> the active stage only. Windows in other stages are not
+moved, minimised, or resized — they are simply covered by a full-screen window
+Debut owns, so switching stages costs no animation and no window geometry
+changes.
+</p>
+
+<p>
+Holding the activation shortcut opens an overlay that shows every stage as a
+horizontal <strong>plate</strong> of window previews, stacked vertically with the
+active stage centred. You navigate it with the keyboard or the pointer, and you
+can drag windows between stages or drag stages into a different order.
+</p>
+
+<div class="diagram">┌──────────────── stage 2 (inactive, scaled down) ─────────────┐
+│   ▢ Safari      ▢ Notes                                      │
+└──────────────────────────────────────────────────────────────┘
+
+┏━━━━━━━━━━━━━━━ stage 1 (ACTIVE, full scale) ━━━━━━━━━━━━━━━━━┓
+┃   ▣ Xcode       ▢ Terminal     ▢ Simulator                   ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+┌──────────────── stage 3 (inactive, scaled down) ─────────────┐
+│   ▢ Slack                                                    │
+└──────────────────────────────────────────────────────────────┘</div>
+
+<h2>How to read this</h2>
+
+<p>
+Chapters 1 and 2 are the foundation: the domain vocabulary and the shape of the
+program. Chapters 3 through 6 are the four runtime subsystems, in the order data
+flows through them — a window is discovered, assigned to a stage, a key is
+pressed, an overlay is drawn. Chapters 7 and 8 cover the state that outlives a
+session and the instrumentation that makes the system observable. Chapters 9 and
+10 are the engineering process. Chapter 11 is a reference appendix of macOS
+behaviours that shaped the design and that you will otherwise rediscover
+painfully.
+</p>
+
+<div class="cards">
+
+  <a class="card" href="01-concepts.html">
+    <span class="card-num">01</span>
+    <h3>Concepts</h3>
+    <p>Stage, window, plate, session, dormancy. The domain model and the behaviour it produces, with no code.</p>
+  </a>
+
+  <a class="card" href="02-architecture.html">
+    <span class="card-num">02</span>
+    <h3>Architecture</h3>
+    <p>Package targets, the composition root, the dependency graph, threading model, and app lifecycle.</p>
+  </a>
+
+  <a class="card" href="03-window-tracking.html">
+    <span class="card-num">03</span>
+    <h3>Window tracking</h3>
+    <p>Accessibility plus CGWindowList, window classification, AX observers, arming, and process-exit monitoring.</p>
+  </a>
+
+  <a class="card" href="04-stages.html">
+    <span class="card-num">04</span>
+    <h3>Stages &amp; switching</h3>
+    <p>The pure model and the impure controller, the activation sequence, MRU ordering, and the desktop surface.</p>
+  </a>
+
+  <a class="card" href="05-keyboard.html">
+    <span class="card-num">05</span>
+    <h3>Keyboard</h3>
+    <p>The CGEventTap, its decision tree, the held-modifier session machine, quick switch, and configurable bindings.</p>
+  </a>
+
+  <a class="card" href="06-overlay.html">
+    <span class="card-num">06</span>
+    <h3>The overlay</h3>
+    <p>AppKit/SwiftUI boundary, plate layout maths, spring animation as a render transform, previews, and drag.</p>
+  </a>
+
+  <a class="card" href="07-persistence.html">
+    <span class="card-num">07</span>
+    <h3>Persistence</h3>
+    <p>What is written to disk, schema evolution, startup reconciliation, and the dormant-assignment model.</p>
+  </a>
+
+  <a class="card" href="08-observability.html">
+    <span class="card-num">08</span>
+    <h3>Observability</h3>
+    <p>Diagnostic events, the state block E2E reads, performance spans and traces, telemetry, and privacy posture.</p>
+  </a>
+
+  <a class="card" href="09-verification.html">
+    <span class="card-num">09</span>
+    <h3>Verification</h3>
+    <p>The unit suite, geometry and screenshot tests, the E2E harness, the Tart VM path, and CI.</p>
+  </a>
+
+  <a class="card" href="10-build-release.html">
+    <span class="card-num">10</span>
+    <h3>Build &amp; release</h3>
+    <p>Turning a SwiftPM binary into a signed .app, entitlements, the privacy manifest, and the install loop.</p>
+  </a>
+
+  <a class="card" href="11-platform-notes.html">
+    <span class="card-num">11</span>
+    <h3>Platform notes</h3>
+    <p>The macOS constraints behind the design — AX clamping, capture corruption, TCC in automation — plus a glossary.</p>
+  </a>
+
+</div>
+
+<h2>The project at a glance</h2>
+
+<table>
+  <tr><th>Language</th><td>Swift 6.2, <code>swift-tools-version: 6.2</code>, strict concurrency</td></tr>
+  <tr><th>Build system</th><td>SwiftPM only. There is no Xcode project; the <code>.app</code> is assembled by a shell script.</td></tr>
+  <tr><th>Deployment</th><td>Package targets macOS 26; the shipped <code>Info.plist</code> declares <code>LSMinimumSystemVersion 14.0</code></td></tr>
+  <tr><th>UI</th><td>AppKit windows hosting SwiftUI views. No SwiftUI <code>App</code> lifecycle, no <code>@main</code>.</td></tr>
+  <tr><th>Size</th><td>~22k lines across sources and tests; the largest single file is the overlay view at ~1.6k lines</td></tr>
+  <tr><th>Tests</th><td>382 <code>@Test</code> cases in 34 suites, 100% swift-testing (no XCTest), plus a 37-check E2E harness</td></tr>
+  <tr><th>Sandbox</th><td>Disabled. Controlling other applications through Accessibility is impossible inside the sandbox.</td></tr>
+  <tr><th>Network</th><td>None in a stock build. Telemetry has no credentials configured in the shipped <code>Info.plist</code>.</td></tr>
+</table>
+
+<h2>Related documents in this repository</h2>
+
+<p>
+This HTML series is the explanatory layer. It does not replace the normative
+documents, and where they disagree, they win:
+</p>
+
+<ul>
+  <li><code>README.md</code> — the short product description.</li>
+  <li><code>spec/stage-manager.md</code>, <code>spec/behaviors.md</code>, <code>spec/settings.md</code> — the behavioural specifications. These define what Debut must do; the chapters here explain how the code does it.</li>
+  <li><code>AGENTS.md</code> — architecture constraints, the toolchain, and the task workflow. Chapter 11 expands on the constraints listed there.</li>
+  <li><code>docs/local-e2e.md</code>, <code>docs/performance-observability.md</code>, <code>docs/privacy.md</code> — operational notes referenced from chapters 8 and 9.</li>
+</ul>
+
+<div class="note">
+  <span class="label">Convention</span>
+  <p>
+  Throughout this series, a reference like
+  <span class="src">Sources/DebutCore/Services/StageController.swift:245</span>
+  points at a specific line. Line numbers drift as the code changes; the symbol
+  names beside them are the durable part. When something here contradicts the
+  source, the source is right.
+  </p>
+</div>
+
+<div class="pager">
+  <span></span>
+  <a href="01-concepts.html"><span class="dir">Next</span>01 · Concepts &rarr;</a>
+</div>
+
+</main>
+</div>
+</body>
+</html>
