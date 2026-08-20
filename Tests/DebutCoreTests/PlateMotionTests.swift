@@ -1323,6 +1323,22 @@ struct PlateMotionTests {
         #expect(PlateContrast.handleTintWhiteLevel(backgroundLuminance: nil) == 1)
     }
 
+    /// The handle is the only draggable thing on a plate and nothing about its bars says so.
+    /// The cursor is what says so, and it has to say it only where the handle actually is.
+    @Test("The drag handle claims a grab cursor only while it is revealed")
+    func stageHandleGrabFollowsReveal() {
+        #expect(PlateInteraction.stageHandleGrab(isRevealed: false, isDragging: false) == nil)
+        #expect(PlateInteraction.stageHandleGrab(isRevealed: true, isDragging: false) == .open)
+        #expect(PlateInteraction.stageHandleGrab(isRevealed: true, isDragging: true) == .closed)
+    }
+
+    /// A stage drag survives the pointer wandering off the handle — that is why the handle stays
+    /// revealed mid-gesture — so the hand has to stay closed for the whole drag.
+    @Test("A drag keeps the closed hand even once the handle stops being revealed")
+    func stageHandleGrabHoldsThroughDrag() {
+        #expect(PlateInteraction.stageHandleGrab(isRevealed: false, isDragging: true) == .closed)
+    }
+
     /// Where a tap on the overlay actually goes. The buttons are drawn with hit testing off and
     /// float over — or straddle — the plates, so this routing is the whole of their behaviour.
     @Test("A tap on a revealed stage button routes to that button, not the desktop")
