@@ -688,6 +688,37 @@ enum PlateInteraction {
             <= PlateConstants.stageInsertButtonSize / 2
     }
 
+    /// Whether the pointer is over a plate or over the bare overlay around it. The affordances
+    /// that live off-plate — the insert band, the desktop fall-through — are invisible to
+    /// diagnostics until something reports that the pointer reached that region at all.
+    static func pointerRegion(at location: CGPoint, plateFrames: [Int: CGRect]) -> String {
+        plateFrames.values.contains { $0.contains(location) } ? "plate" : "outside"
+    }
+
+    /// Both stage buttons are drawn with hit testing off, so a tap on them arrives at the
+    /// container like any other. This decides what that tap meant. A button only claims a tap
+    /// while it is revealed, and claiming it must beat the desktop fall-through.
+    static func overlayTapTarget(
+        at location: CGPoint,
+        revealedInsertionEdge: StageInsertionEdge?,
+        insertButtonCenter: CGPoint?,
+        revealedCloseIndex: Int?,
+        closeButtonCenter: CGPoint?,
+        plateFrames: [Int: CGRect]
+    ) -> OverlayTapTarget {
+        if let revealedInsertionEdge,
+           let insertButtonCenter,
+           isStageInsertButtonHit(location, center: insertButtonCenter) {
+            return .insertStage(revealedInsertionEdge)
+        }
+        if let revealedCloseIndex,
+           let closeButtonCenter,
+           isStageCloseButtonHit(location, center: closeButtonCenter) {
+            return .deleteStage(revealedCloseIndex)
+        }
+        return isDesktopArea(location, plateFrames: plateFrames) ? .desktop : .none
+    }
+
     /// A square centred on each plate's corner button — the same point the button is drawn
     /// at, so reaching for the button cannot leave the zone that revealed it.
     static func revealedStageCloseIndex(
@@ -845,6 +876,41 @@ enum PlateInteraction {
     }
 }
 
+enum OverlayTapTarget: Equatable {
+    case insertStage(StageInsertionEdge)
+    case deleteStage(Int)
+    case desktop
+    case none
+
+    var diagnosticName: String {
+        switch self {
+        case .insertStage(let edge): "insertStage.\(edge == .top ? "top" : "bottom")"
+        case .deleteStage: "deleteStage"
+        case .desktop: "desktop"
+        case .none: "none"
+        }
+    }
+}
+
+/// Everything needed to explain, after the fact, why a tap on the overlay did what it did. A tap
+/// that resolves to nothing is otherwise indistinguishable from a tap that never arrived, which is
+/// how the stage buttons stayed dead behind a green suite.
+struct OverlayTapDiagnostic {
+    let location: CGPoint
+    let target: OverlayTapTarget
+    let insertButtonCenter: CGPoint?
+    let closeButtonCenter: CGPoint?
+}
+
+/// Where the pointer is relative to the plates, plus the stack edges the insert bands hang off,
+/// so a band that never triggers can be compared against the pointer that failed to trigger it.
+struct OverlayPointerRegionDiagnostic {
+    let region: String
+    let location: CGPoint
+    let topBoundary: CGFloat?
+    let bottomBoundary: CGFloat?
+}
+
 enum PlateContrast {
     /// The sRGB level whose relative luminance is the WCAG crossover between a white and a black
     /// glyph. sRGB is not linear, so the crossover lands below the 0.5 midpoint rather than on it.
@@ -981,6 +1047,9 @@ public struct OverlaySwiftUIView: View {
     public var onStageDeleteRequested: ((Int) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onDesktopSelected: (() -> Void)?
+    var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
+    var onStageButtonRevealed: ((String, CGPoint?) -> Void)?
+    var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
 
     @State private var revealedStageInsertionEdge: StageInsertionEdge?
     @State private var windowDrag: WindowDragState?
@@ -988,6 +1057,7 @@ public struct OverlaySwiftUIView: View {
     @State private var retainedWindowDragFocusStageIndex: Int?
     @State private var stageDrag: StageDragState?
     @State private var pointerSelection: PointerSelection?
+    @State private var reportedPointerRegion: String?
     @State private var pointerMovementGate: PointerMovementGate
     @State private var plateFrames: [Int: CGRect] = [:]
     @State private var windowFrames: [WindowFrameID: CGRect] = [:]
@@ -1368,6 +1438,11 @@ public struct OverlaySwiftUIView: View {
                 .offset(y: yOffset)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            // The frame above only grows the layout bounds; hit testing still follows the drawn
+            // plates. Everything the stage buttons need lives in the space it adds — the insert
+            // band beyond the stack, the outer half of the corner delete button, the desktop
+            // fall-through — so without a content shape none of it can be hovered or clicked.
+            .contentShape(Rectangle())
             .overlay(alignment: .topLeading) {
                 if let settlingWindowDrop {
                     WindowPreviewView(
@@ -1407,6 +1482,13 @@ public struct OverlaySwiftUIView: View {
                         .position(center)
                         .allowsHitTesting(false)
                         .transition(.opacity)
+                        // Reported from where the button is actually drawn, and on every move,
+                        // so a reveal cannot be compared against a stale center.
+                        .onAppear { onStageButtonRevealed?("insert", center) }
+                        .onChange(of: center) { _, moved in
+                            onStageButtonRevealed?("insert", moved)
+                        }
+                        .onDisappear { onStageButtonRevealed?("insert", nil) }
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -1420,6 +1502,11 @@ public struct OverlaySwiftUIView: View {
                         .position(center)
                         .allowsHitTesting(false)
                         .transition(.opacity)
+                        .onAppear { onStageButtonRevealed?("close", center) }
+                        .onChange(of: center) { _, moved in
+                            onStageButtonRevealed?("close", moved)
+                        }
+                        .onDisappear { onStageButtonRevealed?("close", nil) }
                 }
             }
             .animation(.easeOut(duration: 0.14), value: revealedStageInsertionEdge)
@@ -1435,38 +1522,43 @@ public struct OverlaySwiftUIView: View {
             .simultaneousGesture(
                 SpatialTapGesture(coordinateSpace: .named("overlay"))
                     .onEnded { event in
-                        // The insert button lives outside every plate frame, so it has to be
-                        // claimed here or the same tap would read as a desktop click.
-                        if let edge = revealedStageInsertionEdge,
-                           let center = stageInsertButtonCenter(
-                               containerWidth: geo.size.width,
-                               stackOffset: yOffset,
-                               layout: visualLayout
-                           ),
-                           PlateInteraction.isStageInsertButtonHit(event.location, center: center) {
+                        let insertCenter = stageInsertButtonCenter(
+                            containerWidth: geo.size.width,
+                            stackOffset: yOffset,
+                            layout: visualLayout
+                        )
+                        let closeCenter = stageCloseButtonCenter(
+                            containerWidth: geo.size.width,
+                            stackOffset: yOffset,
+                            plateWidths: plateWidths,
+                            layout: visualLayout
+                        )
+                        let target = PlateInteraction.overlayTapTarget(
+                            at: event.location,
+                            revealedInsertionEdge: revealedStageInsertionEdge,
+                            insertButtonCenter: insertCenter,
+                            revealedCloseIndex: revealedStageCloseIndex,
+                            closeButtonCenter: closeCenter,
+                            plateFrames: plateFrames
+                        )
+                        onOverlayTapRouted?(OverlayTapDiagnostic(
+                            location: event.location,
+                            target: target,
+                            insertButtonCenter: insertCenter,
+                            closeButtonCenter: closeCenter
+                        ))
+                        switch target {
+                        case .insertStage(let edge):
                             revealedStageInsertionEdge = nil
                             onStageInsertRequested?(edge)
-                            return
-                        }
-                        // The close button straddles the plate's corner, so a tap on its outer
-                        // half would otherwise read as a desktop click.
-                        if let index = revealedStageCloseIndex,
-                           let center = stageCloseButtonCenter(
-                               containerWidth: geo.size.width,
-                               stackOffset: yOffset,
-                               plateWidths: plateWidths,
-                               layout: visualLayout
-                           ),
-                           PlateInteraction.isStageCloseButtonHit(event.location, center: center) {
+                        case .deleteStage(let index):
                             revealedStageCloseIndex = nil
                             onStageDeleteRequested?(index)
-                            return
+                        case .desktop:
+                            onDesktopSelected?()
+                        case .none:
+                            break
                         }
-                        guard PlateInteraction.isDesktopArea(
-                            event.location,
-                            plateFrames: plateFrames
-                        ) else { return }
-                        onDesktopSelected?()
                     }
             )
             .onPreferenceChange(PlateFramePreferenceKey.self) { frames in
@@ -1479,6 +1571,23 @@ public struct OverlaySwiftUIView: View {
                 switch phase {
                 case let .active(location):
                     hoverPointerY = location.y
+                    let region = PlateInteraction.pointerRegion(
+                        at: location,
+                        plateFrames: plateFrames
+                    )
+                    if region != reportedPointerRegion {
+                        reportedPointerRegion = region
+                        onOverlayPointerRegionChanged?(OverlayPointerRegionDiagnostic(
+                            region: region,
+                            location: location,
+                            topBoundary: PlateMotion.stackBoundary(
+                                edge: .top, stackOffset: yOffset, layout: visualLayout
+                            ),
+                            bottomBoundary: PlateMotion.stackBoundary(
+                                edge: .bottom, stackOffset: yOffset, layout: visualLayout
+                            )
+                        ))
+                    }
                     guard pointerMovementGate.observe(at: NSEvent.mouseLocation) else {
                         return
                     }
@@ -1529,6 +1638,13 @@ public struct OverlaySwiftUIView: View {
                     revealedStageInsertionEdge = nil
                     revealedStageCloseIndex = nil
                     updateRevealedStageHandle(nil)
+                    if reportedPointerRegion != "ended" {
+                        reportedPointerRegion = "ended"
+                        onOverlayPointerRegionChanged?(OverlayPointerRegionDiagnostic(
+                            region: "ended", location: .zero,
+                            topBoundary: nil, bottomBoundary: nil
+                        ))
+                    }
                 }
             }
             .animation(
