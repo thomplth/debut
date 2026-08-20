@@ -161,7 +161,7 @@ struct StageControllerTests {
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
             overlayPresentationDelay: 1,
-            fullscreenAppActiveProvider: { false },
+            focusedWindowSnapshotProvider: { .unfocused },
             overlayPresentationRecorder: overlay
         )
         let context = overlay.begin(configuredDelayMilliseconds: 1_000)
@@ -186,7 +186,7 @@ struct StageControllerTests {
         let controller = StageController(
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
-            fullscreenAppActiveProvider: { true },
+            focusedWindowSnapshotProvider: { FocusedWindowSnapshot(frame: nil, isFullscreen: true) },
             overlayPresentationRecorder: overlay
         )
         let context = overlay.begin(configuredDelayMilliseconds: 80)
@@ -198,6 +198,48 @@ struct StageControllerTests {
         #expect(!controller.isStageManagerVisible)
     }
 
+    @Test("Opening the overlay publishes the focused window's frame for display targeting")
+    @MainActor
+    func overlayPublishesFocusedWindowFrame() {
+        let frame = CGRect(x: 1920, y: 200, width: 900, height: 700)
+        let controller = StageController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            overlayPresentationDelay: 0,
+            focusedWindowSnapshotProvider: {
+                FocusedWindowSnapshot(frame: frame, isFullscreen: false)
+            }
+        )
+
+        controller.handleKeyEvent(.cmdTabHold)
+
+        #expect(controller.focusedWindowFrame == frame)
+    }
+
+    @Test("A rejected overlay leaves no stale focused frame behind")
+    @MainActor
+    func rejectedOverlayClearsFocusedWindowFrame() {
+        // The frame decides which display the overlay opens on, so a frame kept from an
+        // earlier open would aim the next presentation at the wrong screen.
+        var snapshot = FocusedWindowSnapshot(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            isFullscreen: false
+        )
+        let controller = StageController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            overlayPresentationDelay: 0,
+            focusedWindowSnapshotProvider: { snapshot }
+        )
+        controller.handleKeyEvent(.cmdTabHold)
+        controller.handleKeyEvent(.cmdRelease)
+
+        snapshot = FocusedWindowSnapshot(frame: nil, isFullscreen: true)
+        controller.handleKeyEvent(.cmdTabHold)
+
+        #expect(controller.focusedWindowFrame == nil)
+    }
+
     @Test("Presentation deadline preserves the originating trace")
     func presentationDeadlinePreservesTrace() throws {
         let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
@@ -206,7 +248,7 @@ struct StageControllerTests {
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
             overlayPresentationDelay: 0,
-            fullscreenAppActiveProvider: { false },
+            focusedWindowSnapshotProvider: { .unfocused },
             overlayPresentationRecorder: overlay
         )
         let delegate = PreviewRefreshDelegate()
@@ -241,7 +283,7 @@ struct StageControllerTests {
         let controller = StageController(
             windowService: windowService,
             keyboardService: keyboardService,
-            fullscreenAppActiveProvider: { false }
+            focusedWindowSnapshotProvider: { .unfocused }
         )
         return (controller, windowService, keyboardService)
     }
@@ -392,7 +434,7 @@ struct StageControllerTests {
         let controller = StageController(
             windowService: windowService,
             keyboardService: keyboardService,
-            fullscreenAppActiveProvider: { false }
+            focusedWindowSnapshotProvider: { .unfocused }
         )
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
@@ -488,7 +530,7 @@ struct StageControllerTests {
             windowService: windowService,
             keyboardService: keyboardService,
             overlayPresentationDelay: 0.5,
-            fullscreenAppActiveProvider: { false }
+            focusedWindowSnapshotProvider: { .unfocused }
         )
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
@@ -510,7 +552,7 @@ struct StageControllerTests {
         let controller = StageController(
             windowService: windowService,
             keyboardService: keyboardService,
-            fullscreenAppActiveProvider: { false }
+            focusedWindowSnapshotProvider: { .unfocused }
         )
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
@@ -542,7 +584,7 @@ struct StageControllerTests {
             windowService: windowService,
             keyboardService: keyboardService,
             overlayPresentationDelay: 0,
-            fullscreenAppActiveProvider: { false }
+            focusedWindowSnapshotProvider: { .unfocused }
         )
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
@@ -574,7 +616,7 @@ struct StageControllerTests {
         let controller = StageController(
             windowService: windowService,
             keyboardService: keyboardService,
-            fullscreenAppActiveProvider: { false },
+            focusedWindowSnapshotProvider: { .unfocused },
             previewRefreshPolicy: policy,
             previewCacheTTL: ttl,
             previewClock: { clock.now }

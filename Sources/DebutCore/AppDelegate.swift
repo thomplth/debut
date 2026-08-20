@@ -567,6 +567,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             self?.stageController?.revealDesktop()
         }
 
+        let display = overlayDisplay(focusedWindowFrame: stageController.focusedWindowFrame)
+        overlayWindow.targetScreenFrame = display?.frame
         let vm = OverlayViewModel(
             stageManager: stageController.stageManager,
             activeStageIndex: stageController.selectedStageIndex,
@@ -574,7 +576,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings,
             wallpaperLuminance: desktopSurfaces?.wallpaperLuminance(
-                forDisplay: NSScreen.main?.displayID
+                forDisplay: display?.displayID
             )
         )
         reportCommandHintLayout(viewModel: vm)
@@ -671,6 +673,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     private func updateOverlay() {
         guard let stageController, let overlayWindow else { return }
+        let display = overlayDisplay(focusedWindowFrame: stageController.focusedWindowFrame)
+        overlayWindow.targetScreenFrame = display?.frame
         let vm = OverlayViewModel(
             stageManager: stageController.stageManager,
             activeStageIndex: stageController.selectedStageIndex,
@@ -678,10 +682,28 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings,
             wallpaperLuminance: desktopSurfaces?.wallpaperLuminance(
-                forDisplay: NSScreen.main?.displayID
+                forDisplay: display?.displayID
             )
         )
         overlayWindow.update(viewModel: vm)
+    }
+
+    /// The screen the plates belong on: the one holding the focused window. Accessibility
+    /// reports that window in Quartz coordinates, so the displays are matched in that space and
+    /// only the winner is translated back into Cocoa's.
+    private func overlayDisplay(
+        focusedWindowFrame: CGRect?
+    ) -> (displayID: CGDirectDisplayID, frame: CGRect)? {
+        let displays = NSScreen.screens.map {
+            DesktopScreenDescriptor(displayID: $0.displayID, frame: CGDisplayBounds($0.displayID))
+        }
+        guard let displayID = OverlayDisplayResolver.resolve(
+            focusedWindowFrame: focusedWindowFrame,
+            displays: displays,
+            mainDisplayID: NSScreen.main?.displayID
+        ), let screen = NSScreen.screens.first(where: { $0.displayID == displayID })
+        else { return nil }
+        return (displayID, screen.frame)
     }
 
     private func recordCommandUsage(_ action: KeyAction) {

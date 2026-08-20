@@ -38,6 +38,10 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     var onStageButtonRevealed: ((String, CGPoint?) -> Void)?
     var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
 
+    /// The display the overlay should cover, in Cocoa screen coordinates. `nil` keeps it on the
+    /// main screen.
+    public var targetScreenFrame: CGRect?
+
     public init() {
         let screen = NSScreen.main ?? NSScreen.screens[0]
         super.init(
@@ -57,7 +61,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
 
     @discardableResult
     public func update(viewModel: OverlayViewModel) -> Bool {
-        synchronizeFrameToMainScreen(display: false)
+        synchronizeFrameToTargetScreen(display: false)
         var view = OverlaySwiftUIView(
             viewModel: viewModel,
             onWindowSelected: onWindowSelected,
@@ -93,7 +97,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         revealDuration: TimeInterval = 0.15,
         onRevealCompleted: @escaping @MainActor @Sendable () -> Void = {}
     ) {
-        synchronizeFrameToMainScreen(display: true)
+        synchronizeFrameToTargetScreen(display: true)
         hostingView?.frame = contentView?.bounds ?? .zero
         startWatchingScroll()
         alphaValue = 0
@@ -141,9 +145,9 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         )
     }
 
-    private func synchronizeFrameToMainScreen(display: Bool) {
-        guard let screen = NSScreen.main else { return }
-        setFrame(screen.frame, display: display)
+    private func synchronizeFrameToTargetScreen(display: Bool) {
+        guard let frame = targetScreenFrame ?? NSScreen.main?.frame else { return }
+        setFrame(frame, display: display)
     }
 
     public func hideOverlay() {
