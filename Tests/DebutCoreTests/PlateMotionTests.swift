@@ -1461,6 +1461,70 @@ struct PlateMotionTests {
         ) == .insertStage(.top))
     }
 
+    /// A gap between two plates is still the stack as far as the pointer is concerned. A scroll
+    /// that died whenever the pointer sat between plates would read as the feature not working.
+    @Test("The scrollable area spans the plates and the gaps between them")
+    func stageScrollAreaSpansTheGaps() {
+        let frames = [
+            0: CGRect(x: 150, y: 100, width: 200, height: 60),
+            1: CGRect(x: 100, y: 200, width: 300, height: 80),
+        ]
+        let inArea: (CGFloat, CGFloat) -> Bool = {
+            PlateInteraction.isInStageScrollArea(CGPoint(x: $0, y: $1), plateFrames: frames)
+        }
+
+        #expect(inArea(250, 130))
+        #expect(inArea(250, 240))
+        #expect(inArea(250, 180))
+
+        // The gap is a taper between two differently sized plates, not a full-width band.
+        #expect(!inArea(120, 165))
+        #expect(inArea(120, 195))
+        #expect(!inArea(250, 400))
+    }
+
+    /// A wheel reports whole notches and a trackpad a stream of points. The leftover has to
+    /// survive between events, or a slow scroll would never accumulate into a step at all.
+    @Test("Scroll travel accumulates into whole stage steps")
+    func stageScrollAccumulatesIntoSteps() {
+        var accumulator = StageScrollAccumulator()
+        let perStage = PlateConstants.stageScrollTravelPerStage
+
+        #expect(accumulator.steps(deltaY: perStage / 3, isPrecise: true) == 0)
+        #expect(accumulator.steps(deltaY: perStage / 3, isPrecise: true) == 0)
+        #expect(accumulator.steps(deltaY: perStage / 3, isPrecise: true) == 1)
+        #expect(accumulator.steps(deltaY: -perStage, isPrecise: true) == -1)
+
+        // One wheel notch is one stage, however small its reported delta.
+        var wheel = StageScrollAccumulator()
+        #expect(wheel.steps(deltaY: 1, isPrecise: false) == 1)
+        #expect(wheel.steps(deltaY: -1, isPrecise: false) == -1)
+    }
+
+    /// A flick left over from the last gesture must not leak into the next one.
+    @Test("Resetting the accumulator drops the leftover travel")
+    func stageScrollResetDropsLeftover() {
+        var accumulator = StageScrollAccumulator()
+        let perStage = PlateConstants.stageScrollTravelPerStage
+
+        #expect(accumulator.steps(deltaY: perStage * 0.9, isPrecise: true) == 0)
+        accumulator.reset()
+        #expect(accumulator.steps(deltaY: perStage * 0.9, isPrecise: true) == 0)
+    }
+
+    /// Scrolling stops at the ends rather than wrapping, so a long flick cannot land somewhere
+    /// unrelated to where it started.
+    @Test("Scrolling clamps at the ends of the stack")
+    func stageScrollDestinationClamps() {
+        #expect(PlateInteraction.stageScrollDestination(current: 1, steps: -1, stageCount: 3) == 2)
+        #expect(PlateInteraction.stageScrollDestination(current: 1, steps: 1, stageCount: 3) == 0)
+        #expect(PlateInteraction.stageScrollDestination(current: 0, steps: 1, stageCount: 3) == nil)
+        #expect(PlateInteraction.stageScrollDestination(current: 2, steps: -4, stageCount: 3) == nil)
+        #expect(PlateInteraction.stageScrollDestination(current: 0, steps: -9, stageCount: 3) == 2)
+        #expect(PlateInteraction.stageScrollDestination(current: 0, steps: 0, stageCount: 3) == nil)
+        #expect(PlateInteraction.stageScrollDestination(current: 0, steps: 1, stageCount: 0) == nil)
+    }
+
     @Test("A stale pointer exit cannot clear the newly hovered window")
     func stalePointerExitDoesNotClearSelection() {
         let first = PointerSelection(stageIndex: 0, windowIndex: 0)
