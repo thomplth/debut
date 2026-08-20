@@ -117,6 +117,15 @@ if [[ -f "$publish" ]]; then
     expect_contains "$publish" 'gh release create' "the workflow must create the GitHub release"
     expect_contains "$publish" 'Debut\.dmg' "the release must attach the disk image"
     expect_contains "$publish" 'git tag' "the release must be tagged"
+    # main is protected by a ruleset that lets no bot update it, so a release that tries to push a
+    # version-bump commit dies after building, having already pushed its tag. Tag the tested commit
+    # in place and push nothing but the tag.
+    expect_not_contains "$publish" 'git commit' \
+        "the publish workflow must not commit, because it cannot push to protected main"
+    expect_not_contains "$publish" 'git push .*HEAD:main|git push .*origin main' \
+        "the publish workflow must never push a branch"
+    expect_contains "$publish" 'git push origin "?\$\{?TAG' \
+        "the publish workflow must push only the tag"
 fi
 
 # The badges are the only place a reader sees whether main is currently releasable.

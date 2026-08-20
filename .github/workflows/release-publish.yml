@@ -44,37 +44,34 @@ jobs:
           echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> "$GITHUB_ENV"
           echo "TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault" >> "$GITHUB_ENV"
 
-      - name: Record the version being released
+      # Stamped into the working tree for the build only. It is deliberately never committed:
+      # main is protected against any bot update, and the tag is what records the version anyway.
+      - name: Stamp the version into the build
         env:
           VERSION: ${{ inputs.version }}
         run: ./scripts/apply-version.sh "$VERSION"
 
-      # Written before the version bump is committed, so the notes describe the work being
-      # released rather than the release commit itself.
       - name: Write the release notes
         env:
           VERSION: ${{ inputs.version }}
           PREVIOUS_TAG: ${{ inputs.previous_tag }}
         run: ./scripts/release-notes.sh "$PREVIOUS_TAG" "v$VERSION" | tee "$RUNNER_TEMP/notes.md"
 
-      - name: Commit and tag the release
+      - name: Tag the tested commit
         env:
           VERSION: ${{ inputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet; then
-              echo "Sources already state $VERSION; tagging the existing commit."
-          else
-              git commit -am "Release v$VERSION"
-          fi
           git tag -a "v$VERSION" -m "Debut v$VERSION"
+          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
 
       - name: Build the disk image
         run: ./scripts/package-dmg.sh
 
-      - name: Push the release commit and tag
-        run: git push origin HEAD:main --follow-tags
+      # Last, so a build or packaging failure leaves no tag behind claiming a release happened.
+      - name: Push the tag
+        run: git push origin "$TAG"
 
       - name: Publish the GitHub release
         env:

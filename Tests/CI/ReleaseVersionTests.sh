@@ -236,6 +236,19 @@ if [[ -x "$verify" ]]; then
     rm -rf "$clone" "$clone2"
 fi
 
+# The release stamps the version in at build time and never commits it, so whatever is checked in
+# is what every unreleased build reports. A plausible-looking number there would quietly misreport
+# the version in Settings and in exported diagnostics for as long as nobody noticed.
+checked_in_version="$(sed -nE 's/.*public static let version = "([^"]*)".*/\1/p' \
+    "$repo_root/Sources/DebutCore/DebutCore.swift")"
+expect_equal "$checked_in_version" "0.0.0-dev" \
+    "the checked-in version must stay a dev placeholder, since releases stamp it at build time"
+
+plist_version="$(grep -A1 "CFBundleShortVersionString" "$repo_root/Resources/Info.plist" \
+    | sed -nE 's/.*<string>([^<]*)<\/string>.*/\1/p')"
+expect_equal "$plist_version" "0.0.0-dev" \
+    "the checked-in bundle version must stay a dev placeholder too"
+
 if (( failures > 0 )); then
     exit 1
 fi

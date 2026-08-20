@@ -67,9 +67,11 @@ Releases are automated in GitHub Actions and are never cut by hand. Both paths g
 
 Every job in a release run is pinned to the commit that triggered it, and `scripts/verify-release-commit.sh` aborts the publish if `main` has moved on since. Landing on `main` while a release is gating therefore does not ship an untested commit — it fails that release, and the next run picks the new commit up. Re-run the release rather than trying to rescue a failed one.
 
-The next version comes from the tags alone, via `scripts/release-plan.sh`; nothing else records the current version. `scripts/apply-version.sh` then writes it into `Sources/DebutCore/DebutCore.swift` and `Resources/Info.plist`, which is why those two must keep their current shape. Release notes are the commit subjects in the range, so a vague commit message becomes a vague changelog entry.
+The next version comes from the tags alone, via `scripts/release-plan.sh`; nothing else records the current version. Release notes are the commit subjects in the range, so a vague commit message becomes a vague changelog entry.
 
-The version-bump commit the publish workflow makes is the one commit exempt from the Linear issue ID prefix; it is `Release vX.Y.Z`.
+A release never commits and never pushes a branch. The `Main Protection` ruleset forbids any bot from updating `main`, and an earlier design that pushed a `Release vX.Y.Z` commit died at that push having already pushed its tag. The publish workflow instead tags the tested commit in place and pushes only the tag, which the ruleset does not cover.
+
+`scripts/apply-version.sh` therefore stamps the version into `Sources/DebutCore/DebutCore.swift` and `Resources/Info.plist` for the build only — those edits are deliberately thrown away. Both files must keep their current shape for the stamp to land. What is checked in stays `0.0.0-dev`, so a build reporting that version is telling you it is not a release. Do not "fix" it to a real number.
 
 ## Toolchain
 
