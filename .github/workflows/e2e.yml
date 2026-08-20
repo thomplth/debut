@@ -2,8 +2,6 @@ name: E2E
 
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_call:
   workflow_dispatch:
 
@@ -11,7 +9,8 @@ permissions:
   contents: read
 
 concurrency:
-  # Keyed on the calling workflow too, so a release gate and a push run never cancel each other.
+  # Keyed on the calling workflow too, so a release gate and a pull request run on the same ref
+  # never cancel each other.
   group: e2e-${{ github.workflow }}-${{ github.ref }}
   # Superseded pull request runs are worth cancelling; a run gating a release is not.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

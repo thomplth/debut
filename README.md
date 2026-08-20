@@ -1,7 +1,5 @@
 # Debut
 
-[![CI](https://github.com/thomplth/debut/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/thomplth/debut/actions/workflows/ci.yml)
-[![E2E](https://github.com/thomplth/debut/actions/workflows/e2e.yml/badge.svg?branch=main)](https://github.com/thomplth/debut/actions/workflows/e2e.yml)
 [![Daily Release](https://github.com/thomplth/debut/actions/workflows/release-daily.yml/badge.svg)](https://github.com/thomplth/debut/actions/workflows/release-daily.yml)
 
 A stage-based workspace manager for macOS. Debut replaces the native app switcher
