@@ -1122,8 +1122,194 @@ test("Window-drop E2E cleanup restores the original stages") {
         && stageWindowCounts(in: readState()) == originalWindowCounts
 }
 
-// --- 11. Customized global activation ---
-header("11. Customized global activation")
+// --- 11. Stage add and delete buttons ---
+// Deliberately ahead of the relaunch scenarios: those provoke a system-modal TCC alert that
+// takes over input for the rest of the run, which no overlay affordance can be tested through.
+header("11. Hover and click the stage add and delete buttons")
+
+/// The buttons only exist while revealed, and only the app knows where it drew them. Sweep the
+/// pointer along a path until the app reports the reveal, then click exactly where it says.
+func sweepForStageButton(_ kind: String, along path: [CGPoint]) -> CGPoint? {
+    for point in path {
+        postMouseMove(to: point)
+        wait(0.15)
+        if let center = revealedStageButtonCenter(kind) { return center }
+    }
+    return nil
+}
+
+func revealedStageButtonCenter(_ kind: String) -> CGPoint? {
+    let reveals = readEvents().filter {
+        $0["event"] == "overlay_stage_button_revealed" && $0["button"] == kind
+    }
+    guard let last = reveals.last, last["revealed"] == "true" else { return nil }
+    let parts = (last["center"] ?? "").split(separator: ",").compactMap { Double($0) }
+    guard parts.count == 2 else { return nil }
+    return CGPoint(x: parts[0], y: parts[1])
+}
+
+func currentStageCount() -> Int { Int(readState()["stageCount"] ?? "") ?? 0 }
+
+/// Only regions the pointer is actually in. An `ended` from a previously dismissed overlay can
+/// land in the log after a scenario starts, and counting it reads as hover being alive when it
+/// is not.
+func pointerRegionEventCount() -> Int {
+    readEvents().filter {
+        $0["event"] == "overlay_pointer_region_changed" && $0["region"] != "ended"
+    }.count
+}
+
+/// Hover is not live the instant the overlay is shown — in the VM it takes a second or two of
+/// render and capture work before the first pointer event lands. Jiggle until the app reports a
+/// region so a sweep cannot silently run against a surface that is not listening yet.
+func waitForOverlayHover(near point: CGPoint) -> Bool {
+    let before = pointerRegionEventCount()
+    for step in 0..<40 {
+        postMouseMove(to: CGPoint(x: point.x + (step.isMultiple(of: 2) ? 8 : -8), y: point.y))
+        wait(0.15)
+        if pointerRegionEventCount() > before { return true }
+    }
+    return false
+}
+
+/// The active plate's rect on screen, derived the same way `firstWindowCenter` derives a card.
+func activePlateFrame(in state: [String: String]) -> CGRect? {
+    guard let maxWindows = Int(state["maxWindowsInStage"] ?? ""), maxWindows > 0,
+          let activeWindows = Int(state["windowsInActiveStage"] ?? "")
+    else { return nil }
+    let screen = CGDisplayBounds(CGMainDisplayID())
+    let thumbnail = PlateConstants.thumbnailSize(
+        forWindowCount: maxWindows,
+        screenWidth: screen.width
+    )
+    let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
+    let plateWidth = PlateConstants.plateWidth(
+        forWindowCount: activeWindows,
+        thumbnailWidth: thumbnail.width
+    )
+    return CGRect(
+        x: screen.midX - plateWidth / 2,
+        y: screen.midY - plateHeight / 2,
+        width: plateWidth,
+        height: plateHeight
+    )
+}
+
+let baselineStageCount = currentStageCount()
+info("Stage count before the button checks: \(baselineStageCount)")
+
+postFlagsChanged(flags: [.maskCommand])
+wait(0.1)
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+wait(0.8)
+
+if let plateFrame = activePlateFrame(in: readState()) {
+    info("Active plate frame: \(plateFrame)")
+    let regionEventsBefore = pointerRegionEventCount()
+    let hoverLive = waitForOverlayHover(near: CGPoint(x: plateFrame.midX, y: plateFrame.midY))
+    info("Overlay hover became live: \(hoverLive)")
+    if !hoverLive {
+        info("The overlay reported no pointer region at all; hover is not reaching it in this VM")
+    }
+
+    // Walk up the middle of the plate and out through its top edge into the insert band.
+    let insertSweep = stride(from: plateFrame.minY + 12, to: plateFrame.minY - 72, by: -6)
+        .map { CGPoint(x: plateFrame.midX, y: $0) }
+    let insertCenter = sweepForStageButton("insert", along: insertSweep)
+    let _ = takeScreenshot("11_stage_insert_sweep")
+
+    for region in readEvents().filter({ $0["event"] == "overlay_pointer_region_changed" })
+        .dropFirst(regionEventsBefore) {
+        info("Pointer region: \(region["region"] ?? "?") at \(region["location"] ?? "?") "
+            + "top=\(region["topBoundary"] ?? "?") bottom=\(region["bottomBoundary"] ?? "?")")
+    }
+
+    test("Hovering above the stack reveals the add-stage button") {
+        insertCenter != nil
+    }
+
+    if let insertCenter {
+        info("App reported the add-stage button at \(insertCenter)")
+        postMouseClick(at: insertCenter)
+        wait(0.6)
+
+        test("Clicking the add-stage button routes to an insert, not the desktop") {
+            readEvents().last { $0["event"] == "overlay_tap_routed" }?["target"]?
+                .hasPrefix("insertStage") == true
+        }
+        test("Clicking the add-stage button adds a stage") {
+            for _ in 0..<20 {
+                if currentStageCount() == baselineStageCount + 1 { return true }
+                wait(0.1)
+            }
+            return false
+        }
+    } else {
+        fail("Never saw the add-stage button, so it could not be clicked")
+        fail("Add-stage click could not be attempted")
+    }
+
+    // Debut refuses to delete the only stage, so the delete check needs a second one whether or
+    // not the add-stage click above produced it.
+    if currentStageCount() < 2 {
+        postKeyDown(keyCode: CGKeyCode(kVK_ANSI_N), flags: [.maskCommand])
+        for _ in 0..<30 where currentStageCount() < 2 { wait(0.1) }
+    }
+    let deleteFrame = activePlateFrame(in: readState()) ?? plateFrame
+    info("Active plate frame for the delete check: \(deleteFrame)")
+    let _ = waitForOverlayHover(near: CGPoint(x: deleteFrame.midX, y: deleteFrame.midY))
+
+    // The delete button rides a plate's top-right corner, so sweep a grid around that corner.
+    let corner = CGPoint(x: deleteFrame.maxX, y: deleteFrame.minY)
+    let closeSweep = stride(from: -18.0, through: 18.0, by: 6.0).flatMap { dy in
+        stride(from: -18.0, through: 18.0, by: 6.0).map {
+            CGPoint(x: corner.x + $0, y: corner.y + dy)
+        }
+    }
+    let closeCenter = sweepForStageButton("close", along: closeSweep)
+    let _ = takeScreenshot("11_stage_close_sweep")
+
+    test("Hovering a plate corner reveals the delete-stage button") {
+        closeCenter != nil
+    }
+
+    if let closeCenter {
+        info("App reported the delete-stage button at \(closeCenter)")
+        let countBeforeDelete = currentStageCount()
+        postMouseClick(at: closeCenter)
+        wait(0.6)
+
+        test("Clicking the delete-stage button routes to a delete, not the desktop") {
+            readEvents().last { $0["event"] == "overlay_tap_routed" }?["target"] == "deleteStage"
+        }
+        test("Clicking the delete-stage button removes a stage") {
+            for _ in 0..<20 {
+                if currentStageCount() == countBeforeDelete - 1 { return true }
+                wait(0.1)
+            }
+            return false
+        }
+    } else {
+        fail("Never saw the delete-stage button, so it could not be clicked")
+        fail("Delete-stage click could not be attempted")
+    }
+} else {
+    fail("Could not calculate the active plate frame")
+    fail("Add-stage checks could not be attempted")
+    fail("Delete-stage checks could not be attempted")
+}
+
+postFlagsChanged(flags: [])
+postKeyDown(keyCode: CGKeyCode(kVK_Escape))
+postKeyUp(keyCode: CGKeyCode(kVK_Escape))
+wait(0.5)
+
+if currentStageCount() != baselineStageCount {
+    info("Stage count drifted to \(currentStageCount()); restoring is left to the next scenario's relaunch")
+}
+
+// --- 12. Customized global activation ---
+header("12. Customized global activation")
 let stoppedBeforeCustomization = terminateDebutAndWait()
 
 let originalSettingsData = try? Data(contentsOf: settingsFile)
@@ -1192,8 +1378,8 @@ if let originalSettingsData {
     try? FileManager.default.removeItem(at: settingsFile)
 }
 
-// --- 12. First-launch onboarding (forced, without changing user defaults) ---
-header("12. First-launch onboarding")
+// --- 13. First-launch onboarding (forced, without changing user defaults) ---
+header("13. First-launch onboarding")
 
 clearDiagnosticFile()
 let onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
@@ -1229,8 +1415,8 @@ test("Debut relaunches normally after the onboarding check") {
 
 _ = terminateDebutAndWait()
 
-// --- 13. Settings window chrome ---
-header("13. Settings window chrome")
+// --- 14. Settings window chrome ---
+header("14. Settings window chrome")
 
 clearDiagnosticFile()
 let settingsApplication = launchDebut(arguments: ["--show-settings"])

@@ -510,6 +510,34 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             self.updateOverlay()
         }
 
+        overlayWindow.onStageButtonRevealed = { [weak self] kind, center in
+            self?.diag.report("overlay_stage_button_revealed", details: [
+                "button": kind,
+                "revealed": "\(center != nil)",
+                "center": center.map(formatOverlayPoint) ?? "none",
+            ])
+        }
+
+        // A tap that resolves to nothing is indistinguishable from a tap that never arrived,
+        // which is how the stage buttons stayed dead behind a green test suite.
+        overlayWindow.onOverlayTapRouted = { [weak self] tap in
+            self?.diag.report("overlay_tap_routed", details: [
+                "target": tap.target.diagnosticName,
+                "location": formatOverlayPoint(tap.location),
+                "insertButtonCenter": tap.insertButtonCenter.map(formatOverlayPoint) ?? "none",
+                "closeButtonCenter": tap.closeButtonCenter.map(formatOverlayPoint) ?? "none",
+            ])
+        }
+
+        overlayWindow.onOverlayPointerRegionChanged = { [weak self] region in
+            self?.diag.report("overlay_pointer_region_changed", level: .transient, details: [
+                "region": region.region,
+                "location": formatOverlayPoint(region.location),
+                "topBoundary": region.topBoundary.map { String(format: "%.1f", $0) } ?? "none",
+                "bottomBoundary": region.bottomBoundary.map { String(format: "%.1f", $0) } ?? "none",
+            ])
+        }
+
         overlayWindow.onPointerSelectionChanged = { [weak self] stageIndex, windowIndex in
             self?.diag.report("overlay_pointer_selection_changed", level: .transient, details: [
                 "stageIndex": stageIndex.map(String.init) ?? "none",
@@ -1016,4 +1044,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         )
     }
 
+}
+
+func formatOverlayPoint(_ point: CGPoint) -> String {
+    String(format: "%.1f,%.1f", point.x, point.y)
 }

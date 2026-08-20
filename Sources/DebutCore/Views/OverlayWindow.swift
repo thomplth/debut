@@ -11,6 +11,9 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     public var onStageDeleteRequested: ((Int) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onDesktopSelected: (() -> Void)?
+    var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
+    var onStageButtonRevealed: ((String, CGPoint?) -> Void)?
+    var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
 
     public init() {
         let screen = NSScreen.main ?? NSScreen.screens[0]
@@ -32,7 +35,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     @discardableResult
     public func update(viewModel: OverlayViewModel) -> Bool {
         synchronizeFrameToMainScreen(display: false)
-        let view = OverlaySwiftUIView(
+        var view = OverlaySwiftUIView(
             viewModel: viewModel,
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
@@ -43,6 +46,9 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
             onPointerSelectionChanged: onPointerSelectionChanged,
             onDesktopSelected: onDesktopSelected
         )
+        view.onOverlayTapRouted = onOverlayTapRouted
+        view.onStageButtonRevealed = onStageButtonRevealed
+        view.onOverlayPointerRegionChanged = onOverlayPointerRegionChanged
         if let hostingView {
             hostingView.rootView = view
             hostingView.frame = contentView?.bounds ?? .zero
