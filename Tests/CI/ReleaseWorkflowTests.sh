@@ -37,7 +37,9 @@ done
 
 if [[ -f "$ci" ]]; then
     expect_contains "$ci" '^  pull_request:' "CI must run for pull requests"
-    expect_contains "$ci" '^    branches: \[main\]$' "CI push runs must be limited to main"
+    # A push run cannot fail a commit back out of main, so it buys nothing the release gates do
+    # not already provide. CI is a merge requirement for pull requests and a gate for releases.
+    expect_not_contains "$ci" '^  push:' "CI must not run on pushes to main"
     expect_contains "$ci" '^  workflow_call:' "CI must be callable as a release gate"
     expect_contains "$ci" 'runs-on: macos-26$' "CI must use the free standard macOS 26 runner"
     expect_not_contains "$ci" 'runs-on: .*-(large|xlarge)|runs-on: self-hosted' \
@@ -128,10 +130,14 @@ if [[ -f "$publish" ]]; then
         "the publish workflow must push only the tag"
 fi
 
-# The badges are the only place a reader sees whether main is currently releasable.
+# The badge is the only place a reader sees whether main is currently releasable. The gates run on
+# pull requests alone, and a release calls them as reusable workflows, whose runs are attributed to
+# the caller. Neither feeds a ci.yml or e2e.yml badge on main, so both would read "no status".
 if [[ -f "README.md" ]]; then
-    expect_contains "README.md" 'workflows/ci\.yml/badge\.svg' "the README must show the CI status"
-    expect_contains "README.md" 'workflows/e2e\.yml/badge\.svg' "the README must show the E2E status"
+    expect_contains "README.md" 'workflows/release-daily\.yml/badge\.svg' \
+        "the README must show whether main is releasable"
+    expect_not_contains "README.md" 'workflows/(ci|e2e)\.yml/badge\.svg' \
+        "the README must not show a gate badge that no run on main can ever fill"
 fi
 
 if (( failures > 0 )); then
