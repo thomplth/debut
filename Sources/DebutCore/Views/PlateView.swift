@@ -150,13 +150,22 @@ enum PlateMotion {
         return max(minimumPlateOpacity, progress * progress)
     }
 
+    /// Every candidate is pointer or drag state that can outlive the stage it named, so a
+    /// candidate past the end has to be skipped rather than carried into layout: `stackLayout`
+    /// answers an out-of-range focus with an empty stack, which its callers then index into.
     static func focusedStageIndex(
         active: Int,
         hovered: Int?,
         dragTarget: Int?,
-        retainedDragTarget: Int?
+        retainedDragTarget: Int?,
+        stageCount: Int
     ) -> Int {
-        dragTarget ?? retainedDragTarget ?? hovered ?? active
+        let slots = 0..<max(0, stageCount)
+        guard !slots.isEmpty else { return 0 }
+        let candidate = [dragTarget, retainedDragTarget, hovered]
+            .compactMap { $0 }
+            .first(where: slots.contains)
+        return candidate ?? min(max(active, 0), slots.upperBound - 1)
     }
 
     static func stackLayout(
@@ -1204,7 +1213,8 @@ public struct OverlaySwiftUIView: View {
                 active: viewModel.activeStageIndex,
                 hovered: hoveredStageIndex ?? revealedStageHandleIndex,
                 dragTarget: dragTargetIndex,
-                retainedDragTarget: retainedWindowDragFocusStageIndex
+                retainedDragTarget: retainedWindowDragFocusStageIndex,
+                stageCount: plates.count
             )
             let baselineLayout = PlateMotion.stackLayout(
                 stageCount: plates.count,

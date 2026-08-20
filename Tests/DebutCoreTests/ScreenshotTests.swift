@@ -254,6 +254,24 @@ struct ScreenshotTests {
         #expect(abs(heldPlate.midX - idleHeld.midX) < 0.5)
     }
 
+    @Test("A focus index left behind by a vanished stage still renders the stack")
+    func staleFocusIndexRendersStack() {
+        let vm = makeSampleViewModel(stageCount: 3, windowsPerStage: [2, 2, 2], activeIndex: 0)
+        let stale = StageDragState(
+            stageIndex: 0,
+            stageID: vm.plates[0].id,
+            verticalTranslation: 0,
+            destinationIndex: 6
+        )
+
+        let frames = renderPlateFrames(
+            OverlaySwiftUIView(viewModel: vm, initialStageDrag: stale),
+            size: NSSize(width: 1200, height: 600)
+        )
+
+        #expect(frames.count == 3)
+    }
+
     @Test("Cross-stage drag grows the target plate before drop")
     func crossStageDragFocusesTargetPlate() throws {
         let vm = makeSampleViewModel(stageCount: 2, windowsPerStage: [2, 2], activeIndex: 0)

@@ -413,24 +413,60 @@ struct PlateMotionTests {
     @Test("A pointer or drag target becomes the gradient focus")
     func interactionFocusPriority() {
         #expect(PlateMotion.focusedStageIndex(
-            active: 2, hovered: nil, dragTarget: nil, retainedDragTarget: nil
+            active: 2, hovered: nil, dragTarget: nil, retainedDragTarget: nil, stageCount: 5
         ) == 2)
         #expect(PlateMotion.focusedStageIndex(
-            active: 2, hovered: 4, dragTarget: nil, retainedDragTarget: nil
+            active: 2, hovered: 4, dragTarget: nil, retainedDragTarget: nil, stageCount: 5
         ) == 4)
         #expect(PlateMotion.focusedStageIndex(
-            active: 2, hovered: 4, dragTarget: 1, retainedDragTarget: nil
+            active: 2, hovered: 4, dragTarget: 1, retainedDragTarget: nil, stageCount: 5
         ) == 1)
     }
 
     @Test("Cross-stage drag focus is retained through drop completion")
     func retainedCrossStageDragFocus() {
         #expect(PlateMotion.focusedStageIndex(
-            active: 0, hovered: nil, dragTarget: 1, retainedDragTarget: nil
+            active: 0, hovered: nil, dragTarget: 1, retainedDragTarget: nil, stageCount: 2
         ) == 1)
         #expect(PlateMotion.focusedStageIndex(
-            active: 0, hovered: nil, dragTarget: nil, retainedDragTarget: 1
+            active: 0, hovered: nil, dragTarget: nil, retainedDragTarget: 1, stageCount: 2
         ) == 1)
+    }
+
+    @Test("Focus candidates that outlived their stage are skipped")
+    func staleFocusCandidatesAreIgnored() {
+        #expect(PlateMotion.focusedStageIndex(
+            active: 1, hovered: 6, dragTarget: nil, retainedDragTarget: nil, stageCount: 4
+        ) == 1)
+        #expect(PlateMotion.focusedStageIndex(
+            active: 1, hovered: 2, dragTarget: 9, retainedDragTarget: nil, stageCount: 4
+        ) == 2)
+        #expect(PlateMotion.focusedStageIndex(
+            active: 1, hovered: -1, dragTarget: nil, retainedDragTarget: nil, stageCount: 4
+        ) == 1)
+        #expect(PlateMotion.focusedStageIndex(
+            active: 7, hovered: nil, dragTarget: nil, retainedDragTarget: nil, stageCount: 4
+        ) == 3)
+    }
+
+    @Test("A stale focus index leaves the stack laid out rather than empty")
+    func staleFocusKeepsStackLayout() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: PlateMotion.focusedStageIndex(
+                active: 0,
+                hovered: 6,
+                dragTarget: nil,
+                retainedDragTarget: nil,
+                stageCount: 3
+            ),
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+
+        #expect(layout.centers.count == 3)
+        #expect(layout.scales[0] == 1)
     }
 
     @Test("Edge hover scrolls overflow toward its boundary")
@@ -843,7 +879,8 @@ struct PlateMotionTests {
                 active: 0,
                 hovered: nil,
                 dragTarget: destination,
-                retainedDragTarget: nil
+                retainedDragTarget: nil,
+                stageCount: stageCount
             ),
             plateHeight: 100,
             spacing: 12,
