@@ -604,53 +604,29 @@ enum PlateInteraction {
         ) ?? sourceIndex
     }
 
-    /// The drag handle sits in a gutter beside the plate. Treating that gutter as part of the
-    /// plate is what lets the pointer travel out to the handle without the plate losing focus
-    /// and shrinking away underneath it.
+    /// Hovering the plate anywhere reveals its handle. Aiming at the gutter to make the handle
+    /// appear was a game of skill, and it needed hysteresis besides, because revealing the handle
+    /// widens the plate and slid the pointer straight back out of the narrow strip that had
+    /// revealed it. A whole-plate trigger has nothing to slip out of.
     static func revealedStageHandleIndex(
-        previous: Int?,
         at location: CGPoint,
         containerWidth: CGFloat,
         stackOffset: CGFloat,
         plateWidths: [CGFloat],
         layout: PlateStackLayout
     ) -> Int? {
-        guard plateWidths.count == layout.centers.count,
-              layout.scales.count == layout.centers.count,
-              layout.heights.count == layout.centers.count
-        else { return nil }
-
-        for index in layout.centers.indices {
-            let frame = PlateMotion.plateFrame(
-                at: index,
-                containerWidth: containerWidth,
-                stackOffset: stackOffset,
-                plateWidths: plateWidths,
-                layout: layout
-            )
-            guard location.y >= frame.minY, location.y <= frame.maxY else { continue }
-
-            let scale = layout.scales[index]
-            let reach = previous == index
-                ? PlateConstants.stageHandleHoverWidth + PlateConstants.stageHandleRevealWidth
-                : PlateConstants.stageHandleHoverWidth
-            let zone = CGRect(
-                x: frame.minX - PlateConstants.stageHandleGutterWidth * scale,
-                y: frame.minY,
-                width: (PlateConstants.stageHandleGutterWidth + reach) * scale,
-                height: frame.height
-            )
-            if zone.contains(location) { return index }
-        }
-        return nil
+        stageIndex(
+            at: location,
+            containerWidth: containerWidth,
+            stackOffset: stackOffset,
+            plateWidths: plateWidths,
+            layout: layout
+        )
     }
 
     /// A band just outside each end of the stack. The button is centered in its own band, so
-    /// travelling out to it can never leave the region that revealed it. Once revealed the band
-    /// also reaches back inside the plate: entering it magnifies that plate, whose edge then
-    /// grows past the still-stationary pointer and would otherwise swallow the affordance.
+    /// travelling out to it can never leave the region that revealed it.
     static func stageInsertionEdge(
-        previous: StageInsertionEdge?,
         at location: CGPoint,
         containerWidth: CGFloat,
         stackOffset: CGFloat,
@@ -669,18 +645,38 @@ enum PlateInteraction {
             ) else { return nil }
             let index = edge == .top ? 0 : layout.centers.count - 1
             let halfWidth = plateWidths[index] * layout.scales[index] / 2
-            let depth = previous == edge ? PlateConstants.stageInsertStickyDepth : 0
             let band = CGRect(
                 x: containerWidth / 2 - halfWidth,
-                y: edge == .top
-                    ? boundary - PlateConstants.stageInsertHoverHeight
-                    : boundary - depth,
+                y: edge == .top ? boundary - PlateConstants.stageInsertHoverHeight : boundary,
                 width: halfWidth * 2,
-                height: PlateConstants.stageInsertHoverHeight + depth
+                height: PlateConstants.stageInsertHoverHeight
             )
             if band.contains(location) { return edge }
         }
-        return nil
+
+        // Hovering an end plate offers the same button, so it can be found without hunting for a
+        // thin strip of empty overlay. A lone plate is both ends at once and can only be split.
+        guard let index = stageIndex(
+            at: location,
+            containerWidth: containerWidth,
+            stackOffset: stackOffset,
+            plateWidths: plateWidths,
+            layout: layout
+        ) else { return nil }
+        let isFirst = index == 0
+        let isLast = index == layout.centers.count - 1
+        if isFirst, isLast {
+            let frame = PlateMotion.plateFrame(
+                at: index,
+                containerWidth: containerWidth,
+                stackOffset: stackOffset,
+                plateWidths: plateWidths,
+                layout: layout
+            )
+            return location.y < frame.midY ? .top : .bottom
+        }
+        if isFirst { return .top }
+        return isLast ? .bottom : nil
     }
 
     /// A drag outlives the reveal that started it, because the pointer leaves the handle as soon
@@ -691,9 +687,16 @@ enum PlateInteraction {
         return isRevealed ? .open : nil
     }
 
+    /// A control's hit area is its magnified size, not its resting size. Hovering it is what
+    /// magnifies it, so any smaller area leaves a visible ring that is not pressable, and makes
+    /// the control pulse as the pointer crosses back and forth over the resting edge.
+    static func stageControlHitRadius(diameter: CGFloat) -> CGFloat {
+        diameter / 2 * PlateConstants.stageControlHoverScale
+    }
+
     static func isStageInsertButtonHit(_ location: CGPoint, center: CGPoint) -> Bool {
         hypot(location.x - center.x, location.y - center.y)
-            <= PlateConstants.stageInsertButtonSize / 2
+            <= stageControlHitRadius(diameter: PlateConstants.stageInsertButtonSize)
     }
 
     /// Whether the pointer is over a plate or over the bare overlay around it. The affordances
@@ -727,8 +730,9 @@ enum PlateInteraction {
         return isDesktopArea(location, plateFrames: plateFrames) ? .desktop : .none
     }
 
-    /// A square centred on each plate's corner button — the same point the button is drawn
-    /// at, so reaching for the button cannot leave the zone that revealed it.
+    /// Hovering the plate anywhere reveals its close button. The corner zone stays as well,
+    /// because the button rides the plate's corner arc and so hangs half off the plate: without
+    /// it, reaching for the button would step off the plate and take the button away.
     static func revealedStageCloseIndex(
         at location: CGPoint,
         containerWidth: CGFloat,
@@ -737,6 +741,16 @@ enum PlateInteraction {
         layout: PlateStackLayout,
         cornerRadius: CGFloat
     ) -> Int? {
+        if let hovered = stageIndex(
+            at: location,
+            containerWidth: containerWidth,
+            stackOffset: stackOffset,
+            plateWidths: plateWidths,
+            layout: layout
+        ) {
+            return hovered
+        }
+
         for index in layout.centers.indices {
             guard let center = PlateMotion.stageCloseButtonCenter(
                 at: index,
@@ -757,7 +771,7 @@ enum PlateInteraction {
 
     static func isStageCloseButtonHit(_ location: CGPoint, center: CGPoint) -> Bool {
         hypot(location.x - center.x, location.y - center.y)
-            <= PlateConstants.stageCloseButtonSize / 2
+            <= stageControlHitRadius(diameter: PlateConstants.stageCloseButtonSize)
     }
 
     static func pointerSelection(
@@ -846,7 +860,6 @@ enum PlateInteraction {
         // Reaching for the add-stage button has to keep the end plate magnified, or the stack
         // re-lays out under the pointer and the button moves out from under the click.
         if let edge = stageInsertionEdge(
-            previous: nil,
             at: location,
             containerWidth: containerWidth,
             stackOffset: currentStackOffset,
@@ -983,16 +996,15 @@ public struct PlateConstants {
     public static let compactStageSpacing: CGFloat = 14
     public static let stageSpacing: CGFloat = 34
     public static let commandHintFooterOffset: CGFloat = 24
-    public static let stageHandleHoverWidth: CGFloat = 24
     public static let stageHandleRevealWidth: CGFloat = 36
     public static let stageHandleGutterWidth: CGFloat = 40
     public static let edgeHoverRegion: CGFloat = 56
     public static let edgeScrollMargin: CGFloat = 28
     public static let stageInsertHoverHeight: CGFloat = 44
     public static let stageInsertButtonSize: CGFloat = 26
-    public static let stageInsertStickyDepth: CGFloat = 28
     public static let stageCloseButtonSize: CGFloat = 22
     public static let stageCloseHoverSize: CGFloat = 48
+    public static let stageControlHoverScale: CGFloat = 1.25
 
     public static func thumbnailSize(forWindowCount count: Int, screenWidth: CGFloat) -> (width: CGFloat, height: CGFloat) {
         let maxWidth = screenWidth - screenMargin * 2
@@ -1085,6 +1097,7 @@ public struct OverlaySwiftUIView: View {
     @State private var revealedStageCloseIndex: Int?
     @State private var hoveredStageIndex: Int?
     @State private var hoverPointerY: CGFloat?
+    @State private var hoverLocation: CGPoint?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
@@ -1499,7 +1512,10 @@ public struct OverlaySwiftUIView: View {
                     stackOffset: yOffset,
                     layout: visualLayout
                 ) {
+                    let magnified = isPointerOn(center, hit: PlateInteraction.isStageInsertButtonHit)
                     StageInsertButton(appearance: viewModel.appearance)
+                        .scaleEffect(magnified ? PlateConstants.stageControlHoverScale : 1)
+                        .animation(.easeOut(duration: 0.12), value: magnified)
                         .position(center)
                         .allowsHitTesting(false)
                         .transition(.opacity)
@@ -1519,7 +1535,10 @@ public struct OverlaySwiftUIView: View {
                     plateWidths: plateWidths,
                     layout: visualLayout
                 ) {
+                    let magnified = isPointerOn(center, hit: PlateInteraction.isStageCloseButtonHit)
                     StageCloseButton(appearance: viewModel.appearance)
+                        .scaleEffect(magnified ? PlateConstants.stageControlHoverScale : 1)
+                        .animation(.easeOut(duration: 0.12), value: magnified)
                         .position(center)
                         .allowsHitTesting(false)
                         .transition(.opacity)
@@ -1592,6 +1611,7 @@ public struct OverlaySwiftUIView: View {
                 switch phase {
                 case let .active(location):
                     hoverPointerY = location.y
+                    hoverLocation = location
                     let region = PlateInteraction.pointerRegion(
                         at: location,
                         plateFrames: plateFrames
@@ -1625,7 +1645,6 @@ public struct OverlaySwiftUIView: View {
                     )
                     updateRevealedStageHandle(
                         PlateInteraction.revealedStageHandleIndex(
-                            previous: revealedStageHandleIndex,
                             at: location,
                             containerWidth: geo.size.width,
                             stackOffset: yOffset,
@@ -1635,7 +1654,6 @@ public struct OverlaySwiftUIView: View {
                     )
                     revealedStageInsertionEdge = windowDrag == nil && stageDrag == nil
                         ? PlateInteraction.stageInsertionEdge(
-                            previous: revealedStageInsertionEdge,
                             at: location,
                             containerWidth: geo.size.width,
                             stackOffset: yOffset,
@@ -1655,6 +1673,7 @@ public struct OverlaySwiftUIView: View {
                         : nil
                 case .ended:
                     hoverPointerY = nil
+                    hoverLocation = nil
                     hoveredStageIndex = nil
                     revealedStageInsertionEdge = nil
                     revealedStageCloseIndex = nil
@@ -1790,6 +1809,13 @@ public struct OverlaySwiftUIView: View {
         onStageReordered?(drag.stageIndex, drag.destinationIndex)
     }
 
+    /// The buttons are drawn with hit testing off so their taps route through the container, which
+    /// also means they never receive a hover. The tracked pointer is the only thing that knows.
+    private func isPointerOn(_ center: CGPoint, hit: (CGPoint, CGPoint) -> Bool) -> Bool {
+        guard let hoverLocation else { return false }
+        return hit(hoverLocation, center)
+    }
+
     private func stageInsertButtonCenter(
         containerWidth: CGFloat,
         stackOffset: CGFloat,
@@ -1858,6 +1884,7 @@ struct PlateSwiftUIView: View {
     var onWindowDropRequested: ((WindowMoveRequest) -> Void)?
     var onStageDragChanged: ((CGSize) -> Void)?
     var onStageDragEnded: (() -> Void)?
+    @State private var isHandleHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var removalTransition: PlateFocusTransition {
@@ -1971,8 +1998,11 @@ struct PlateSwiftUIView: View {
         .overlay(alignment: .leading) {
             if isStageHandleRevealed {
                 StageDragHandle(wallpaperLuminance: wallpaperLuminance)
+                    .scaleEffect(isHandleHovered ? PlateConstants.stageControlHoverScale : 1)
+                    .animation(.easeOut(duration: 0.12), value: isHandleHovered)
                     .frame(width: PlateConstants.stageHandleRevealWidth)
                     .contentShape(Rectangle())
+                    .onHover { isHandleHovered = $0 }
                     .gesture(stageHandleDragGesture)
                     .pointerStyle(handleGrab?.pointerStyle)
                     .transition(.opacity)
