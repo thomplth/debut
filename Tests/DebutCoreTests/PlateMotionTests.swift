@@ -86,6 +86,63 @@ struct PlateMotionTests {
         )
     }
 
+    @Test("A keyboard reorder animates only when no drag is in flight")
+    func keyboardWindowReorderMotionYieldsToDrag() {
+        #expect(
+            PlateMotion.keyboardWindowReorderTransition(
+                reduceMotion: false,
+                hasActiveDrag: false,
+                isAwaitingCommittedLayout: false
+            ) == .spring(duration: 0.294, bounce: 0.06)
+        )
+        #expect(
+            PlateMotion.keyboardWindowReorderTransition(
+                reduceMotion: true,
+                hasActiveDrag: false,
+                isAwaitingCommittedLayout: false
+            ) == .fade(duration: 0.126)
+        )
+        #expect(
+            PlateMotion.keyboardWindowReorderTransition(
+                reduceMotion: false,
+                hasActiveDrag: true,
+                isAwaitingCommittedLayout: false
+            ) == nil
+        )
+        #expect(
+            PlateMotion.keyboardWindowReorderTransition(
+                reduceMotion: false,
+                hasActiveDrag: false,
+                isAwaitingCommittedLayout: true
+            ) == nil
+        )
+    }
+
+    @Test("The window layout key sees a reorder that leaves the count alone")
+    func windowLayoutKeyTracksOrderWithinAStage() {
+        func plate(_ ids: [CGWindowID]) -> PlateData {
+            PlateData(
+                id: UUID(),
+                windows: ids.map {
+                    PlateWindowData(
+                        id: $0,
+                        windowID: $0,
+                        ownerBundleID: "com.example",
+                        ownerName: "Example",
+                        windowTitle: "Window \($0)",
+                        previewImage: nil
+                    )
+                },
+                isActive: true,
+                index: 0
+            )
+        }
+
+        let original = PlateMotion.windowLayoutKey(for: [plate([1, 2, 3])])
+        #expect(PlateMotion.windowLayoutKey(for: [plate([1, 2, 3])]) == original)
+        #expect(PlateMotion.windowLayoutKey(for: [plate([2, 1, 3])]) != original)
+    }
+
     @Test("Snapped preview waits for the committed window order")
     func snappedPreviewWaitsForCommittedLayout() {
         let request = WindowMoveRequest(
