@@ -959,7 +959,10 @@ struct PlateMotionTests {
         ) == nil)
     }
 
-    @Test("The drag handle reveals from the gutter of any plate, not just the current one")
+    /// Reaching for a narrow gutter to make a control appear is a game of skill. Hovering the
+    /// plate at all is the trigger, so the handle is already there by the time the pointer
+    /// arrives at it — and no hysteresis is needed, because there is no narrow strip to slip out of.
+    @Test("The drag handle reveals from anywhere on its plate, not just the gutter")
     func stageHandleRevealFollowsPlateGeometry() {
         let layout = PlateMotion.stackLayout(
             stageCount: 3,
@@ -968,60 +971,22 @@ struct PlateMotionTests {
             spacing: 12,
             inactiveScale: 0.8
         )
-        let inactiveWidth: CGFloat = 200 * layout.scales[2]
-        let inactiveLeadingEdge: CGFloat = 500 / 2 - inactiveWidth / 2
+        let widths: [CGFloat] = [200, 300, 200]
+        let inactiveLeadingEdge: CGFloat = 500 / 2 - widths[2] * layout.scales[2] / 2
+        let handleIndex: (CGPoint) -> Int? = {
+            PlateInteraction.revealedStageHandleIndex(
+                at: $0,
+                containerWidth: 500,
+                stackOffset: 0,
+                plateWidths: widths,
+                layout: layout
+            )
+        }
 
-        #expect(PlateInteraction.revealedStageHandleIndex(
-            previous: nil,
-            at: CGPoint(x: inactiveLeadingEdge - 6, y: layout.centers[2]),
-            containerWidth: 500,
-            stackOffset: 0,
-            plateWidths: [200, 300, 200],
-            layout: layout
-        ) == 2)
-        #expect(PlateInteraction.revealedStageHandleIndex(
-            previous: nil,
-            at: CGPoint(x: 250, y: layout.centers[2]),
-            containerWidth: 500,
-            stackOffset: 0,
-            plateWidths: [200, 300, 200],
-            layout: layout
-        ) == nil)
-    }
-
-    /// Revealing the handle widens the plate, which slides the pointer deeper into it. Without
-    /// hysteresis that immediately fails the reveal test and the handle flickers.
-    @Test("A revealed handle survives the plate growing under a still pointer")
-    func stageHandleRevealHoldsThroughExpansion() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 2,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let leadingEdge: CGFloat = 500 / 2 - 300 / 2
-        let deeperIn = CGPoint(
-            x: leadingEdge + PlateConstants.stageHandleHoverWidth + 8,
-            y: layout.centers[0]
-        )
-
-        #expect(PlateInteraction.revealedStageHandleIndex(
-            previous: nil,
-            at: deeperIn,
-            containerWidth: 500,
-            stackOffset: 0,
-            plateWidths: [300, 300],
-            layout: layout
-        ) == nil)
-        #expect(PlateInteraction.revealedStageHandleIndex(
-            previous: 0,
-            at: deeperIn,
-            containerWidth: 500,
-            stackOffset: 0,
-            plateWidths: [300, 300],
-            layout: layout
-        ) == 0)
+        #expect(handleIndex(CGPoint(x: inactiveLeadingEdge - 6, y: layout.centers[2])) == 2)
+        #expect(handleIndex(CGPoint(x: 250, y: layout.centers[2])) == 2)
+        #expect(handleIndex(CGPoint(x: 250, y: layout.centers[1])) == 1)
+        #expect(handleIndex(CGPoint(x: 20, y: layout.centers[1])) == nil)
     }
 
     @Test("The add-stage affordance reveals just beyond the first and last plate edges")
@@ -1038,7 +1003,6 @@ struct PlateMotionTests {
         let lastBottom = layout.centers[2] + layout.heights[2] / 2
         let edge: (CGPoint) -> StageInsertionEdge? = {
             PlateInteraction.stageInsertionEdge(
-                previous: nil,
                 at: $0,
                 containerWidth: 500,
                 stackOffset: 0,
@@ -1057,9 +1021,62 @@ struct PlateMotionTests {
         #expect(edge(CGPoint(x: 20, y: firstTop - 10)) == nil)
     }
 
-    /// Entering the band magnifies the end plate, which grows its edge past the stationary
-    /// pointer. Without stickiness the affordance would vanish before it could be clicked.
-    @Test("A revealed add-stage band survives the plate growing over the pointer")
+    /// The band is a thin strip of empty overlay, which is a poor thing to have to find. Hovering
+    /// the plate the new stage would sit next to offers the same button.
+    @Test("The add-stage affordance reveals from the first and last plates")
+    func stageInsertionEdgeRevealsFromEndPlates() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [200, 300, 200]
+        let edge: (CGPoint) -> StageInsertionEdge? = {
+            PlateInteraction.stageInsertionEdge(
+                at: $0,
+                containerWidth: 500,
+                stackOffset: 0,
+                plateWidths: widths,
+                layout: layout
+            )
+        }
+
+        #expect(edge(CGPoint(x: 250, y: layout.centers[0])) == .top)
+        #expect(edge(CGPoint(x: 250, y: layout.centers[2])) == .bottom)
+        #expect(edge(CGPoint(x: 250, y: layout.centers[1])) == nil)
+    }
+
+    /// One plate is both ends of the stack at once, so which button it offers can only come from
+    /// which half of it the pointer is in.
+    @Test("A lone plate offers the add-stage button on the half the pointer is in")
+    func stageInsertionEdgeSplitsALonePlate() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 1,
+            focusIndex: 0,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let edge: (CGFloat) -> StageInsertionEdge? = {
+            PlateInteraction.stageInsertionEdge(
+                at: CGPoint(x: 250, y: $0),
+                containerWidth: 500,
+                stackOffset: 0,
+                plateWidths: [300],
+                layout: layout
+            )
+        }
+
+        #expect(edge(layout.centers[0] - layout.heights[0] / 4) == .top)
+        #expect(edge(layout.centers[0] + layout.heights[0] / 4) == .bottom)
+    }
+
+    /// Entering the band magnifies the end plate, whose edge then grows past the stationary
+    /// pointer and swallows it. The plate itself now offers the same button, so the affordance
+    /// survives being swallowed without the band needing to reach back inside the plate.
+    @Test("A revealed add-stage affordance survives the plate growing over the pointer")
     func stageInsertionEdgeStaysRevealedWhenThePlateGrows() {
         let layout = PlateMotion.stackLayout(
             stageCount: 3,
@@ -1070,25 +1087,14 @@ struct PlateMotionTests {
         )
         let widths: [CGFloat] = [300, 200, 200]
         let firstTop = layout.centers[0] - layout.heights[0] / 2
-        let swallowed = CGPoint(x: 250, y: firstTop + 10)
-        let edge: (StageInsertionEdge?, CGPoint) -> StageInsertionEdge? = {
-            PlateInteraction.stageInsertionEdge(
-                previous: $0,
-                at: $1,
-                containerWidth: 500,
-                stackOffset: 0,
-                plateWidths: widths,
-                layout: layout
-            )
-        }
 
-        #expect(edge(nil, swallowed) == nil)
-        #expect(edge(.top, swallowed) == .top)
-        #expect(edge(.bottom, swallowed) == nil)
-        #expect(edge(.top, CGPoint(
-            x: 250,
-            y: firstTop + PlateConstants.stageInsertStickyDepth + 1
-        )) == nil)
+        #expect(PlateInteraction.stageInsertionEdge(
+            at: CGPoint(x: 250, y: firstTop + 10),
+            containerWidth: 500,
+            stackOffset: 0,
+            plateWidths: widths,
+            layout: layout
+        ) == .top)
     }
 
     @Test("The add-stage band keeps the end plate magnified")
@@ -1142,7 +1148,6 @@ struct PlateMotionTests {
             )
             #expect(center?.x == 250)
             #expect(PlateInteraction.stageInsertionEdge(
-                previous: nil,
                 at: center ?? .zero,
                 containerWidth: 500,
                 stackOffset: 40,
@@ -1157,7 +1162,6 @@ struct PlateMotionTests {
         let empty = PlateStackLayout(scales: [], heights: [], centers: [], totalHeight: 0)
 
         #expect(PlateInteraction.stageInsertionEdge(
-            previous: nil,
             at: .zero,
             containerWidth: 500,
             stackOffset: 0,
@@ -1172,7 +1176,35 @@ struct PlateMotionTests {
         ) == nil)
     }
 
-    @Test("The close affordance reveals near a plate's top-right corner")
+    @Test("The close affordance reveals from anywhere on its plate")
+    func stageCloseRevealsFromThePlate() {
+        let layout = PlateMotion.stackLayout(
+            stageCount: 3,
+            focusIndex: 1,
+            plateHeight: 100,
+            spacing: 12,
+            inactiveScale: 0.8
+        )
+        let widths: [CGFloat] = [200, 300, 200]
+        let closeIndex: (CGPoint) -> Int? = {
+            PlateInteraction.revealedStageCloseIndex(
+                at: $0,
+                containerWidth: 500,
+                stackOffset: 0,
+                plateWidths: widths,
+                layout: layout,
+                cornerRadius: 0
+            )
+        }
+
+        #expect(closeIndex(CGPoint(x: 250, y: layout.centers[1])) == 1)
+        #expect(closeIndex(CGPoint(x: 250, y: layout.centers[0])) == 0)
+        #expect(closeIndex(CGPoint(x: 20, y: layout.centers[1])) == nil)
+    }
+
+    /// The button rides the plate's corner, so its outer half hangs off the plate. Plate hover
+    /// alone would drop the reveal the moment the pointer reached for it.
+    @Test("The close affordance survives the pointer stepping off the plate onto the button")
     func stageCloseReveal() {
         let layout = PlateMotion.stackLayout(
             stageCount: 3,
@@ -1196,12 +1228,13 @@ struct PlateMotionTests {
             x: 250 + widths[1] * layout.scales[1] / 2,
             y: layout.centers[1] - layout.heights[1] / 2
         )
+        let justOutsideThePlate = CGPoint(x: secondCorner.x + 6, y: secondCorner.y - 6)
 
         #expect(closeIndex(secondCorner) == 1)
-        #expect(closeIndex(CGPoint(x: 250, y: layout.centers[1])) == nil)
+        #expect(closeIndex(justOutsideThePlate) == 1)
         #expect(closeIndex(CGPoint(
-            x: secondCorner.x - PlateConstants.stageCloseHoverSize,
-            y: secondCorner.y
+            x: secondCorner.x + PlateConstants.stageCloseHoverSize,
+            y: secondCorner.y - PlateConstants.stageCloseHoverSize
         )) == nil)
     }
 
@@ -1387,8 +1420,29 @@ struct PlateMotionTests {
         #expect(route(CGPoint(x: 250, y: 200)) == .none)
 
         // Just outside a button's radius is a miss, not a near-enough hit.
-        let justOutside = PlateConstants.stageInsertButtonSize / 2 + 1
+        let justOutside = PlateInteraction.stageControlHitRadius(
+            diameter: PlateConstants.stageInsertButtonSize
+        ) + 1
         #expect(route(CGPoint(x: 250 + justOutside, y: 60)) == .desktop)
+    }
+
+    /// Hovering a control is what magnifies it, so anything smaller than the magnified size would
+    /// leave a visible ring that is not pressable, and would flicker as the pointer crossed it.
+    @Test("A stage control can be pressed across its magnified size")
+    func stageControlHitAreaMatchesTheMagnifiedSize() {
+        let insertRing = PlateConstants.stageInsertButtonSize / 2 + 1
+        let closeRing = PlateConstants.stageCloseButtonSize / 2 + 1
+        let center = CGPoint(x: 250, y: 60)
+
+        #expect(PlateConstants.stageControlHoverScale > 1)
+        #expect(PlateInteraction.isStageInsertButtonHit(
+            CGPoint(x: center.x + insertRing, y: center.y),
+            center: center
+        ))
+        #expect(PlateInteraction.isStageCloseButtonHit(
+            CGPoint(x: center.x + closeRing, y: center.y),
+            center: center
+        ))
     }
 
     /// The buttons can overlap: the insert button sits above the first plate, near the corner
