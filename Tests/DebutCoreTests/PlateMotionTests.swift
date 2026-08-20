@@ -1323,6 +1323,74 @@ struct PlateMotionTests {
         #expect(PlateContrast.handleTintWhiteLevel(backgroundLuminance: nil) == 1)
     }
 
+    /// Where a tap on the overlay actually goes. The buttons are drawn with hit testing off and
+    /// float over — or straddle — the plates, so this routing is the whole of their behaviour.
+    @Test("A tap on a revealed stage button routes to that button, not the desktop")
+    func overlayTapRoutesToStageButtons() {
+        let plateFrames = [0: CGRect(x: 100, y: 100, width: 300, height: 200)]
+        let insertCenter = CGPoint(x: 250, y: 60)
+        let closeCenter = CGPoint(x: 390, y: 110)
+        let route: (CGPoint, StageInsertionEdge?, Int?) -> OverlayTapTarget = {
+            PlateInteraction.overlayTapTarget(
+                at: $0,
+                revealedInsertionEdge: $1,
+                insertButtonCenter: insertCenter,
+                revealedCloseIndex: $2,
+                closeButtonCenter: closeCenter,
+                plateFrames: plateFrames
+            )
+        }
+
+        #expect(route(insertCenter, .top, nil) == .insertStage(.top))
+        #expect(route(insertCenter, .bottom, nil) == .insertStage(.bottom))
+
+        // The close button sits on the plate's corner, so its tap must win over the plate.
+        #expect(route(closeCenter, nil, 0) == .deleteStage(0))
+        #expect(route(closeCenter, nil, 2) == .deleteStage(2))
+
+        // A button that is not revealed cannot be tapped, however close the pointer is.
+        #expect(route(insertCenter, nil, nil) == .desktop)
+        #expect(route(closeCenter, nil, nil) == .none)
+    }
+
+    @Test("A tap away from every stage button keeps the desktop behaviour")
+    func overlayTapFallsThroughToDesktop() {
+        let plateFrames = [0: CGRect(x: 100, y: 100, width: 300, height: 200)]
+        let route: (CGPoint) -> OverlayTapTarget = {
+            PlateInteraction.overlayTapTarget(
+                at: $0,
+                revealedInsertionEdge: .top,
+                insertButtonCenter: CGPoint(x: 250, y: 60),
+                revealedCloseIndex: 0,
+                closeButtonCenter: CGPoint(x: 390, y: 110),
+                plateFrames: plateFrames
+            )
+        }
+
+        #expect(route(CGPoint(x: 900, y: 500)) == .desktop)
+        #expect(route(CGPoint(x: 250, y: 200)) == .none)
+
+        // Just outside a button's radius is a miss, not a near-enough hit.
+        let justOutside = PlateConstants.stageInsertButtonSize / 2 + 1
+        #expect(route(CGPoint(x: 250 + justOutside, y: 60)) == .desktop)
+    }
+
+    /// The buttons can overlap: the insert button sits above the first plate, near the corner
+    /// its close button rides. A tap can only ever do one thing.
+    @Test("Overlapping stage buttons resolve to a single action")
+    func overlayTapPrefersInsertWhenButtonsOverlap() {
+        let shared = CGPoint(x: 250, y: 60)
+
+        #expect(PlateInteraction.overlayTapTarget(
+            at: shared,
+            revealedInsertionEdge: .top,
+            insertButtonCenter: shared,
+            revealedCloseIndex: 0,
+            closeButtonCenter: shared,
+            plateFrames: [:]
+        ) == .insertStage(.top))
+    }
+
     @Test("A stale pointer exit cannot clear the newly hovered window")
     func stalePointerExitDoesNotClearSelection() {
         let first = PointerSelection(stageIndex: 0, windowIndex: 0)
