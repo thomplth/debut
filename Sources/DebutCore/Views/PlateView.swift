@@ -683,6 +683,14 @@ enum PlateInteraction {
         return nil
     }
 
+    /// A drag outlives the reveal that started it, because the pointer leaves the handle as soon
+    /// as the plate moves under it. The closed hand therefore has to follow the gesture, not the
+    /// reveal, or the cursor would spring back to an arrow mid-drag.
+    static func stageHandleGrab(isRevealed: Bool, isDragging: Bool) -> StageHandleGrab? {
+        if isDragging { return .closed }
+        return isRevealed ? .open : nil
+    }
+
     static func isStageInsertButtonHit(_ location: CGPoint, center: CGPoint) -> Bool {
         hypot(location.x - center.x, location.y - center.y)
             <= PlateConstants.stageInsertButtonSize / 2
@@ -873,6 +881,18 @@ enum PlateInteraction {
             width: frame.width + gutter,
             height: frame.height
         )
+    }
+}
+
+enum StageHandleGrab: Equatable {
+    case open
+    case closed
+
+    var pointerStyle: PointerStyle {
+        switch self {
+        case .open: .grabIdle
+        case .closed: .grabActive
+        }
     }
 }
 
@@ -1360,6 +1380,7 @@ public struct OverlaySwiftUIView: View {
                             footerHints: footerHints,
                             stageHandleExpansion: stageHandleExpansion,
                             isStageHandleRevealed: isStageHandleRevealed,
+                            isStageDragging: isStageDragging,
                             windowDrag: $windowDrag,
                             layoutWindowDrag: layoutWindowDrag,
                             settlingWindowID: settlingWindowDrop?.request.windowID,
@@ -1825,6 +1846,7 @@ struct PlateSwiftUIView: View {
     let footerHints: [CommandHintPresentation]
     let stageHandleExpansion: CGFloat
     let isStageHandleRevealed: Bool
+    let isStageDragging: Bool
     @Binding var windowDrag: WindowDragState?
     let layoutWindowDrag: WindowDragState?
     let settlingWindowID: CGWindowID?
@@ -1952,6 +1974,7 @@ struct PlateSwiftUIView: View {
                     .frame(width: PlateConstants.stageHandleRevealWidth)
                     .contentShape(Rectangle())
                     .gesture(stageHandleDragGesture)
+                    .pointerStyle(handleGrab?.pointerStyle)
                     .transition(.opacity)
             }
         }
@@ -1968,6 +1991,13 @@ struct PlateSwiftUIView: View {
             }
         }
         .animation(.easeOut(duration: 0.14), value: isStageHandleRevealed)
+    }
+
+    private var handleGrab: StageHandleGrab? {
+        PlateInteraction.stageHandleGrab(
+            isRevealed: isStageHandleRevealed,
+            isDragging: isStageDragging
+        )
     }
 
     private var stageHandleDragGesture: some Gesture {
