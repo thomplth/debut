@@ -774,6 +774,33 @@ enum PlateInteraction {
             <= stageControlHitRadius(diameter: PlateConstants.stageCloseButtonSize)
     }
 
+    /// The gaps between plates belong to the stack as far as the pointer is concerned. A scroll
+    /// that died whenever the pointer sat between two plates would read as the feature not
+    /// working, so a gap counts as long as the pointer is within the taper joining the two.
+    static func isInStageScrollArea(_ location: CGPoint, plateFrames: [Int: CGRect]) -> Bool {
+        let frames = plateFrames.values
+        if frames.contains(where: { $0.contains(location) }) { return true }
+
+        let ordered = frames.sorted { $0.minY < $1.minY }
+        for (upper, lower) in zip(ordered, ordered.dropFirst()) {
+            let gap = lower.minY - upper.maxY
+            guard gap > 0, location.y >= upper.maxY, location.y <= lower.minY else { continue }
+            let progress = (location.y - upper.maxY) / gap
+            let halfWidth = upper.width / 2 + (lower.width / 2 - upper.width / 2) * progress
+            let centerX = upper.midX + (lower.midX - upper.midX) * progress
+            if abs(location.x - centerX) <= halfWidth { return true }
+        }
+        return false
+    }
+
+    /// Scrolling stops at the ends rather than wrapping, so a long flick cannot land somewhere
+    /// unrelated to where it started. A move to where the selection already is means no move.
+    static func stageScrollDestination(current: Int, steps: Int, stageCount: Int) -> Int? {
+        guard stageCount > 0, steps != 0 else { return nil }
+        let target = min(max(current - steps, 0), stageCount - 1)
+        return target == current ? nil : target
+    }
+
     static func pointerSelection(
         current: PointerSelection?,
         target: PointerSelection,
@@ -935,6 +962,17 @@ struct OverlayTapDiagnostic {
     let closeButtonCenter: CGPoint?
 }
 
+/// Every stage of a scroll's journey: where it landed, whether that counted as the stack, and
+/// what it did. A scroll that changes nothing is otherwise indistinguishable from one the window
+/// never received.
+struct OverlayScrollDiagnostic {
+    let location: CGPoint
+    let deltaY: CGFloat
+    let isInScrollArea: Bool
+    let steps: Int
+    let destination: Int?
+}
+
 /// Where the pointer is relative to the plates, plus the stack edges the insert bands hang off,
 /// so a band that never triggers can be compared against the pointer that failed to trigger it.
 struct OverlayPointerRegionDiagnostic {
@@ -954,6 +992,25 @@ enum PlateContrast {
     static func handleTintWhiteLevel(backgroundLuminance: Double?) -> Double {
         guard let backgroundLuminance else { return 1 }
         return backgroundLuminance < handleTintThreshold ? 1 : 0
+    }
+}
+
+/// A wheel reports whole notches and a trackpad a stream of points, and both have to become
+/// whole stage steps. The leftover travel has to survive between events, or a slow scroll would
+/// never accumulate into a step at all.
+struct StageScrollAccumulator {
+    private var travel: CGFloat = 0
+
+    mutating func steps(deltaY: CGFloat, isPrecise: Bool) -> Int {
+        travel += isPrecise ? deltaY : deltaY * PlateConstants.stageScrollTravelPerStage
+        let whole = (travel / PlateConstants.stageScrollTravelPerStage).rounded(.towardZero)
+        travel -= whole * PlateConstants.stageScrollTravelPerStage
+        return Int(whole)
+    }
+
+    /// A gesture starts from rest, so a flick left over from the last one cannot leak into it.
+    mutating func reset() {
+        travel = 0
     }
 }
 
@@ -1005,6 +1062,7 @@ public struct PlateConstants {
     public static let stageCloseButtonSize: CGFloat = 22
     public static let stageCloseHoverSize: CGFloat = 48
     public static let stageControlHoverScale: CGFloat = 1.25
+    public static let stageScrollTravelPerStage: CGFloat = 30
 
     public static func thumbnailSize(forWindowCount count: Int, screenWidth: CGFloat) -> (width: CGFloat, height: CGFloat) {
         let maxWidth = screenWidth - screenMargin * 2
@@ -1081,6 +1139,9 @@ public struct OverlaySwiftUIView: View {
     public var onDesktopSelected: (() -> Void)?
     var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
     var onStageButtonRevealed: ((String, CGPoint?) -> Void)?
+    var onStageScrollSelected: ((Int) -> Void)?
+    var onStageScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
+    var scrollRelay: OverlayScrollRelay?
     var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
 
     @State private var revealedStageInsertionEdge: StageInsertionEdge?
@@ -1098,6 +1159,7 @@ public struct OverlaySwiftUIView: View {
     @State private var hoveredStageIndex: Int?
     @State private var hoverPointerY: CGFloat?
     @State private var hoverLocation: CGPoint?
+    @State private var scrollAccumulator = StageScrollAccumulator()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
@@ -1601,6 +1663,9 @@ public struct OverlaySwiftUIView: View {
                         }
                     }
             )
+            .onChange(of: scrollRelay?.latest) { _, event in
+                if let event { handleStageScroll(event) }
+            }
             .onPreferenceChange(PlateFramePreferenceKey.self) { frames in
                 plateFrames = frames
             }
@@ -1807,6 +1872,37 @@ public struct OverlaySwiftUIView: View {
         stageDrag = nil
         guard drag.destinationIndex != drag.stageIndex else { return }
         onStageReordered?(drag.stageIndex, drag.destinationIndex)
+    }
+
+    /// Reported at every stage, because a scroll that changes nothing is otherwise
+    /// indistinguishable from a scroll the window never received.
+    private func handleStageScroll(_ event: OverlayScrollEvent) {
+        if event.isGestureStart { scrollAccumulator.reset() }
+        let inArea = windowDrag == nil && stageDrag == nil
+            && PlateInteraction.isInStageScrollArea(event.location, plateFrames: plateFrames)
+        let steps = inArea
+            ? scrollAccumulator.steps(deltaY: event.deltaY, isPrecise: event.isPrecise)
+            : 0
+        let destination = PlateInteraction.stageScrollDestination(
+            current: viewModel.activeStageIndex,
+            steps: steps,
+            stageCount: viewModel.plates.count
+        )
+
+        onStageScrollRouted?(OverlayScrollDiagnostic(
+            location: event.location,
+            deltaY: event.deltaY,
+            isInScrollArea: inArea,
+            steps: steps,
+            destination: destination
+        ))
+
+        guard let destination else { return }
+        // The stack re-lays out under a stationary pointer, and whichever plate lands beneath it
+        // would otherwise take the magnify straight back off the stage the scroll just chose.
+        hoveredStageIndex = nil
+        pointerMovementGate.reset(at: NSEvent.mouseLocation)
+        onStageScrollSelected?(destination)
     }
 
     /// The buttons are drawn with hit testing off so their taps route through the container, which
