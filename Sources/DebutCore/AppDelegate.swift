@@ -510,6 +510,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             self.updateOverlay()
         }
 
+        overlayWindow.onStageScrollSelected = { [weak self] index in
+            guard let self, let ctrl = self.stageController else { return }
+            ctrl.jumpToStage(index: index)
+            self.diag.report("stage_scrolled_from_overlay", details: [
+                "stageIndex": "\(index)",
+            ])
+        }
+
+        overlayWindow.onStageScrollRouted = { [weak self] scroll in
+            self?.diag.report("overlay_scroll_routed", level: .transient, details: [
+                "location": formatOverlayPoint(scroll.location),
+                "deltaY": String(format: "%.1f", scroll.deltaY),
+                "inScrollArea": "\(scroll.isInScrollArea)",
+                "steps": "\(scroll.steps)",
+                "destination": scroll.destination.map(String.init) ?? "none",
+            ])
+        }
+
         overlayWindow.onStageButtonRevealed = { [weak self] kind, center in
             self?.diag.report("overlay_stage_button_revealed", details: [
                 "button": kind,

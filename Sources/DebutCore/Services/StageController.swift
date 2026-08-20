@@ -1010,7 +1010,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         notifyOverlayUpdated()
     }
 
-    private func jumpToStage(index: Int) {
+    public func jumpToStage(index: Int) {
         guard isStageManagerVisible,
               stageManager.stages.indices.contains(index) else { return }
         selectedStageIndex = index
