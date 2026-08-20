@@ -21,6 +21,51 @@ struct OverlayWindowTests {
         #expect(created)
     }
 
+    @Test("The overlay opens on the display it was pointed at")
+    func showOverlayUsesTargetDisplayFrame() async throws {
+        let screen = try #require(NSScreen.main ?? NSScreen.screens.first)
+        let target = screen.frame.insetBy(dx: 120, dy: 120)
+        let window = OverlayWindow()
+        window.targetScreenFrame = target
+
+        _ = window.update(viewModel: OverlayViewModel(
+            stageManager: StageManager(),
+            activeStageIndex: 0,
+            selectedWindowIndex: 0
+        ))
+        #expect(window.frame == target)
+
+        await withCheckedContinuation { continuation in
+            window.showOverlay(revealDuration: 0) {
+                continuation.resume()
+            }
+        }
+
+        #expect(window.frame == target)
+        window.orderOut(nil)
+    }
+
+    @Test("Clearing the target display returns the overlay to the main screen")
+    func clearedTargetFallsBackToMainScreen() throws {
+        let screen = try #require(NSScreen.main ?? NSScreen.screens.first)
+        let window = OverlayWindow()
+        window.targetScreenFrame = screen.frame.insetBy(dx: 120, dy: 120)
+        _ = window.update(viewModel: OverlayViewModel(
+            stageManager: StageManager(),
+            activeStageIndex: 0,
+            selectedWindowIndex: 0
+        ))
+
+        window.targetScreenFrame = nil
+        _ = window.update(viewModel: OverlayViewModel(
+            stageManager: StageManager(),
+            activeStageIndex: 0,
+            selectedWindowIndex: 0
+        ))
+
+        #expect(window.frame == screen.frame)
+    }
+
     @Test("Reveal completion is delivered after ordering and rendering")
     func revealCompletion() async {
         let window = OverlayWindow()

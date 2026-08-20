@@ -171,13 +171,17 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// Desktop surfaces — one per display, sitting between active and inactive stage windows
     public var desktopSurfaces: DesktopSurfaceCoordinator?
 
+    /// Where the frontmost app's focused window sat when the overlay last opened, in Quartz
+    /// global coordinates. The delegate resolves it to the display it presents the plates on.
+    public private(set) var focusedWindowFrame: CGRect?
+
     private var preOverlayStageID: UUID?
     private var previousStageID: UUID?
     private var backtickCycleWindows: [CGWindowID] = []
     private var backtickCycleIndex: Int = 0
     private var overlayPresentationGeneration: UInt = 0
     private var isOverlayPresented: Bool = false
-    private let fullscreenAppActiveProvider: (() -> Bool)?
+    private let focusedWindowSnapshotProvider: (() -> FocusedWindowSnapshot)?
     private var previewCaptureTask: Task<Void, Never>?
     private var previewCaptureGeneration: UInt = 0
     private var previewCacheEntries: [CGWindowID: PreviewCacheEntry] = [:]
@@ -194,7 +198,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         keyboardService: any KeyboardService,
         stageManager: StageManager = StageManager(),
         overlayPresentationDelay: TimeInterval = AppSettings.defaultOverlayPresentationDelay,
-        fullscreenAppActiveProvider: (() -> Bool)? = nil,
+        focusedWindowSnapshotProvider: (() -> FocusedWindowSnapshot)? = nil,
         overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
         previewRefreshPolicy: PreviewRefreshPolicy = .lastActiveOnly,
         previewCacheTTL: TimeInterval = AppSettings.defaultPreviewCacheTTL,
@@ -204,7 +208,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         self.keyboardService = keyboardService
         self.stageManager = stageManager
         self.overlayPresentationDelay = overlayPresentationDelay
-        self.fullscreenAppActiveProvider = fullscreenAppActiveProvider
+        self.focusedWindowSnapshotProvider = focusedWindowSnapshotProvider
         self.overlayPresentationRecorder = overlayPresentationRecorder
         self.previewRefreshPolicy = previewRefreshPolicy
         self.previewCacheTTL = previewCacheTTL
@@ -615,11 +619,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private func setupOverlay() {
         // Don't show overlay when a fullscreen app is active
         let presentation = activeOverlayPresentation
-        let fullscreen = isFullscreenAppActive()
+        let focusedWindow = probeFocusedWindow()
+        focusedWindowFrame = focusedWindow.frame
         if let presentation {
             overlayPresentationRecorder.mark(.fullscreenProbeCompleted, for: presentation)
         }
-        if fullscreen {
+        if focusedWindow.isFullscreen {
             if let presentation {
                 overlayPresentationRecorder.complete(presentation, outcome: .fullscreenRejected)
                 activeOverlayPresentation = nil
@@ -735,27 +740,46 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// element ref it is set on, not to the app's connection.
     static let fullscreenProbeTimeout: TimeInterval = 0.05
 
-    private func isFullscreenAppActive() -> Bool {
-        if let fullscreenAppActiveProvider {
-            return fullscreenAppActiveProvider()
+    private func probeFocusedWindow() -> FocusedWindowSnapshot {
+        if let focusedWindowSnapshotProvider {
+            return focusedWindowSnapshotProvider()
         }
         guard let frontApp = NSWorkspace.shared.frontmostApplication,
               frontApp.bundleIdentifier != "com.thomplth.Debut"
-        else { return false }
+        else { return .unfocused }
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
         AXUIElementSetMessagingTimeout(axApp, Float(Self.fullscreenProbeTimeout))
         var windowsRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &windowsRef) == .success else {
-            return false
+            return .unfocused
         }
         let axWindow = windowsRef as! AXUIElement
         AXUIElementSetMessagingTimeout(axWindow, Float(Self.fullscreenProbeTimeout))
         var fullscreenRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axWindow, "AXFullScreen" as CFString, &fullscreenRef) == .success else {
-            return false
-        }
-        return (fullscreenRef as? Bool) == true
+        let isFullscreen = AXUIElementCopyAttributeValue(axWindow, "AXFullScreen" as CFString, &fullscreenRef) == .success
+            && (fullscreenRef as? Bool) == true
+        return FocusedWindowSnapshot(
+            frame: axFrame(of: axWindow),
+            isFullscreen: isFullscreen
+        )
+    }
+
+    private func axFrame(of axWindow: AXUIElement) -> CGRect? {
+        var positionRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axWindow, kAXPositionAttribute as CFString, &positionRef) == .success,
+              AXUIElementCopyAttributeValue(axWindow, kAXSizeAttribute as CFString, &sizeRef) == .success
+        else { return nil }
+
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        guard let positionValue = positionRef, CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              let sizeValue = sizeRef, CFGetTypeID(sizeValue) == AXValueGetTypeID(),
+              AXValueGetValue(positionValue as! AXValue, .cgPoint, &origin),
+              AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+        else { return nil }
+        return CGRect(origin: origin, size: size)
     }
 
     /// A missing capture can mean that a window is merely hidden, so a preview is retained until
