@@ -89,6 +89,19 @@ enum PlateMotion {
         return windowReorderTransition(reduceMotion: reduceMotion)
     }
 
+    /// A keyboard reorder is the one layout change with nothing to announce it: the window count
+    /// is unchanged, so the removal animation cannot see it, and no drag is in flight, so the drag
+    /// reorder animation is not armed. It is the exact complement of the drag case, and the two
+    /// must stay mutually exclusive or a drop would be animated against its own handoff.
+    static func keyboardWindowReorderTransition(
+        reduceMotion: Bool,
+        hasActiveDrag: Bool,
+        isAwaitingCommittedLayout: Bool
+    ) -> PlateFocusTransition? {
+        guard !hasActiveDrag, !isAwaitingCommittedLayout else { return nil }
+        return windowReorderTransition(reduceMotion: reduceMotion)
+    }
+
     /// A window leaving the plate is the app going away, not a layout tweak, so it settles
     /// without bounce: overshoot would read as the card trying to come back.
     static func windowRemovalTransition(reduceMotion: Bool) -> PlateFocusTransition {
@@ -1365,6 +1378,11 @@ public struct OverlaySwiftUIView: View {
                 hasActiveDrag: layoutWindowDrag != nil,
                 isAwaitingCommittedLayout: settlingWindowDrop != nil
             )
+            let keyboardWindowReorderTransition = PlateMotion.keyboardWindowReorderTransition(
+                reduceMotion: reduceMotion,
+                hasActiveDrag: layoutWindowDrag != nil,
+                isAwaitingCommittedLayout: settlingWindowDrop != nil
+            )
             let dragTargetIndex = layoutWindowDrag?.dropTarget?.stageIndex
                 ?? stageDrag?.destinationIndex
             let dragSlots = stageDrag.map {
@@ -1619,6 +1637,7 @@ public struct OverlaySwiftUIView: View {
             .animation(focusTransition.animation, value: focusedStageIndex)
             .animation(focusTransition.animation, value: pointerSelection)
             .animation(activeWindowReorderTransition?.animation, value: layoutWindowDrag?.dropTarget)
+            .animation(keyboardWindowReorderTransition?.animation, value: windowLayoutKey)
             .animation(focusTransition.animation, value: dragSlots)
             .coordinateSpace(name: "overlay")
             .simultaneousGesture(
