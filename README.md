@@ -7,9 +7,9 @@
 Cmd-Tab stops showing you every window you own and starts showing you the three you are working with.
 
 [![Daily Release](https://github.com/thomplth/debut/actions/workflows/release-daily.yml/badge.svg)](https://github.com/thomplth/debut/actions/workflows/release-daily.yml)
-[![CI](https://github.com/thomplth/debut/actions/workflows/ci.yml/badge.svg)](https://github.com/thomplth/debut/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/thomplth/debut?label=download)](https://github.com/thomplth/debut/releases/latest)
 ![Platform](https://img.shields.io/badge/macOS-26%20Tahoe-black)
+![Architecture](https://img.shields.io/badge/Apple%20Silicon-arm64-black)
 
 <img src="docs/media/overlay.jpg" alt="The Debut overlay: three stages of window previews stacked over a macOS desktop" width="820">
 
@@ -190,6 +190,8 @@ swift test --no-parallel        # unit and screenshot tests
 
 `--no-parallel` is required rather than preferred: several suites block the main
 thread, so parallel runs fail on timing instead of behaviour.
+
+### High-risk verification
 
 End-to-end coverage is reserved for high-risk changes — global keyboard handling,
 Accessibility integration, window lifecycle, overlay presentation, persistence
