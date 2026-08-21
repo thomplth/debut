@@ -1063,6 +1063,7 @@ public struct PlateConstants {
     public static let bottomPadding: CGFloat = 24
     public static let screenMargin: CGFloat = 80
     public static let badgeSize: CGFloat = 40
+    public static let previewPlaceholderIconSize: CGFloat = 32
     public static let compactStageSpacing: CGFloat = 14
     public static let stageSpacing: CGFloat = 34
     public static let commandHintFooterOffset: CGFloat = 24
@@ -2338,8 +2339,15 @@ struct WindowPreviewView: View {
                         RoundedRectangle(cornerRadius: 6)
                             .fill(.quaternary.opacity(0.3))
                             .overlay {
-                                AppIconImage(bundleID: window.ownerBundleID, name: window.ownerName, iconSize: 32)
-                                    .frame(width: 32, height: 32)
+                                AppIconImage(
+                                    bundleID: window.ownerBundleID,
+                                    name: window.ownerName,
+                                    iconSize: PlateConstants.previewPlaceholderIconSize
+                                )
+                                .frame(
+                                    width: PlateConstants.previewPlaceholderIconSize,
+                                    height: PlateConstants.previewPlaceholderIconSize
+                                )
                             }
                     }
                 }
@@ -2437,9 +2445,9 @@ struct AppIconImage: NSViewRepresentable {
     }
 
     private func resolveIcon() -> NSImage {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            let icon = NSWorkspace.shared.icon(forFile: url.path)
-            icon.size = NSSize(width: iconSize, height: iconSize)
+        // Never hand back NSWorkspace's lazy icon: it rasterizes at draw time, on the main
+        // thread, inside the Core Animation commit (KHA-481).
+        if let icon = AppIconCache.shared.cachedOrRasterize(bundleID: bundleID, size: iconSize) {
             return icon
         }
         let size = iconSize
