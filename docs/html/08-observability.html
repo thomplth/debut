@@ -328,7 +328,7 @@ records a trace of 14 named phases&nbsp;<span class="src">:11</span>, in causal 
 
 <div class="diagram">activation_recognized      keystroke classified in the tap callback
 main_actor_dequeued        handoff to main completed
-fullscreen_probe_completed is a fullscreen Space in the way?
+focus_probe_completed      where is the focused window, and is it fullscreen?
 controller_accepted        StageController agreed to present
 presentation_scheduled     deferred presentation armed
 presentation_deadline_fired
@@ -345,7 +345,7 @@ wallpaper_completed        asynchronous, after reveal</div>
 The last four intentionally land after the overlay is already visible; the overlay
 does not wait for its own thumbnails. Each trace also carries an outcome
 <span class="src">:28</span> — <code>presented</code>,
-<code>released_before_presentation</code>, <code>fullscreen_rejected</code>,
+<code>released_before_presentation</code>,
 <code>superseded</code>, <code>hidden_before_reveal</code>,
 <code>app_terminated</code> — so an abandoned presentation is distinguishable from a
 slow one rather than just vanishing.

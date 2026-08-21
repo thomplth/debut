@@ -417,6 +417,38 @@ func visibleWindowTitles(for processIdentifier: pid_t) -> [String] {
     }
 }
 
+func focusedWindowElement(for processIdentifier: pid_t) -> AXUIElement? {
+    let application = AXUIElementCreateApplication(processIdentifier)
+    var focused: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(
+        application,
+        kAXFocusedWindowAttribute as CFString,
+        &focused
+    ) == .success, let element = focused, CFGetTypeID(element) == AXUIElementGetTypeID()
+    else { return nil }
+    return (element as! AXUIElement)
+}
+
+func windowIsFullscreen(_ window: AXUIElement) -> Bool {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &value) == .success
+    else { return false }
+    return (value as? Bool) == true
+}
+
+/// Returns whether the Space transition actually completed, since a virtualized guest can
+/// accept the attribute and never animate.
+@discardableResult
+func setWindowFullscreen(_ window: AXUIElement, _ enabled: Bool, timeout: TimeInterval = 10) -> Bool {
+    AXUIElementSetAttributeValue(window, "AXFullScreen" as CFString, enabled as CFBoolean)
+    let deadline = Date().addingTimeInterval(timeout)
+    repeat {
+        if windowIsFullscreen(window) == enabled { return true }
+        wait(0.25)
+    } while Date() < deadline
+    return false
+}
+
 func desktopSurfaceIsOnScreen(for processIdentifier: pid_t) -> Bool {
     guard let rawWindows = CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements],
@@ -1334,6 +1366,84 @@ wait(0.5)
 if currentStageCount() != baselineStageCount {
     info("Stage count drifted to \(currentStageCount()); restoring is left to the next scenario's relaunch")
 }
+
+// --- 11b. Fullscreen Spaces ---
+// A fullscreen app owns a Space of its own, which the desktop surface deliberately never
+// joins. The plates have to reach it anyway, or the activation shortcut is dead exactly
+// where the user cannot see their other windows.
+header("11b. Overlay inside a fullscreen Space")
+
+let fullscreenFixture = NSRunningApplication
+    .runningApplications(withBundleIdentifier: "com.apple.TextEdit")
+    .first
+let fullscreenWindow = fullscreenFixture.flatMap {
+    $0.activate()
+    wait(1)
+    return focusedWindowElement(for: $0.processIdentifier)
+}
+let enteredFullscreen = fullscreenWindow.map { setWindowFullscreen($0, true) } ?? false
+
+if enteredFullscreen {
+    // The Space animation keeps running after the attribute flips.
+    wait(2)
+    postFlagsChanged(flags: [.maskCommand])
+    wait(0.1)
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+    wait(1.5)
+    let _ = takeScreenshot("11b_overlay_in_fullscreen")
+
+    test("Overlay opens over a fullscreen Space") {
+        for _ in 0..<30 {
+            if readState()["overlayVisible"] == "true" { return true }
+            wait(0.1)
+        }
+        info("  overlayVisible = \(readState()["overlayVisible"] ?? "nil")")
+        return false
+    }
+
+    test("Debut presents knowing the focused window was fullscreen") {
+        let fullscreenState = readState()["focusedWindowFullscreen"] ?? "nil"
+        if fullscreenState != "true" { info("  focusedWindowFullscreen = \(fullscreenState)") }
+        return fullscreenState == "true"
+    }
+
+    info("Releasing Cmd to commit the selection...")
+    postFlagsChanged(flags: [])
+    wait(2)
+
+    // Only that the session commits, not that macOS finished moving Spaces. Debut's part is
+    // `NSRunningApplication.activate()`; the Space animation that follows is the system's, and a
+    // guest VM does not reliably deliver it.
+    test("Releasing the modifier commits the session from a fullscreen Space") {
+        for _ in 0..<50 {
+            if readState()["overlayVisible"] == "false" { return true }
+            wait(0.1)
+        }
+        info("  overlayVisible = \(readState()["overlayVisible"] ?? "nil")")
+        return false
+    }
+
+    if let fullscreenWindow {
+        fullscreenFixture?.activate()
+        wait(1)
+        if !setWindowFullscreen(fullscreenWindow, false) {
+            info("The fixture window did not leave fullscreen; the next scenario relaunches Debut")
+        }
+        wait(1)
+    }
+} else {
+    let reason = fullscreenFixture == nil
+        ? "The TextEdit fixture is not running"
+        : "The guest did not complete the fullscreen Space transition"
+    skipTest("Overlay opens over a fullscreen Space", reason: reason)
+    skipTest("Debut presents knowing the focused window was fullscreen", reason: reason)
+    skipTest("Releasing the modifier commits the session from a fullscreen Space", reason: reason)
+}
+
+postFlagsChanged(flags: [])
+postKeyDown(keyCode: CGKeyCode(kVK_Escape))
+postKeyUp(keyCode: CGKeyCode(kVK_Escape))
+wait(0.5)
 
 // --- 12. Customized global activation ---
 header("12. Customized global activation")
