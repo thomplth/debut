@@ -141,6 +141,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
         stageManager.activateStage(id: startStageID)
 
+        AppIconCache.shared.warm(
+            bundleIDs: stageManager.allWindowOwnerBundleIDs,
+            sizes: AppIconCache.overlayIconSizes
+        )
+
         // Create desktop surfaces — one per display, sitting between active and inactive
         // stage windows
         let surfaces = DesktopSurfaceCoordinator(onFileDragEntered: { [weak self] in

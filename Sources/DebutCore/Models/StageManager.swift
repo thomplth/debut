@@ -62,6 +62,13 @@ public struct StageManager: Codable, Sendable {
         stages.reduce(into: 0) { $0 += $1.windows.count }
     }
 
+    public var allWindowOwnerBundleIDs: [String] {
+        var seen: Set<String> = []
+        let live = stages.flatMap(\.windows).map(\.ownerBundleID)
+        let dormant = dormantWindowAssignments.map(\.window.ownerBundleID)
+        return (live + dormant).filter { seen.insert($0).inserted }
+    }
+
     public func stage(atIndex index: Int) -> Stage? {
         guard stages.indices.contains(index) else { return nil }
         return stages[index]

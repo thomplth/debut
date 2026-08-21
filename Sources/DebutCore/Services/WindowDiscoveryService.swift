@@ -499,6 +499,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     func handleAppLaunch(_ app: AppInfo) {
+        AppIconCache.shared.warm(bundleIDs: [app.bundleID], sizes: AppIconCache.overlayIconSizes)
+
         if launchDiscoveryDelay == 0 {
             discoverLaunchedWindows(for: app)
             return
