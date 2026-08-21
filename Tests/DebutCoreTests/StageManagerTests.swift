@@ -78,21 +78,6 @@ struct StageManagerTests {
         #expect(sm.stages[1].id == originalID)
     }
 
-    @Test("Create stage at a stack edge regardless of the active stage")
-    func createAtEdge() {
-        var sm = StageManager()
-        let originalID = sm.activeStageID
-        sm.createStage(atEdge: .top)
-        #expect(sm.stages.count == 2)
-        #expect(sm.stages[1].id == originalID)
-        #expect(sm.activeStageID == sm.stages[0].id)
-
-        sm.createStage(atEdge: .bottom)
-        #expect(sm.stages.count == 3)
-        #expect(sm.stages[2].id == sm.activeStageID)
-        #expect(sm.stages[1].id == originalID)
-    }
-
     @Test("Delete overflows windows up")
     func deleteOverflowUp() {
         var sm = StageManager()

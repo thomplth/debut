@@ -26,10 +26,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case jumpToStage1, jumpToStage2, jumpToStage3
     case jumpToStage4, jumpToStage5, jumpToStage6
     case jumpToStage7, jumpToStage8, jumpToStage9
-    case newStageBelow
-    case newStageAbove
-    case deleteStage
-    case deleteStageForward
     case moveWindowUp
     case moveWindowDown
     case moveWindowLeft
@@ -71,10 +67,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .jumpToStage7: "Jump to stage 7"
         case .jumpToStage8: "Jump to stage 8"
         case .jumpToStage9: "Jump to last stage"
-        case .newStageBelow: "New stage below"
-        case .newStageAbove: "New stage above"
-        case .deleteStage: "Delete stage"
-        case .deleteStageForward: "Delete stage (forward delete)"
         case .moveWindowUp: "Move window up"
         case .moveWindowDown: "Move window down"
         case .moveWindowLeft: "Move window left in stage"
@@ -128,10 +120,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .jumpToStage7: .jumpToStage(7)
         case .jumpToStage8: .jumpToStage(8)
         case .jumpToStage9: .jumpToLastStage
-        case .newStageBelow: .newStageBelow
-        case .newStageAbove: .newStageAbove
-        case .deleteStage: .deleteStage
-        case .deleteStageForward: .deleteStage
         case .moveWindowUp: .moveWindowUp
         case .moveWindowDown: .moveWindowDown
         case .moveWindowLeft: .moveWindowLeft
@@ -406,10 +394,6 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .jumpToStage7: KeyCombo(keyCode: kVK_ANSI_7),
             .jumpToStage8: KeyCombo(keyCode: kVK_ANSI_8),
             .jumpToStage9: KeyCombo(keyCode: kVK_ANSI_9),
-            .newStageBelow: KeyCombo(keyCode: kVK_ANSI_N),
-            .newStageAbove: KeyCombo(keyCode: kVK_ANSI_N, shift: true),
-            .deleteStage: KeyCombo(keyCode: kVK_Delete),
-            .deleteStageForward: KeyCombo(keyCode: kVK_ForwardDelete),
             .moveWindowUp: KeyCombo(keyCode: kVK_UpArrow),
             .moveWindowDown: KeyCombo(keyCode: kVK_DownArrow),
             .moveWindowLeft: KeyCombo(keyCode: kVK_LeftArrow),

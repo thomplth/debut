@@ -115,8 +115,6 @@ overlay. Holding past it presents the plates.
 | `←` `→` | Reorder the window inside its stage |
 | `↑` `↓` | Move the window to the stage above or below |
 | `⌥ ↑` / `⌥ ↓` | Swap this stage's position with its neighbour |
-| `N` / `⇧ N` | New stage below / above |
-| `⌫` / `⌦` | Delete this stage; its windows overflow into a neighbour |
 | `Q` | Quit the selected app |
 | `Esc` | Close the overlay without ending the session |
 

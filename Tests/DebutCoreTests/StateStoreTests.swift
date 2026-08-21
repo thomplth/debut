@@ -67,7 +67,7 @@ struct StateStoreTests {
         settings.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
         settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(command: true)
         settings.commandHintVisibility = .always
-        _ = settings.recordCommandUsage(.newStageBelow)
+        _ = settings.recordCommandUsage(.swapStageUp)
 
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
@@ -78,7 +78,7 @@ struct StateStoreTests {
         #expect(loaded.quickSwitchModifiers == ShortcutModifiers(control: true, option: true))
         #expect(loaded.quickSwitchSameApplicationModifiers == ShortcutModifiers(command: true))
         #expect(loaded.commandHintVisibility == .always)
-        #expect(loaded.commandUsageCounts[.newStageBelow] == 1)
+        #expect(loaded.commandUsageCounts[.swapStageUp] == 1)
     }
 
     @Test("Older settings use Control and Control-Option quick-switch defaults")
