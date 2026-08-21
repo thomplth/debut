@@ -187,19 +187,22 @@ stage immediately, with no session and no overlay, and they dismiss the overlay
 first if it happens to be open.
 </p>
 
-<div class="warn">
-  <span class="label">Suppressed entirely</span>
+<div class="note">
+  <span class="label">Inside a full-screen Space</span>
   <p>
-  While the frontmost application is full-screen, the overlay is not shown at all.
-  Debut's occlusion technique does not apply inside a full-screen Space, so
-  pretending otherwise would produce a switcher that visibly does nothing.
+  The overlay is presented over a full-screen app too, and every shortcut behaves
+  as it does on the desktop. The overlay window joins all Spaces at
+  <code>.statusBar</code> level, so the plates reach the Space the user is
+  actually looking at.
   </p>
   <p>
-  The keystroke is still swallowed. The event tap has no notion of full-screen
-  state and has already returned <code>nil</code>; the suppression happens later,
-  in <code>setupOverlay()</code>&nbsp;<span class="src">StageController.swift:604</span>,
-  which probes for a full-screen app and returns early, completing the
-  presentation trace with outcome <code>fullscreen_rejected</code>.
+  What does not follow is the desktop surface, which must stay off other Spaces
+  or it would cover the full-screen app. Inactive stages are therefore not
+  occluded in there — the full-screen app already covers them. The probe in
+  <code>setupOverlay()</code>&nbsp;<span class="src">StageController.swift:624</span>
+  still asks the question, but only to publish
+  <code>focusedWindowFullscreen</code> in the diagnostic state block; it no
+  longer rejects the presentation.
   </p>
 </div>
 
