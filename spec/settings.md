@@ -10,6 +10,7 @@ Debut's behavior, appearance, shortcuts, and exclusions.
 │ Appearance    │                                  │
 │ Excluded Apps │   all sections stacked           │
 │ App           │                                  │
+│ Privacy       │                                  │
 │ Keyboard      │                                  │
 │ Troubleshoot  │                                  │
 │ About         │                                  │
@@ -42,6 +43,11 @@ follows the system Reduce Motion setting rather than a Debut toggle.
 Every control in Settings must be wired to behaviour. Options that no code reads
 are removed rather than left visible; `AppSettings` ignores unknown keys, so
 files written by an older build keep loading.
+
+**Privacy** — one switch for anonymous usage and performance sharing, on by default,
+alongside a preview of the exact payload and a link to the privacy policy. The choice
+takes effect immediately and turning it off discards anything still queued. Local
+diagnostics are unaffected either way; see [../docs/privacy.md](../docs/privacy.md).
 
 **Keyboard Shortcuts** — an editable binding for every `KeyAction`, recorded by
 clicking a row and pressing the combination. Conflicts are detected inline and
