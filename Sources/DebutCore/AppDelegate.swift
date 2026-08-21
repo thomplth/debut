@@ -495,26 +495,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             ])
         }
 
-        overlayWindow.onStageInsertRequested = { [weak self] edge in
-            guard let self, let ctrl = self.stageController else { return }
-            ctrl.insertStage(atEdge: edge)
-            self.diag.report("stage_inserted_from_overlay", details: [
-                "edge": "\(edge)",
-                "stageCount": "\(ctrl.stageManager.stages.count)",
-            ])
-            self.updateOverlay()
-        }
-
-        overlayWindow.onStageDeleteRequested = { [weak self] index in
-            guard let self, let ctrl = self.stageController else { return }
-            ctrl.deleteStage(atIndex: index)
-            self.diag.report("stage_deleted_from_overlay", details: [
-                "stageIndex": "\(index)",
-                "stageCount": "\(ctrl.stageManager.stages.count)",
-            ])
-            self.updateOverlay()
-        }
-
         overlayWindow.onStageScrollSelected = { [weak self] index in
             guard let self, let ctrl = self.stageController else { return }
             ctrl.jumpToStage(index: index)
@@ -533,22 +513,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             ])
         }
 
-        overlayWindow.onStageButtonRevealed = { [weak self] kind, center in
-            self?.diag.report("overlay_stage_button_revealed", details: [
-                "button": kind,
-                "revealed": "\(center != nil)",
-                "center": center.map(formatOverlayPoint) ?? "none",
-            ])
-        }
-
-        // A tap that resolves to nothing is indistinguishable from a tap that never arrived,
-        // which is how the stage buttons stayed dead behind a green test suite.
+        // A tap that resolves to nothing is indistinguishable from a tap that never arrived.
         overlayWindow.onOverlayTapRouted = { [weak self] tap in
             self?.diag.report("overlay_tap_routed", details: [
                 "target": tap.target.diagnosticName,
                 "location": formatOverlayPoint(tap.location),
-                "insertButtonCenter": tap.insertButtonCenter.map(formatOverlayPoint) ?? "none",
-                "closeButtonCenter": tap.closeButtonCenter.map(formatOverlayPoint) ?? "none",
             ])
         }
 

@@ -143,9 +143,6 @@ struct OnboardingTests {
         #expect(viewModel.tutorialStep == .switchWindows)
 
         viewModel.advanceTutorial()
-        #expect(viewModel.tutorialStep == .createStage)
-
-        viewModel.advanceTutorial()
         #expect(viewModel.tutorialStep == .moveWindow)
 
         viewModel.advanceTutorial()

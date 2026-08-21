@@ -135,42 +135,6 @@ struct ScreenshotTests {
         #expect(vm.plates.count == 9)
     }
 
-    @Test("Add-stage buttons render above the first and below the last plate")
-    func stageInsertButtons() throws {
-        let vm = makeSampleViewModel(stageCount: 3, windowsPerStage: [3, 4, 2], activeIndex: 1)
-        let size = NSSize(width: 1200, height: 600)
-
-        for edge in [StageInsertionEdge.top, .bottom] {
-            guard let img = renderSwiftUI(
-                OverlaySwiftUIView(viewModel: vm, initialStageInsertionEdge: edge),
-                size: size
-            ) else {
-                throw ScreenshotError.renderFailed
-            }
-            try saveImage(img, name: "10_stage_insert_button_\(edge)")
-        }
-
-        #expect(vm.plates.count == 3)
-    }
-
-    @Test("The close button renders at a plate's top-right corner")
-    func stageCloseButton() throws {
-        let vm = makeSampleViewModel(stageCount: 3, windowsPerStage: [3, 4, 2], activeIndex: 1)
-        let size = NSSize(width: 1200, height: 600)
-
-        for index in [0, 1] {
-            guard let img = renderSwiftUI(
-                OverlaySwiftUIView(viewModel: vm, initialStageCloseIndex: index),
-                size: size
-            ) else {
-                throw ScreenshotError.renderFailed
-            }
-            try saveImage(img, name: "11_stage_close_button_\(index)")
-        }
-
-        #expect(vm.plates.count == 3)
-    }
-
     @Test("Selection on second window")
     func selectionState() throws {
         let vm = OverlayViewModel(

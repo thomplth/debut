@@ -15,23 +15,23 @@ struct CommandHintTests {
     func automaticThreshold() {
         var settings = AppSettings()
         #expect(settings.commandHintVisibility == .automatic)
-        #expect(settings.shouldShowCommandHint(for: .newStageBelow))
+        #expect(settings.shouldShowCommandHint(for: .swapStageUp))
 
         for _ in 0..<2 {
-            let didRecord = settings.recordCommandUsage(.newStageBelow)
+            let didRecord = settings.recordCommandUsage(.swapStageUp)
             #expect(didRecord)
         }
-        #expect(settings.shouldShowCommandHint(for: .newStageBelow))
+        #expect(settings.shouldShowCommandHint(for: .swapStageUp))
 
-        let didRecordThirdUse = settings.recordCommandUsage(.newStageBelow)
+        let didRecordThirdUse = settings.recordCommandUsage(.swapStageUp)
         #expect(didRecordThirdUse)
-        #expect(!settings.shouldShowCommandHint(for: .newStageBelow))
+        #expect(!settings.shouldShowCommandHint(for: .swapStageUp))
         // A sibling command keeps its own count, so retiring one never retires the other.
-        #expect(settings.shouldShowCommandHint(for: .newStageAbove))
+        #expect(settings.shouldShowCommandHint(for: .swapStageDown))
 
-        let didRecordFourthUse = settings.recordCommandUsage(.newStageBelow)
+        let didRecordFourthUse = settings.recordCommandUsage(.swapStageUp)
         #expect(!didRecordFourthUse)
-        #expect(settings.commandUsageCounts[.newStageBelow] == 3)
+        #expect(settings.commandUsageCounts[.swapStageUp] == 3)
     }
 
     @Test("Every footer command retires, collapsing the stage spacing")
@@ -137,29 +137,29 @@ struct CommandHintTests {
     func visibilityOverrides() {
         var settings = AppSettings()
         settings.commandHintVisibility = .never
-        #expect(!settings.shouldShowCommandHint(for: .deleteStage))
+        #expect(!settings.shouldShowCommandHint(for: .swapStageUp))
 
         settings.commandHintVisibility = .always
-        settings.commandUsageCounts[.deleteStage] = 99
-        #expect(settings.shouldShowCommandHint(for: .deleteStage))
+        settings.commandUsageCounts[.swapStageUp] = 99
+        #expect(settings.shouldShowCommandHint(for: .swapStageUp))
     }
 
     @Test("Reset clears all learned command usage")
     func resetUsage() {
         var settings = AppSettings()
-        _ = settings.recordCommandUsage(.newStageBelow)
+        _ = settings.recordCommandUsage(.swapStageUp)
         _ = settings.recordCommandUsage(.moveWindowDown)
 
         settings.resetCommandHintUsage()
 
         #expect(settings.commandUsageCounts.isEmpty)
-        #expect(settings.shouldShowCommandHint(for: .newStageBelow))
+        #expect(settings.shouldShowCommandHint(for: .swapStageUp))
     }
 
     @Test("Stage number hints sit left of every plate without an icon")
     func stageHintCatalog() {
         var settings = AppSettings()
-        settings.keyBindings.bindings[.newStageBelow] = KeyCombo(keyCode: kVK_ANSI_B)
+        settings.keyBindings.bindings[.swapStageUp] = KeyCombo(keyCode: kVK_ANSI_B)
 
         let numberHint = CommandHintCatalog.stageNumberHint(
             stageIndex: 0,
@@ -174,7 +174,7 @@ struct CommandHintTests {
     @Test("Active plate actions sit below the plate and use purpose icons")
     func plateFooterCatalog() {
         var settings = AppSettings()
-        settings.keyBindings.bindings[.newStageBelow] = KeyCombo(keyCode: kVK_ANSI_B)
+        settings.keyBindings.bindings[.swapStageUp] = KeyCombo(keyCode: kVK_ANSI_B)
 
         let inactiveHints = CommandHintCatalog.plateFooterHints(
             stageIndex: 0,
@@ -190,9 +190,9 @@ struct CommandHintTests {
         )
 
         #expect(inactiveHints.isEmpty)
-        #expect(activeHints.flatMap(\.actions).contains(.newStageBelow))
+        #expect(activeHints.flatMap(\.actions).contains(.swapStageUp))
         #expect(activeHints.flatMap(\.actions).contains(.moveWindowUp))
-        #expect(activeHints.first(where: { $0.actions.contains(.newStageBelow) })?.shortcut.contains("B") == true)
+        #expect(activeHints.first(where: { $0.actions.contains(.swapStageUp) })?.shortcut.contains("B") == true)
         #expect(activeHints.allSatisfy { $0.placement == .plateFooter })
         #expect(activeHints.allSatisfy { $0.iconSystemName != nil })
     }
@@ -248,7 +248,7 @@ struct CommandHintTests {
     func eventActionMapping() {
         #expect(DebutKeyEvent.cmdTabHold.commandHintAction == .nextWindow)
         #expect(DebutKeyEvent.cmdOptionTabHold.commandHintAction == .nextStage)
-        #expect(DebutKeyEvent.newStageBelow.commandHintAction == .newStageBelow)
+        #expect(DebutKeyEvent.swapStageUp.commandHintAction == .swapStageUp)
         #expect(DebutKeyEvent.jumpToLastStage.commandHintAction == .jumpToStage9)
         #expect(DebutKeyEvent.escape.commandHintAction == .dismissOverlay)
         #expect(DebutKeyEvent.nextWindowRepeat.commandHintAction == nil)

@@ -498,12 +498,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             quickSwitchToStage(index: position - 1, keepingCurrentApplication: false)
         case .switchToStageKeepingCurrentApplication(let position):
             quickSwitchToStage(index: position - 1, keepingCurrentApplication: true)
-        case .newStageBelow:
-            createStage(position: .below)
-        case .newStageAbove:
-            createStage(position: .above)
-        case .deleteStage:
-            deleteSelectedStage()
         case .moveWindowUp:
             moveWindow(direction: .up)
         case .moveWindowDown:
@@ -1052,50 +1046,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
               stageManager.stages.indices.contains(index) else { return }
         selectedStageIndex = index
         selectedWindowIndex = 0
-        notifyOverlayUpdated()
-    }
-
-    private func createStage(position: StageInsertPosition) {
-        guard isStageManagerVisible else { return }
-        let currentID = stageManager.stages.indices.contains(selectedStageIndex)
-            ? stageManager.stages[selectedStageIndex].id : stageManager.activeStageID
-        stageManager.activateStage(id: currentID)
-        stageManager.createStage(position: position)
-        if let newIndex = stageManager.stages.firstIndex(where: { $0.id == stageManager.activeStageID }) {
-            selectedStageIndex = newIndex
-        }
-        selectedWindowIndex = 0
-        delegate?.stageControllerDidMutateState(self)
-        notifyOverlayUpdated()
-    }
-
-    public func insertStage(atEdge edge: StageInsertionEdge) {
-        guard isStageManagerVisible else { return }
-        stageManager.createStage(atEdge: edge)
-        selectedStageIndex = edge == .top ? 0 : stageManager.stages.count - 1
-        selectedWindowIndex = 0
-        delegate?.stageControllerDidMutateState(self)
-        notifyOverlayUpdated()
-    }
-
-    public func deleteStage(atIndex index: Int) {
-        guard isStageManagerVisible,
-              stageManager.stages.indices.contains(index) else { return }
-        stageManager.deleteStage(id: stageManager.stages[index].id)
-        selectedStageIndex = min(selectedStageIndex, stageManager.stages.count - 1)
-        selectedWindowIndex = 0
-        delegate?.stageControllerDidMutateState(self)
-        notifyOverlayUpdated()
-    }
-
-    private func deleteSelectedStage() {
-        guard isStageManagerVisible,
-              stageManager.stages.indices.contains(selectedStageIndex) else { return }
-        let targetID = stageManager.stages[selectedStageIndex].id
-        stageManager.deleteStage(id: targetID)
-        selectedStageIndex = min(selectedStageIndex, stageManager.stages.count - 1)
-        selectedWindowIndex = 0
-        delegate?.stageControllerDidMutateState(self)
         notifyOverlayUpdated()
     }
 
