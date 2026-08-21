@@ -175,6 +175,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// global coordinates. The delegate resolves it to the display it presents the plates on.
     public private(set) var focusedWindowFrame: CGRect?
 
+    /// Whether that window owned a fullscreen Space. The plates are presented either way; this
+    /// is what tells a diagnostic reader which of the two presentations it is looking at.
+    public private(set) var focusedWindowIsFullscreen: Bool = false
+
     private var preOverlayStageID: UUID?
     private var previousStageID: UUID?
     private var backtickCycleWindows: [CGWindowID] = []
@@ -222,6 +226,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             guard let self else { return ["error": "controller deallocated"] }
             return [
                 "overlayVisible": "\(self.isStageManagerVisible)",
+                "focusedWindowFullscreen": "\(self.focusedWindowIsFullscreen)",
                 "stageCount": "\(self.stageManager.stages.count)",
                 "activeStageIndex": "\(self.selectedStageIndex)",
                 "selectedWindowIndex": "\(self.selectedWindowIndex)",
@@ -617,19 +622,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func setupOverlay() {
-        // Don't show overlay when a fullscreen app is active
         let presentation = activeOverlayPresentation
         let focusedWindow = probeFocusedWindow()
         focusedWindowFrame = focusedWindow.frame
+        focusedWindowIsFullscreen = focusedWindow.isFullscreen
         if let presentation {
-            overlayPresentationRecorder.mark(.fullscreenProbeCompleted, for: presentation)
-        }
-        if focusedWindow.isFullscreen {
-            if let presentation {
-                overlayPresentationRecorder.complete(presentation, outcome: .fullscreenRejected)
-                activeOverlayPresentation = nil
-            }
-            return
+            overlayPresentationRecorder.mark(.focusProbeCompleted, for: presentation)
         }
         if let presentation {
             overlayPresentationRecorder.mark(.controllerAccepted, for: presentation)
@@ -738,7 +736,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     ///
     /// The bound has to be applied to each element the probe messages: it is scoped to the
     /// element ref it is set on, not to the app's connection.
-    static let fullscreenProbeTimeout: TimeInterval = 0.05
+    static let focusProbeTimeout: TimeInterval = 0.05
 
     private func probeFocusedWindow() -> FocusedWindowSnapshot {
         if let focusedWindowSnapshotProvider {
@@ -749,13 +747,13 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         else { return .unfocused }
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
-        AXUIElementSetMessagingTimeout(axApp, Float(Self.fullscreenProbeTimeout))
+        AXUIElementSetMessagingTimeout(axApp, Float(Self.focusProbeTimeout))
         var windowsRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &windowsRef) == .success else {
             return .unfocused
         }
         let axWindow = windowsRef as! AXUIElement
-        AXUIElementSetMessagingTimeout(axWindow, Float(Self.fullscreenProbeTimeout))
+        AXUIElementSetMessagingTimeout(axWindow, Float(Self.focusProbeTimeout))
         var fullscreenRef: CFTypeRef?
         let isFullscreen = AXUIElementCopyAttributeValue(axWindow, "AXFullScreen" as CFString, &fullscreenRef) == .success
             && (fullscreenRef as? Bool) == true

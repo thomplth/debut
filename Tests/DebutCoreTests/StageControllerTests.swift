@@ -172,30 +172,58 @@ struct StageControllerTests {
         let trace = try #require(overlay.snapshot().completed.last)
         #expect(trace.traceID == context.traceID)
         #expect(trace.outcome == .releasedBeforePresentation)
-        #expect(trace.phases.contains { $0.phase == .fullscreenProbeCompleted })
+        #expect(trace.phases.contains { $0.phase == .focusProbeCompleted })
         #expect(trace.phases.contains { $0.phase == .presentationScheduled })
         #expect(performance.snapshot().recent.allSatisfy {
             $0.operation != .overlayEndToEndVisible
         })
     }
 
-    @Test("Fullscreen rejection is a terminal trace outcome")
-    func fullscreenRejectionFinalizesPresentationTrace() throws {
+    @Test("A fullscreen frontmost app still gets the overlay")
+    func fullscreenAppStillPresentsOverlay() throws {
         let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
         let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
         let controller = StageController(
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
-            focusedWindowSnapshotProvider: { FocusedWindowSnapshot(frame: nil, isFullscreen: true) },
+            focusedWindowSnapshotProvider: {
+                FocusedWindowSnapshot(
+                    frame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+                    isFullscreen: true
+                )
+            },
             overlayPresentationRecorder: overlay
         )
         let context = overlay.begin(configuredDelayMilliseconds: 80)
 
         controller.handleKeyEvent(.cmdTabHold, overlayPresentation: context)
 
-        let trace = try #require(overlay.snapshot().completed.last)
-        #expect(trace.outcome == .fullscreenRejected)
-        #expect(!controller.isStageManagerVisible)
+        #expect(controller.isStageManagerVisible)
+        #expect(overlay.snapshot().completed.isEmpty)
+        let trace = try #require(overlay.snapshot().active.first)
+        #expect(trace.phases.contains { $0.phase == .controllerAccepted })
+    }
+
+    @Test("The overlay records that its window was fullscreen")
+    @MainActor
+    func fullscreenStateIsObservable() {
+        // E2E can only tell a fullscreen presentation from an ordinary one through the
+        // diagnostic state block, so the probe's answer has to outlive the probe.
+        var snapshot = FocusedWindowSnapshot(frame: nil, isFullscreen: true)
+        let controller = StageController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            overlayPresentationDelay: 0,
+            focusedWindowSnapshotProvider: { snapshot }
+        )
+
+        controller.handleKeyEvent(.cmdTabHold)
+        #expect(controller.focusedWindowIsFullscreen)
+
+        controller.handleKeyEvent(.cmdRelease)
+        snapshot = .unfocused
+        controller.handleKeyEvent(.cmdTabHold)
+        #expect(!controller.focusedWindowIsFullscreen)
     }
 
     @Test("Opening the overlay publishes the focused window's frame for display targeting")
@@ -1376,12 +1404,12 @@ struct StageControllerTests {
         keyboardSvc.simulateEvent(.escape)
     }
 
-    @Test("The fullscreen probe timeout stays bounded")
-    func fullscreenProbeTimeoutIsBounded() {
+    @Test("The focus probe timeout stays bounded")
+    func focusProbeTimeoutIsBounded() {
         // Passing 0 to AXUIElementSetMessagingTimeout means "use the system
         // default", which is seconds long. That would put an unbounded
         // cross-process wait back on the overlay-open path.
-        #expect(StageController.fullscreenProbeTimeout > 0)
-        #expect(StageController.fullscreenProbeTimeout <= 0.1)
+        #expect(StageController.focusProbeTimeout > 0)
+        #expect(StageController.focusProbeTimeout <= 0.1)
     }
 }

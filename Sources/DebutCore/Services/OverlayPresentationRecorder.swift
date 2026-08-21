@@ -11,7 +11,7 @@ public struct OverlayPresentationContext: Codable, Equatable, Sendable {
 public enum OverlayPresentationPhase: String, Codable, CaseIterable, Sendable {
     case activationRecognized = "activation_recognized"
     case mainActorDequeued = "main_actor_dequeued"
-    case fullscreenProbeCompleted = "fullscreen_probe_completed"
+    case focusProbeCompleted = "focus_probe_completed"
     case controllerAccepted = "controller_accepted"
     case presentationScheduled = "presentation_scheduled"
     case presentationDeadlineFired = "presentation_deadline_fired"
@@ -28,7 +28,6 @@ public enum OverlayPresentationPhase: String, Codable, CaseIterable, Sendable {
 public enum OverlayPresentationOutcome: String, Codable, Sendable {
     case presented
     case releasedBeforePresentation = "released_before_presentation"
-    case fullscreenRejected = "fullscreen_rejected"
     case superseded
     case hiddenBeforeReveal = "hidden_before_reveal"
     case appTerminated = "app_terminated"

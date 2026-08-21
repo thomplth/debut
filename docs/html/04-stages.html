@@ -380,10 +380,12 @@ easy to "simplify" back into a regression.
 </div>
 
 <div class="why">
-  <span class="label">The full-screen probe has a per-element timeout</span>
+  <span class="label">The focus probe has a per-element timeout</span>
   <p>
-  Before showing the overlay, the controller asks whether the frontmost app is
-  full-screen. An unresponsive app would hang that question, so the Accessibility
+  Before showing the overlay, the controller asks the frontmost app where its
+  focused window is and whether that window owns a full-screen Space — one
+  round-trip, because this is the hot path. An unresponsive app would hang that
+  question, so the Accessibility
   messaging timeout is bounded at 50&nbsp;ms — and it must be set on
   <strong>both</strong> the application element and the focused-window element,
   because "it is scoped to the element ref it is set on, not to the app's
