@@ -18,8 +18,8 @@ usage() {
 Usage: scripts/tart-e2e.sh <prepare|run|run-all|stop|status>
 
   prepare  Clone and configure the free Tahoe VM (one-time, about 27 GB download)
-  run      Run the stable 32-check loop; skip four unsupported virtualized drags
-  run-all  Attempt every check, including the four diagnostic drag checks
+  run      Run the checks that are stable under virtualization; skip the drag gestures
+  run-all  Attempt every check, including the drag gestures Tart cannot deliver
   stop     Stop the warm guest VM
   status   Show the VM configuration and current IP address
 
