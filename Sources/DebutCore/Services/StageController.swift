@@ -168,8 +168,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
     public private(set) var variedWindowPreviewIDs: Set<CGWindowID> = []
 
-    /// Desktop surfaces — one per display, sitting between active and inactive stage windows
-    public var desktopSurfaces: DesktopSurfaceCoordinator?
+    /// The macOS desktops that back the stages. The stage at index N is desktop N.
+    public var spaceSwitcher: (any SpaceSwitching)?
 
     /// Where the frontmost app's focused window sat when the overlay last opened, in Quartz
     /// global coordinates. The delegate resolves it to the display it presents the plates on.
@@ -245,6 +245,26 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     // MARK: - Stage switching
 
+    /// Makes the stage list match the desktops macOS actually has.
+    ///
+    /// Stages are desktops now, and only the user can create a desktop — `SLSSpaceCreate`
+    /// returns an id no display manages, so a Debut-created Space would be unreachable from
+    /// Mission Control. A stage with no desktop behind it is therefore a switch target that
+    /// silently does nothing, and a desktop with no stage is invisible to the switcher.
+    /// Called on launch and whenever the desktop set may have changed.
+    public func reconcileStagesWithDesktops() {
+        guard let spaceSwitcher else { return }
+        let desktops = spaceSwitcher.desktopCount()
+        guard desktops > 0 else { return }
+
+        while stageManager.stages.count > desktops {
+            stageManager.deleteStage(id: stageManager.stages[stageManager.stages.count - 1].id)
+        }
+        while stageManager.stages.count < desktops {
+            stageManager.createStage(position: .below)
+        }
+    }
+
     /// Position-based label for a stage, e.g. "Stage 2". Used for diagnostics only.
     private func stageLabel(forID id: UUID) -> String {
         guard let index = stageManager.stages.firstIndex(where: { $0.id == id }) else { return "?" }
@@ -271,20 +291,17 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             self.previousStageID = previousID
             stageManager.activateStage(id: targetID)
 
-            // 1. Bring desktop surfaces to front — covers all inactive windows
-            if let desktopSurfaces {
-                MainActor.assumeIsolated { desktopSurfaces.orderToFront() }
-            }
-
-            // 2. Raise all windows in the target stage above the surface (no app activation yet)
+            // The stage's windows already live on the target desktop, so macOS reveals all
+            // of them in one composited transition. The surface architecture instead covered
+            // the screen and AX-raised each window in turn, and that staggered raise is the
+            // flash this migration exists to remove — so there is deliberately no per-window
+            // raise here.
             let raiseID = PerformanceRecorder.shared.begin(
                 .stageRaise,
                 workload: .init(windows: targetStage?.windows.count ?? 0)
             )
-            if let targetStage {
-                for window in targetStage.windows {
-                    _ = windowService.raiseWindow(windowID: window.windowID)
-                }
+            if let index = stageManager.stages.firstIndex(where: { $0.id == targetID }) {
+                spaceSwitcher?.switchToDesktop(index: index)
             }
             _ = PerformanceRecorder.shared.end(raiseID)
 
@@ -657,17 +674,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             overlayPresentationRecorder.updateEnvironment(
                 for: presentation,
                 previewCache: .classify(cached: cachedCount, assigned: assignedWindowIDs.count),
-                wallpaperState: desktopSurfaces.map { surfaces in
-                    MainActor.assumeIsolated { surfaces.overlayWallpaperState }
-                } ?? .unavailable,
+                // Debut no longer draws a wallpaper of its own — the real desktop is the
+                // backdrop now, so there is no captured wallpaper whose state to report.
+                wallpaperState: .unavailable,
                 workload: workload,
                 cachedPreviewCount: cachedCount
             )
-        }
-        if let desktopSurfaces {
-            MainActor.assumeIsolated {
-                desktopSurfaces.refreshWallpaper(overlayPresentation: presentation)
-            }
         }
         scheduleOverlayPresentation()
     }
@@ -972,6 +984,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             toStageID: toStageID,
             at: toWindowIndex
         )
+        relocateToStageDesktop(windowID: windowID,
+                               fromStageIndex: fromStageIndex,
+                               toStageIndex: toStageIndex)
 
         if selectedStageIndex == toStageIndex,
            let movedIndex = stageManager.stages[toStageIndex].windows.firstIndex(where: {
@@ -1108,6 +1123,35 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         notifyOverlayUpdated()
     }
 
+    /// Puts the window on the desktop backing its new stage.
+    ///
+    /// The stage model is the user's intent and has already been updated, so a refused move is
+    /// reported rather than rolled back — the next reconcile reads the window's real desktop
+    /// and corrects the assignment either way.
+    private func relocateToStageDesktop(windowID: CGWindowID,
+                                        fromStageIndex: Int,
+                                        toStageIndex: Int) {
+        guard fromStageIndex != toStageIndex, let spaceSwitcher else { return }
+        guard let bounds = windowService.listWindows()
+            .first(where: { $0.windowID == windowID })?.bounds
+        else {
+            diag.report("window_move_skipped",
+                        details: ["windowID": "\(windowID)", "reason": "no_bounds"])
+            return
+        }
+
+        let grab = CGPoint(x: bounds.midX, y: bounds.minY + 12)
+        spaceSwitcher.moveWindow(windowID: windowID, titleBar: grab, toDesktop: toStageIndex) {
+            [weak self] moved in
+            guard !moved else { return }
+            DispatchQueue.main.async {
+                self?.diag.report("window_move_failed",
+                                  details: ["windowID": "\(windowID)",
+                                            "toDesktop": "\(toStageIndex)"])
+            }
+        }
+    }
+
     private func moveWindow(direction: SwapDirection) {
         guard isStageManagerVisible,
               stageManager.stages.indices.contains(selectedStageIndex) else { return }
@@ -1127,6 +1171,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
         let targetStageID = stageManager.stages[targetStageIndex].id
         stageManager.moveWindow(windowID: window.windowID, fromStageID: stage.id, toStageID: targetStageID)
+        relocateToStageDesktop(windowID: window.windowID,
+                               fromStageIndex: selectedStageIndex,
+                               toStageIndex: targetStageIndex)
 
         // Follow the moved window to the target stage
         selectedStageIndex = targetStageIndex

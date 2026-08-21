@@ -316,7 +316,10 @@ struct StageControllerTests {
         return (controller, windowService, keyboardService)
     }
 
-    @Test("Cross-stage switch raises every target stage window")
+    // Raising every window was the desktop-surface architecture lifting them above the
+    // wallpaper overlay one at a time. Stages are real desktops now, so macOS reveals the
+    // whole stage in one transition and only the requested window is touched.
+    @Test("Cross-stage switch raises the requested window")
     func switchStage() {
         let (controller, windowSvc, _) = makeController()
         let stageAID = controller.stageManager.stages[0].id
@@ -330,7 +333,8 @@ struct StageControllerTests {
 
         controller.switchToStage(id: stageBID, raiseWindowID: 202)
 
-        #expect(Set(windowSvc.raisedWindowIDs).isSuperset(of: Set<CGWindowID>([202, 303])))
+        #expect(windowSvc.raisedWindowIDs.contains(202))
+        #expect(!windowSvc.raisedWindowIDs.contains(303))
     }
 
     @Test("Dispatched commands report hint usage")
