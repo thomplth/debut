@@ -131,7 +131,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             }
             self.runEventTap(startupSignal: startupSignal)
         }
-        thread.name = "com.thomplth.Debut.event-tap"
+        thread.name = "com.thomplth.DebutSpace.event-tap"
         lifecycleLock.withLock {
             eventTapThread = thread
         }

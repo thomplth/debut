@@ -132,7 +132,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         // Activate the stage containing the currently focused window, or fall back to first stage
         let startStageID: UUID
         if let frontApp = NSWorkspace.shared.frontmostApplication,
-           frontApp.bundleIdentifier != "com.thomplth.Debut",
+           frontApp.bundleIdentifier != "com.thomplth.DebutSpace",
            let focusedWID = discovery.focusedWindowID(for: frontApp.processIdentifier),
            let owningStage = stageManager.stageContainingWindow(windowID: focusedWID) {
             startStageID = owningStage

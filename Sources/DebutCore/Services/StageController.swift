@@ -749,7 +749,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             return focusedWindowSnapshotProvider()
         }
         guard let frontApp = NSWorkspace.shared.frontmostApplication,
-              frontApp.bundleIdentifier != "com.thomplth.Debut"
+              frontApp.bundleIdentifier != "com.thomplth.DebutSpace"
         else { return .unfocused }
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)

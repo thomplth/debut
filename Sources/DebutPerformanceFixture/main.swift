@@ -180,7 +180,7 @@ private final class FixtureDelegate: NSObject, NSApplicationDelegate {
     private func installCommands() {
         let center = DistributedNotificationCenter.default()
         for command in ["hide", "reveal", "close", "recreate", "dynamic-title", "hang", "exit"] {
-            center.addObserver(forName: Notification.Name("com.thomplth.Debut.fixture.\(command)"), object: nil, queue: .main) { [weak self] _ in
+            center.addObserver(forName: Notification.Name("com.thomplth.DebutSpace.fixture.\(command)"), object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.handle(command) }
             }
         }

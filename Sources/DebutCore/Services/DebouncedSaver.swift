@@ -3,7 +3,7 @@ import Foundation
 public final class DebouncedSaver: @unchecked Sendable {
     private let store: StateStore
     private let delay: TimeInterval
-    private let queue = DispatchQueue(label: "com.thomplth.Debut.debouncedSave")
+    private let queue = DispatchQueue(label: "com.thomplth.DebutSpace.debouncedSave")
     private var workItem: DispatchWorkItem?
 
     public init(store: StateStore, delay: TimeInterval = 0.5) {
