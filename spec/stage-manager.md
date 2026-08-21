@@ -69,7 +69,12 @@ The held-modifier session and overlay visibility are separate states.
 navigation keypress reopens it. Releasing the modifier commits the current
 selection and ends the session.
 
-The overlay is suppressed entirely while the frontmost app is fullscreen.
+The overlay opens on the display holding the focused window, not on the main
+display. Accessibility reports that window in Quartz coordinates, so displays
+are matched in that space and only the winning display is translated back into
+Cocoa's. A window straddling two displays resolves to the one it overlaps most.
+
+The overlay is also presented inside a fullscreen app's Space.
 
 ### Navigation
 

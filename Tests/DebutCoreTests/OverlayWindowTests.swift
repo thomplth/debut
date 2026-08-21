@@ -5,6 +5,17 @@ import Testing
 @Suite("Overlay window", .serialized)
 @MainActor
 struct OverlayWindowTests {
+    @Test("The overlay is allowed into another app's fullscreen Space")
+    func overlayJoinsFullscreenSpaces() {
+        // Unlike the desktop surface, the plates have to reach the Space the user is actually
+        // looking at, and a fullscreen app owns a Space of its own.
+        let window = OverlayWindow()
+
+        #expect(window.collectionBehavior.contains(.canJoinAllSpaces))
+        #expect(window.collectionBehavior.contains(.fullScreenAuxiliary))
+        #expect(window.level == .statusBar)
+    }
+
     @Test("Updating content synchronizes the screen frame before layout")
     func updateSynchronizesFrame() throws {
         let screen = try #require(NSScreen.main ?? NSScreen.screens.first)
