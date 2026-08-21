@@ -2414,14 +2414,9 @@ struct LiquidGlassModifier: ViewModifier {
     let appearance: AppSettings
 
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            let glass: Glass = appearance.glassStyle == .clear ? .clear : .regular
-            content
-                .glassEffect(glass, in: .rect(cornerRadius: cornerRadius))
-        } else {
-            content
-                .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: cornerRadius))
-        }
+        let glass: Glass = appearance.glassStyle == .clear ? .clear : .regular
+        content
+            .glassEffect(glass, in: .rect(cornerRadius: cornerRadius))
     }
 }
 

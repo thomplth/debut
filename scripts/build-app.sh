@@ -12,13 +12,20 @@ RESOURCES="$CONTENTS/Resources"
 
 echo "Building $APP_NAME in release mode..."
 cd "$PROJECT_DIR"
-TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift build -c release 2>&1
+# Debut is arm64-only. Without --arch, `swift build` targets whatever host it runs on, so an
+# Intel machine or a toolchain running under Rosetta would produce an x86_64 bundle that still
+# looks like a valid release.
+SWIFT_BUILD=(env TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift build -c release --arch arm64)
+"${SWIFT_BUILD[@]}" 2>&1
+
+# --arch puts the product under a triple-specific directory, so ask rather than assume.
+BIN_DIR="$("${SWIFT_BUILD[@]}" --show-bin-path)"
 
 echo "Assembling .app bundle..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS" "$RESOURCES"
 
-cp "$BUILD_DIR/release/Debut" "$MACOS/Debut"
+cp "$BIN_DIR/Debut" "$MACOS/Debut"
 cp "$PROJECT_DIR/Resources/Info.plist" "$CONTENTS/Info.plist"
 cp "$PROJECT_DIR/Resources/PrivacyInfo.xcprivacy" "$RESOURCES/PrivacyInfo.xcprivacy"
 

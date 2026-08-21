@@ -104,11 +104,12 @@ matters on the normal desktop.
 <div class="warn">
 <p>
 <strong><code>CGWindowListCreateImage</code> corrupts silently and per app.</strong>
-Deprecated in macOS 14, it still compiles only because of the declared deployment
-target. It does not fail cleanly and it does not fail uniformly: measured on macOS
+macOS 15 obsoleted the family and the package no longer targets a version that can
+call it, so this is now a rule about capture paths in general rather than about one
+API. It did not fail cleanly and it did not fail uniformly: measured on macOS
 26.5.2 across 21 live windows, 18 captured real content while one app's windows
-came back as a uniform grey image. Because most windows still look right, the
-failure hides.
+came back as a uniform grey image. Because most windows still looked right, the
+failure hid.
 </p>
 <p>
 <strong>Never treat a non-nil capture as proof of content.</strong> Assert that a

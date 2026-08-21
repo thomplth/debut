@@ -111,27 +111,25 @@ things in order:
   <tr><td><code>NSSupportsAutomaticTermination</code></td><td><code>false</code></td><td>macOS must not reclaim the process while idle; the event tap has to stay alive</td></tr>
   <tr><td><code>NSSupportsSuddenTermination</code></td><td><code>false</code></td><td>State must be flushed on terminate (chapter 7), so the process needs to run its shutdown</td></tr>
   <tr><td><code>NSHighResolutionCapable</code></td><td><code>true</code></td><td>Required for correct Retina capture and rendering</td></tr>
-  <tr><td><code>LSMinimumSystemVersion</code></td><td><code>14.0</code></td><td><strong>Inconsistent with the package.</strong> See below</td></tr>
-  <tr><td><code>CFBundleShortVersionString</code></td><td><code>0.1.0</code>, build <code>1</code></td><td>Hand-edited; nothing automates it</td></tr>
+  <tr><td><code>LSMinimumSystemVersion</code></td><td><code>26.0</code></td><td>Matches the package's deployment target. See below</td></tr>
+  <tr><td><code>CFBundleShortVersionString</code></td><td><code>0.0.0-dev</code>, build <code>1</code></td><td>A placeholder. The release stamps the real version in at build time and never commits it (chapter 10)</td></tr>
   <tr><td><code>TelemetryDeckNamespace</code> / <code>AppID</code></td><td>empty</td><td>No telemetry destination in the stock build (chapter 8)</td></tr>
 </table>
 
-<div class="warn">
 <p>
-<strong>The two minimum-version declarations disagree.</strong>
-<code>Package.swift</code> targets <code>.macOS(.v26)</code>; <code>Info.plist</code>
-declares <code>LSMinimumSystemVersion</code> 14.0. The plist is the looser of the
-two and is what Launch Services enforces, so a macOS 14 machine will happily launch
-a binary compiled against the 26 SDK — and then fail at whichever API is missing.
+The minimum version is declared twice — once for the compiler in
+<code>Package.swift</code>, once for Launch Services in <code>Info.plist</code> — and
+they have to agree. They did not for a while: the package targeted
+<code>.macOS(.v26)</code> while the plist still said 14.0. Launch Services enforces
+the plist, so the looser number would have let a macOS 14 machine install and launch
+a binary compiled against the 26 SDK, and the failure would land on the user at
+whichever API turned out to be missing rather than on us at build time.
 </p>
 <p>
-This is not purely cosmetic: AGENTS.md notes that
-<code>CGWindowListCreateImage</code> "only still compiles because the package
-targets macOS 14", which suggests the deployment target moved and the plist did
-not follow. If you intend to support 14, the package target is wrong; if you intend
-26-only, the plist is. Do not silently change either without deciding which.
+<code>Tests/CI/PackagingTests.sh</code> now derives the expected plist value from
+<code>Package.swift</code> and fails when the two drift, so bumping the platform
+cannot silently leave the plist behind.
 </p>
-</div>
 
 <h3>Code signing</h3>
 

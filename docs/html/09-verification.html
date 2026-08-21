@@ -43,7 +43,7 @@ layered, and each layer exists because the one below it cannot see something.
 
 <table>
   <tr><th>Layer</th><th>What it proves</th><th>What it cannot see</th></tr>
-  <tr><td><strong>Unit</strong> — 382 <code>@Test</code> cases in 34 suites</td><td>Model logic, reconciliation decisions, keyboard interpretation, persistence round-trips</td><td>Anything requiring a real window server or another process</td></tr>
+  <tr><td><strong>Unit</strong> — <code>swift test --no-parallel</code></td><td>Model logic, reconciliation decisions, keyboard interpretation, persistence round-trips</td><td>Anything requiring a real window server or another process</td></tr>
   <tr><td><strong>Screenshot</strong> — <code>ScreenshotTests.swift</code></td><td>SwiftUI actually renders, and geometry matches expectations</td><td>Whether the overlay window was ordered in front of anything</td></tr>
   <tr><td><strong>E2E in a VM</strong> — <code>scripts/tart-e2e.sh</code></td><td>A real signed app, real permissions, real event tap, real windows</td><td>Synthetic drag gestures — virtualized macOS does not deliver them</td></tr>
   <tr><td><strong>E2E in the foreground</strong> — <code>scripts/e2e-test.sh</code></td><td>Physical drag delivery</td><td>Nothing, but it takes over the developer's desktop</td></tr>
@@ -244,7 +244,7 @@ E2E binary drives the real app with synthetic input and reads a file. An event t
 does not refresh the state block is, from here, invisible.
 </p>
 
-<h3>The 37 scenarios</h3>
+<h3>The scenarios</h3>
 
 <p>
 They run in ordered groups, each depending on the previous having left the app in a

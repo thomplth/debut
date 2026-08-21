@@ -106,9 +106,7 @@ final class SystemDesktopWallpaperCapture: DesktopWallpaperCapturing {
         // recognise as UI is one of these windows — desktop icons belong to Finder, the menu bar
         // and Dock to Dock — so this drops all of them, Debut's own surface included.
         let filter = SCContentFilter(display: display, excludingWindows: content.windows)
-        if #available(macOS 14.2, *) {
-            filter.includeMenuBar = false
-        }
+        filter.includeMenuBar = false
 
         let configuration = SCStreamConfiguration()
         configuration.width = Int(pixelSize.width)
