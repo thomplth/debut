@@ -121,9 +121,14 @@ lifecycle event does.
 
 ## Fullscreen apps
 
-The overlay is not shown while the frontmost app is fullscreen, and the
-activation shortcut passes through to the system. The desktop surface must not
-join all Spaces, or it would follow into the fullscreen Space and cover the app.
+The overlay is shown inside a fullscreen app's Space, and every shortcut behaves
+as it does on the desktop. The overlay window joins all Spaces at
+`.statusBar` level so the plates reach the Space the user is actually looking
+at.
+
+The desktop surface must not join all Spaces, or it would follow into the
+fullscreen Space and cover the app. Inactive stages are therefore not occluded
+inside a fullscreen Space — the fullscreen app already covers them.
 
 ## Edge cases
 
