@@ -21,7 +21,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     private var windowService: AccessibilityWindowService?
     private var keyboardService: EventTapKeyboardService?
-    private var desktopSurfaces: DesktopSurfaceCoordinator?
+    private var spaceService: SpaceService?
     private var currentSettings: AppSettings = AppSettings()
     private var pendingStageManager: StageManager?
     private var debouncedSaver: DebouncedSaver?
@@ -146,16 +146,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             sizes: AppIconCache.overlayIconSizes
         )
 
-        // Create desktop surfaces — one per display, sitting between active and inactive
-        // stage windows
-        let surfaces = DesktopSurfaceCoordinator(onFileDragEntered: { [weak self] in
-            guard let self else { return }
-            self.desktopSurfaces?.orderOut()
-            NSWorkspace.shared.hideOtherApplications()
-            self.diag.report("real_desktop_presented_for_file_drag")
-        })
-        surfaces.orderToFront()
-        self.desktopSurfaces = surfaces
+        let spaceService = SpaceService()
+        self.spaceService = spaceService
 
         let controller = StageController(
             windowService: windowService,
@@ -166,7 +158,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             previewCacheTTL: currentSettings.previewCacheTTL
         )
         controller.delegate = self
-        controller.desktopSurfaces = surfaces
+        controller.spaceSwitcher = spaceService
         controller.onCommandUsed = { [weak self] action in
             DispatchQueue.main.async {
                 self?.recordCommandUsage(action)
@@ -174,7 +166,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
         controller.onDesktopReveal = { [weak self] in
             DispatchQueue.main.async {
-                self?.desktopSurfaces?.orderOut()
                 NSWorkspace.shared.hideOtherApplications()
                 self?.diag.report("real_desktop_presented")
             }
@@ -190,8 +181,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             currentSettings.quickSwitchSameApplicationModifiers
         keyboardService.heldCycleMinimumInterval = currentSettings.heldCycleMinimumInterval
 
-        // Raise active stage windows above the desktop surface
-        controller.switchToStage(id: stageManager.activeStageID)
+        // Stages are the user's desktops, so the persisted stage list is only a starting
+        // guess — desktops may have been added or removed while Debut was not running.
+        controller.reconcileStagesWithDesktops()
+
+        // Adopt the desktop already showing instead of switching to the persisted stage.
+        // Yanking the user to another desktop on launch would be both surprising and, for a
+        // login-item launch, invisible until they wondered where their windows went.
+        if let current = spaceService.currentDesktopIndex(),
+           controller.stageManager.stages.indices.contains(current) {
+            controller.stageManager.activateStage(id: controller.stageManager.stages[current].id)
+        }
 
         discovery.onWindowsDiscovered = { [weak self] windows in
             DispatchQueue.main.async {
@@ -580,9 +580,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             selectedWindowIndex: stageController.selectedWindowIndex,
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings,
-            wallpaperLuminance: desktopSurfaces?.wallpaperLuminance(
-                forDisplay: display?.displayID
-            )
+            wallpaperLuminance: nil
         )
         reportCommandHintLayout(viewModel: vm)
         let createdHostingView = overlayWindow.update(viewModel: vm)
@@ -686,9 +684,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             selectedWindowIndex: stageController.selectedWindowIndex,
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings,
-            wallpaperLuminance: desktopSurfaces?.wallpaperLuminance(
-                forDisplay: display?.displayID
-            )
+            wallpaperLuminance: nil
         )
         overlayWindow.update(viewModel: vm)
     }
@@ -922,12 +918,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         if let controller = stageController, let discovery = windowDiscovery {
             controller.rebuildWindowCache(using: discovery)
 
-            // Rebuild the z-order as well as the model so windows that were on
-            // an inactive stage become visible immediately after the reset.
-            desktopSurfaces?.orderToFront()
-            for window in controller.stageManager.activeStage.windows {
-                _ = controller.windowService.raiseWindow(windowID: window.windowID)
-            }
+            // No z-order to rebuild — the windows of the active stage are the windows on
+            // the current desktop, and macOS is already showing them.
             if let firstWindow = controller.stageManager.activeStage.windows.first {
                 _ = controller.windowService.activateApp(bundleID: firstWindow.ownerBundleID)
             }
