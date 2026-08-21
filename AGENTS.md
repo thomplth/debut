@@ -19,7 +19,7 @@ For every task:
    - Implement the change.
    - Continue running and fixing the tests until they pass.
 4. After verification, commit the task, merge the task branch into `main`, then remove the worktree and task branch.
-5. From `main`, install the completed local build and replace the existing `/Applications/Debut.app`. The installed app must match the completed source.
+5. From `main`, install the completed local build and replace the existing `/Applications/debut-space.app`. The installed app must match the completed source.
 6. Push the completed `main` branch to `origin`.
 
 ## Build & Test Workflow
@@ -28,11 +28,16 @@ After any code change, run the relevant unit and screenshot tests, then build, i
 ```bash
 TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test --no-parallel
 ./scripts/build-app.sh
-pkill -f "Debut.app" || true
-rm -rf /Applications/Debut.app
-cp -R .build/Debut.app /Applications/Debut.app
-open /Applications/Debut.app
+pkill -f "debut-space.app" || true
+rm -rf /Applications/debut-space.app
+cp -R .build/debut-space.app /Applications/debut-space.app
+open /Applications/debut-space.app
 ```
+
+This build is `com.thomplth.DebutSpace`, separate from `com.thomplth.Debut`. It
+therefore has its own Accessibility grant, its own Application Support directory,
+and its own diagnostic log, and it can run alongside a stock Debut install —
+though not usefully, since both would install a keyboard event tap.
 
 Never leave code changes uninstalled — the installed app must always match the source.
 

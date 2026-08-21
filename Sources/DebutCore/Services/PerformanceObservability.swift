@@ -266,14 +266,14 @@ public final class PerformanceRecorder: @unchecked Sendable {
     private static func defaultResourceReader() -> any ProcessResourceReading {
         // Unit and screenshot suites create many controllers concurrently. They test injected
         // readers separately and must not turn every synthetic operation into a Mach task scan.
-        Bundle.main.bundleIdentifier == "com.thomplth.Debut"
+        Bundle.main.bundleIdentifier == "com.thomplth.DebutSpace"
             ? SystemProcessResourceReader()
             : UnavailableProcessResourceReader()
     }
     private let lock = NSLock()
     private let resourceReader: any ProcessResourceReading
     private let now: @Sendable () -> UInt64
-    private let log = OSLog(subsystem: "com.thomplth.Debut", category: "performance")
+    private let log = OSLog(subsystem: "com.thomplth.DebutSpace", category: "performance")
     private var active: [UUID: Active] = [:]
     private var buffers: [PerformanceOperation: PerformanceSampleBuffer] = [:]
     private var observations: [PerformanceOperation: [PerformanceObservation]] = [:]

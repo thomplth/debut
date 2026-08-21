@@ -22,7 +22,7 @@ public final class AppIconCache: @unchecked Sendable {
     }
 
     private let rasterize: (String, CGFloat) -> NSImage?
-    private let queue = DispatchQueue(label: "com.thomplth.Debut.app-icon-cache", qos: .utility)
+    private let queue = DispatchQueue(label: "com.thomplth.DebutSpace.app-icon-cache", qos: .utility)
     private let lock = NSLock()
     private var icons: [Key: NSImage] = [:]
     private var requested: Set<Key> = []

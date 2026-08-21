@@ -268,7 +268,7 @@ public struct SettingsView: View {
 
     private func runningAppNames(excluding bundleIDs: [String]) -> [RunningApp] {
         NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.bundleIdentifier != "com.thomplth.Debut" }
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.bundleIdentifier != "com.thomplth.DebutSpace" }
             .compactMap { app in
                 guard let bundleID = app.bundleIdentifier,
                       !bundleIDs.contains(bundleID)

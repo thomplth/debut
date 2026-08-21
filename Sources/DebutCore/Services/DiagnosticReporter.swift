@@ -18,7 +18,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         let dir: URL
         if isHostedByDebutApp {
             dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                .appendingPathComponent("Debut")
+                .appendingPathComponent("DebutSpace")
         } else {
             dir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("DebutDiagnostics-\(ProcessInfo.processInfo.processIdentifier)")
@@ -31,7 +31,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     /// `.xctest` bundle nor `XCTestConfigurationFilePath` under swift-testing,
     /// so detecting them by absence is unreliable.
     private static var isHostedByDebutApp: Bool {
-        Bundle.main.bundleIdentifier == "com.thomplth.Debut"
+        Bundle.main.bundleIdentifier == "com.thomplth.DebutSpace"
     }
 
     private let directory: URL
@@ -39,7 +39,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     private let performanceRecorder: PerformanceRecorder
     private let overlayPresentationRecorder: OverlayPresentationRecorder
     private var eventLog: [[String: String]] = []
-    private let queue = DispatchQueue(label: "com.thomplth.Debut.diagnostic")
+    private let queue = DispatchQueue(label: "com.thomplth.DebutSpace.diagnostic")
 
     /// Allocating a formatter per event is measurable on the input path. Only touched on
     /// `queue`, which serializes the access the type itself does not guarantee.

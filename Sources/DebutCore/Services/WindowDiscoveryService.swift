@@ -247,7 +247,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         // Install focus observer on the current frontmost app
         if let front,
-           front.bundleIdentifier != "com.thomplth.Debut" {
+           front.bundleIdentifier != "com.thomplth.DebutSpace" {
             installFocusObserver(for: front.processIdentifier)
         }
     }
@@ -545,7 +545,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             isHidden: app.isHidden
         ))
 
-        guard bundleID != "com.thomplth.Debut",
+        guard bundleID != "com.thomplth.DebutSpace",
               !excludedBundleIDs.contains(bundleID),
               app.activationPolicy == .regular
         else { return }
@@ -558,7 +558,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         onFrontmostAppChanged?(app.bundleID)
 
         let pid = app.pid
-        let shouldTrackActivation = app.bundleID != "com.thomplth.Debut"
+        let shouldTrackActivation = app.bundleID != "com.thomplth.DebutSpace"
             && !excludedBundleIDs.contains(app.bundleID)
         let sampledFocusedWindowID: CGWindowID?
 

@@ -387,7 +387,7 @@ final class LockedApplicationResult: @unchecked Sendable {
 }
 
 func launchDebut(arguments: [String] = []) -> NSRunningApplication? {
-    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.thomplth.Debut") else {
+    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.thomplth.DebutSpace") else {
         return nil
     }
     let semaphore = DispatchSemaphore(value: 0)
@@ -501,7 +501,7 @@ func wait(_ seconds: Double) {
 @discardableResult
 func terminateDebutAndWait(timeout: TimeInterval = 10) -> Bool {
     for application in NSRunningApplication.runningApplications(
-        withBundleIdentifier: "com.thomplth.Debut"
+        withBundleIdentifier: "com.thomplth.DebutSpace"
     ) {
         _ = application.terminate()
     }
@@ -509,7 +509,7 @@ func terminateDebutAndWait(timeout: TimeInterval = 10) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     repeat {
         if NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.thomplth.Debut"
+            withBundleIdentifier: "com.thomplth.DebutSpace"
         ).isEmpty {
             return true
         }
@@ -543,10 +543,10 @@ func clearDiagnosticFile() {
 header("Debut E2E — Screen Interaction Tests")
 
 // Ensure app is running
-let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.Debut")
+let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.DebutSpace")
 if running.isEmpty {
     info("Launching Debut...")
-    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.thomplth.Debut") {
+    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.thomplth.DebutSpace") {
         let sem = DispatchSemaphore(value: 0)
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in sem.signal() }
         sem.wait()
@@ -610,7 +610,7 @@ test("Wallpaper store changes refresh the desktop surface") {
 // --- 1c. System window overviews ---
 header("1c. Mission Control and App Exposé")
 let overviewApplication = NSRunningApplication.runningApplications(
-    withBundleIdentifier: "com.thomplth.Debut"
+    withBundleIdentifier: "com.thomplth.DebutSpace"
 ).first
 let overviewPID = overviewApplication?.processIdentifier ?? 0
 
