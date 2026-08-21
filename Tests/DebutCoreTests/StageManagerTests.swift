@@ -33,6 +33,32 @@ struct StageManagerTests {
         #expect(sm.liveWindowCount == 1)
     }
 
+    @Test("Owner bundle identifiers are deduplicated and include dormant assignments")
+    func allWindowOwnerBundleIDs() {
+        var sm = StageManager()
+        let firstStageID = sm.activeStageID
+        sm.createStage(position: .below)
+        let secondStageID = sm.activeStageID
+        sm.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One"),
+            toStageID: firstStageID
+        )
+        sm.addWindow(
+            StageWindow(windowID: 102, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Two"),
+            toStageID: secondStageID
+        )
+        sm.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Three", ownerPID: 20),
+            toStageID: secondStageID
+        )
+
+        #expect(Set(sm.allWindowOwnerBundleIDs) == ["com.a", "com.b"])
+
+        // A dormant app still gets a plate once it relaunches, so its icon is worth warming.
+        _ = sm.makeWindowsDormant(forOwnerPID: 20)
+        #expect(Set(sm.allWindowOwnerBundleIDs) == ["com.a", "com.b"])
+    }
+
     @Test("Create stage below active")
     func createBelow() {
         var sm = StageManager()
