@@ -11,6 +11,7 @@ let package = Package(
         .executable(name: "DebutPerformanceFixture", targets: ["DebutPerformanceFixture"]),
         .executable(name: "DebutBenchmarks", targets: ["DebutBenchmarks"]),
         .executable(name: "DebutGlassLab", targets: ["DebutGlassLab"]),
+        .executable(name: "DebutDemo", targets: ["DebutDemo"]),
         .library(name: "DebutCore", targets: ["DebutCore"]),
     ],
     targets: [
@@ -48,6 +49,10 @@ let package = Package(
             name: "DebutPerformanceFixture",
             dependencies: ["DebutInputDriver"],
             path: "Sources/DebutPerformanceFixture"
+        ),
+        .executableTarget(
+            name: "DebutDemo",
+            path: "Sources/DebutDemo"
         ),
         .executableTarget(
             name: "DebutBenchmarks",
