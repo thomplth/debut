@@ -223,24 +223,35 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         diag.report(started ? "event_tap_created" : "event_tap_failed")
 
         diag.setMainQueueStateProvider { [weak self] in
-            guard let self else { return ["error": "controller deallocated"] }
-            return [
-                "overlayVisible": "\(self.isStageManagerVisible)",
-                "focusedWindowFullscreen": "\(self.focusedWindowIsFullscreen)",
-                "stageCount": "\(self.stageManager.stages.count)",
-                "activeStageIndex": "\(self.selectedStageIndex)",
-                "selectedWindowIndex": "\(self.selectedWindowIndex)",
-                "eventTapRunning": "\(self.keyboardService.isRunning)",
-                "eventTapStarted": "\(self.keyboardServiceStarted)",
-                "windowsInActiveStage": "\(self.stageManager.activeStage.windows.count)",
-                "maxWindowsInStage": "\(self.stageManager.stages.map(\.windows.count).max() ?? 0)",
-                "windowCountsByStage": self.stageManager.stages
-                    .map { String($0.windows.count) }
-                    .joined(separator: ","),
-                "windowPreviewCount": "\(self.windowPreviews.count)",
-                "variedWindowPreviewCount": "\(self.variedWindowPreviewIDs.count)",
-            ]
+            self?.diagnosticState ?? ["error": "controller deallocated"]
         }
+    }
+
+    /// The state block E2E reads out of `diagnostic.json`.
+    ///
+    /// `activeStageIndex` is the desktop showing and `selectedStageIndex` is the overlay's
+    /// cursor. They are only the same while the overlay drives the switch — a desktop the
+    /// user changes themselves moves one and not the other.
+    public var diagnosticState: [String: String] {
+        let activeStageIndex = stageManager.stages
+            .firstIndex(where: { $0.id == stageManager.activeStageID }) ?? 0
+        return [
+            "overlayVisible": "\(isStageManagerVisible)",
+            "focusedWindowFullscreen": "\(focusedWindowIsFullscreen)",
+            "stageCount": "\(stageManager.stages.count)",
+            "activeStageIndex": "\(activeStageIndex)",
+            "selectedStageIndex": "\(selectedStageIndex)",
+            "selectedWindowIndex": "\(selectedWindowIndex)",
+            "eventTapRunning": "\(keyboardService.isRunning)",
+            "eventTapStarted": "\(keyboardServiceStarted)",
+            "windowsInActiveStage": "\(stageManager.activeStage.windows.count)",
+            "maxWindowsInStage": "\(stageManager.stages.map(\.windows.count).max() ?? 0)",
+            "windowCountsByStage": stageManager.stages
+                .map { String($0.windows.count) }
+                .joined(separator: ","),
+            "windowPreviewCount": "\(windowPreviews.count)",
+            "variedWindowPreviewCount": "\(variedWindowPreviewIDs.count)",
+        ]
     }
 
     // MARK: - Stage switching

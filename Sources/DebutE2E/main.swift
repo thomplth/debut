@@ -870,7 +870,7 @@ for _ in 0..<30 {
 
 let preparedDropState = readState()
 let preparedWindowCounts = stageWindowCounts(in: preparedDropState)
-let destinationStageIndex = Int(preparedDropState["activeStageIndex"] ?? "") ?? -1
+let destinationStageIndex = Int(preparedDropState["selectedStageIndex"] ?? "") ?? -1
 let sourceStageIndex = destinationStageIndex - 1
 info("  Original drop state: stages=\(originalStageCount), windows=\(originalWindowCounts)")
 info("  Prepared drop state: active=\(destinationStageIndex), windows=\(preparedWindowCounts)")
@@ -968,7 +968,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
     wait(0.3)
     let reorderedState = readState()
     let reorderedWindowCounts = stageWindowCounts(in: reorderedState)
-    let reorderedActiveStageIndex = Int(reorderedState["activeStageIndex"] ?? "") ?? -1
+    let reorderedActiveStageIndex = Int(reorderedState["selectedStageIndex"] ?? "") ?? -1
     if reorderedWindowCounts.indices.contains(destinationStageIndex),
        let reverseHotspot = platePoint(
             stageIndex: destinationStageIndex,

@@ -222,6 +222,26 @@ struct StageControllerSpaceTests {
         #expect(controller.stageManager.stages[0].windows.first?.windowID == 7)
     }
 
+    // The state block is the only way E2E observes a running session, and it reported the
+    // overlay's selection cursor under the name `activeStageIndex`. The two used to be the
+    // same thing; a desktop the user switches to themselves moves the active stage without
+    // touching the cursor, so the block claimed stage 1 while the app was on stage 3.
+    @Test("The diagnostic state reports the active stage and the cursor separately")
+    func diagnosticStateSeparatesActiveFromSelected() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
+        controller.selectedStageIndex = 0
+
+        spaces.current = 2
+        controller.syncActiveStageWithCurrentDesktop()
+
+        #expect(controller.diagnosticState["activeStageIndex"] == "2")
+        #expect(controller.diagnosticState["selectedStageIndex"] == "0")
+    }
+
     @Test("Missing desktops are added as stages")
     func growsToDesktops() {
         let spaces = MockSpaceSwitcher(desktops: 4, current: 0)
