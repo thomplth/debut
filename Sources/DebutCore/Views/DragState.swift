@@ -6,19 +6,13 @@ struct WindowDragState: Equatable {
     let sourceStageIndex: Int
     let sourceWindowIndex: Int
     var location: CGPoint
-    var dropTarget: WindowDropTarget?
-}
-
-struct WindowDropTarget: Equatable {
-    let stageIndex: Int
-    let windowIndex: Int
+    var dropWindowIndex: Int?
 }
 
 struct WindowMoveRequest: Equatable {
     let windowID: CGWindowID
-    let fromStageIndex: Int
+    let stageIndex: Int
     let fromWindowIndex: Int
-    let toStageIndex: Int
     let toWindowIndex: Int
 }
 

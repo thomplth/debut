@@ -45,12 +45,9 @@ public enum CommandHintCatalog {
 
         var groups: [(String, [KeyAction], String)] = [
             ("Select stage", [.nextStage, .previousStage], "rectangle.stack"),
-            ("New stage", [.newStageBelow, .newStageAbove], "plus"),
-            ("Delete stage", [.deleteStage], "trash"),
             ("Reorder stage", [.swapStageUp, .swapStageDown], "arrow.up.arrow.down"),
         ]
         if hasSelectedWindow {
-            groups.append(("Move window", [.moveWindowUp, .moveWindowDown], "arrow.up.and.down"))
             groups.append((
                 "Reorder window",
                 [.moveWindowLeft, .moveWindowRight],

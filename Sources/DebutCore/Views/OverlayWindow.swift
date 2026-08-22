@@ -27,15 +27,12 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     public var onStageScrollSelected: ((Int) -> Void)?
     var onStageScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     public var onWindowSelected: ((Int, Int) -> Void)?
-    public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
+    public var onWindowMoved: ((CGWindowID, Int, Int, Int) -> Void)?
     public var onStageReordered: ((Int, Int) -> Void)?
     public var onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?
-    public var onStageInsertRequested: ((StageInsertionEdge) -> Void)?
-    public var onStageDeleteRequested: ((Int) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onDesktopSelected: (() -> Void)?
     var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
-    var onStageButtonRevealed: ((String, CGPoint?) -> Void)?
     var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
 
     /// The display the overlay should cover, in Cocoa screen coordinates. `nil` keeps it on the
@@ -68,13 +65,10 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
             onWindowMoved: onWindowMoved,
             onStageReordered: onStageReordered,
             onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
-            onStageInsertRequested: onStageInsertRequested,
-            onStageDeleteRequested: onStageDeleteRequested,
             onPointerSelectionChanged: onPointerSelectionChanged,
             onDesktopSelected: onDesktopSelected
         )
         view.onOverlayTapRouted = onOverlayTapRouted
-        view.onStageButtonRevealed = onStageButtonRevealed
         view.onOverlayPointerRegionChanged = onOverlayPointerRegionChanged
         view.scrollRelay = scrollRelay
         view.onStageScrollSelected = onStageScrollSelected

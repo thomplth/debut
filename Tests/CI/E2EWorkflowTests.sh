@@ -69,7 +69,8 @@ if [[ -f "$runner" ]]; then
     expect_contains "$runner" 'killall replayd' \
         "CI E2E must reload replayd after changing its capture approval"
     expect_contains "$runner" './scripts/build-app.sh' "CI E2E entry point must build the app"
-    expect_contains "$runner" '/Applications/Debut.app' "CI E2E entry point must install the app"
+    expect_contains "$runner" 'sudo cp -R "\$app_bundle" "\$app_path"' \
+        "CI E2E entry point must install the bundle build-app.sh reported"
     expect_contains "$runner" '\.build/release/DebutE2E' \
         "CI E2E entry point must reuse the release suite built with the app"
 fi

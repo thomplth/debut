@@ -67,7 +67,7 @@ struct StateStoreTests {
         settings.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
         settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(command: true)
         settings.commandHintVisibility = .always
-        _ = settings.recordCommandUsage(.newStageBelow)
+        _ = settings.recordCommandUsage(.swapStageUp)
 
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
@@ -78,7 +78,7 @@ struct StateStoreTests {
         #expect(loaded.quickSwitchModifiers == ShortcutModifiers(control: true, option: true))
         #expect(loaded.quickSwitchSameApplicationModifiers == ShortcutModifiers(command: true))
         #expect(loaded.commandHintVisibility == .always)
-        #expect(loaded.commandUsageCounts[.newStageBelow] == 1)
+        #expect(loaded.commandUsageCounts[.swapStageUp] == 1)
     }
 
     @Test("Older settings use Control and Control-Option quick-switch defaults")
@@ -129,6 +129,20 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.overlayPresentationDelay == 0.075)
+    }
+
+    @Test("Older settings default the desktop switch speed")
+    func legacySettingsDefaultSpaceSwitchVelocity() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "spaceSwitchVelocity")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+
+        #expect(decoded.spaceSwitchVelocity == AppSettings.defaultSpaceSwitchVelocity)
     }
 
     @Test("Older settings default the preview cache to last-active refreshes")
