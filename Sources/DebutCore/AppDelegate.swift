@@ -105,7 +105,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         discovery.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
 
         let spaceService = SpaceService()
-        spaceService.switchVelocity = currentSettings.spaceSwitchVelocity
+        spaceService.switchDuration = currentSettings.spaceSwitchDuration
         self.spaceService = spaceService
         discovery.spaceSwitcher = spaceService
 
@@ -872,7 +872,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.stageController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
                 self.stageController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
                 self.stageController?.previewCacheTTL = newSettings.previewCacheTTL
-                self.spaceService?.switchVelocity = newSettings.spaceSwitchVelocity
+                self.spaceService?.switchDuration = newSettings.spaceSwitchDuration
                 self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
                     newSettings.quickSwitchExcludedBundleIDs
                 )
