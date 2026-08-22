@@ -185,8 +185,12 @@ struct StageControllerSpaceTests {
             == controller.stageManager.stages[2].id)
     }
 
-    @Test("An activated window with no reported desktop joins the showing stage")
-    func activationWithoutDesktopJoinsActiveStage() {
+    // Observed live: a Finder window sits on every desktop, so macOS reports no single one,
+    // and reading that silence as "the desktop showing" dragged its plate onto whichever
+    // stage was last visited. Reassignment is destructive, so it needs a positive answer;
+    // silence is not one, and leaving the assignment lets a later real answer correct it.
+    @Test("An activated window with no reported desktop keeps its stage")
+    func activationWithoutDesktopKeepsAssignment() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 1)
         let (controller, _) = makeController(spaces: spaces)
         controller.stageManager.createStage(position: .below)
@@ -199,6 +203,26 @@ struct StageControllerSpaceTests {
         controller.recordWindowActivation(windowID: 7)
 
         #expect(spaces.switchRequests.isEmpty)
+        #expect(controller.stageManager.stageContainingWindow(windowID: 7)
+            == controller.stageManager.stages[0].id)
+    }
+
+    // A window Debut has never seen has no assignment to protect, so the showing desktop is
+    // the only answer available and is very likely right.
+    @Test("An unassigned window with no reported desktop joins the showing stage")
+    func activationOfUnknownWindowJoinsActiveStage() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 1)
+        let (controller, windowService) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.activateStage(id: controller.stageManager.stages[1].id)
+        windowService.windowList = [
+            WindowInfo(windowID: 7, ownerBundleID: "com.a", ownerName: "A", ownerPID: 42,
+                       title: "W", bounds: .zero, isOnScreen: true)
+        ]
+
+        controller.recordWindowActivation(windowID: 7)
+
         #expect(controller.stageManager.stageContainingWindow(windowID: 7)
             == controller.stageManager.stages[1].id)
     }

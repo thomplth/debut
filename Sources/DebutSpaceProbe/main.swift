@@ -22,6 +22,22 @@ if arguments.first == "goto", let target = arguments.dropFirst().first.flatMap(I
     exit(0)
 }
 
+// `windows` dumps what macOS says about every window's desktop. Run it from two different
+// desktops and diff: an answer that changes with the desktop showing is the window server
+// reporting the view rather than the window, which the whole detection scheme rests on not
+// happening.
+if arguments.first == "windows" {
+    let discovery = AccessibilityWindowService()
+    let windows = discovery.listWindows()
+    let desktops = service.desktopIndexes(forWindows: windows.map(\.windowID))
+    print("showing desktop \(service.currentDesktopIndex().map { $0 + 1 } ?? -1)")
+    for window in windows.sorted(by: { $0.windowID < $1.windowID }) {
+        let desktop = desktops[window.windowID].map { "\($0 + 1)" } ?? "none"
+        print("\(window.windowID)\t\(desktop)\t\(window.ownerName)\t\(window.title)")
+    }
+    exit(0)
+}
+
 // The switch-speed setting is only observable against the live Dock: a unit test can assert
 // which velocity was posted, but not whether the Dock snapped or slid at that velocity.
 if let velocity = arguments.first.flatMap(Double.init) {

@@ -397,11 +397,15 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         // cross-stage activation by switching stages, which now means switching desktops,
         // and that fought the user in a loop: the switch changed the Space, the Space
         // change resynced the active stage, and the next focus event switched back.
-        let activeStageID = stageManager.activeStageID
-        let targetStageID = spaceSwitcher?.desktopIndex(forWindow: windowID)
-            .flatMap { stageManager.stages.indices.contains($0) ? stageManager.stages[$0].id : nil }
-            ?? activeStageID
+        //
+        // Only a positive answer moves a window that already belongs somewhere. A window on
+        // every desktop — Finder's, typically — resolves to no single one, and reading that
+        // silence as "the desktop showing" dragged its plate onto whichever stage was last
+        // visited. Silence leaves the assignment for a later real answer to correct.
         let ownerStageID = stageOwningWindow(windowID: windowID)
+        let desktopStageID = spaceSwitcher?.desktopIndex(forWindow: windowID)
+            .flatMap { stageManager.stages.indices.contains($0) ? stageManager.stages[$0].id : nil }
+        let targetStageID = desktopStageID ?? ownerStageID ?? stageManager.activeStageID
 
         if ownerStageID == targetStageID {
             stageManager.bringWindowToFront(windowID: windowID, inStageID: targetStageID)
