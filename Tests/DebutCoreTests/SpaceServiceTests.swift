@@ -54,20 +54,70 @@ struct SpaceSwitchPlanTests {
 @Suite("SpaceService switch speed")
 struct SpaceServiceSpeedTests {
 
-    @Test("Switch velocity defaults to the shipped setting")
-    func defaultVelocity() {
-        #expect(SpaceService().switchVelocity == AppSettings.defaultSpaceSwitchVelocity)
+    @Test("Switch duration defaults to the shipped setting")
+    func defaultDuration() {
+        #expect(SpaceService().switchDuration == AppSettings.defaultSpaceSwitchDuration)
     }
 
-    // A zero or negative velocity would post a gesture the Dock resolves by rubber-banding
-    // back, so the setting's range is enforced by the service rather than only by the slider.
-    @Test("Switch velocity is clamped to a range that actually moves the Dock")
-    func velocityIsClamped() {
+    // The slider is the only thing that should decide this, but a settings file can be edited
+    // by hand and a negative duration would schedule samples into the past.
+    @Test("Switch duration is clamped to the range the slider offers")
+    func durationIsClamped() {
         let service = SpaceService()
-        service.switchVelocity = 0
-        #expect(service.switchVelocity == AppSettings.minimumSpaceSwitchVelocity)
-        service.switchVelocity = 100_000
-        #expect(service.switchVelocity == AppSettings.maximumSpaceSwitchVelocity)
+        service.switchDuration = -1
+        #expect(service.switchDuration == 0)
+        service.switchDuration = 10
+        #expect(service.switchDuration == AppSettings.maximumSpaceSwitchDuration)
+    }
+}
+
+// The user-facing setting is a duration in milliseconds, and it is only honest because these
+// samples are what the Dock is shown. A Began+Ended pair on its own hands the transition to
+// the Dock, which picks "no transition at all" for any velocity much above 80 — which is the
+// whole range the old speed slider offered, so every value on it looked identical.
+@Suite("DockSwipeAnimation")
+struct DockSwipeAnimationTests {
+
+    @Test("An instant switch has no samples to send")
+    func instantHasNoSamples() {
+        #expect(DockSwipeAnimation.samples(duration: 0).isEmpty)
+        #expect(DockSwipeAnimation.samples(duration: -1).isEmpty)
+    }
+
+    @Test("The last sample lands exactly on the requested duration")
+    func lastSampleIsTheDuration() throws {
+        let samples = DockSwipeAnimation.samples(duration: 0.12)
+        let last = try #require(samples.last)
+        #expect(abs(last.delay - 0.12) < 1e-9)
+    }
+
+    // Progress is what the Dock draws, and it saturates at one desktop per gesture — the
+    // instant path asks for 2 and still lands exactly one hop. So the final sample has to
+    // reach 1 exactly: short of it, the release settles back where the slide started.
+    @Test("Progress rises from above zero to exactly one desktop")
+    func progressSpansOneDesktop() throws {
+        let samples = DockSwipeAnimation.samples(duration: 0.12)
+        let first = try #require(samples.first)
+        let last = try #require(samples.last)
+        #expect(first.progress > 0)
+        #expect(abs(last.progress - 1) < 1e-9)
+        #expect(zip(samples, samples.dropFirst()).allSatisfy { $0.progress < $1.progress })
+        #expect(zip(samples, samples.dropFirst()).allSatisfy { $0.delay < $1.delay })
+    }
+
+    @Test("Sample count follows the duration at the sample rate")
+    func sampleCountFollowsDuration() {
+        let short = DockSwipeAnimation.samples(duration: 0.1)
+        let long = DockSwipeAnimation.samples(duration: 0.2)
+        #expect(long.count == short.count * 2)
+        #expect(short.count == Int((0.1 * DockSwipeAnimation.sampleRate).rounded()))
+    }
+
+    // A duration far below one frame still has to produce a usable gesture rather than a
+    // single sample the Dock reads as a flick.
+    @Test("A duration shorter than one sample still sends two samples")
+    func veryShortDurationStillAnimates() {
+        #expect(DockSwipeAnimation.samples(duration: 0.001).count == 2)
     }
 }
 
