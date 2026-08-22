@@ -254,13 +254,18 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// Called on launch and whenever the desktop set may have changed.
     public func reconcileStagesWithDesktops() {
         guard let spaceSwitcher else { return }
-        let desktops = spaceSwitcher.desktopCount()
-        guard desktops > 0 else { return }
+        Self.reconcileStages(&stageManager, desktopCount: spaceSwitcher.desktopCount())
+    }
 
-        while stageManager.stages.count > desktops {
+    /// Exposed separately because startup has to grow the stage list before windows are
+    /// reconciled, which happens before any controller exists.
+    public static func reconcileStages(_ stageManager: inout StageManager, desktopCount: Int) {
+        guard desktopCount > 0 else { return }
+
+        while stageManager.stages.count > desktopCount {
             stageManager.deleteStage(id: stageManager.stages[stageManager.stages.count - 1].id)
         }
-        while stageManager.stages.count < desktops {
+        while stageManager.stages.count < desktopCount {
             stageManager.createStage(position: .below)
         }
     }
