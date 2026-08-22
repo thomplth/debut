@@ -597,6 +597,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             quickSwitchToStage(index: position - 1, keepingCurrentApplication: false)
         case .switchToStageKeepingCurrentApplication(let position):
             quickSwitchToStage(index: position - 1, keepingCurrentApplication: true)
+        case .moveWindowUp:
+            moveWindow(direction: .up)
+        case .moveWindowDown:
+            moveWindow(direction: .down)
         case .moveWindowLeft:
             moveWindowWithinStage(offset: -1)
         case .moveWindowRight:
@@ -1052,27 +1056,34 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     @discardableResult
-    public func reorderWindowByDrag(
+    public func moveWindowByDrag(
         windowID: CGWindowID,
-        stageIndex: Int,
+        fromStageIndex: Int,
+        toStageIndex: Int,
         toWindowIndex: Int
     ) -> Bool {
-        guard stageManager.stages.indices.contains(stageIndex),
-              stageManager.stages[stageIndex].windows.contains(where: {
+        guard stageManager.stages.indices.contains(fromStageIndex),
+              stageManager.stages.indices.contains(toStageIndex),
+              canRelocate(from: fromStageIndex, to: toStageIndex),
+              stageManager.stages[fromStageIndex].windows.contains(where: {
                   $0.windowID == windowID
               })
         else { return false }
 
-        let stageID = stageManager.stages[stageIndex].id
+        let fromStageID = stageManager.stages[fromStageIndex].id
+        let toStageID = stageManager.stages[toStageIndex].id
         stageManager.moveWindow(
             windowID: windowID,
-            fromStageID: stageID,
-            toStageID: stageID,
+            fromStageID: fromStageID,
+            toStageID: toStageID,
             at: toWindowIndex
         )
+        relocateToStageDesktop(windowID: windowID,
+                               fromStageIndex: fromStageIndex,
+                               toStageIndex: toStageIndex)
 
-        if selectedStageIndex == stageIndex,
-           let movedIndex = stageManager.stages[stageIndex].windows.firstIndex(where: {
+        if selectedStageIndex == toStageIndex,
+           let movedIndex = stageManager.stages[toStageIndex].windows.firstIndex(where: {
                $0.windowID == windowID
            }) {
             selectedWindowIndex = movedIndex
@@ -1159,6 +1170,70 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public func handleLiveWindowsRemoved() {
         let windowCount = stageManager.stages[safe: selectedStageIndex]?.windows.count ?? 0
         selectedWindowIndex = max(0, min(selectedWindowIndex, windowCount - 1))
+        notifyOverlayUpdated()
+    }
+
+    /// Whether the stage model may record a window changing stages.
+    ///
+    /// The transport is a private-API bridge that fails by doing nothing, so a move it cannot
+    /// perform must not update the model either: the plate would sit on one stage while the
+    /// window stayed on another desktop, persisted, with nothing to correct it. A controller
+    /// with no space switcher at all is not backed by desktops, so nothing constrains it.
+    private func canRelocate(from: Int, to: Int) -> Bool {
+        from == to || spaceSwitcher.map(\.canMoveWindows) ?? true
+    }
+
+    /// Puts the window on the desktop backing its new stage.
+    ///
+    /// The stage model is the user's intent and has already been updated, so a refused move is
+    /// reported rather than rolled back — the next reconcile reads the window's real desktop
+    /// and corrects the assignment either way.
+    private func relocateToStageDesktop(windowID: CGWindowID,
+                                        fromStageIndex: Int,
+                                        toStageIndex: Int) {
+        guard fromStageIndex != toStageIndex, let spaceSwitcher else { return }
+
+        spaceSwitcher.moveWindow(windowID: windowID, toDesktop: toStageIndex) {
+            [weak self] moved in
+            guard !moved else { return }
+            DispatchQueue.main.async {
+                self?.diag.report("window_move_failed",
+                                  details: ["windowID": "\(windowID)",
+                                            "toDesktop": "\(toStageIndex)"])
+            }
+        }
+    }
+
+    private func moveWindow(direction: SwapDirection) {
+        guard isStageManagerVisible,
+              stageManager.stages.indices.contains(selectedStageIndex) else { return }
+        let stage = stageManager.stages[selectedStageIndex]
+        guard stage.windows.indices.contains(selectedWindowIndex) else { return }
+        let window = stage.windows[selectedWindowIndex]
+
+        let targetStageIndex: Int
+        switch direction {
+        case .up:
+            guard selectedStageIndex > 0 else { return }
+            targetStageIndex = selectedStageIndex - 1
+        case .down:
+            guard selectedStageIndex < stageManager.stages.count - 1 else { return }
+            targetStageIndex = selectedStageIndex + 1
+        }
+        guard canRelocate(from: selectedStageIndex, to: targetStageIndex) else { return }
+
+        let targetStageID = stageManager.stages[targetStageIndex].id
+        stageManager.moveWindow(windowID: window.windowID, fromStageID: stage.id, toStageID: targetStageID)
+        relocateToStageDesktop(windowID: window.windowID,
+                               fromStageIndex: selectedStageIndex,
+                               toStageIndex: targetStageIndex)
+
+        // Follow the moved window to the target stage
+        selectedStageIndex = targetStageIndex
+        let targetWindows = stageManager.stages[targetStageIndex].windows
+        selectedWindowIndex = targetWindows.firstIndex(where: { $0.windowID == window.windowID }) ?? 0
+
+        delegate?.stageControllerDidMutateState(self)
         notifyOverlayUpdated()
     }
 
