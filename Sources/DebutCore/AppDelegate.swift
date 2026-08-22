@@ -104,6 +104,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         // Apply exclusion list
         discovery.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
 
+        let spaceService = SpaceService()
+        self.spaceService = spaceService
+        discovery.spaceSwitcher = spaceService
+
+        // Windows are placed by the desktop they are on, so the stage list has to cover
+        // every desktop before the first reconcile. Growing it afterwards would leave the
+        // tail desktops' answers out of range, and those windows would land on stage 1.
+        StageController.reconcileStages(&stageManager, desktopCount: spaceService.desktopCount())
+
         // Remove stale window IDs, remap live window IDs from snapshot
         let reconcileID = PerformanceRecorder.shared.begin(
             .windowReconciliation,
@@ -121,8 +130,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             stageManager.removeAllWindows(forBundleID: bundleID)
         }
 
-        // Remove empty stages (unless all are empty)
-        stageManager.removeEmptyStages()
+        // Empty stages are deliberately kept: a desktop with nothing on it is still a
+        // desktop, and pruning it would shift every later stage off the desktop it maps to.
 
         if stageManager.stages.allSatisfy({ $0.windows.isEmpty }) &&
             stageManager.dormantWindowAssignments.isEmpty {
@@ -145,9 +154,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             bundleIDs: stageManager.allWindowOwnerBundleIDs,
             sizes: AppIconCache.overlayIconSizes
         )
-
-        let spaceService = SpaceService()
-        self.spaceService = spaceService
 
         let controller = StageController(
             windowService: windowService,
@@ -199,7 +205,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 let result = self.runtimeWindowReconciler.reconcile(
                     RuntimeWindowSnapshot(
                         liveWindows: windows,
-                        allWindowIDs: nil
+                        allWindowIDs: nil,
+                        desktopIndexes: self.spaceService?.desktopIndexes(
+                            forWindows: windows.map(\.windowID)
+                        ) ?? [:]
                     ),
                     stageManager: &controller.stageManager
                 )

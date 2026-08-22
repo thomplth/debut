@@ -8,17 +8,22 @@ public struct RuntimeWindowSnapshot: Sendable {
     /// Windows currently assigned without an armed destroy notification, so
     /// nothing can ever prove they closed.
     public let unarmedWindowIDs: Set<CGWindowID>
+    /// The desktop macOS reports for each window. Absent means macOS gave no single
+    /// answer — an all-Spaces or fullscreen window — which must not be read as desktop 0.
+    public let desktopIndexes: [CGWindowID: Int]
 
     public init(
         liveWindows: [WindowInfo],
         allWindowIDs: Set<CGWindowID>?,
         focusedWindowID: CGWindowID? = nil,
-        unarmedWindowIDs: Set<CGWindowID> = []
+        unarmedWindowIDs: Set<CGWindowID> = [],
+        desktopIndexes: [CGWindowID: Int] = [:]
     ) {
         self.liveWindows = liveWindows
         self.allWindowIDs = allWindowIDs
         self.focusedWindowID = focusedWindowID
         self.unarmedWindowIDs = unarmedWindowIDs
+        self.desktopIndexes = desktopIndexes
     }
 }
 
@@ -36,6 +41,7 @@ public struct WindowAssignmentEvent: Equatable, Sendable {
         case recoveredBundle = "recovered_bundle"
         case dormantRestored = "dormant_restored"
         case strandedStageRecovered = "stranded_stage_recovered"
+        case desktopChanged = "desktop_changed"
     }
 
     public let kind: Kind
@@ -203,6 +209,40 @@ public struct RuntimeWindowReconciler: Sendable {
             ))
         }
 
+        // Stages are desktops, so macOS owns the membership question. An assignment that
+        // disagrees is stale — the user dragged the window in Mission Control — and the
+        // desktop wins. Unlike CG absence this is a positive statement about where the
+        // window is, so acting on it cannot erase anything.
+        for info in snapshot.liveWindows {
+            guard let currentStageID = stageManager.stageContainingWindow(windowID: info.windowID),
+                  let desktopStageID = desktopStageID(
+                      for: info.windowID,
+                      snapshot: snapshot,
+                      stageManager: stageManager
+                  ),
+                  desktopStageID != currentStageID,
+                  let window = stageManager.stages
+                      .first(where: { $0.id == currentStageID })?
+                      .windows.first(where: { $0.windowID == info.windowID })
+            else { continue }
+
+            let fromStage = stageManager.stages.firstIndex(where: { $0.id == currentStageID })
+            stageManager.removeLiveWindowFromAllStages(windowID: info.windowID)
+            stageManager.addWindow(window, toStageID: desktopStageID)
+            provisionalWindowIDs.remove(info.windowID)
+            consumedLiveWindowIDs.insert(info.windowID)
+            reassignedCount += 1
+            events.append(WindowAssignmentEvent(
+                kind: .reassigned,
+                windowID: info.windowID,
+                bundleID: info.ownerBundleID,
+                windowTitle: info.title,
+                fromStage: fromStage,
+                toStage: stageManager.stages.firstIndex(where: { $0.id == desktopStageID }),
+                reason: .desktopChanged
+            ))
+        }
+
         // AX metadata is still useful for additions, but never for destructive
         // absence checks. Existing assignments are left untouched.
         let targetStageID = newWindowStageID.flatMap { requestedID in
@@ -212,11 +252,17 @@ public struct RuntimeWindowReconciler: Sendable {
         for info in snapshot.liveWindows where
             !consumedLiveWindowIDs.contains(info.windowID) &&
             stageManager.stageContainingWindow(windowID: info.windowID) == nil {
+            let desktopStageID = desktopStageID(
+                for: info.windowID,
+                snapshot: snapshot,
+                stageManager: stageManager
+            )
             let strandedStageID = unambiguousStrandedStageID(
                 forBundleID: info.ownerBundleID,
                 strandedStageIDs: strandedStageIDs,
                 stageManager: stageManager
             )
+            let placementStageID = desktopStageID ?? strandedStageID ?? targetStageID
             stageManager.addWindow(
                 StageWindow(
                     windowID: info.windowID,
@@ -225,11 +271,14 @@ public struct RuntimeWindowReconciler: Sendable {
                     windowTitle: info.title,
                     ownerPID: info.ownerPID
                 ),
-                toStageID: strandedStageID ?? targetStageID
+                toStageID: placementStageID
             )
             // Placement was a guess while the bundle has unresolved assignments,
-            // so leave it reclaimable once the counts settle.
-            if strandedStageIDs[info.ownerBundleID] != nil ||
+            // so leave it reclaimable once the counts settle. A desktop answer is not
+            // a guess, and letting a later bundle-only match reclaim it would drag the
+            // window off the desktop it is demonstrably on.
+            if desktopStageID == nil,
+               strandedStageIDs[info.ownerBundleID] != nil ||
                 stageManager.dormantWindowAssignments.contains(where: {
                     $0.window.ownerBundleID == info.ownerBundleID
                 }) {
@@ -243,8 +292,10 @@ public struct RuntimeWindowReconciler: Sendable {
                 bundleID: info.ownerBundleID,
                 windowTitle: info.title,
                 fromStage: nil,
-                toStage: stageManager.stages.firstIndex(where: { $0.id == (strandedStageID ?? targetStageID) }),
-                reason: strandedStageID == nil ? .new : .strandedStageRecovered
+                toStage: stageManager.stages.firstIndex(where: { $0.id == placementStageID }),
+                reason: desktopStageID == nil && strandedStageID != nil
+                    ? .strandedStageRecovered
+                    : .new
             ))
         }
 
@@ -262,6 +313,19 @@ public struct RuntimeWindowReconciler: Sendable {
             reassignedCount: reassignedCount,
             events: events
         )
+    }
+
+    /// The stage matching the desktop macOS reports for a window. Nil when macOS gave no
+    /// single desktop, or when the stage list has not yet grown to include it.
+    private func desktopStageID(
+        for windowID: CGWindowID,
+        snapshot: RuntimeWindowSnapshot,
+        stageManager: StageManager
+    ) -> UUID? {
+        guard let index = snapshot.desktopIndexes[windowID],
+              stageManager.stages.indices.contains(index)
+        else { return nil }
+        return stageManager.stages[index].id
     }
 
     /// The stage a replacement window should join. Only answerable when every

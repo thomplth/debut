@@ -23,6 +23,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onAppActivated: ((RuntimeWindowSnapshot) -> Void)?
     public var onAppTerminated: ((pid_t) -> Void)?
     public var excludedBundleIDs: Set<String> = []
+    /// Stages are desktops, so every snapshot carries the desktop macOS reports for each
+    /// window. Without it the reconciler falls back to guessing from the active stage.
+    public var spaceSwitcher: (any SpaceSwitching)?
 
     private let focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)?
     private let frontmostPIDProvider: @Sendable () -> pid_t?
@@ -125,10 +128,15 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     public func populateDefaultStage(_ stageManager: inout StageManager) {
         let windows = discoverRunningWindows()
-        let stageID = stageManager.stages[0].id
+        let desktopIndexes = spaceSwitcher?
+            .desktopIndexes(forWindows: windows.map(\.windowID)) ?? [:]
 
         for window in windows {
-            stageManager.addWindow(window, toStageID: stageID)
+            // This path never reaches the reconciler, so the desktop rule is applied here
+            // too — otherwise a first run collapses every desktop onto stage 1.
+            let desktopStageID = desktopIndexes[window.windowID]
+                .flatMap { stageManager.stages.indices.contains($0) ? stageManager.stages[$0].id : nil }
+            stageManager.addWindow(window, toStageID: desktopStageID ?? stageManager.stages[0].id)
             trackAndRegister(windowID: window.windowID, pid: window.ownerPID ?? 0)
         }
 
@@ -207,7 +215,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let result = reconciler.reconcile(
             RuntimeWindowSnapshot(
                 liveWindows: liveWindows,
-                allWindowIDs: windowService.listAllWindowIDs()
+                allWindowIDs: windowService.listAllWindowIDs(),
+                desktopIndexes: desktopIndexes(for: liveWindows)
             ),
             stageManager: &stageManager,
             newWindowStageID: firstStageID
@@ -510,6 +519,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
     }
 
+    private func desktopIndexes(for windows: [WindowInfo]) -> [CGWindowID: Int] {
+        spaceSwitcher?.desktopIndexes(forWindows: windows.map(\.windowID)) ?? [:]
+    }
+
     private func discoverLaunchedWindows(for app: AppInfo) {
         let pid = app.pid
         let windows = windowService.listWindows().filter { $0.ownerPID == pid }
@@ -599,7 +612,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             liveWindows: liveWindows,
             allWindowIDs: windowService.listAllWindowIDs(),
             focusedWindowID: focusedWindowID,
-            unarmedWindowIDs: unarmedWindowIDs
+            unarmedWindowIDs: unarmedWindowIDs,
+            desktopIndexes: desktopIndexes(for: liveWindows)
         ))
         if let focusedWindowID {
             onWindowActivated?(focusedWindowID)

@@ -183,7 +183,20 @@ public protocol SpaceSwitching: AnyObject {
     func desktopCount() -> Int
     func currentDesktopIndex() -> Int?
     func desktopIndex(forWindow windowID: CGWindowID) -> Int?
+    /// Declared here, not only in the extension, so a conformer's faster batch
+    /// implementation is reached through an `any SpaceSwitching` too.
+    func desktopIndexes(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: Int]
     @discardableResult func switchToDesktop(index: Int) -> Bool
+}
+
+public extension SpaceSwitching {
+    /// Desktop indexes for many windows at once. Windows with no single desktop are
+    /// absent from the result; callers read absence as "macOS did not answer".
+    func desktopIndexes(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: Int] {
+        windowIDs.reduce(into: [:]) { result, windowID in
+            result[windowID] = desktopIndex(forWindow: windowID)
+        }
+    }
 }
 
 /// Reads and changes which macOS Space is showing, and which Space a window lives on.
@@ -254,6 +267,17 @@ public final class SpaceService: SpaceSwitching {
     /// Which stage a window belongs to, or `nil` when it does not belong to exactly one.
     public func desktopIndex(forWindow windowID: CGWindowID) -> Int? {
         Self.soleIndex(of: spaces(forWindow: windowID), in: userDesktops())
+    }
+
+    /// `SLSCopySpacesForWindows` returns a flat space list with no per-window attribution,
+    /// so windows are still resolved one at a time. What this avoids is the copy of the
+    /// whole display topology that `userDesktops()` makes on every single lookup.
+    public func desktopIndexes(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: Int] {
+        let desktops = userDesktops()
+        guard !desktops.isEmpty else { return [:] }
+        return windowIDs.reduce(into: [:]) { result, windowID in
+            result[windowID] = Self.soleIndex(of: spaces(forWindow: windowID), in: desktops)
+        }
     }
 
     static func index(of space: CGSSpaceID, in desktops: [CGSSpaceID]) -> Int? {

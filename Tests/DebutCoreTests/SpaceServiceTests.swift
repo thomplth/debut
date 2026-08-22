@@ -108,4 +108,17 @@ struct SpaceServiceMappingTests {
         #expect(SpaceService.soleIndex(of: [4916], in: desktops) == 1)
         #expect(SpaceService.soleIndex(of: [], in: desktops) == nil)
     }
+
+    // The reconciler asks about every live window at once. A window with no single
+    // desktop must be absent from the result rather than present with a wrong index,
+    // because the reconciler reads absence as "leave this assignment alone".
+    @Test("Batch lookup omits windows with no single desktop")
+    func batchOmitsUnresolvedWindows() {
+        let switcher = MockSpaceSwitcher(desktops: 3, current: 0)
+        switcher.windowDesktops = [11: 0, 22: 2]
+
+        let indexes = switcher.desktopIndexes(forWindows: [11, 22, 33])
+
+        #expect(indexes == [11: 0, 22: 2])
+    }
 }
