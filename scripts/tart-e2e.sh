@@ -54,8 +54,18 @@ prepare_vm() {
 stage_build() {
     local ARTIFACT_ID
     local old_artifacts=()
+    local build_log app_bundle
     echo "Building Debut and the E2E executable on the host..."
-    "$PROJECT_DIR/scripts/build-app.sh"
+    # The bundle name belongs to build-app.sh; naming it again here is how a rename last
+    # slipped through, staging a path that no longer existed.
+    build_log="$(mktemp)"
+    "$PROJECT_DIR/scripts/build-app.sh" | tee "$build_log"
+    app_bundle="$(awk '/^Built: /{ sub(/^Built: /, ""); print }' "$build_log")"
+    rm -f "$build_log"
+    if [[ -z "$app_bundle" || ! -d "$app_bundle" ]]; then
+        echo "build-app.sh did not report a built app bundle." >&2
+        exit 1
+    fi
 
     mkdir -p "$SHARE_DIR"
     rm -rf "$SHARE_DIR/results"
@@ -73,7 +83,7 @@ stage_build() {
     APP_ARTIFACT="Debut-$ARTIFACT_ID.app.zip"
     E2E_ARTIFACT="DebutE2E-$ARTIFACT_ID"
     GUEST_ARTIFACT="tart-e2e-guest-$ARTIFACT_ID.sh"
-    /usr/bin/ditto -c -k --keepParent "$PROJECT_DIR/.build/Debut.app" "$SHARE_DIR/$APP_ARTIFACT"
+    /usr/bin/ditto -c -k --keepParent "$app_bundle" "$SHARE_DIR/$APP_ARTIFACT"
     /usr/bin/install -m 755 "$PROJECT_DIR/.build/release/DebutE2E" "$SHARE_DIR/$E2E_ARTIFACT"
     /usr/bin/install -m 755 "$PROJECT_DIR/scripts/tart-e2e-guest.sh" "$SHARE_DIR/$GUEST_ARTIFACT"
 }

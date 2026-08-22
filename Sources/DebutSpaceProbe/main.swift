@@ -29,8 +29,13 @@ if arguments.first == "goto", let target = arguments.dropFirst().first.flatMap(I
 if arguments.first == "windows" {
     let discovery = AccessibilityWindowService()
     let windows = discovery.listWindows()
+    // Timed because whether this read can sit on the overlay's activation path is a latency
+    // question, and KHA-481 was an XPC call that looked free until it was measured.
+    let started = Date()
     let desktops = service.desktopIndexes(forWindows: windows.map(\.windowID))
+    let elapsed = Date().timeIntervalSince(started) * 1000
     print("showing desktop \(service.currentDesktopIndex().map { $0 + 1 } ?? -1)")
+    print(String(format: "desktop read: %d windows in %.1fms", windows.count, elapsed))
     for window in windows.sorted(by: { $0.windowID < $1.windowID }) {
         let desktop = desktops[window.windowID].map { "\($0 + 1)" } ?? "none"
         print("\(window.windowID)\t\(desktop)\t\(window.ownerName)\t\(window.title)")

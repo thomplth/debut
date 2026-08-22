@@ -53,6 +53,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "DebutDemo",
+            dependencies: ["DebutCore"],
             path: "Sources/DebutDemo"
         ),
         .executableTarget(

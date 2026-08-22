@@ -10,9 +10,7 @@ public final class StateStore: Sendable {
     }
 
     public convenience init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("DebutSpace")
-        self.init(directory: dir)
+        self.init(directory: DebutCore.applicationSupportDirectory)
     }
 
     private func ensureDirectory() throws {

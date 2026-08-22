@@ -72,11 +72,8 @@ func test(_ name: String, _ body: () -> Bool) {
 
 // MARK: - Diagnostic file
 
-let diagnosticFile: URL = {
-    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        .appendingPathComponent("Debut")
-    return dir.appendingPathComponent("diagnostic.json")
-}()
+let diagnosticFile: URL = DebutCore.applicationSupportDirectory
+    .appendingPathComponent("diagnostic.json")
 
 let settingsFile: URL = diagnosticFile
     .deletingLastPathComponent()

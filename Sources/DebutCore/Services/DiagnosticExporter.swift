@@ -116,11 +116,7 @@ public final class DiagnosticExporter {
     private let now: @Sendable () -> Date
 
     public convenience init() {
-        let support = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!.appendingPathComponent("Debut")
-        self.init(applicationSupportDirectory: support)
+        self.init(applicationSupportDirectory: DebutCore.applicationSupportDirectory)
     }
 
     init(

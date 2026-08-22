@@ -6,7 +6,6 @@ APP_ARCHIVE="$SHARE_DIR/${1:?missing app archive name}"
 E2E_SOURCE="$SHARE_DIR/${2:?missing E2E executable name}"
 E2E_MODE="${3:?missing E2E mode}"
 RESULTS_DIR="$SHARE_DIR/results"
-APP_PATH="/Applications/Debut.app"
 SYSTEM_TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
 FIXTURE_DIR="/tmp/debut-e2e-fixtures"
 
@@ -19,12 +18,21 @@ case "$E2E_MODE" in
         ;;
 esac
 
-# This script replaces /Applications/Debut.app and rewrites TCC, so refuse to
-# run anywhere the host has not staged artifacts through VirtioFS.
+# This script replaces the installed app and rewrites TCC, so refuse to run
+# anywhere the host has not staged artifacts through VirtioFS.
 if [[ ! -f "$APP_ARCHIVE" || ! -x "$E2E_SOURCE" ]]; then
     echo "The staged E2E artifacts are missing; run scripts/tart-e2e.sh from the host." >&2
     exit 1
 fi
+
+# The archive carries its own name, so a rename on the host cannot leave the guest installing,
+# permitting and launching three different apps.
+app_name="$(/usr/bin/unzip -Z1 "$APP_ARCHIVE" | awk -F/ '$1 ~ /\.app$/ { print $1; exit }')"
+if [[ -z "$app_name" ]]; then
+    echo "The staged archive does not contain an app bundle." >&2
+    exit 1
+fi
+APP_PATH="/Applications/$app_name"
 
 console_user="$(stat -f %Su /dev/console)"
 if [[ -z "$console_user" || "$console_user" == "root" || "$console_user" == "loginwindow" ]]; then
@@ -40,7 +48,7 @@ as_console() {
 }
 
 cleanup() {
-    as_console pkill -f "Debut.app" 2>/dev/null || true
+    as_console pkill -f "$APP_PATH" 2>/dev/null || true
     as_console pkill -x TextEdit 2>/dev/null || true
     as_console launchctl unsetenv DEBUT_DISABLE_WINDOW_PREVIEWS 2>/dev/null || true
 }
@@ -148,16 +156,21 @@ echo "Installing the host build in the isolated guest..."
 sudo rm -rf "$APP_PATH"
 sudo ditto -x -k "$APP_ARCHIVE" /Applications
 
+bundle_id="$(/usr/bin/defaults read "$APP_PATH/Contents/Info" CFBundleIdentifier)"
+# Debut keeps its state under the last component of its bundle ID; Tests/CI/AppIdentityTests.sh
+# holds the two together so this stays a derivation rather than a guess.
+support_dir="$console_home/Library/Application Support/${bundle_id##*.}"
+
 echo "Granting Screen Recording and Accessibility to Debut and the E2E input driver..."
-grant_accessibility "com.thomplth.Debut" 0 "$APP_PATH"
-grant_screen_capture "com.thomplth.Debut" "$APP_PATH"
+grant_accessibility "$bundle_id" 0 "$APP_PATH"
+grant_screen_capture "$bundle_id" "$APP_PATH"
 grant_accessibility "$E2E_SOURCE" 1 "$E2E_SOURCE"
 grant_post_event "$E2E_SOURCE" "$E2E_SOURCE"
 sudo killall tccd 2>/dev/null || true
 
 echo "Preparing deterministic fixture windows..."
-as_console rm -rf "$console_home/Library/Application Support/Debut"
-as_console env HOME="$console_home" defaults write com.thomplth.Debut hasCompletedOnboarding -bool true
+as_console rm -rf "$support_dir"
+as_console env HOME="$console_home" defaults write "$bundle_id" hasCompletedOnboarding -bool true
 rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 printf 'Debut E2E fixture one\n' > "$FIXTURE_DIR/one.txt"
