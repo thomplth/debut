@@ -381,38 +381,55 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             commitBacktickCycle()
         }
 
+        // A window cannot take focus on a desktop that is not showing, so the desktop is
+        // already right here and only the assignment can be wrong. Debut used to answer a
+        // cross-stage activation by switching stages, which now means switching desktops,
+        // and that fought the user in a loop: the switch changed the Space, the Space
+        // change resynced the active stage, and the next focus event switched back.
         let activeStageID = stageManager.activeStageID
+        let targetStageID = spaceSwitcher?.desktopIndex(forWindow: windowID)
+            .flatMap { stageManager.stages.indices.contains($0) ? stageManager.stages[$0].id : nil }
+            ?? activeStageID
         let ownerStageID = stageOwningWindow(windowID: windowID)
 
-        if ownerStageID == activeStageID {
-            // Window is in the active stage — update MRU
-            stageManager.bringWindowToFront(windowID: windowID, inStageID: activeStageID)
+        if ownerStageID == targetStageID {
+            stageManager.bringWindowToFront(windowID: windowID, inStageID: targetStageID)
             delegate?.stageControllerDidMutateState(self)
-        } else if let ownerStageID {
-            // Window belongs to another stage — switch to that stage
-            diag.report("switching_to_window_stage", details: [
+            return
+        }
+
+        if let ownerStageID,
+           let window = stageManager.stages.first(where: { $0.id == ownerStageID })?
+               .windows.first(where: { $0.windowID == windowID }) {
+            diag.report("window_reassigned", details: [
                 "windowID": "\(windowID)",
-                "targetStage": stageLabel(forID: ownerStageID),
+                "bundleID": window.ownerBundleID,
+                "windowTitle": window.windowTitle,
+                "fromStage": stageLabel(forID: ownerStageID),
+                "toStage": stageLabel(forID: targetStageID),
+                "reason": "activated_on_other_desktop",
             ])
-            switchToStage(id: ownerStageID, raiseWindowID: windowID)
-        } else {
-            // Window not in any stage — new window, add to active stage.
-            // This handles "code ." creating a new VSCode window while
-            // other VSCode windows are in a different stage.
-            let windows = windowService.listWindows()
-            if let info = windows.first(where: { $0.windowID == windowID }) {
-                let window = StageWindow(
+            stageManager.removeLiveWindowFromAllStages(windowID: windowID)
+            stageManager.addWindow(window, toStageID: targetStageID)
+        } else if let info = windowService.listWindows().first(where: { $0.windowID == windowID }) {
+            // Genuinely new — "code ." opening a window while the app's other windows sit
+            // on another desktop.
+            stageManager.addWindow(
+                StageWindow(
                     windowID: info.windowID,
                     ownerBundleID: info.ownerBundleID,
                     ownerName: info.ownerName,
                     windowTitle: info.title,
                     ownerPID: info.ownerPID
-                )
-                stageManager.addWindow(window, toStageID: activeStageID)
-                stageManager.bringWindowToFront(windowID: windowID, inStageID: activeStageID)
-                delegate?.stageControllerDidMutateState(self)
-            }
+                ),
+                toStageID: targetStageID
+            )
+        } else {
+            return
         }
+
+        stageManager.bringWindowToFront(windowID: windowID, inStageID: targetStageID)
+        delegate?.stageControllerDidMutateState(self)
     }
 
     public func updateFrontmostApp(isExcluded: Bool) {

@@ -1130,8 +1130,11 @@ struct StageControllerTests {
         #expect(windowIDs == [101, 303, 202])
     }
 
-    @Test("Cross-stage window activation switches to owning stage")
-    func crossStageSwitches() {
+    // Stages are desktops, so a window that takes focus is on the desktop already showing —
+    // whatever Debut recorded earlier. The window moves to the showing stage rather than the
+    // user being moved to the window, and it must not end up in both.
+    @Test("Cross-stage window activation moves the window, not the user")
+    func crossStageActivationMovesTheWindow() {
         let (controller, _, _) = makeController()
         let stageAID = controller.stageManager.stages[0].id
         controller.stageManager.createStage(position: .below)
@@ -1140,17 +1143,14 @@ struct StageControllerTests {
         controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageAID)
         controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageBID)
 
-        // Switch to stage B
         controller.switchToStage(id: stageBID)
         #expect(controller.stageManager.activeStageID == stageBID)
 
-        // Activate window from stage A while in stage B — should switch back to A
         controller.recordWindowActivation(windowID: 101)
-        #expect(controller.stageManager.activeStageID == stageAID)
 
-        // Window stays only in stage A (no duplication)
-        #expect(controller.stageManager.stages[0].windows.contains(where: { $0.windowID == 101 }))
-        #expect(!controller.stageManager.stages[1].windows.contains(where: { $0.windowID == 101 }))
+        #expect(controller.stageManager.activeStageID == stageBID)
+        #expect(!controller.stageManager.stages[0].windows.contains(where: { $0.windowID == 101 }))
+        #expect(controller.stageManager.stages[1].windows.contains(where: { $0.windowID == 101 }))
     }
 
     @Test("Window cache reset can report diagnostics while rebuilding controller state")
