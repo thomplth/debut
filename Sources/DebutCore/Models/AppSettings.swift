@@ -69,6 +69,18 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Paces held cycling independently of the user's key-repeat rate.
     public static let defaultHeldCycleMinimumInterval: TimeInterval = 0.06
 
+    /// How hard the forged trackpad swipe throws the desktop. High enough and the Dock
+    /// snaps straight to the target instead of animating toward it, which is the whole
+    /// reason stages switch by gesture rather than by the stock shortcut. Lower values
+    /// trade that instant snap for macOS's own slide, which some people prefer to follow.
+    public static let defaultSpaceSwitchVelocity: Double = 400
+    /// Not a round number: 50 was measured dropping roughly half its hops against the live
+    /// Dock, which rubber-banded back to the desktop it started on. 100 landed every hop
+    /// across repeated runs, so the floor is set where the gesture is still reliable rather
+    /// than where it is still slow.
+    public static let minimumSpaceSwitchVelocity: Double = 100
+    public static let maximumSpaceSwitchVelocity: Double = 1000
+
     public var launchAtLogin: Bool
     public var excludedBundleIDs: [String]
     public var shareAnonymousTelemetry: Bool
@@ -85,6 +97,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var quickSwitchExcludedBundleIDs: [String]
     public var quickSwitchModifiers: ShortcutModifiers
     public var quickSwitchSameApplicationModifiers: ShortcutModifiers
+
+    // Stage switching
+    public var spaceSwitchVelocity: Double
 
     // Window previews
     public var previewRefreshPolicy: PreviewRefreshPolicy
@@ -112,6 +127,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
             control: true,
             option: true
         )
+        self.spaceSwitchVelocity = Self.defaultSpaceSwitchVelocity
         self.previewRefreshPolicy = .lastActiveOnly
         self.previewCacheTTL = Self.defaultPreviewCacheTTL
         self.commandHintVisibility = .automatic
@@ -137,6 +153,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
             TimeInterval.self,
             forKey: .heldCycleMinimumInterval
         ) ?? Self.defaultHeldCycleMinimumInterval
+        spaceSwitchVelocity = try container.decodeIfPresent(
+            Double.self,
+            forKey: .spaceSwitchVelocity
+        ) ?? Self.defaultSpaceSwitchVelocity
         keyBindings = try container.decodeIfPresent(KeyBindings.self, forKey: .keyBindings) ?? KeyBindings()
         quickSwitchExcludedBundleIDs = try container.decodeIfPresent(
             [String].self,
