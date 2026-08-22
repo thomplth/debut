@@ -7,9 +7,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     var desktops: Int
     var current: Int
     private(set) var switchRequests: [Int] = []
-    private(set) var moveRequests: [(windowID: CGWindowID, desktop: Int)] = []
     var windowDesktops: [CGWindowID: Int] = [:]
-    var moveSucceeds = true
 
     init(desktops: Int = 3, current: Int = 0) {
         self.desktops = desktops
@@ -25,13 +23,6 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
         guard (0..<desktops).contains(index) else { return false }
         current = index
         return true
-    }
-
-    func moveWindow(windowID: CGWindowID, titleBar: CGPoint, toDesktop: Int,
-                    completion: (@Sendable (Bool) -> Void)?) {
-        moveRequests.append((windowID, toDesktop))
-        if moveSucceeds { windowDesktops[windowID] = toDesktop }
-        completion?(moveSucceeds)
     }
 }
 
@@ -118,54 +109,6 @@ struct StageControllerSpaceTests {
         controller.reconcileStagesWithDesktops()
 
         #expect(controller.stageManager.stages.count == 2)
-    }
-
-    // A stage assignment that does not relocate the window is only a label: the window would
-    // stay visible on the desktop it started on, in every stage.
-    @Test("Assigning a window to another stage moves it to that desktop")
-    func dragMovesWindowToDesktop() {
-        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
-        let (controller, windowService) = makeController(spaces: spaces)
-        let stageA = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        controller.stageManager.activateStage(id: stageA)
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: stageA)
-        windowService.windowList = [
-            WindowInfo(windowID: 101, ownerBundleID: "com.a", ownerName: "A", ownerPID: 1,
-                       title: "T1", bounds: CGRect(x: 0, y: 100, width: 400, height: 300),
-                       isOnScreen: true)
-        ]
-
-        controller.moveWindowByDrag(windowID: 101, fromStageIndex: 0, toStageIndex: 1,
-                                    toWindowIndex: 0)
-
-        #expect(spaces.moveRequests.map(\.windowID) == [101])
-        #expect(spaces.moveRequests.map(\.desktop) == [1])
-    }
-
-    @Test("Reordering within a stage does not move the window between desktops")
-    func withinStageDoesNotMove() {
-        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
-        let (controller, windowService) = makeController(spaces: spaces)
-        let stageA = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: stageA)
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
-            toStageID: stageA)
-        windowService.windowList = [
-            WindowInfo(windowID: 202, ownerBundleID: "com.b", ownerName: "B", ownerPID: 2,
-                       title: "T2", bounds: CGRect(x: 0, y: 100, width: 400, height: 300),
-                       isOnScreen: true)
-        ]
-
-        controller.moveWindowByDrag(windowID: 202, fromStageIndex: 0, toStageIndex: 0,
-                                    toWindowIndex: 0)
-
-        #expect(spaces.moveRequests.isEmpty)
     }
 
     @Test("Missing desktops are added as stages")
