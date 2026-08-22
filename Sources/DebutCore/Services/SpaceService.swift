@@ -43,8 +43,19 @@ nonisolated(unsafe) private let slsCopySpacesForWindows: (@convention(c) (CGSCon
 /// Selector for `SLSCopySpacesForWindows` meaning "all spaces the window belongs to".
 private let kSpaceSelectorAll: Int32 = 7
 
-// Private CGEvent fields carrying DockSwipe gesture parameters. Values transcribed from
-// Space Rabbit, which is the working reference for this technique.
+// Private CGEvent fields carrying DockSwipe gesture parameters.
+//
+// Switching a Space by forging a synthetic DockSwipe is not Debut's discovery. With thanks to:
+//
+//   - InstantSpaceSwitcher — https://github.com/jurplel/InstantSpaceSwitcher
+//     The original technique, and the source of the velocity presets that showed where the
+//     Dock stops animating and starts cutting.
+//   - Space Rabbit — https://github.com/Tahul/space-rabbit
+//     The working reference these field numbers are transcribed from, and the source of the
+//     driven-progress pattern `DockSwipeAnimation` below is modelled on: post Began, then
+//     feed the Dock timed Changed samples, then End. Space Rabbit drives progress that way
+//     on the Mission Control axis; Debut applies it to the horizontal one so its switch
+//     setting can be a duration rather than an opaque speed.
 let kCGSEventTypeField = CGEventField(rawValue: 55)!
 let kCGEventGestureHIDType = CGEventField(rawValue: 110)!
 let kCGEventGestureScrollY = CGEventField(rawValue: 119)!
