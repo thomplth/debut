@@ -1,9 +1,5 @@
-// KHA-482 probe 9 — does the *shipped* move path work, at the timings it actually uses?
-//
-// Probe 6 proved the technique with generous 1.4s settles. SpaceService trimmed those to keep a
-// stage assignment from feeling frozen, and a drag that releases before the desktop transition
-// finishes drops the window on the wrong desktop. Probes 1-8 each re-implemented the sequence,
-// so none of them could catch that: this one links DebutCore and drives SpaceService itself.
+// Exercises SpaceService's desktop switching against the live window server: every desktop in
+// turn, each hop verified against what the window server reports afterwards.
 
 import AppKit
 import DebutCore
@@ -16,67 +12,51 @@ let service = SpaceService()
 let desktops = service.userDesktops()
 print("desktops in order: \(desktops)")
 guard desktops.count >= 2 else { print("FATAL: need 2+ desktops"); exit(1) }
+guard service.canSwitchSpaces else {
+    print("FATAL: this macOS version rejects synthetic dock swipes"); exit(1)
+}
+guard let origin = service.currentDesktopIndex() else {
+    print("FATAL: cannot read the current desktop"); exit(1)
+}
+print("starting on desktop \(origin + 1)")
 
-let doc = "/tmp/kha482-probe9.txt"
-try? "KHA-482 shipped-path probe".write(toFile: doc, atomically: true, encoding: .utf8)
-Process.launchedProcess(launchPath: "/usr/bin/open", arguments: ["-a", "TextEdit", doc])
-pause(2.5)
+var failures: [String] = []
 
-guard let app = NSWorkspace.shared.runningApplications
-    .first(where: { $0.bundleIdentifier == "com.apple.TextEdit" }) else { print("FATAL: no TextEdit"); exit(1) }
-app.activate()
-pause(0.6)
-
-let info = ((CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]]) ?? [])
-    .filter { ($0["kCGWindowOwnerPID"] as? NSNumber)?.int32Value == app.processIdentifier }
-    .filter { (($0["kCGWindowLayer"] as? NSNumber)?.int32Value ?? -1) == 0 }
-    .first
-
-guard let info,
-      let wid = (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
-      let bd = info["kCGWindowBounds"] as? [String: Any],
-      let bounds = CGRect(dictionaryRepresentation: bd as CFDictionary) else {
-    print("FATAL: no TextEdit window"); exit(1)
+// The switch is a forged gesture the Dock consumes asynchronously, so the desktop has to be
+// re-read until it settles rather than once.
+@MainActor func settle(on target: Int) -> Bool {
+    for _ in 0..<40 {
+        if service.currentDesktopIndex() == target { return true }
+        pause(0.05)
+    }
+    return false
 }
 
-guard let origin = service.desktopIndex(forWindow: wid) else {
-    print("FATAL: window \(wid) is on \(service.spaces(forWindow: wid)), need exactly one desktop"); exit(1)
+@MainActor func hop(to target: Int) {
+    let started = Date()
+    guard service.switchToDesktop(index: target) else {
+        failures.append("desktop \(target + 1): switchToDesktop refused")
+        print("  desktop \(target + 1): REFUSED")
+        return
+    }
+    let landed = settle(on: target)
+    let ms = Date().timeIntervalSince(started) * 1000
+    let reported = service.currentDesktopIndex().map { $0 + 1 }
+    print("  desktop \(target + 1): \(landed ? "ok" : "landed on \(String(describing: reported))")"
+        + "   \(String(format: "%.0f", ms))ms")
+    if !landed {
+        failures.append("desktop \(target + 1): landed on \(String(describing: reported))")
+    }
 }
 
-// Farthest target, so a pass cannot be a single incidental step.
-let target = origin == desktops.count - 1 ? 0 : desktops.count - 1
-let grab = CGPoint(x: bounds.midX, y: bounds.minY + 12)
-print("window \(wid): desktop \(origin + 1) -> desktop \(target + 1) (\(abs(target - origin)) away)")
-
-let started = Date()
-let done = DispatchSemaphore(value: 0)
-nonisolated(unsafe) var moved = false
-service.moveWindow(windowID: wid, titleBar: grab, toDesktop: target) { result in
-    moved = result
-    done.signal()
+for target in desktops.indices where target != origin {
+    hop(to: target)
 }
-while done.wait(timeout: .now() + 0.05) == .timedOut { pause(0.05) }
-let elapsed = Date().timeIntervalSince(started)
 
-print("SpaceService.moveWindow -> \(moved)   (\(String(format: "%.2f", elapsed))s)")
-print("window now on desktop index: \(String(describing: service.desktopIndex(forWindow: wid)))")
+hop(to: origin)
 
-if moved {
-    print("RESULT: shipped move path works at its own timings.")
+if failures.isEmpty {
+    print("RESULT: PASS — \(desktops.count) desktops, every switch landed where it asked.")
 } else {
-    print("RESULT: shipped move path FAILED — timings or bindings are wrong.")
+    print("RESULT: FAIL — \(failures.joined(separator: "; "))")
 }
-
-// Put the window back so the probe leaves nothing behind.
-if moved {
-    let back = DispatchSemaphore(value: 0)
-    service.switchToDesktop(index: target)
-    pause(0.8)
-    service.moveWindow(windowID: wid, titleBar: grab, toDesktop: origin) { _ in back.signal() }
-    while back.wait(timeout: .now() + 0.05) == .timedOut { pause(0.05) }
-    service.switchToDesktop(index: origin)
-    pause(0.6)
-}
-app.terminate()
-try? FileManager.default.removeItem(atPath: doc)
-print("current desktop index: \(String(describing: service.currentDesktopIndex()))")

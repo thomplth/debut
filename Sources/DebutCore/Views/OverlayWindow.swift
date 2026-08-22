@@ -27,7 +27,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     public var onStageScrollSelected: ((Int) -> Void)?
     var onStageScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     public var onWindowSelected: ((Int, Int) -> Void)?
-    public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
+    public var onWindowMoved: ((CGWindowID, Int, Int, Int) -> Void)?
     public var onStageReordered: ((Int, Int) -> Void)?
     public var onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?

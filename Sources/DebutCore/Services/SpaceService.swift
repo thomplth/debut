@@ -184,87 +184,12 @@ public protocol SpaceSwitching: AnyObject {
     func currentDesktopIndex() -> Int?
     func desktopIndex(forWindow windowID: CGWindowID) -> Int?
     @discardableResult func switchToDesktop(index: Int) -> Bool
-    func moveWindow(windowID: CGWindowID, titleBar: CGPoint, toDesktop: Int,
-                    completion: (@Sendable (Bool) -> Void)?)
-}
-
-public extension SpaceSwitching {
-    func moveWindow(windowID: CGWindowID, titleBar: CGPoint, toDesktop: Int) {
-        moveWindow(windowID: windowID, titleBar: titleBar, toDesktop: toDesktop, completion: nil)
-    }
-}
-
-// MARK: - Drag
-
-/// Holds a window by its title bar, switches desktop underneath it, and drops it there.
-///
-/// Every delay here is waiting on another process: the owning app has to notice the drag, and
-/// the WindowServer has to finish the desktop transition before the release lands. There is no
-/// callback for either, which is why this is a sequence of sleeps rather than event-driven.
-enum WindowDrag {
-    private static let grabSettle: TimeInterval = 0.12
-    private static let dragStep: TimeInterval = 0.05
-    private static let chordSettle: TimeInterval = 0.08
-    private static let transitionSettle: TimeInterval = 0.55
-
-    static func perform(grab: CGPoint, chords: [SymbolicHotkey]) {
-        let source = CGEventSource(stateID: .hidSystemState)
-        let restore = CGEvent(source: nil)?.location
-        func post(_ event: CGEvent?) { event?.post(tap: .cghidEventTap) }
-        func drag(_ dy: CGFloat) {
-            post(CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged,
-                         mouseCursorPosition: CGPoint(x: grab.x, y: grab.y + dy),
-                         mouseButton: .left))
-        }
-
-        post(CGEvent(mouseEventSource: source, mouseType: .mouseMoved,
-                     mouseCursorPosition: grab, mouseButton: .left))
-        Thread.sleep(forTimeInterval: grabSettle)
-        post(CGEvent(mouseEventSource: source, mouseType: .leftMouseDown,
-                     mouseCursorPosition: grab, mouseButton: .left))
-        Thread.sleep(forTimeInterval: grabSettle)
-
-        // A single jump does not read as a drag; the owning app needs a few moves to enter its
-        // drag loop, and until it does the window will not follow across the transition.
-        for dy in stride(from: CGFloat(4), through: 16, by: 4) {
-            drag(dy)
-            Thread.sleep(forTimeInterval: dragStep)
-        }
-
-        for chord in chords {
-            for isDown in [true, false] {
-                let event = CGEvent(keyboardEventSource: source,
-                                    virtualKey: chord.keyCode, keyDown: isDown)
-                event?.flags = chord.flags
-                post(event)
-            }
-            Thread.sleep(forTimeInterval: chordSettle)
-        }
-
-        Thread.sleep(forTimeInterval: transitionSettle)
-        drag(20)
-        Thread.sleep(forTimeInterval: dragStep)
-        post(CGEvent(mouseEventSource: source, mouseType: .leftMouseUp,
-                     mouseCursorPosition: CGPoint(x: grab.x, y: grab.y + 20),
-                     mouseButton: .left))
-        Thread.sleep(forTimeInterval: transitionSettle)
-
-        if let restore { CGWarpMouseCursorPosition(restore) }
-    }
 }
 
 /// Reads and changes which macOS Space is showing, and which Space a window lives on.
 public final class SpaceService: SpaceSwitching {
 
-    private let hotkeys: any SymbolicHotkeyReading
-
-    /// Serialized because a move drives the physical cursor: two at once would interleave
-    /// mouse-down and mouse-up events and leave a button stuck down.
-    private let moveQueue = DispatchQueue(label: "com.thomplth.debut.space-move")
-
-    public init(hotkeys: any SymbolicHotkeyReading = SymbolicHotkeyDefaults()) {
-        self.hotkeys = hotkeys
-    }
+    public init() {}
 
     public func desktopCount() -> Int { userDesktops().count }
 
@@ -366,51 +291,5 @@ public final class SpaceService: SpaceSwitching {
             }
         }
         return true
-    }
-
-    // MARK: Moving
-
-    /// Puts a window on another desktop by dragging it across a desktop switch.
-    ///
-    /// This cannot reuse the forged gesture that `switchToDesktop` posts: the Dock ignores
-    /// those while a mouse drag is held, so the switch has to come from the user's own
-    /// keyboard shortcut. That makes the move dependent on bindings Debut does not own, and
-    /// `false` here usually means those bindings are turned off rather than that anything
-    /// went wrong.
-    ///
-    /// Runs off the main thread — the drag spends the better part of a second waiting on other
-    /// processes, and blocking the main thread for that long would stall the event tap.
-    public func moveWindow(windowID: CGWindowID,
-                           titleBar: CGPoint,
-                           toDesktop target: Int,
-                           completion: (@Sendable (Bool) -> Void)? = nil) {
-        moveQueue.async { [self] in
-            let moved = performMove(windowID: windowID, titleBar: titleBar, toDesktop: target)
-            completion?(moved)
-        }
-    }
-
-    private func performMove(windowID: CGWindowID, titleBar: CGPoint, toDesktop target: Int) -> Bool {
-        let desktops = userDesktops()
-        guard let origin = Self.soleIndex(of: spaces(forWindow: windowID), in: desktops),
-              // A drag can only grab a window that is actually on screen, so the window's own
-              // desktop has to be the one showing.
-              currentDesktopIndex() == origin,
-              let chords = SpaceMoveKeystrokes.plan(
-                from: origin,
-                to: target,
-                desktopCount: desktops.count,
-                direct: { [hotkeys] in hotkeys.hotkey(id: SymbolicHotkeyID.directDesktop($0)) },
-                step: { [hotkeys] direction in
-                    hotkeys.hotkey(id: direction == .right ? SymbolicHotkeyID.moveRight
-                                                           : SymbolicHotkeyID.moveLeft)
-                })
-        else { return false }
-
-        WindowDrag.perform(grab: titleBar, chords: chords)
-
-        // Verified rather than assumed: the drag can be refused by an app that never entered
-        // its drag loop, and that failure is silent.
-        return Self.soleIndex(of: spaces(forWindow: windowID), in: userDesktops()) == target
     }
 }

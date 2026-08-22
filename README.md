@@ -47,13 +47,12 @@ nothing.
 
 <img src="docs/media/quick-switch.gif" alt="Jumping between stages with Control-1, Control-2 and Control-3" width="760">
 
-**Reorganise without leaving the keyboard.** Inside the overlay, the arrow keys move
-the selected window between stages, and the selection travels with it.
+**Reorganise without leaving the keyboard.** Inside the overlay, the left and right
+arrow keys reorder the selected window inside its stage, and the selection travels
+with it.
 
-<img src="docs/media/window-move.gif" alt="Moving a window down a stage and back with the arrow keys" width="760">
-
-The pointer works too: drag a preview onto another plate to move that window, or drag
-a plate by its handle to reorder the stack.
+The pointer works too: drag a preview to a new slot on its own plate, or drag a plate
+by its handle to reorder the stack.
 
 ## Install
 

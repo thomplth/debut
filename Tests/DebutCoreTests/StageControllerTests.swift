@@ -400,10 +400,9 @@ struct StageControllerTests {
         )
 
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(controller.moveWindowByDrag(
+        #expect(controller.reorderWindowByDrag(
             windowID: 202,
-            fromStageIndex: 0,
-            toStageIndex: 0,
+            stageIndex: 0,
             toWindowIndex: 0
         ))
         keyboardSvc.simulateEvent(.cmdRelease)
@@ -523,15 +522,14 @@ struct StageControllerTests {
         #expect(delegate.overlayClosed.wait(timeout: .now()) == .success)
     }
 
-    @Test("Moving a window updates the visible overlay without reopening it")
+    @Test("Reordering a window updates the visible overlay without reopening it")
     func movingWindowDoesNotReopenOverlay() {
         let (controller, _, keyboardService) = makeController()
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
         controller.overlayPresentationDelay = 0
 
-        let sourceStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
+        let stageID = controller.stageManager.stages[0].id
         controller.stageManager.addWindow(
             StageWindow(
                 windowID: 101,
@@ -539,19 +537,27 @@ struct StageControllerTests {
                 ownerName: "A",
                 windowTitle: "T1"
             ),
-            toStageID: sourceStageID
+            toStageID: stageID
         )
-        controller.stageManager.activateStage(id: sourceStageID)
+        controller.stageManager.addWindow(
+            StageWindow(
+                windowID: 202,
+                ownerBundleID: "com.b",
+                ownerName: "B",
+                windowTitle: "T2"
+            ),
+            toStageID: stageID
+        )
 
         keyboardService.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
 
-        keyboardService.simulateEvent(.moveWindowDown)
+        keyboardService.simulateEvent(.moveWindowLeft)
 
         #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(delegate.overlayOpened.wait(timeout: .now() + 0.1) == .timedOut)
-        #expect(controller.selectedStageIndex == 1)
-        #expect(controller.stageManager.stages[1].windows.map(\.windowID) == [101])
+        #expect(controller.selectedWindowIndex == 0)
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [202, 101])
     }
 
     @Test("Configured overlay presentation delay controls the hold threshold")

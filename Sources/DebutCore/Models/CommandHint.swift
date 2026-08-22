@@ -48,7 +48,6 @@ public enum CommandHintCatalog {
             ("Reorder stage", [.swapStageUp, .swapStageDown], "arrow.up.arrow.down"),
         ]
         if hasSelectedWindow {
-            groups.append(("Move window", [.moveWindowUp, .moveWindowDown], "arrow.up.and.down"))
             groups.append((
                 "Reorder window",
                 [.moveWindowLeft, .moveWindowRight],

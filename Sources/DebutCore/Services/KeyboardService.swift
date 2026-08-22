@@ -19,8 +19,6 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case switchToStage(Int)     // Configured modifier + 1-9 (global immediate switch)
     case switchToStageKeepingCurrentApplication(Int)
 
-    case moveWindowUp           // Up Arrow
-    case moveWindowDown         // Down Arrow
     case moveWindowLeft         // Left Arrow — reorder within the stage
     case moveWindowRight        // Right Arrow — reorder within the stage
     case swapStageUp            // Option+Up Arrow
@@ -48,10 +46,6 @@ public enum DebutKeyEvent: Equatable, Sendable {
             KeyAction.jumpAction(forStageIndex: position - 1)
         case .jumpToLastStage:
             .jumpToStage9
-        case .moveWindowUp:
-            .moveWindowUp
-        case .moveWindowDown:
-            .moveWindowDown
         case .moveWindowLeft:
             .moveWindowLeft
         case .moveWindowRight:

@@ -52,17 +52,6 @@ struct ScreenshotTests {
         return frames
     }
 
-    private func renderPlateSurfaceFrames<V: View>(_ view: V, size: NSSize) -> [Int: CGRect] {
-        var frames: [Int: CGRect] = [:]
-        let rootView = view
-            .frame(width: size.width, height: size.height)
-            .onPreferenceChange(PlateSurfaceFramePreferenceKey.self) { frames = $0 }
-        let hostingView = NSHostingView(rootView: rootView)
-        hostingView.frame = NSRect(origin: .zero, size: size)
-        hostingView.layoutSubtreeIfNeeded()
-        return frames
-    }
-
     private func saveImage(_ image: NSImage, name: String) throws {
         let url = Self.outputDir.appendingPathComponent("\(name).png")
         guard let tiff = image.tiffRepresentation,
@@ -157,7 +146,7 @@ struct ScreenshotTests {
             sourceStageIndex: 1,
             sourceWindowIndex: 0,
             location: CGPoint(x: 600, y: 300),
-            dropTarget: nil
+            dropWindowIndex: nil
         )
         let idleFrames = renderPlateFrames(OverlaySwiftUIView(viewModel: vm), size: size)
         let draggingFrames = renderPlateFrames(
@@ -180,7 +169,7 @@ struct ScreenshotTests {
             sourceStageIndex: 0,
             sourceWindowIndex: 0,
             location: CGPoint(x: 600, y: 200),
-            dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 2)
+            dropWindowIndex: 2
         )
         let idle = renderWindowFrames(OverlaySwiftUIView(viewModel: vm), size: size)
         let dragging = renderWindowFrames(
@@ -234,76 +223,6 @@ struct ScreenshotTests {
         )
 
         #expect(frames.count == 3)
-    }
-
-    @Test("Cross-stage drag grows the target plate before drop")
-    func crossStageDragFocusesTargetPlate() throws {
-        let vm = makeSampleViewModel(stageCount: 2, windowsPerStage: [2, 2], activeIndex: 0)
-        let size = NSSize(width: 1200, height: 500)
-        let drag = WindowDragState(
-            windowID: vm.plates[0].windows[0].id,
-            sourceStageIndex: 0,
-            sourceWindowIndex: 0,
-            location: CGPoint(x: 600, y: 330),
-            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 0)
-        )
-        let idle = renderPlateFrames(OverlaySwiftUIView(viewModel: vm), size: size)
-        let dragging = renderPlateFrames(
-            OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag),
-            size: size
-        )
-
-        #expect(idle[0]!.width > idle[1]!.width)
-        #expect(dragging[1]!.width > dragging[0]!.width)
-    }
-
-    @Test("Cross-stage drag resizes the rendered plate surfaces")
-    func crossStageDragResizesPlateSurfaces() throws {
-        let vm = makeSampleViewModel(stageCount: 2, windowsPerStage: [2, 2], activeIndex: 0)
-        let size = NSSize(width: 1200, height: 500)
-        let drag = WindowDragState(
-            windowID: vm.plates[0].windows[0].id,
-            sourceStageIndex: 0,
-            sourceWindowIndex: 0,
-            location: CGPoint(x: 600, y: 330),
-            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 0)
-        )
-        let idle = renderPlateSurfaceFrames(OverlaySwiftUIView(viewModel: vm), size: size)
-        let dragging = renderPlateSurfaceFrames(
-            OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag),
-            size: size
-        )
-
-        #expect(dragging[0]!.width < idle[0]!.width)
-        #expect(dragging[1]!.width > idle[1]!.width)
-    }
-
-    @Test("Cross-stage drag keeps source icons inside its centered plate surface")
-    func crossStageDragKeepsSourceIconsInsidePlateSurface() throws {
-        let vm = makeSampleViewModel(stageCount: 2, windowsPerStage: [3, 2], activeIndex: 0)
-        let size = NSSize(width: 1200, height: 500)
-        let drag = WindowDragState(
-            windowID: vm.plates[0].windows[2].id,
-            sourceStageIndex: 0,
-            sourceWindowIndex: 2,
-            location: CGPoint(x: 600, y: 330),
-            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 0)
-        )
-        let view = OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag)
-        let surfaces = renderPlateSurfaceFrames(view, size: size)
-        let windows = renderWindowFrames(view, size: size)
-
-        let sourceSurface = try #require(surfaces[0])
-        let visibleSourceFrames = windows
-            .filter { $0.key.stageIndex == 0 && $0.key.windowIndex != 2 }
-            .map(\.value)
-        let sourceBounds = try #require(visibleSourceFrames.reduce(nil as CGRect?) { bounds, frame in
-            bounds.map { $0.union(frame) } ?? frame
-        })
-
-        #expect(sourceBounds.minX >= sourceSurface.minX)
-        #expect(sourceBounds.maxX <= sourceSurface.maxX)
-        #expect(abs(sourceBounds.midX - sourceSurface.midX) < 0.5)
     }
 
     @Test("Onboarding welcome screen")
