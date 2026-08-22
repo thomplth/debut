@@ -325,14 +325,6 @@ public struct OnboardingView: View {
                 detail: "Press Command–Tab, then keep holding Command. Release Command when the window you want is selected.",
                 shortcut: "⌘ Tab · hold ⌘"
             )
-        case .createStage:
-            TutorialContent(
-                icon: "rectangle.stack.badge.plus",
-                shortTitle: "Create",
-                title: "Create a new stage",
-                detail: "With the switcher open, press N. Debut creates a stage below the current one and moves focus to it.",
-                shortcut: "N"
-            )
         case .moveWindow:
             TutorialContent(
                 icon: "rectangle.portrait.and.arrow.forward",

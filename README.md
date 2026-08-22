@@ -47,13 +47,12 @@ nothing.
 
 <img src="docs/media/quick-switch.gif" alt="Jumping between stages with Control-1, Control-2 and Control-3" width="760">
 
-**Reorganise without leaving the keyboard.** Inside the overlay, the arrow keys move
-the selected window between stages, and the selection travels with it.
+**Reorganise without leaving the keyboard.** Inside the overlay, the left and right
+arrow keys reorder the selected window inside its stage, and the selection travels
+with it.
 
-<img src="docs/media/window-move.gif" alt="Moving a window down a stage and back with the arrow keys" width="760">
-
-The pointer works too: drag a preview onto another plate to move that window, or drag
-a plate by its handle to reorder the stack.
+The pointer works too: drag a preview to a new slot on its own plate, or drag a plate
+by its handle to reorder the stack.
 
 ## Install
 
@@ -115,8 +114,6 @@ overlay. Holding past it presents the plates.
 | `←` `→` | Reorder the window inside its stage |
 | `↑` `↓` | Move the window to the stage above or below |
 | `⌥ ↑` / `⌥ ↓` | Swap this stage's position with its neighbour |
-| `N` / `⇧ N` | New stage below / above |
-| `⌫` / `⌦` | Delete this stage; its windows overflow into a neighbour |
 | `Q` | Quit the selected app |
 | `Esc` | Close the overlay without ending the session |
 
@@ -131,10 +128,16 @@ once — the browser window you need for this task, and the four you do not.
 **Stages are not named.** A stage's label is its 1-based position, so creating,
 deleting, and reordering need no bookkeeping and no rename step.
 
-**Inactive stages are occluded, not moved.** Debut owns a full-screen desktop surface
-that sits in z-order between the active and inactive windows. Switching orders that
-surface to the front and raises the active stage above it. Nothing is minimised,
-nothing is repositioned, and no window is moved off-screen.
+**A stage is a real macOS desktop.** Stage 3 is desktop 3, and macOS — not Debut — is
+the source of truth for which desktop a window is on. Switching a stage is therefore
+one composited transition drawn by the window server, so the whole stage appears at
+once instead of its windows being raised one by one. Debut follows desktops it did not
+switch, so Mission Control and Control-Arrow stay in sync.
+
+**Switching is a gesture Debut forges.** macOS offers no supported way to change
+desktop on demand, so Debut synthesises the trackpad swipe — a technique from
+[InstantSpaceSwitcher](https://github.com/jurplel/InstantSpaceSwitcher) by way of
+[Space Rabbit](https://github.com/Tahul/space-rabbit).
 
 **Layout survives quitting and rebooting.** Assignments persist by bundle ID and
 window title, with a bundle-only fallback because titles are not stable keys —

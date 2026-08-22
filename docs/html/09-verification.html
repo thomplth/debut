@@ -212,7 +212,7 @@ assertion does the opposite, which is the right way round.
 
 <p>
 The suite also covers the depth gradient at nine plates, selection state,
-cross-stage drag growth and surface resizing, and the three onboarding screens —
+window drag focus and slot previews, and the three onboarding screens —
 with a <code>MockOnboardingPermissionClient</code>&nbsp;<span class="src">:325</span>
 standing in for the real TCC prompts.
 </p>
@@ -286,14 +286,12 @@ the session back.
 <h3>The drag skip</h3>
 
 <p>
-Four scenarios are named in a set at the top of the file&nbsp;<span class="src">:16</span>:
+Two scenarios are named in a set at the top of the file&nbsp;<span class="src">:16</span>:
 </p>
 
 <pre><code>let hostedDragTests: Set&lt;String&gt; = [
     "Dragging the revealed handle reorders the stage",
     "A reverse handle drag restores the original stage order",
-    "Dropping a window updates the source and destination stage models",
-    "The refreshed destination plate supports an immediate reverse drag",
 ]</code></pre>
 
 <p>

@@ -41,7 +41,7 @@ struct KeyboardShortcutCustomizationTests {
     @Test("Older saved bindings gain defaults for newly configurable shortcuts")
     func legacyBindingsGainNewDefaults() throws {
         var legacy = KeyBindings()
-        legacy.bindings[.newStageBelow] = KeyCombo(keyCode: kVK_ANSI_B)
+        legacy.bindings[.swapStageUp] = KeyCombo(keyCode: kVK_ANSI_B)
         for action in KeyAction.globalActions + [.dismissOverlay] {
             legacy.bindings.removeValue(forKey: action)
         }
@@ -51,7 +51,7 @@ struct KeyboardShortcutCustomizationTests {
             from: JSONEncoder().encode(legacy)
         )
 
-        #expect(decoded.combo(for: .newStageBelow) == KeyCombo(keyCode: kVK_ANSI_B))
+        #expect(decoded.combo(for: .swapStageUp) == KeyCombo(keyCode: kVK_ANSI_B))
         #expect(decoded.combo(for: .activateNextWindow)?.command == true)
         #expect(decoded.combo(for: .quickSwitchStage1)?.control == true)
         #expect(decoded.combo(for: .dismissOverlay)?.keyCode == kVK_Escape)
@@ -60,7 +60,7 @@ struct KeyboardShortcutCustomizationTests {
     @Test("Retired saved actions are ignored")
     func retiredSavedActionsAreIgnored() throws {
         var saved = KeyBindings()
-        saved.bindings[.newStageBelow] = KeyCombo(keyCode: kVK_ANSI_B)
+        saved.bindings[.swapStageUp] = KeyCombo(keyCode: kVK_ANSI_B)
         var object = try #require(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any]
         )
@@ -74,7 +74,7 @@ struct KeyboardShortcutCustomizationTests {
             from: JSONSerialization.data(withJSONObject: object)
         )
 
-        #expect(decoded.combo(for: .newStageBelow) == KeyCombo(keyCode: kVK_ANSI_B))
+        #expect(decoded.combo(for: .swapStageUp) == KeyCombo(keyCode: kVK_ANSI_B))
     }
 
     @Test("A custom global shortcut replaces Command-Tab activation")
@@ -111,7 +111,7 @@ struct KeyboardShortcutCustomizationTests {
             keyCode: kVK_Space,
             control: true
         )
-        bindings.bindings[.newStageBelow] = KeyCombo(keyCode: kVK_ANSI_B)
+        bindings.bindings[.swapStageUp] = KeyCombo(keyCode: kVK_ANSI_B)
         service.keyBindings = bindings
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -122,7 +122,7 @@ struct KeyboardShortcutCustomizationTests {
 
         let controlB = keyEvent(keyCode: kVK_ANSI_B, flags: .maskControl)
         #expect(service.handleCGEvent(type: .keyDown, event: controlB) == nil)
-        #expect(delegate.receivedEvents == [.cmdTabHold, .newStageBelow])
+        #expect(delegate.receivedEvents == [.cmdTabHold, .swapStageUp])
     }
 
     @Test("Legacy per-number bindings cannot move quick switch away from digit keys")

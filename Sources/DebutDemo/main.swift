@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import DebutCore
 import Foundation
 
 // Captures the README media inside the Tart guest. It shares no code with DebutE2E on
@@ -64,9 +65,8 @@ func describe(_ mode: CGDisplayMode) -> String {
 
 // MARK: - Debut state
 
-let diagnosticFile = FileManager.default
-    .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-    .appendingPathComponent("Debut/diagnostic.json")
+let diagnosticFile = DebutCore.applicationSupportDirectory
+    .appendingPathComponent("diagnostic.json")
 
 func readState() -> [String: String] {
     guard let data = try? Data(contentsOf: diagnosticFile),

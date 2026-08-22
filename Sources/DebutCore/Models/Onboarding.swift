@@ -19,7 +19,6 @@ public enum OnboardingPage: Int, CaseIterable, Sendable {
 
 public enum OnboardingTutorialStep: Int, CaseIterable, Sendable {
     case switchWindows
-    case createStage
     case moveWindow
 }
 

@@ -228,24 +228,6 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdOptionTabHold, .jumpToLastStage])
     }
 
-    @Test("Stage management events")
-    func stageManagement() {
-        let svc = MockKeyboardService()
-        let delegate = TestKeyboardDelegate()
-        _ = svc.start(delegate: delegate)
-
-        svc.simulateEvent(.cmdTabHold)
-        svc.simulateEvent(.newStageBelow)
-        svc.simulateEvent(.newStageAbove)
-        svc.simulateEvent(.deleteStage)
-        svc.simulateEvent(.cmdRelease)
-
-        #expect(delegate.receivedEvents.count == 5)
-        #expect(delegate.receivedEvents[1] == .newStageBelow)
-        #expect(delegate.receivedEvents[2] == .newStageAbove)
-        #expect(delegate.receivedEvents[3] == .deleteStage)
-    }
-
     @Test("Quick switch events")
     func quickSwitch() {
         let svc = MockKeyboardService()
@@ -489,12 +471,12 @@ struct KeyboardServiceTests {
         let delegate = TestKeyboardDelegate()
         _ = svc.start(delegate: delegate)
 
-        svc.simulateEvent(.moveWindowUp)
-        svc.simulateEvent(.moveWindowDown)
+        svc.simulateEvent(.moveWindowLeft)
+        svc.simulateEvent(.moveWindowRight)
         svc.simulateEvent(.swapStageUp)
         svc.simulateEvent(.swapStageDown)
 
-        #expect(delegate.receivedEvents == [.moveWindowUp, .moveWindowDown, .swapStageUp, .swapStageDown])
+        #expect(delegate.receivedEvents == [.moveWindowLeft, .moveWindowRight, .swapStageUp, .swapStageDown])
     }
 
     @Test("Escape event")
@@ -729,16 +711,16 @@ struct KeyboardServiceTests {
         #expect(service.handleCGEvent(type: .keyDown, event: tabEvent(autoRepeat: false)) == nil)
         service.overlayVisible = true
 
-        let downArrow = CGEvent(
+        let leftArrow = CGEvent(
             keyboardEventSource: nil,
-            virtualKey: CGKeyCode(kVK_DownArrow),
+            virtualKey: CGKeyCode(kVK_LeftArrow),
             keyDown: true
         )!
-        downArrow.flags = .maskCommand
-        downArrow.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
-        #expect(service.handleCGEvent(type: .keyDown, event: downArrow) == nil)
+        leftArrow.flags = .maskCommand
+        leftArrow.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+        #expect(service.handleCGEvent(type: .keyDown, event: leftArrow) == nil)
 
-        #expect(delegate.receivedEvents == [.cmdTabHold, .moveWindowDown])
+        #expect(delegate.receivedEvents == [.cmdTabHold, .moveWindowLeft])
     }
 
     @Test("Cmd+Option+Tab event")

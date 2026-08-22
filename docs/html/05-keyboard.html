@@ -301,7 +301,7 @@ string-backed <code>CaseIterable</code> enum in four groups:
   </tr>
   <tr>
     <td>Session</td><td>session</td>
-    <td><code>nextWindow</code>, <code>previousWindow</code>, <code>previousWindowAlternate</code>, <code>nextStage</code>, <code>previousStage</code>, <code>jumpToStage1</code>…<code>9</code>, <code>newStageBelow</code>, <code>newStageAbove</code>, <code>deleteStage</code>, <code>deleteStageForward</code>, <code>moveWindowUp</code>/<code>Down</code>, <code>swapStageUp</code>/<code>Down</code>, <code>dismissOverlay</code></td>
+    <td><code>nextWindow</code>, <code>previousWindow</code>, <code>previousWindowAlternate</code>, <code>nextStage</code>, <code>previousStage</code>, <code>jumpToStage1</code>…<code>9</code>, <code>moveWindowUp</code>/<code>Down</code>, <code>swapStageUp</code>/<code>Down</code>, <code>dismissOverlay</code></td>
   </tr>
 </table>
 
@@ -310,8 +310,7 @@ Derived properties on the enum carry the semantics the raw cases cannot:
 <code>shortcutScope</code>, <code>isOverlayActivation</code>,
 <code>quickSwitchPosition</code>, <code>isSameAppCycle</code>, and
 <code>toKeyEvent()</code>. Alternates collapse in <code>toKeyEvent()</code> —
-<code>previousWindowAlternate</code> becomes <code>previousWindow</code>,
-<code>deleteStageForward</code> becomes <code>deleteStage</code>, and
+<code>previousWindowAlternate</code> becomes <code>previousWindow</code> and
 <code>jumpToStage9</code> becomes <code>jumpToLastStage</code>, because the ninth
 slot targets the <em>last</em> stage rather than literally stage 9.
 </p>

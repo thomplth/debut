@@ -147,14 +147,13 @@ struct PlateMotionTests {
     func snappedPreviewWaitsForCommittedLayout() {
         let request = WindowMoveRequest(
             windowID: 42,
-            fromStageIndex: 0,
+            stageIndex: 1,
             fromWindowIndex: 0,
-            toStageIndex: 1,
             toWindowIndex: 1
         )
         #expect(!PlateMotion.isWindowDropApplied(
             request,
-            to: WindowLayoutKey(stageWindowIDs: [[42, 43], [50, 51]])
+            to: WindowLayoutKey(stageWindowIDs: [[43], [42, 50, 51]])
         ))
         #expect(PlateMotion.isWindowDropApplied(
             request,
@@ -162,7 +161,7 @@ struct PlateMotionTests {
         ))
         #expect(!PlateMotion.isWindowDropApplied(
             request,
-            to: WindowLayoutKey(stageWindowIDs: [[43], [42, 50, 51]])
+            to: WindowLayoutKey(stageWindowIDs: [[42, 43], [50, 51]])
         ))
     }
 
@@ -398,11 +397,10 @@ struct PlateMotionTests {
 
         let top = layout.centers[0] - layout.heights[0] / 2
         let bottom = layout.centers[1] + layout.heights[1] / 2
-        let reach = PlateConstants.stageInsertHoverHeight
 
         #expect(PlateInteraction.hoveredStageIndex(
             previous: 0,
-            at: CGPoint(x: 250, y: top - reach - 1),
+            at: CGPoint(x: 250, y: top - 1),
             containerWidth: 500,
             currentStackOffset: 0,
             plateWidths: widths,
@@ -410,7 +408,7 @@ struct PlateMotionTests {
         ) == nil)
         #expect(PlateInteraction.hoveredStageIndex(
             previous: 1,
-            at: CGPoint(x: 250, y: bottom + reach + 1),
+            at: CGPoint(x: 250, y: bottom + 1),
             containerWidth: 500,
             currentStackOffset: 0,
             plateWidths: widths,
@@ -470,39 +468,29 @@ struct PlateMotionTests {
     @Test("A pointer or drag target becomes the gradient focus")
     func interactionFocusPriority() {
         #expect(PlateMotion.focusedStageIndex(
-            active: 2, hovered: nil, dragTarget: nil, retainedDragTarget: nil, stageCount: 5
+            active: 2, hovered: nil, dragTarget: nil, stageCount: 5
         ) == 2)
         #expect(PlateMotion.focusedStageIndex(
-            active: 2, hovered: 4, dragTarget: nil, retainedDragTarget: nil, stageCount: 5
+            active: 2, hovered: 4, dragTarget: nil, stageCount: 5
         ) == 4)
         #expect(PlateMotion.focusedStageIndex(
-            active: 2, hovered: 4, dragTarget: 1, retainedDragTarget: nil, stageCount: 5
-        ) == 1)
-    }
-
-    @Test("Cross-stage drag focus is retained through drop completion")
-    func retainedCrossStageDragFocus() {
-        #expect(PlateMotion.focusedStageIndex(
-            active: 0, hovered: nil, dragTarget: 1, retainedDragTarget: nil, stageCount: 2
-        ) == 1)
-        #expect(PlateMotion.focusedStageIndex(
-            active: 0, hovered: nil, dragTarget: nil, retainedDragTarget: 1, stageCount: 2
+            active: 2, hovered: 4, dragTarget: 1, stageCount: 5
         ) == 1)
     }
 
     @Test("Focus candidates that outlived their stage are skipped")
     func staleFocusCandidatesAreIgnored() {
         #expect(PlateMotion.focusedStageIndex(
-            active: 1, hovered: 6, dragTarget: nil, retainedDragTarget: nil, stageCount: 4
+            active: 1, hovered: 6, dragTarget: nil, stageCount: 4
         ) == 1)
         #expect(PlateMotion.focusedStageIndex(
-            active: 1, hovered: 2, dragTarget: 9, retainedDragTarget: nil, stageCount: 4
+            active: 1, hovered: 2, dragTarget: 9, stageCount: 4
         ) == 2)
         #expect(PlateMotion.focusedStageIndex(
-            active: 1, hovered: -1, dragTarget: nil, retainedDragTarget: nil, stageCount: 4
+            active: 1, hovered: -1, dragTarget: nil, stageCount: 4
         ) == 1)
         #expect(PlateMotion.focusedStageIndex(
-            active: 7, hovered: nil, dragTarget: nil, retainedDragTarget: nil, stageCount: 4
+            active: 7, hovered: nil, dragTarget: nil, stageCount: 4
         ) == 3)
     }
 
@@ -514,7 +502,6 @@ struct PlateMotionTests {
                 active: 0,
                 hovered: 6,
                 dragTarget: nil,
-                retainedDragTarget: nil,
                 stageCount: 3
             ),
             plateHeight: 100,
@@ -653,28 +640,11 @@ struct PlateMotionTests {
         }
     }
 
-    @Test("Window drops allow reordered and cross-stage positions")
+    @Test("Window drops allow only a changed position in the same stage")
     func windowDropPolicy() {
-        #expect(!PlateInteraction.shouldMoveWindow(
-            fromStageIndex: 1,
-            fromWindowIndex: 1,
-            to: WindowDropTarget(stageIndex: 1, windowIndex: 1)
-        ))
-        #expect(PlateInteraction.shouldMoveWindow(
-            fromStageIndex: 1,
-            fromWindowIndex: 1,
-            to: WindowDropTarget(stageIndex: 1, windowIndex: 2)
-        ))
-        #expect(PlateInteraction.shouldMoveWindow(
-            fromStageIndex: 1,
-            fromWindowIndex: 1,
-            to: WindowDropTarget(stageIndex: 2, windowIndex: 0)
-        ))
-        #expect(!PlateInteraction.shouldMoveWindow(
-            fromStageIndex: 1,
-            fromWindowIndex: 1,
-            to: nil
-        ))
+        #expect(!PlateInteraction.shouldMoveWindow(fromWindowIndex: 1, to: 1))
+        #expect(PlateInteraction.shouldMoveWindow(fromWindowIndex: 1, to: 2))
+        #expect(!PlateInteraction.shouldMoveWindow(fromWindowIndex: 1, to: nil))
     }
 
     @Test("Window drop position ignores the dragged card in its source stage")
@@ -691,20 +661,20 @@ struct PlateMotionTests {
             WindowFrameID(stageIndex: 1, windowIndex: 1): CGRect(x: 130, y: 200, width: 90, height: 100),
         ]
 
-        #expect(PlateInteraction.windowDropTarget(
+        #expect(PlateInteraction.windowDropIndex(
             at: CGPoint(x: 300, y: 80),
             sourceStageIndex: 0,
             sourceWindowIndex: 0,
             plateFrames: plateFrames,
             windowFrames: windowFrames
-        ) == WindowDropTarget(stageIndex: 0, windowIndex: 2))
-        #expect(PlateInteraction.windowDropTarget(
+        ) == 2)
+        #expect(PlateInteraction.windowDropIndex(
             at: CGPoint(x: 125, y: 240),
             sourceStageIndex: 0,
             sourceWindowIndex: 0,
             plateFrames: plateFrames,
             windowFrames: windowFrames
-        ) == WindowDropTarget(stageIndex: 1, windowIndex: 1))
+        ) == nil)
     }
 
     @Test("Same-stage drag animates windows into their prospective MRU order")
@@ -714,7 +684,7 @@ struct PlateMotionTests {
             sourceStageIndex: 0,
             sourceWindowIndex: 0,
             location: .zero,
-            dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 2)
+            dropWindowIndex: 2
         )
 
         #expect(PlateMotion.windowDragOffset(
@@ -732,7 +702,7 @@ struct PlateMotionTests {
             sourceStageIndex: 0,
             sourceWindowIndex: 2,
             location: .zero,
-            dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 0)
+            dropWindowIndex: 0
         )
         #expect(PlateMotion.windowDragOffset(
             stageIndex: 0, windowIndex: 0, drag: reverseDrag, cardStride: 100
@@ -742,79 +712,35 @@ struct PlateMotionTests {
         ) == -200)
     }
 
-    @Test("Cross-stage drag opens an insertion gap and closes the source gap")
-    func crossStageWindowDragOffsets() {
-        let drag = WindowDragState(
-            windowID: 42,
-            sourceStageIndex: 0,
-            sourceWindowIndex: 1,
-            location: .zero,
-            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 1)
-        )
-
-        #expect(PlateMotion.displayedWindowCounts(actual: [3, 2], drag: drag) == [2, 3])
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 0, windowIndex: 0, drag: drag, cardStride: 100
-        ) == 0)
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 0, windowIndex: 2, drag: drag, cardStride: 100
-        ) == -100)
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 1, windowIndex: 0, drag: drag, cardStride: 100
-        ) == 0)
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 1, windowIndex: 1, drag: drag, cardStride: 100
-        ) == 100)
-        #expect(PlateMotion.windowGridCenterOffset(
-            stageIndex: 0, drag: drag, cardStride: 100
-        ) == 50)
-        #expect(PlateMotion.windowGridCenterOffset(
-            stageIndex: 1, drag: drag, cardStride: 100
-        ) == 0)
-        #expect(PlateMotion.windowGridCenterOffset(
-            stageIndex: 2, drag: drag, cardStride: 100
-        ) == 0)
-    }
-
-    @Test("Released preview snaps to same-stage, cross-stage, and empty-stage slots")
+    @Test("Released preview snaps to the slot it was dropped on")
     func releasedPreviewDestination() {
         let frames = [
             WindowFrameID(stageIndex: 0, windowIndex: 0): CGRect(x: 20, y: 20, width: 80, height: 100),
             WindowFrameID(stageIndex: 0, windowIndex: 1): CGRect(x: 120, y: 20, width: 80, height: 100),
             WindowFrameID(stageIndex: 0, windowIndex: 2): CGRect(x: 220, y: 20, width: 80, height: 100),
-            WindowFrameID(stageIndex: 1, windowIndex: 0): CGRect(x: 20, y: 200, width: 80, height: 100),
-            WindowFrameID(stageIndex: 1, windowIndex: 1): CGRect(x: 120, y: 200, width: 80, height: 100),
-        ]
-        let plates = [
-            0: CGRect(x: 0, y: 0, width: 340, height: 160),
-            1: CGRect(x: 0, y: 180, width: 240, height: 160),
-            2: CGRect(x: 0, y: 360, width: 140, height: 160),
         ]
 
         #expect(PlateMotion.windowDropDestination(
             sourceStageIndex: 0,
             sourceWindowIndex: 0,
-            target: WindowDropTarget(stageIndex: 0, windowIndex: 2),
+            targetWindowIndex: 2,
             cardStride: 100,
-            plateFrames: plates,
             windowFrames: frames
         ) == CGPoint(x: 260, y: 70))
         #expect(PlateMotion.windowDropDestination(
             sourceStageIndex: 0,
-            sourceWindowIndex: 0,
-            target: WindowDropTarget(stageIndex: 1, windowIndex: 1),
+            sourceWindowIndex: 2,
+            targetWindowIndex: 0,
             cardStride: 100,
-            plateFrames: plates,
             windowFrames: frames
-        ) == CGPoint(x: 160, y: 250))
+        ) == CGPoint(x: 60, y: 70))
         #expect(PlateMotion.windowDropDestination(
-            sourceStageIndex: 0,
+            sourceStageIndex: 1,
             sourceWindowIndex: 0,
-            target: WindowDropTarget(stageIndex: 2, windowIndex: 0),
+            targetWindowIndex: 1,
             cardStride: 100,
-            plateFrames: plates,
             windowFrames: frames
-        ) == CGPoint(x: 70, y: 434))
+        ) == nil)
     }
 
     @Test("A press without meaningful movement selects instead of starting a drag")
@@ -832,7 +758,7 @@ struct PlateMotionTests {
             sourceStageIndex: 1,
             sourceWindowIndex: 0,
             location: CGPoint(x: 100, y: 200),
-            dropTarget: WindowDropTarget(stageIndex: 2, windowIndex: 3)
+            dropWindowIndex: 3
         )
 
         let request = PlateInteraction.finishWindowDrag(&drag)
@@ -840,9 +766,8 @@ struct PlateMotionTests {
         #expect(drag == nil)
         #expect(request == WindowMoveRequest(
             windowID: 42,
-            fromStageIndex: 1,
+            stageIndex: 1,
             fromWindowIndex: 0,
-            toStageIndex: 2,
             toWindowIndex: 3
         ))
     }
@@ -936,7 +861,6 @@ struct PlateMotionTests {
                 active: 0,
                 hovered: nil,
                 dragTarget: destination,
-                retainedDragTarget: nil,
                 stageCount: stageCount
             ),
             plateHeight: 100,
@@ -1046,352 +970,6 @@ struct PlateMotionTests {
         #expect(handleIndex(CGPoint(x: 20, y: layout.centers[1])) == nil)
     }
 
-    @Test("The add-stage affordance reveals just beyond the first and last plate edges")
-    func stageInsertionEdgeReveal() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 3,
-            focusIndex: 1,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let widths: [CGFloat] = [200, 300, 200]
-        let firstTop = layout.centers[0] - layout.heights[0] / 2
-        let lastBottom = layout.centers[2] + layout.heights[2] / 2
-        let edge: (CGPoint) -> StageInsertionEdge? = {
-            PlateInteraction.stageInsertionEdge(
-                at: $0,
-                containerWidth: 500,
-                stackOffset: 0,
-                plateWidths: widths,
-                layout: layout
-            )
-        }
-
-        #expect(edge(CGPoint(x: 250, y: firstTop - 10)) == .top)
-        #expect(edge(CGPoint(x: 250, y: lastBottom + 10)) == .bottom)
-        #expect(edge(CGPoint(x: 250, y: layout.centers[1])) == nil)
-        #expect(edge(CGPoint(
-            x: 250,
-            y: firstTop - PlateConstants.stageInsertHoverHeight - 1
-        )) == nil)
-        #expect(edge(CGPoint(x: 20, y: firstTop - 10)) == nil)
-    }
-
-    /// The band is a thin strip of empty overlay, which is a poor thing to have to find. Hovering
-    /// the plate the new stage would sit next to offers the same button.
-    @Test("The add-stage affordance reveals from the first and last plates")
-    func stageInsertionEdgeRevealsFromEndPlates() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 3,
-            focusIndex: 1,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let widths: [CGFloat] = [200, 300, 200]
-        let edge: (CGPoint) -> StageInsertionEdge? = {
-            PlateInteraction.stageInsertionEdge(
-                at: $0,
-                containerWidth: 500,
-                stackOffset: 0,
-                plateWidths: widths,
-                layout: layout
-            )
-        }
-
-        #expect(edge(CGPoint(x: 250, y: layout.centers[0])) == .top)
-        #expect(edge(CGPoint(x: 250, y: layout.centers[2])) == .bottom)
-        #expect(edge(CGPoint(x: 250, y: layout.centers[1])) == nil)
-    }
-
-    /// One plate is both ends of the stack at once, so which button it offers can only come from
-    /// which half of it the pointer is in.
-    @Test("A lone plate offers the add-stage button on the half the pointer is in")
-    func stageInsertionEdgeSplitsALonePlate() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 1,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let edge: (CGFloat) -> StageInsertionEdge? = {
-            PlateInteraction.stageInsertionEdge(
-                at: CGPoint(x: 250, y: $0),
-                containerWidth: 500,
-                stackOffset: 0,
-                plateWidths: [300],
-                layout: layout
-            )
-        }
-
-        #expect(edge(layout.centers[0] - layout.heights[0] / 4) == .top)
-        #expect(edge(layout.centers[0] + layout.heights[0] / 4) == .bottom)
-    }
-
-    /// Entering the band magnifies the end plate, whose edge then grows past the stationary
-    /// pointer and swallows it. The plate itself now offers the same button, so the affordance
-    /// survives being swallowed without the band needing to reach back inside the plate.
-    @Test("A revealed add-stage affordance survives the plate growing over the pointer")
-    func stageInsertionEdgeStaysRevealedWhenThePlateGrows() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 3,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let widths: [CGFloat] = [300, 200, 200]
-        let firstTop = layout.centers[0] - layout.heights[0] / 2
-
-        #expect(PlateInteraction.stageInsertionEdge(
-            at: CGPoint(x: 250, y: firstTop + 10),
-            containerWidth: 500,
-            stackOffset: 0,
-            plateWidths: widths,
-            layout: layout
-        ) == .top)
-    }
-
-    @Test("The add-stage band keeps the end plate magnified")
-    func hoveredStageIndexFollowsTheInsertBand() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 3,
-            focusIndex: 1,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let widths: [CGFloat] = [200, 300, 200]
-        let firstTop = layout.centers[0] - layout.heights[0] / 2
-        let lastBottom = layout.centers[2] + layout.heights[2] / 2
-        let hovered: (CGPoint) -> Int? = {
-            PlateInteraction.hoveredStageIndex(
-                previous: nil,
-                at: $0,
-                containerWidth: 500,
-                currentStackOffset: 0,
-                plateWidths: widths,
-                currentLayout: layout
-            )
-        }
-
-        #expect(hovered(CGPoint(x: 250, y: firstTop - 10)) == 0)
-        #expect(hovered(CGPoint(x: 250, y: lastBottom + 10)) == 2)
-        #expect(hovered(CGPoint(
-            x: 250,
-            y: firstTop - PlateConstants.stageInsertHoverHeight - 1
-        )) == nil)
-    }
-
-    @Test("The add-stage button sits inside the band that reveals it")
-    func stageInsertButtonSitsInsideItsHoverBand() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 2,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let widths: [CGFloat] = [300, 240]
-
-        for insertionEdge in [StageInsertionEdge.top, .bottom] {
-            let center = PlateMotion.stageInsertButtonCenter(
-                edge: insertionEdge,
-                containerWidth: 500,
-                stackOffset: 40,
-                layout: layout
-            )
-            #expect(center?.x == 250)
-            #expect(PlateInteraction.stageInsertionEdge(
-                at: center ?? .zero,
-                containerWidth: 500,
-                stackOffset: 40,
-                plateWidths: widths,
-                layout: layout
-            ) == insertionEdge)
-        }
-    }
-
-    @Test("An empty stack offers no add-stage affordance")
-    func stageInsertionEdgeRequiresPlates() {
-        let empty = PlateStackLayout(scales: [], heights: [], centers: [], totalHeight: 0)
-
-        #expect(PlateInteraction.stageInsertionEdge(
-            at: .zero,
-            containerWidth: 500,
-            stackOffset: 0,
-            plateWidths: [],
-            layout: empty
-        ) == nil)
-        #expect(PlateMotion.stageInsertButtonCenter(
-            edge: .top,
-            containerWidth: 500,
-            stackOffset: 0,
-            layout: empty
-        ) == nil)
-    }
-
-    @Test("The close affordance reveals from anywhere on its plate")
-    func stageCloseRevealsFromThePlate() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 3,
-            focusIndex: 1,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let widths: [CGFloat] = [200, 300, 200]
-        let closeIndex: (CGPoint) -> Int? = {
-            PlateInteraction.revealedStageCloseIndex(
-                at: $0,
-                containerWidth: 500,
-                stackOffset: 0,
-                plateWidths: widths,
-                layout: layout,
-                cornerRadius: 0
-            )
-        }
-
-        #expect(closeIndex(CGPoint(x: 250, y: layout.centers[1])) == 1)
-        #expect(closeIndex(CGPoint(x: 250, y: layout.centers[0])) == 0)
-        #expect(closeIndex(CGPoint(x: 20, y: layout.centers[1])) == nil)
-    }
-
-    /// The button rides the plate's corner, so its outer half hangs off the plate. Plate hover
-    /// alone would drop the reveal the moment the pointer reached for it.
-    @Test("The close affordance survives the pointer stepping off the plate onto the button")
-    func stageCloseReveal() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 3,
-            focusIndex: 1,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let widths: [CGFloat] = [200, 300, 200]
-        let closeIndex: (CGPoint) -> Int? = {
-            PlateInteraction.revealedStageCloseIndex(
-                at: $0,
-                containerWidth: 500,
-                stackOffset: 0,
-                plateWidths: widths,
-                layout: layout,
-                cornerRadius: 0
-            )
-        }
-        let secondCorner = CGPoint(
-            x: 250 + widths[1] * layout.scales[1] / 2,
-            y: layout.centers[1] - layout.heights[1] / 2
-        )
-        let justOutsideThePlate = CGPoint(x: secondCorner.x + 6, y: secondCorner.y - 6)
-
-        #expect(closeIndex(secondCorner) == 1)
-        #expect(closeIndex(justOutsideThePlate) == 1)
-        #expect(closeIndex(CGPoint(
-            x: secondCorner.x + PlateConstants.stageCloseHoverSize,
-            y: secondCorner.y - PlateConstants.stageCloseHoverSize
-        )) == nil)
-    }
-
-    @Test("The close button sits inside the corner zone that reveals it")
-    func stageCloseButtonSitsInsideItsHoverZone() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 2,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let widths: [CGFloat] = [300, 240]
-
-        for index in 0..<2 {
-            let center = PlateMotion.stageCloseButtonCenter(
-                at: index,
-                containerWidth: 500,
-                stackOffset: 40,
-                plateWidths: widths,
-                layout: layout,
-                cornerRadius: 40
-            )
-            #expect(PlateInteraction.revealedStageCloseIndex(
-                at: center ?? .zero,
-                containerWidth: 500,
-                stackOffset: 40,
-                plateWidths: widths,
-                layout: layout,
-                cornerRadius: 40
-            ) == index)
-            #expect(PlateInteraction.isStageCloseButtonHit(
-                center ?? .zero,
-                center: center ?? .zero
-            ))
-        }
-    }
-
-    /// The button has to ride the plate's visible border, so a rounded corner pulls it down and
-    /// to the left along the arc; a square corner leaves it exactly on the corner point.
-    @Test("The close button follows the plate corner radius")
-    func stageCloseButtonFollowsCornerRadius() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 2,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.5
-        )
-        let widths: [CGFloat] = [300, 240]
-        let center: (Int, CGFloat) -> CGPoint? = {
-            PlateMotion.stageCloseButtonCenter(
-                at: $0,
-                containerWidth: 500,
-                stackOffset: 0,
-                plateWidths: widths,
-                layout: layout,
-                cornerRadius: $1
-            )
-        }
-        let sharpCorner: (Int) -> CGPoint = { index in
-            CGPoint(
-                x: 250 + widths[index] * layout.scales[index] / 2,
-                y: layout.centers[index] - layout.heights[index] / 2
-            )
-        }
-
-        #expect(center(0, 0) == sharpCorner(0))
-
-        let inset = 40 * (1 - 1 / 2.0.squareRoot())
-        #expect(abs((center(0, 40)?.x ?? 0) - (sharpCorner(0).x - inset)) < 0.001)
-        #expect(abs((center(0, 40)?.y ?? 0) - (sharpCorner(0).y + inset)) < 0.001)
-
-        // The scaled-down plate draws a scaled-down radius, so its inset shrinks to match.
-        #expect(abs((center(1, 40)?.x ?? 0) - (sharpCorner(1).x - inset * layout.scales[1])) < 0.001)
-        #expect(abs((center(1, 40)?.y ?? 0) - (sharpCorner(1).y + inset * layout.scales[1])) < 0.001)
-    }
-
-    @Test("An empty stack offers no close affordance")
-    func stageCloseRequiresPlates() {
-        let empty = PlateStackLayout(scales: [], heights: [], centers: [], totalHeight: 0)
-
-        #expect(PlateInteraction.revealedStageCloseIndex(
-            at: .zero,
-            containerWidth: 500,
-            stackOffset: 0,
-            plateWidths: [],
-            layout: empty,
-            cornerRadius: 0
-        ) == nil)
-        #expect(PlateMotion.stageCloseButtonCenter(
-            at: 0,
-            containerWidth: 500,
-            stackOffset: 0,
-            plateWidths: [],
-            layout: empty,
-            cornerRadius: 0
-        ) == nil)
-    }
-
     @Test("The drag handle takes whichever tint reads against the wallpaper")
     func dragHandleTintFollowsBackgroundLuminance() {
         #expect(PlateContrast.handleTintWhiteLevel(backgroundLuminance: 0) == 1)
@@ -1429,93 +1007,17 @@ struct PlateMotionTests {
         #expect(PlateInteraction.stageHandleGrab(isRevealed: false, isDragging: true) == .closed)
     }
 
-    /// Where a tap on the overlay actually goes. The buttons are drawn with hit testing off and
-    /// float over — or straddle — the plates, so this routing is the whole of their behaviour.
-    @Test("A tap on a revealed stage button routes to that button, not the desktop")
-    func overlayTapRoutesToStageButtons() {
-        let plateFrames = [0: CGRect(x: 100, y: 100, width: 300, height: 200)]
-        let insertCenter = CGPoint(x: 250, y: 60)
-        let closeCenter = CGPoint(x: 390, y: 110)
-        let route: (CGPoint, StageInsertionEdge?, Int?) -> OverlayTapTarget = {
-            PlateInteraction.overlayTapTarget(
-                at: $0,
-                revealedInsertionEdge: $1,
-                insertButtonCenter: insertCenter,
-                revealedCloseIndex: $2,
-                closeButtonCenter: closeCenter,
-                plateFrames: plateFrames
-            )
-        }
-
-        #expect(route(insertCenter, .top, nil) == .insertStage(.top))
-        #expect(route(insertCenter, .bottom, nil) == .insertStage(.bottom))
-
-        // The close button sits on the plate's corner, so its tap must win over the plate.
-        #expect(route(closeCenter, nil, 0) == .deleteStage(0))
-        #expect(route(closeCenter, nil, 2) == .deleteStage(2))
-
-        // A button that is not revealed cannot be tapped, however close the pointer is.
-        #expect(route(insertCenter, nil, nil) == .desktop)
-        #expect(route(closeCenter, nil, nil) == .none)
-    }
-
-    @Test("A tap away from every stage button keeps the desktop behaviour")
+    /// A tap that resolves to nothing is otherwise indistinguishable from a tap that never
+    /// arrived, so the overlay has to name what a tap landed on even when it landed on nothing.
+    @Test("A tap away from the plates keeps the desktop behaviour")
     func overlayTapFallsThroughToDesktop() {
         let plateFrames = [0: CGRect(x: 100, y: 100, width: 300, height: 200)]
         let route: (CGPoint) -> OverlayTapTarget = {
-            PlateInteraction.overlayTapTarget(
-                at: $0,
-                revealedInsertionEdge: .top,
-                insertButtonCenter: CGPoint(x: 250, y: 60),
-                revealedCloseIndex: 0,
-                closeButtonCenter: CGPoint(x: 390, y: 110),
-                plateFrames: plateFrames
-            )
+            PlateInteraction.overlayTapTarget(at: $0, plateFrames: plateFrames)
         }
 
         #expect(route(CGPoint(x: 900, y: 500)) == .desktop)
         #expect(route(CGPoint(x: 250, y: 200)) == .none)
-
-        // Just outside a button's radius is a miss, not a near-enough hit.
-        let justOutside = PlateInteraction.stageControlHitRadius(
-            diameter: PlateConstants.stageInsertButtonSize
-        ) + 1
-        #expect(route(CGPoint(x: 250 + justOutside, y: 60)) == .desktop)
-    }
-
-    /// Hovering a control is what magnifies it, so anything smaller than the magnified size would
-    /// leave a visible ring that is not pressable, and would flicker as the pointer crossed it.
-    @Test("A stage control can be pressed across its magnified size")
-    func stageControlHitAreaMatchesTheMagnifiedSize() {
-        let insertRing = PlateConstants.stageInsertButtonSize / 2 + 1
-        let closeRing = PlateConstants.stageCloseButtonSize / 2 + 1
-        let center = CGPoint(x: 250, y: 60)
-
-        #expect(PlateConstants.stageControlHoverScale > 1)
-        #expect(PlateInteraction.isStageInsertButtonHit(
-            CGPoint(x: center.x + insertRing, y: center.y),
-            center: center
-        ))
-        #expect(PlateInteraction.isStageCloseButtonHit(
-            CGPoint(x: center.x + closeRing, y: center.y),
-            center: center
-        ))
-    }
-
-    /// The buttons can overlap: the insert button sits above the first plate, near the corner
-    /// its close button rides. A tap can only ever do one thing.
-    @Test("Overlapping stage buttons resolve to a single action")
-    func overlayTapPrefersInsertWhenButtonsOverlap() {
-        let shared = CGPoint(x: 250, y: 60)
-
-        #expect(PlateInteraction.overlayTapTarget(
-            at: shared,
-            revealedInsertionEdge: .top,
-            insertButtonCenter: shared,
-            revealedCloseIndex: 0,
-            closeButtonCenter: shared,
-            plateFrames: [:]
-        ) == .insertStage(.top))
     }
 
     /// A gap between two plates is still the stack as far as the pointer is concerned. A scroll

@@ -80,6 +80,102 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshotFocusedWindowID == 4)
     }
 
+    // The reconciler decides stage membership from the snapshot alone, so a snapshot that
+    // omits desktops silently reverts it to guessing from the active stage.
+    @Test("Activation snapshots carry the desktop macOS reports for each window")
+    func activationSnapshotCarriesDesktops() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1), liveWindow(2)]
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        spaces.windowDesktops = [1: 0, 2: 2]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 1 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        var desktopIndexes: [CGWindowID: Int] = [:]
+        service.onAppActivated = { desktopIndexes = $0.desktopIndexes }
+
+        service.handleAppActivation(AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false))
+
+        #expect(desktopIndexes == [1: 0, 2: 2])
+    }
+
+    // Dragging a window to another desktop activates no app, so the activation snapshot never
+    // fires and the assignment stayed stale until the user clicked the window — the move was
+    // invisible in Debut until then. A desktop change has to take its own snapshot.
+    @Test("A desktop refresh snapshots where every window now is")
+    func desktopRefreshSnapshotsDesktops() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1), liveWindow(2)]
+        windowService.allWindowIDList = [1, 2]
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        spaces.windowDesktops = [1: 0, 2: 2]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        var snapshot: RuntimeWindowSnapshot?
+        service.onDesktopsChanged = { snapshot = $0 }
+
+        service.refreshDesktopAssignments()
+
+        #expect(snapshot?.desktopIndexes == [1: 0, 2: 2])
+        #expect(snapshot?.liveWindows.map(\.windowID) == [1, 2])
+        // Nothing was activated, so naming a focused window would reorder a stage on a
+        // refresh that is only meant to answer "where is everything now".
+        #expect(snapshot?.focusedWindowID == nil)
+    }
+
+    @Test("Startup reconcile places each window on the desktop it is actually on")
+    func startupReconcilePlacesByDesktop() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1), liveWindow(2)]
+        windowService.allWindowIDList = [1, 2]
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        spaces.windowDesktops = [1: 2, 2: 1]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        var manager = StageManager()
+        StageController.reconcileStages(&manager, desktopCount: 3)
+
+        service.reconcileWindows(&manager)
+
+        #expect(manager.stageContainingWindow(windowID: 1) == manager.stages[2].id)
+        #expect(manager.stageContainingWindow(windowID: 2) == manager.stages[1].id)
+    }
+
+    // The first-run path bypasses the reconciler entirely, so it needs the desktop rule
+    // spelled out separately or a fresh install collapses every desktop onto stage 1.
+    @Test("First-run population places windows by desktop rather than all on stage 1")
+    func defaultStagePopulationPlacesByDesktop() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1), liveWindow(2)]
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.windowDesktops = [1: 1, 2: 0]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        var manager = StageManager()
+        StageController.reconcileStages(&manager, desktopCount: 2)
+
+        service.populateDefaultStage(&manager)
+
+        #expect(manager.stageContainingWindow(windowID: 1) == manager.stages[1].id)
+        #expect(manager.stageContainingWindow(windowID: 2) == manager.stages[0].id)
+    }
+
     @Test("Launch publishes its complete window batch before focused-window activation")
     func knownLaunchedWindowStillActivates() {
         let windowService = MockWindowService()
