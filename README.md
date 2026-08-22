@@ -138,7 +138,10 @@ switch, so Mission Control and Control-Arrow stay in sync.
 **Switching is a gesture Debut forges.** macOS offers no supported way to change
 desktop on demand, so Debut synthesises the trackpad swipe — a technique from
 [InstantSpaceSwitcher](https://github.com/jurplel/InstantSpaceSwitcher) by way of
-[Space Rabbit](https://github.com/Tahul/space-rabbit).
+[Space Rabbit](https://github.com/Tahul/space-rabbit) — and drives its progress on a
+timer rather than handing the transition to the Dock. That is what lets the switch
+setting be a duration in milliseconds, from an instant cut up to a slide you can
+follow.
 
 **Moving a window between stages does not move your cursor.** The reassignment goes
 through the window server directly and settles in a few milliseconds. Nothing is
