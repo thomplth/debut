@@ -131,6 +131,20 @@ struct StateStoreTests {
         #expect(decoded.overlayPresentationDelay == 0.075)
     }
 
+    @Test("Older settings default the desktop switch speed")
+    func legacySettingsDefaultSpaceSwitchVelocity() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "spaceSwitchVelocity")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+
+        #expect(decoded.spaceSwitchVelocity == AppSettings.defaultSpaceSwitchVelocity)
+    }
+
     @Test("Older settings default the preview cache to last-active refreshes")
     func legacySettingsDefaultPreviewCache() throws {
         let encoded = try JSONEncoder().encode(AppSettings())

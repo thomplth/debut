@@ -40,6 +40,35 @@ struct SpaceSwitchPlanTests {
     func singleDesktop() {
         #expect(SpaceSwitchPlan(from: 0, to: 0, desktopCount: 1) == nil)
     }
+
+    // A two-desktop jump at single-step velocity animates through the desktop in between,
+    // which is the delay the whole gesture path exists to avoid.
+    @Test("Velocity scales with the distance travelled")
+    func velocityScalesWithDistance() {
+        #expect(SpaceSwitchPlan(from: 0, to: 1, desktopCount: 4)?.velocity(base: 400) == 400)
+        #expect(SpaceSwitchPlan(from: 0, to: 3, desktopCount: 4)?.velocity(base: 400) == 1200)
+        #expect(SpaceSwitchPlan(from: 0, to: 1, desktopCount: 4)?.velocity(base: 150) == 150)
+    }
+}
+
+@Suite("SpaceService switch speed")
+struct SpaceServiceSpeedTests {
+
+    @Test("Switch velocity defaults to the shipped setting")
+    func defaultVelocity() {
+        #expect(SpaceService().switchVelocity == AppSettings.defaultSpaceSwitchVelocity)
+    }
+
+    // A zero or negative velocity would post a gesture the Dock resolves by rubber-banding
+    // back, so the setting's range is enforced by the service rather than only by the slider.
+    @Test("Switch velocity is clamped to a range that actually moves the Dock")
+    func velocityIsClamped() {
+        let service = SpaceService()
+        service.switchVelocity = 0
+        #expect(service.switchVelocity == AppSettings.minimumSpaceSwitchVelocity)
+        service.switchVelocity = 100_000
+        #expect(service.switchVelocity == AppSettings.maximumSpaceSwitchVelocity)
+    }
 }
 
 @Suite("DockSwipeEvent")

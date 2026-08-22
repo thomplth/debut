@@ -270,6 +270,28 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
+    /// Adopts the desktop currently showing as the active stage.
+    ///
+    /// The user can switch desktop without Debut — Mission Control, Control+Arrow, or
+    /// clicking a window on another desktop all do it — and until this runs, Debut's active
+    /// stage is simply wrong. Call it whenever macOS reports the active Space changed.
+    public func syncActiveStageWithCurrentDesktop() {
+        guard let index = spaceSwitcher?.currentDesktopIndex(),
+              stageManager.stages.indices.contains(index)
+        else { return }
+        let stageID = stageManager.stages[index].id
+        guard stageID != stageManager.activeStageID else { return }
+
+        previousStageID = stageManager.activeStageID
+        stageManager.activateStage(id: stageID)
+        diag.report("active_stage_synced", details: [
+            "to": stageLabel(forID: stageID),
+            "reason": "desktop_changed_externally",
+        ])
+        delegate?.stageControllerDidMutateState(self)
+        delegate?.stageControllerDidSwitchStage(self)
+    }
+
     /// Position-based label for a stage, e.g. "Stage 2". Used for diagnostics only.
     private func stageLabel(forID id: UUID) -> String {
         guard let index = stageManager.stages.firstIndex(where: { $0.id == id }) else { return "?" }

@@ -105,6 +105,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         discovery.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
 
         let spaceService = SpaceService()
+        spaceService.switchVelocity = currentSettings.spaceSwitchVelocity
         self.spaceService = spaceService
         discovery.spaceSwitcher = spaceService
 
@@ -302,6 +303,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
         discovery.startObserving()
 
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(activeSpaceDidChange(_:)),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
+
         diag.report("controller_setup", details: [
             "eventTapStarted": "\(controller.keyboardServiceStarted)",
             "eventTapRunning": "\(keyboardService.isRunning)",
@@ -328,6 +336,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             object: nil
         )
         observingAccessibilityChanges = false
+    }
+
+    /// Fires for Debut's own switches as well as the user's. The sync is a no-op when the
+    /// active stage already matches, so there is no need to distinguish them.
+    @objc private func activeSpaceDidChange(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.stageController?.syncActiveStageWithCurrentDesktop()
+        }
     }
 
     @objc private func workspaceApplicationActivated(_ notification: Notification) {
@@ -832,6 +848,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.stageController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
                 self.stageController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
                 self.stageController?.previewCacheTTL = newSettings.previewCacheTTL
+                self.spaceService?.switchVelocity = newSettings.spaceSwitchVelocity
                 self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
                     newSettings.quickSwitchExcludedBundleIDs
                 )

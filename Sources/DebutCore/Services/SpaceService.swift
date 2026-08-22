@@ -63,11 +63,6 @@ let kCGSGesturePhaseBegan: Int64 = 1
 let kCGSGesturePhaseEnded: Int64 = 4
 let kGestureMotionHorizontal: Int64 = 1
 
-/// Velocity high enough that the Dock snaps to the next Space instead of animating toward it.
-/// The instant snap is the entire reason this app switches Spaces by gesture rather than by
-/// the stock shortcut — an animated transition would reintroduce the delay stages are meant
-/// to remove.
-private let kInstantSwitchVelocity: Double = 400.0
 private let kInstantSwitchProgress: Double = 2.0
 
 // MARK: - Plan
@@ -103,6 +98,10 @@ struct SpaceSwitchPlan: Equatable {
         direction = target > current ? .right : .left
         steps = abs(target - current)
     }
+
+    /// Scaled by distance: at single-step velocity a two-desktop jump animates through the
+    /// desktop in between, which is the delay the gesture path exists to avoid.
+    func velocity(base: Double) -> Double { base * Double(steps) }
 }
 
 extension SpaceSwitchDirection: Equatable {}
@@ -124,7 +123,7 @@ enum DockSwipeEvent {
     /// decides between snapping and animating.
     static func make(phase: DockSwipePhase,
                      direction: SpaceSwitchDirection,
-                     velocity: Double = kInstantSwitchVelocity) -> CGEvent? {
+                     velocity: Double = AppSettings.defaultSpaceSwitchVelocity) -> CGEvent? {
         guard let event = CGEvent(source: nil) else { return nil }
 
         event.setIntegerValueField(kCGSEventTypeField, value: kCGSEventDockControl)
@@ -201,6 +200,17 @@ public extension SpaceSwitching {
 
 /// Reads and changes which macOS Space is showing, and which Space a window lives on.
 public final class SpaceService: SpaceSwitching {
+
+    /// How hard the forged swipe throws the desktop. Clamped here rather than only at the
+    /// slider, because a zero velocity posts a gesture the Dock resolves by rubber-banding.
+    public var switchVelocity: Double = AppSettings.defaultSpaceSwitchVelocity {
+        didSet {
+            switchVelocity = min(
+                max(switchVelocity, AppSettings.minimumSpaceSwitchVelocity),
+                AppSettings.maximumSpaceSwitchVelocity
+            )
+        }
+    }
 
     public init() {}
 
@@ -308,7 +318,7 @@ public final class SpaceService: SpaceSwitching {
               let plan = SpaceSwitchPlan(from: current, to: target, desktopCount: desktops.count)
         else { return false }
 
-        let velocity = kInstantSwitchVelocity * Double(plan.steps)
+        let velocity = plan.velocity(base: switchVelocity)
         for _ in 0..<plan.steps {
             guard DockSwipeEvent.postSwitch(direction: plan.direction, velocity: velocity) else {
                 return false
