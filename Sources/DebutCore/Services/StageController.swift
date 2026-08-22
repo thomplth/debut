@@ -156,6 +156,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public var onCommandUsed: (@Sendable (KeyAction) -> Void)?
     public var onDesktopReveal: (() -> Void)?
 
+    private var pendingStageFocus: (stageID: UUID, windowID: CGWindowID)?
+
     public private(set) var isStageManagerVisible: Bool = false
     public var selectedStageIndex: Int = 0
     public var selectedWindowIndex: Int = 0
@@ -281,6 +283,42 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
+    /// Call whenever macOS reports the active Space changed.
+    public func desktopDidChange() {
+        syncActiveStageWithCurrentDesktop()
+        applyPendingStageFocus()
+    }
+
+    /// Focuses the window a stage switch asked for, now that its desktop is showing.
+    ///
+    /// A switch that focused its target straight away was focusing it on the desktop it was
+    /// leaving, because the Dock consumes the forged swipe asynchronously. macOS then
+    /// restored its own idea of focus as the Space settled and overwrote the choice.
+    private func applyPendingStageFocus() {
+        guard let pending = pendingStageFocus else { return }
+        guard let index = spaceSwitcher?.currentDesktopIndex(),
+              stageManager.stages.indices.contains(index),
+              stageManager.stages[index].id == pending.stageID
+        else {
+            // The user overtook the switch. Dragging focus back to the stage they left is
+            // worse than leaving it wherever they landed.
+            pendingStageFocus = nil
+            return
+        }
+        pendingStageFocus = nil
+        focusWindow(pending.windowID, inStageID: pending.stageID)
+        delegate?.stageControllerDidMutateState(self)
+    }
+
+    private func focusWindow(_ windowID: CGWindowID, inStageID stageID: UUID) {
+        _ = windowService.raiseWindow(windowID: windowID)
+        stageManager.bringWindowToFront(windowID: windowID, inStageID: stageID)
+        if let bundleID = stageManager.stages.first(where: { $0.id == stageID })?
+            .windows.first(where: { $0.windowID == windowID })?.ownerBundleID {
+            _ = windowService.activateApp(bundleID: bundleID)
+        }
+    }
+
     /// Adopts the desktop currently showing as the active stage.
     ///
     /// The user can switch desktop without Debut — Mission Control, Control+Arrow, or
@@ -321,6 +359,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         backtickCycleIndex = 0
 
         let previousID = stageManager.activeStageID
+        var desktopIsSettling = false
 
         if previousID != targetID {
             let fromLabel = stageLabel(forID: previousID)
@@ -338,8 +377,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 .stageRaise,
                 workload: .init(windows: targetStage?.windows.count ?? 0)
             )
-            if let index = stageManager.stages.firstIndex(where: { $0.id == targetID }) {
-                spaceSwitcher?.switchToDesktop(index: index)
+            if let index = stageManager.stages.firstIndex(where: { $0.id == targetID }),
+               let switcher = spaceSwitcher {
+                desktopIsSettling = switcher.switchToDesktop(index: index)
             }
             _ = PerformanceRecorder.shared.end(raiseID)
 
@@ -350,14 +390,14 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             ])
         }
 
-        // Focus the selected window and activate its app (single activation, no flash)
-        let targetWindows = targetStage?.windows
-        let focusWindowID = raiseWindowID ?? targetWindows?.first?.windowID
-        if let focusWindowID {
-            _ = windowService.raiseWindow(windowID: focusWindowID)
-            stageManager.bringWindowToFront(windowID: focusWindowID, inStageID: targetID)
-            if let bundleID = targetWindows?.first(where: { $0.windowID == focusWindowID })?.ownerBundleID {
-                _ = windowService.activateApp(bundleID: bundleID)
+        // Focus the selected window and activate its app (single activation, no flash).
+        // A desktop still settling cannot be focused yet — see `applyPendingStageFocus`.
+        if let focusWindowID = raiseWindowID ?? targetStage?.windows.first?.windowID {
+            if desktopIsSettling {
+                pendingStageFocus = (stageID: targetID, windowID: focusWindowID)
+            } else {
+                pendingStageFocus = nil
+                focusWindow(focusWindowID, inStageID: targetID)
             }
         }
 

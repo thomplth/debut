@@ -266,6 +266,65 @@ struct StageControllerSpaceTests {
         #expect(controller.diagnosticState["selectedStageIndex"] == "0")
     }
 
+    // The Dock consumes the forged swipe asynchronously, so a switch that focused its target
+    // straight away was focusing it on the desktop it was leaving. macOS then restored its
+    // own idea of focus as the Space settled and overwrote the choice: measured on a desktop
+    // holding one Calculator window, the switch landed on Finder every time but the first,
+    // and activating Calculator by hand a second later worked.
+    @Test("Focus waits for the desktop to actually change")
+    func focusWaitsForDesktopChange() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, windowService) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        let stageB = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 55, ownerBundleID: "com.b", ownerName: "B", windowTitle: "W"),
+            toStageID: stageB)
+        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
+
+        controller.switchToStage(id: stageB)
+        #expect(!windowService.raisedWindowIDs.contains(55))
+
+        controller.desktopDidChange()
+        #expect(windowService.raisedWindowIDs.contains(55))
+        #expect(windowService.activatedBundleID == "com.b")
+    }
+
+    // Nothing has to settle when the desktop is already right, and waiting for a change that
+    // will never come would leave the window unfocused forever.
+    @Test("A switch that changes no desktop focuses straight away")
+    func sameDesktopSwitchFocusesImmediately() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, windowService) = makeController(spaces: spaces)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 55, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W"),
+            toStageID: controller.stageManager.stages[0].id)
+
+        controller.switchToStage(id: controller.stageManager.stages[0].id)
+
+        #expect(windowService.raisedWindowIDs.contains(55))
+    }
+
+    // A switch the user overtakes — hitting Control+3 while Control+2 is still settling —
+    // must not drag focus back to the stage they left behind.
+    @Test("Focus is dropped when the desktop settles somewhere else")
+    func pendingFocusDroppedOnDifferentDesktop() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, windowService) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 55, ownerBundleID: "com.b", ownerName: "B", windowTitle: "W"),
+            toStageID: controller.stageManager.stages[1].id)
+        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
+
+        controller.switchToStage(id: controller.stageManager.stages[1].id)
+        spaces.current = 2
+        controller.desktopDidChange()
+
+        #expect(!windowService.raisedWindowIDs.contains(55))
+    }
+
     @Test("Missing desktops are added as stages")
     func growsToDesktops() {
         let spaces = MockSpaceSwitcher(desktops: 4, current: 0)

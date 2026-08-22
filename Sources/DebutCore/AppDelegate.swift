@@ -338,11 +338,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         observingAccessibilityChanges = false
     }
 
-    /// Fires for Debut's own switches as well as the user's. The sync is a no-op when the
-    /// active stage already matches, so there is no need to distinguish them.
+    /// Fires for Debut's own switches as well as the user's. Debut's own switches are the
+    /// ones waiting on this to focus their target; a user's switch has nothing pending and
+    /// only needs the active stage adopted.
     @objc private func activeSpaceDidChange(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
-            self?.stageController?.syncActiveStageWithCurrentDesktop()
+            self?.stageController?.desktopDidChange()
         }
     }
 
