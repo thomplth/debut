@@ -74,7 +74,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// reason stages switch by gesture rather than by the stock shortcut. Lower values
     /// trade that instant snap for macOS's own slide, which some people prefer to follow.
     public static let defaultSpaceSwitchVelocity: Double = 400
-    public static let minimumSpaceSwitchVelocity: Double = 50
+    /// Not a round number: 50 was measured dropping roughly half its hops against the live
+    /// Dock, which rubber-banded back to the desktop it started on. 100 landed every hop
+    /// across repeated runs, so the floor is set where the gesture is still reliable rather
+    /// than where it is still slow.
+    public static let minimumSpaceSwitchVelocity: Double = 100
     public static let maximumSpaceSwitchVelocity: Double = 1000
 
     public var launchAtLogin: Bool

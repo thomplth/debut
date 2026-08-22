@@ -9,6 +9,25 @@ func pause(_ s: TimeInterval) { RunLoop.current.run(until: Date().addingTimeInte
 guard AXIsProcessTrusted() else { print("FATAL: needs Accessibility"); exit(1) }
 
 let service = SpaceService()
+let arguments = Array(CommandLine.arguments.dropFirst())
+
+// `goto <n>` parks on one desktop so the window-detection cases — launching an app on a
+// given desktop, dragging one across — can be set up and then inspected.
+if arguments.first == "goto", let target = arguments.dropFirst().first.flatMap(Int.init) {
+    guard service.switchToDesktop(index: target - 1) else {
+        print("FATAL: refused to switch to desktop \(target)"); exit(1)
+    }
+    RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+    print("now on desktop \(service.currentDesktopIndex().map { $0 + 1 } ?? -1)")
+    exit(0)
+}
+
+// The switch-speed setting is only observable against the live Dock: a unit test can assert
+// which velocity was posted, but not whether the Dock snapped or slid at that velocity.
+if let velocity = arguments.first.flatMap(Double.init) {
+    service.switchVelocity = velocity
+}
+print("switch velocity: \(service.switchVelocity)")
 let desktops = service.userDesktops()
 print("desktops in order: \(desktops)")
 guard desktops.count >= 2 else { print("FATAL: need 2+ desktops"); exit(1) }

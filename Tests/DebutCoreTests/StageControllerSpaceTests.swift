@@ -162,6 +162,66 @@ struct StageControllerSpaceTests {
         #expect(controller.stageManager.activeStageID == expected)
     }
 
+    // Observed as a live feedback loop: a stale assignment made Debut switch stages on
+    // focus, switching stages now switches desktop, the desktop change resynced the active
+    // stage, and the next focus event switched straight back. A window cannot take focus on
+    // a desktop that is not showing, so the assignment is what is wrong, never the desktop.
+    @Test("Activating a window recorded on another stage never switches desktop")
+    func activationDoesNotSwitchDesktop() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 2)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.activateStage(id: controller.stageManager.stages[2].id)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W"),
+            toStageID: controller.stageManager.stages[0].id)
+        spaces.windowDesktops = [7: 2]
+
+        controller.recordWindowActivation(windowID: 7)
+
+        #expect(spaces.switchRequests.isEmpty)
+        #expect(controller.stageManager.stageContainingWindow(windowID: 7)
+            == controller.stageManager.stages[2].id)
+    }
+
+    @Test("An activated window with no reported desktop joins the showing stage")
+    func activationWithoutDesktopJoinsActiveStage() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 1)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.activateStage(id: controller.stageManager.stages[1].id)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W"),
+            toStageID: controller.stageManager.stages[0].id)
+
+        controller.recordWindowActivation(windowID: 7)
+
+        #expect(spaces.switchRequests.isEmpty)
+        #expect(controller.stageManager.stageContainingWindow(windowID: 7)
+            == controller.stageManager.stages[1].id)
+    }
+
+    @Test("Activating a window already on the showing stage only updates its order")
+    func activationOnActiveStageUpdatesOrder() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        let stageID = controller.stageManager.stages[0].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W"),
+            toStageID: stageID)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 8, ownerBundleID: "com.b", ownerName: "B", windowTitle: "X"),
+            toStageID: stageID)
+        spaces.windowDesktops = [7: 0, 8: 0]
+
+        controller.recordWindowActivation(windowID: 7)
+
+        #expect(spaces.switchRequests.isEmpty)
+        #expect(controller.stageManager.stages[0].windows.first?.windowID == 7)
+    }
+
     @Test("Missing desktops are added as stages")
     func growsToDesktops() {
         let spaces = MockSpaceSwitcher(desktops: 4, current: 0)
