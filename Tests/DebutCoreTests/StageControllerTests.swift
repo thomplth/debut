@@ -1130,12 +1130,14 @@ struct StageControllerTests {
         #expect(windowIDs == [101, 303, 202])
     }
 
-    // Stages are desktops, so a window that takes focus is on the desktop already showing —
-    // whatever Debut recorded earlier. The window moves to the showing stage rather than the
-    // user being moved to the window, and it must not end up in both.
+    // Stages are desktops, so when macOS reports a focused window on the desktop showing,
+    // that outranks whatever Debut recorded earlier. The window moves to the showing stage
+    // rather than the user being moved to the window, and it must not end up in both.
     @Test("Cross-stage window activation moves the window, not the user")
     func crossStageActivationMovesTheWindow() {
         let (controller, _, _) = makeController()
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        controller.spaceSwitcher = spaces
         let stageAID = controller.stageManager.stages[0].id
         controller.stageManager.createStage(position: .below)
         let stageBID = controller.stageManager.stages[1].id
@@ -1143,6 +1145,7 @@ struct StageControllerTests {
         controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageAID)
         controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageBID)
 
+        spaces.windowDesktops = [101: 1, 202: 1]
         controller.switchToStage(id: stageBID)
         #expect(controller.stageManager.activeStageID == stageBID)
 
