@@ -401,6 +401,25 @@ public struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Stage switch speed")
+                    Spacer()
+                    Text("\(Int(viewModel.settings.spaceSwitchVelocity.rounded()))")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: $viewModel.settings.spaceSwitchVelocity,
+                    in: AppSettings.minimumSpaceSwitchVelocity...AppSettings.maximumSpaceSwitchVelocity,
+                    step: 25
+                )
+                Text("How hard Debut throws the desktop when switching stages. High values snap straight to the stage; low values let macOS slide across, which is easier to follow but slower.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text("Command hints")
                 .font(.headline)
                 .padding(.top, 8)

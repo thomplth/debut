@@ -15,7 +15,9 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     }
 
     func desktopCount() -> Int { desktops }
-    func currentDesktopIndex() -> Int? { current }
+    /// Nil off the end, mirroring the real service: a fullscreen Space is not a user
+    /// desktop, so macOS reports no index while one is showing.
+    func currentDesktopIndex() -> Int? { (0..<desktops).contains(current) ? current : nil }
     func desktopIndex(forWindow windowID: CGWindowID) -> Int? { windowDesktops[windowID] }
 
     func switchToDesktop(index: Int) -> Bool {
@@ -109,6 +111,55 @@ struct StageControllerSpaceTests {
         controller.reconcileStagesWithDesktops()
 
         #expect(controller.stageManager.stages.count == 2)
+    }
+
+    // Nothing stops the user switching desktop with Mission Control or Control+Arrow. When
+    // they do, Debut's idea of the active stage is simply wrong until it is resynced, and a
+    // wrong active stage shows the wrong plate as selected and catches newly discovered
+    // windows that have nowhere else to go.
+    @Test("The active stage follows a desktop the user switched to themselves")
+    func activeStageFollowsUserSwitch() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
+
+        spaces.current = 2
+        controller.syncActiveStageWithCurrentDesktop()
+
+        #expect(controller.stageManager.activeStageID == controller.stageManager.stages[2].id)
+    }
+
+    // The sync reacts to a switch that already happened. Switching again would fight the
+    // user, and on a manual switch would bounce them back and forth.
+    @Test("Syncing the active stage requests no desktop change")
+    func syncRequestsNoSwitch() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 2)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
+
+        controller.syncActiveStageWithCurrentDesktop()
+
+        #expect(spaces.switchRequests.isEmpty)
+    }
+
+    // A fullscreen Space is not a user desktop, so `currentDesktopIndex()` reports nothing
+    // while one is showing. Guessing a stage there would move the user's active stage every
+    // time they watched a video fullscreen.
+    @Test("A desktop with no matching stage leaves the active stage alone")
+    func unknownDesktopLeavesActiveStage() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        let expected = controller.stageManager.activeStageID
+
+        spaces.current = -1
+        controller.syncActiveStageWithCurrentDesktop()
+
+        #expect(controller.stageManager.activeStageID == expected)
     }
 
     @Test("Missing desktops are added as stages")
