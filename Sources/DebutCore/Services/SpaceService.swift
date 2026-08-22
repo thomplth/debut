@@ -193,9 +193,18 @@ public protocol SpaceSwitching: AnyObject {
     /// implementation is reached through an `any SpaceSwitching` too.
     func desktopIndexes(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: Int]
     @discardableResult func switchToDesktop(index: Int) -> Bool
+    /// Whether this conformer can reassign a window's desktop at all. False means the move
+    /// commands should stay inert rather than mutate the model and lie about the result.
+    var canMoveWindows: Bool { get }
+    func moveWindow(windowID: CGWindowID, toDesktop: Int,
+                    completion: (@Sendable (Bool) -> Void)?)
 }
 
 public extension SpaceSwitching {
+    func moveWindow(windowID: CGWindowID, toDesktop: Int) {
+        moveWindow(windowID: windowID, toDesktop: toDesktop, completion: nil)
+    }
+
     /// Desktop indexes for many windows at once. Windows with no single desktop are
     /// absent from the result; callers read absence as "macOS did not answer".
     func desktopIndexes(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: Int] {
@@ -218,6 +227,11 @@ public final class SpaceService: SpaceSwitching {
             )
         }
     }
+
+    /// Confirming a move means re-reading the assignment until the window server catches up.
+    /// That settles in single-digit milliseconds, but it is still a wait, and the main thread
+    /// runs the event tap.
+    private let moveQueue = DispatchQueue(label: "com.thomplth.debut.space-move")
 
     public init() {}
 
@@ -332,5 +346,49 @@ public final class SpaceService: SpaceSwitching {
             }
         }
         return true
+    }
+
+    // MARK: Moving
+
+    public var canMoveWindows: Bool { BridgedWindowManagement.isAvailable }
+
+    /// Puts a window on the desktop at `target`.
+    ///
+    /// The window does not have to be on the showing desktop, and nothing about the user's
+    /// session moves: this is a reassignment in the window server, not a simulated drag.
+    ///
+    /// Dispatching is immediate but landing is not, so `completion` runs once the new
+    /// assignment has been read back. That confirmation is what runs off the main thread —
+    /// it is only a few milliseconds, but the main thread runs the event tap.
+    public func moveWindow(windowID: CGWindowID,
+                           toDesktop target: Int,
+                           completion: (@Sendable (Bool) -> Void)? = nil) {
+        let desktops = userDesktops()
+        guard desktops.indices.contains(target),
+              BridgedWindowManagement.moveWindows([windowID], toSpace: desktops[target])
+        else {
+            completion?(false)
+            return
+        }
+        guard let completion else { return }
+        moveQueue.async { [self] in
+            completion(waitForWindow(windowID, toReachSpace: desktops[target]))
+        }
+    }
+
+    /// Polls the window server until `windowID` reports `space`.
+    ///
+    /// There is no notification for this, and the operation is asynchronous, so a caller that
+    /// wants to know whether the move landed has to look. The wait is bounded because a
+    /// refused move never arrives and would otherwise hang the caller forever.
+    func waitForWindow(_ windowID: CGWindowID,
+                       toReachSpace space: CGSSpaceID,
+                       timeout: TimeInterval = 0.25) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if spaces(forWindow: windowID) == [space] { return true }
+            usleep(1000)
+        } while Date() < deadline
+        return false
     }
 }
