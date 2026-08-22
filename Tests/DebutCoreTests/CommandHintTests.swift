@@ -148,7 +148,7 @@ struct CommandHintTests {
     func resetUsage() {
         var settings = AppSettings()
         _ = settings.recordCommandUsage(.swapStageUp)
-        _ = settings.recordCommandUsage(.moveWindowLeft)
+        _ = settings.recordCommandUsage(.moveWindowDown)
 
         settings.resetCommandHintUsage()
 
@@ -191,7 +191,7 @@ struct CommandHintTests {
 
         #expect(inactiveHints.isEmpty)
         #expect(activeHints.flatMap(\.actions).contains(.swapStageUp))
-        #expect(activeHints.flatMap(\.actions).contains(.moveWindowLeft))
+        #expect(activeHints.flatMap(\.actions).contains(.moveWindowUp))
         #expect(activeHints.first(where: { $0.actions.contains(.swapStageUp) })?.shortcut.contains("B") == true)
         #expect(activeHints.allSatisfy { $0.placement == .plateFooter })
         #expect(activeHints.allSatisfy { $0.iconSystemName != nil })
@@ -230,7 +230,7 @@ struct CommandHintTests {
     @Test("A hidden action is omitted from its contextual group")
     func partiallyRetiredGroup() {
         var settings = AppSettings()
-        settings.commandUsageCounts[.moveWindowLeft] = 3
+        settings.commandUsageCounts[.moveWindowUp] = 3
 
         let hints = CommandHintCatalog.plateFooterHints(
             stageIndex: 0,
@@ -238,10 +238,10 @@ struct CommandHintTests {
             hasSelectedWindow: true,
             settings: settings
         )
-        let moveHint = hints.first(where: { $0.label == "Reorder window" })
+        let moveHint = hints.first(where: { $0.label == "Move window" })
 
-        #expect(moveHint?.actions == [.moveWindowRight])
-        #expect(moveHint?.shortcut == "→")
+        #expect(moveHint?.actions == [.moveWindowDown])
+        #expect(moveHint?.shortcut == "↓")
     }
 
     @Test("Key events map to hint usage without counting auto-repeat")

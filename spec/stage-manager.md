@@ -111,6 +111,9 @@ why the frontmost bundle ID has to be read from cache.
   overflow into an adjacent stage — below for the first stage, otherwise above —
   and the active stage follows the overflow. Deleting the only stage creates a
   fresh empty one.
+- `moveWindowUp` and `moveWindowDown` move the selected window to the adjacent
+  stage; the selection follows it, and the source stage remains even if it
+  empties.
 - `swapStageUp` and `swapStageDown` exchange the selected stage's position with
   its neighbor.
 
@@ -119,15 +122,13 @@ on plates.
 
 ## Pointer
 
-A window preview can be dragged within its own plate to reorder it, and a plate's
-handle can be dragged to reorder stages within the stack. A window never crosses
-plates: which desktop a window sits on is the user's to change, and Debut only
-observes it. A held plate travels by slot: it keeps its column and its full size
-while the rest of the stack reflows around its current destination, and committing
-the drag makes the moved stage the active one. Both paths emit diagnostic events —
-`window_reordered_by_drag` and `stage_reordered_by_drag` — the latter of which the
-E2E suite asserts against. Virtualized and GitHub-hosted macOS do not deliver
-synthetic drags; see docs/local-e2e.md.
+A window preview can be dragged onto another plate to move that window between
+stages, and a plate's handle can be dragged to reorder stages within the stack.
+A held plate travels by slot: it keeps its column and its full size while the rest
+of the stack reflows around its current destination, and committing the drag makes
+the moved stage the active one. Both paths emit diagnostic events — `window_moved_by_drag` and
+`stage_reordered_by_drag` — which the E2E suite asserts against. Virtualized and
+GitHub-hosted macOS do not deliver synthetic drags; see docs/local-e2e.md.
 
 ## Not yet implemented
 

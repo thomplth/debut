@@ -504,17 +504,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
 
         overlayWindow.onWindowMoved = {
-            [weak self] windowID, stageIndex, fromWindowIndex, toWindowIndex in
+            [weak self] windowID, fromIndex, fromWindowIndex, toIndex, toWindowIndex in
             guard let self, let ctrl = self.stageController else { return }
-            guard ctrl.reorderWindowByDrag(
+            guard ctrl.moveWindowByDrag(
                 windowID: windowID,
-                stageIndex: stageIndex,
+                fromStageIndex: fromIndex,
+                toStageIndex: toIndex,
                 toWindowIndex: toWindowIndex
             ) else { return }
-            self.diag.report("window_reordered_by_drag", details: [
+            self.diag.report("window_moved_by_drag", details: [
                 "windowID": "\(windowID)",
-                "stageIndex": "\(stageIndex)",
+                "fromStageIndex": "\(fromIndex)",
                 "fromWindowIndex": "\(fromWindowIndex)",
+                "toStageIndex": "\(toIndex)",
                 "toWindowIndex": "\(toWindowIndex)",
             ])
             // Let SwiftUI finish the drag transaction before replacing its root view.

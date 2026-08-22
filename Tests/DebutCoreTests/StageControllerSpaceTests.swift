@@ -7,7 +7,10 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     var desktops: Int
     var current: Int
     private(set) var switchRequests: [Int] = []
+    private(set) var moveRequests: [(windowID: CGWindowID, desktop: Int)] = []
     var windowDesktops: [CGWindowID: Int] = [:]
+    var moveSucceeds = true
+    var canMoveWindows = true
 
     init(desktops: Int = 3, current: Int = 0) {
         self.desktops = desktops
@@ -25,6 +28,13 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
         guard (0..<desktops).contains(index) else { return false }
         current = index
         return true
+    }
+
+    func moveWindow(windowID: CGWindowID, toDesktop: Int,
+                    completion: (@Sendable (Bool) -> Void)?) {
+        moveRequests.append((windowID, toDesktop))
+        if moveSucceeds { windowDesktops[windowID] = toDesktop }
+        completion?(moveSucceeds)
     }
 }
 
@@ -323,6 +333,84 @@ struct StageControllerSpaceTests {
         controller.desktopDidChange()
 
         #expect(!windowService.raisedWindowIDs.contains(55))
+    }
+
+    // A stage assignment that does not relocate the window is only a label: the window would
+    // stay visible on the desktop it started on, in every stage.
+    @Test("Assigning a window to another stage moves it to that desktop")
+    func dragMovesWindowToDesktop() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        let stageA = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.activateStage(id: stageA)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: stageA)
+
+        controller.moveWindowByDrag(windowID: 101, fromStageIndex: 0, toStageIndex: 1,
+                                    toWindowIndex: 0)
+
+        #expect(spaces.moveRequests.map(\.windowID) == [101])
+        #expect(spaces.moveRequests.map(\.desktop) == [1])
+    }
+
+    @Test("Reordering within a stage does not move the window between desktops")
+    func withinStageDoesNotMove() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        let stageA = controller.stageManager.stages[0].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: stageA)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toStageID: stageA)
+
+        controller.moveWindowByDrag(windowID: 202, fromStageIndex: 0, toStageIndex: 0,
+                                    toWindowIndex: 0)
+
+        #expect(spaces.moveRequests.isEmpty)
+    }
+
+    // The transport is a private-API bridge that fails by doing nothing. If it ever goes
+    // inert, a move that still updated the model would leave the plate on one stage and the
+    // window on another desktop, persisted, with nothing to correct it.
+    @Test("A cross-stage move is refused outright when the transport is unavailable")
+    func refusesMoveWithoutTransport() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.canMoveWindows = false
+        let (controller, _) = makeController(spaces: spaces)
+        let stageA = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.activateStage(id: stageA)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: stageA)
+
+        #expect(!controller.moveWindowByDrag(windowID: 101, fromStageIndex: 0, toStageIndex: 1,
+                                             toWindowIndex: 0))
+        #expect(spaces.moveRequests.isEmpty)
+        #expect(controller.stageManager.stageContainingWindow(windowID: 101) == stageA)
+    }
+
+    // Reordering inside one stage never touches a desktop, so it must survive the gate.
+    @Test("Reordering within a stage still works when the transport is unavailable")
+    func reordersWithoutTransport() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.canMoveWindows = false
+        let (controller, _) = makeController(spaces: spaces)
+        let stageA = controller.stageManager.stages[0].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: stageA)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toStageID: stageA)
+
+        #expect(controller.moveWindowByDrag(windowID: 202, fromStageIndex: 0, toStageIndex: 0,
+                                            toWindowIndex: 0))
+        #expect(controller.stageManager.stages[0].windows.first?.windowID == 202)
     }
 
     @Test("Missing desktops are added as stages")

@@ -147,13 +147,14 @@ struct PlateMotionTests {
     func snappedPreviewWaitsForCommittedLayout() {
         let request = WindowMoveRequest(
             windowID: 42,
-            stageIndex: 1,
+            fromStageIndex: 0,
             fromWindowIndex: 0,
+            toStageIndex: 1,
             toWindowIndex: 1
         )
         #expect(!PlateMotion.isWindowDropApplied(
             request,
-            to: WindowLayoutKey(stageWindowIDs: [[43], [42, 50, 51]])
+            to: WindowLayoutKey(stageWindowIDs: [[42, 43], [50, 51]])
         ))
         #expect(PlateMotion.isWindowDropApplied(
             request,
@@ -161,7 +162,7 @@ struct PlateMotionTests {
         ))
         #expect(!PlateMotion.isWindowDropApplied(
             request,
-            to: WindowLayoutKey(stageWindowIDs: [[42, 43], [50, 51]])
+            to: WindowLayoutKey(stageWindowIDs: [[43], [42, 50, 51]])
         ))
     }
 
@@ -468,29 +469,39 @@ struct PlateMotionTests {
     @Test("A pointer or drag target becomes the gradient focus")
     func interactionFocusPriority() {
         #expect(PlateMotion.focusedStageIndex(
-            active: 2, hovered: nil, dragTarget: nil, stageCount: 5
+            active: 2, hovered: nil, dragTarget: nil, retainedDragTarget: nil, stageCount: 5
         ) == 2)
         #expect(PlateMotion.focusedStageIndex(
-            active: 2, hovered: 4, dragTarget: nil, stageCount: 5
+            active: 2, hovered: 4, dragTarget: nil, retainedDragTarget: nil, stageCount: 5
         ) == 4)
         #expect(PlateMotion.focusedStageIndex(
-            active: 2, hovered: 4, dragTarget: 1, stageCount: 5
+            active: 2, hovered: 4, dragTarget: 1, retainedDragTarget: nil, stageCount: 5
+        ) == 1)
+    }
+
+    @Test("Cross-stage drag focus is retained through drop completion")
+    func retainedCrossStageDragFocus() {
+        #expect(PlateMotion.focusedStageIndex(
+            active: 0, hovered: nil, dragTarget: 1, retainedDragTarget: nil, stageCount: 2
+        ) == 1)
+        #expect(PlateMotion.focusedStageIndex(
+            active: 0, hovered: nil, dragTarget: nil, retainedDragTarget: 1, stageCount: 2
         ) == 1)
     }
 
     @Test("Focus candidates that outlived their stage are skipped")
     func staleFocusCandidatesAreIgnored() {
         #expect(PlateMotion.focusedStageIndex(
-            active: 1, hovered: 6, dragTarget: nil, stageCount: 4
+            active: 1, hovered: 6, dragTarget: nil, retainedDragTarget: nil, stageCount: 4
         ) == 1)
         #expect(PlateMotion.focusedStageIndex(
-            active: 1, hovered: 2, dragTarget: 9, stageCount: 4
+            active: 1, hovered: 2, dragTarget: 9, retainedDragTarget: nil, stageCount: 4
         ) == 2)
         #expect(PlateMotion.focusedStageIndex(
-            active: 1, hovered: -1, dragTarget: nil, stageCount: 4
+            active: 1, hovered: -1, dragTarget: nil, retainedDragTarget: nil, stageCount: 4
         ) == 1)
         #expect(PlateMotion.focusedStageIndex(
-            active: 7, hovered: nil, dragTarget: nil, stageCount: 4
+            active: 7, hovered: nil, dragTarget: nil, retainedDragTarget: nil, stageCount: 4
         ) == 3)
     }
 
@@ -502,6 +513,7 @@ struct PlateMotionTests {
                 active: 0,
                 hovered: 6,
                 dragTarget: nil,
+                retainedDragTarget: nil,
                 stageCount: 3
             ),
             plateHeight: 100,
@@ -640,11 +652,28 @@ struct PlateMotionTests {
         }
     }
 
-    @Test("Window drops allow only a changed position in the same stage")
+    @Test("Window drops allow reordered and cross-stage positions")
     func windowDropPolicy() {
-        #expect(!PlateInteraction.shouldMoveWindow(fromWindowIndex: 1, to: 1))
-        #expect(PlateInteraction.shouldMoveWindow(fromWindowIndex: 1, to: 2))
-        #expect(!PlateInteraction.shouldMoveWindow(fromWindowIndex: 1, to: nil))
+        #expect(!PlateInteraction.shouldMoveWindow(
+            fromStageIndex: 1,
+            fromWindowIndex: 1,
+            to: WindowDropTarget(stageIndex: 1, windowIndex: 1)
+        ))
+        #expect(PlateInteraction.shouldMoveWindow(
+            fromStageIndex: 1,
+            fromWindowIndex: 1,
+            to: WindowDropTarget(stageIndex: 1, windowIndex: 2)
+        ))
+        #expect(PlateInteraction.shouldMoveWindow(
+            fromStageIndex: 1,
+            fromWindowIndex: 1,
+            to: WindowDropTarget(stageIndex: 2, windowIndex: 0)
+        ))
+        #expect(!PlateInteraction.shouldMoveWindow(
+            fromStageIndex: 1,
+            fromWindowIndex: 1,
+            to: nil
+        ))
     }
 
     @Test("Window drop position ignores the dragged card in its source stage")
@@ -661,20 +690,20 @@ struct PlateMotionTests {
             WindowFrameID(stageIndex: 1, windowIndex: 1): CGRect(x: 130, y: 200, width: 90, height: 100),
         ]
 
-        #expect(PlateInteraction.windowDropIndex(
+        #expect(PlateInteraction.windowDropTarget(
             at: CGPoint(x: 300, y: 80),
             sourceStageIndex: 0,
             sourceWindowIndex: 0,
             plateFrames: plateFrames,
             windowFrames: windowFrames
-        ) == 2)
-        #expect(PlateInteraction.windowDropIndex(
+        ) == WindowDropTarget(stageIndex: 0, windowIndex: 2))
+        #expect(PlateInteraction.windowDropTarget(
             at: CGPoint(x: 125, y: 240),
             sourceStageIndex: 0,
             sourceWindowIndex: 0,
             plateFrames: plateFrames,
             windowFrames: windowFrames
-        ) == nil)
+        ) == WindowDropTarget(stageIndex: 1, windowIndex: 1))
     }
 
     @Test("Same-stage drag animates windows into their prospective MRU order")
@@ -684,7 +713,7 @@ struct PlateMotionTests {
             sourceStageIndex: 0,
             sourceWindowIndex: 0,
             location: .zero,
-            dropWindowIndex: 2
+            dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 2)
         )
 
         #expect(PlateMotion.windowDragOffset(
@@ -702,7 +731,7 @@ struct PlateMotionTests {
             sourceStageIndex: 0,
             sourceWindowIndex: 2,
             location: .zero,
-            dropWindowIndex: 0
+            dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 0)
         )
         #expect(PlateMotion.windowDragOffset(
             stageIndex: 0, windowIndex: 0, drag: reverseDrag, cardStride: 100
@@ -712,35 +741,79 @@ struct PlateMotionTests {
         ) == -200)
     }
 
-    @Test("Released preview snaps to the slot it was dropped on")
+    @Test("Cross-stage drag opens an insertion gap and closes the source gap")
+    func crossStageWindowDragOffsets() {
+        let drag = WindowDragState(
+            windowID: 42,
+            sourceStageIndex: 0,
+            sourceWindowIndex: 1,
+            location: .zero,
+            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 1)
+        )
+
+        #expect(PlateMotion.displayedWindowCounts(actual: [3, 2], drag: drag) == [2, 3])
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 0, windowIndex: 0, drag: drag, cardStride: 100
+        ) == 0)
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 0, windowIndex: 2, drag: drag, cardStride: 100
+        ) == -100)
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 1, windowIndex: 0, drag: drag, cardStride: 100
+        ) == 0)
+        #expect(PlateMotion.windowDragOffset(
+            stageIndex: 1, windowIndex: 1, drag: drag, cardStride: 100
+        ) == 100)
+        #expect(PlateMotion.windowGridCenterOffset(
+            stageIndex: 0, drag: drag, cardStride: 100
+        ) == 50)
+        #expect(PlateMotion.windowGridCenterOffset(
+            stageIndex: 1, drag: drag, cardStride: 100
+        ) == 0)
+        #expect(PlateMotion.windowGridCenterOffset(
+            stageIndex: 2, drag: drag, cardStride: 100
+        ) == 0)
+    }
+
+    @Test("Released preview snaps to same-stage, cross-stage, and empty-stage slots")
     func releasedPreviewDestination() {
         let frames = [
             WindowFrameID(stageIndex: 0, windowIndex: 0): CGRect(x: 20, y: 20, width: 80, height: 100),
             WindowFrameID(stageIndex: 0, windowIndex: 1): CGRect(x: 120, y: 20, width: 80, height: 100),
             WindowFrameID(stageIndex: 0, windowIndex: 2): CGRect(x: 220, y: 20, width: 80, height: 100),
+            WindowFrameID(stageIndex: 1, windowIndex: 0): CGRect(x: 20, y: 200, width: 80, height: 100),
+            WindowFrameID(stageIndex: 1, windowIndex: 1): CGRect(x: 120, y: 200, width: 80, height: 100),
+        ]
+        let plates = [
+            0: CGRect(x: 0, y: 0, width: 340, height: 160),
+            1: CGRect(x: 0, y: 180, width: 240, height: 160),
+            2: CGRect(x: 0, y: 360, width: 140, height: 160),
         ]
 
         #expect(PlateMotion.windowDropDestination(
             sourceStageIndex: 0,
             sourceWindowIndex: 0,
-            targetWindowIndex: 2,
+            target: WindowDropTarget(stageIndex: 0, windowIndex: 2),
             cardStride: 100,
+            plateFrames: plates,
             windowFrames: frames
         ) == CGPoint(x: 260, y: 70))
         #expect(PlateMotion.windowDropDestination(
             sourceStageIndex: 0,
-            sourceWindowIndex: 2,
-            targetWindowIndex: 0,
-            cardStride: 100,
-            windowFrames: frames
-        ) == CGPoint(x: 60, y: 70))
-        #expect(PlateMotion.windowDropDestination(
-            sourceStageIndex: 1,
             sourceWindowIndex: 0,
-            targetWindowIndex: 1,
+            target: WindowDropTarget(stageIndex: 1, windowIndex: 1),
             cardStride: 100,
+            plateFrames: plates,
             windowFrames: frames
-        ) == nil)
+        ) == CGPoint(x: 160, y: 250))
+        #expect(PlateMotion.windowDropDestination(
+            sourceStageIndex: 0,
+            sourceWindowIndex: 0,
+            target: WindowDropTarget(stageIndex: 2, windowIndex: 0),
+            cardStride: 100,
+            plateFrames: plates,
+            windowFrames: frames
+        ) == CGPoint(x: 70, y: 434))
     }
 
     @Test("A press without meaningful movement selects instead of starting a drag")
@@ -758,7 +831,7 @@ struct PlateMotionTests {
             sourceStageIndex: 1,
             sourceWindowIndex: 0,
             location: CGPoint(x: 100, y: 200),
-            dropWindowIndex: 3
+            dropTarget: WindowDropTarget(stageIndex: 2, windowIndex: 3)
         )
 
         let request = PlateInteraction.finishWindowDrag(&drag)
@@ -766,8 +839,9 @@ struct PlateMotionTests {
         #expect(drag == nil)
         #expect(request == WindowMoveRequest(
             windowID: 42,
-            stageIndex: 1,
+            fromStageIndex: 1,
             fromWindowIndex: 0,
+            toStageIndex: 2,
             toWindowIndex: 3
         ))
     }
@@ -861,6 +935,7 @@ struct PlateMotionTests {
                 active: 0,
                 hovered: nil,
                 dragTarget: destination,
+                retainedDragTarget: nil,
                 stageCount: stageCount
             ),
             plateHeight: 100,
