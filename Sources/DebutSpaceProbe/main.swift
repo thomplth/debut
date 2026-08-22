@@ -46,12 +46,13 @@ if arguments.first == "windows" {
     exit(0)
 }
 
-// The switch-speed setting is only observable against the live Dock: a unit test can assert
-// which velocity was posted, but not whether the Dock snapped or slid at that velocity.
-if let velocity = arguments.first.flatMap(Double.init) {
-    service.switchVelocity = velocity
+// The switch-duration setting is only observable against the live Dock: a unit test can
+// assert which samples were posted, but not whether the Dock actually drew them. Argument is
+// in milliseconds, matching the slider.
+if let milliseconds = arguments.first.flatMap(Double.init) {
+    service.switchDuration = milliseconds / 1000
 }
-print("switch velocity: \(service.switchVelocity)")
+print("switch duration: \(Int(service.switchDuration * 1000))ms")
 let desktops = service.userDesktops()
 print("desktops in order: \(desktops)")
 guard desktops.count >= 2 else { print("FATAL: need 2+ desktops"); exit(1) }

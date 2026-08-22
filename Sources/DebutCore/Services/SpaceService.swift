@@ -60,10 +60,17 @@ let kCGSEventGesture: Int64 = 29
 let kCGSEventDockControl: Int64 = 30
 let kIOHIDEventTypeDockSwipe: Int64 = 23
 let kCGSGesturePhaseBegan: Int64 = 1
+let kCGSGesturePhaseChanged: Int64 = 2
 let kCGSGesturePhaseEnded: Int64 = 4
 let kGestureMotionHorizontal: Int64 = 1
 
 private let kInstantSwitchProgress: Double = 2.0
+/// Only used when the switch duration is zero. Far above the band in which the Dock draws a
+/// transition at all, which is exactly the point: the desktop cuts rather than slides.
+private let kInstantSwitchVelocity: Double = 400
+/// Released at the end of a driven slide, where progress has already reached the target and
+/// the velocity only has to be enough to commit rather than rubber-band.
+private let kAnimatedReleaseVelocity: Double = 60
 
 // MARK: - Plan
 
@@ -110,9 +117,50 @@ extension SpaceSwitchDirection: Equatable {}
 
 enum DockSwipePhase {
     case began
+    case changed
     case ended
 
-    var raw: Int64 { self == .began ? kCGSGesturePhaseBegan : kCGSGesturePhaseEnded }
+    var raw: Int64 {
+        switch self {
+        case .began: kCGSGesturePhaseBegan
+        case .changed: kCGSGesturePhaseChanged
+        case .ended: kCGSGesturePhaseEnded
+        }
+    }
+}
+
+/// One frame of a driven swipe: how far into the gesture it is, and how far the desktop has
+/// travelled by then. Distances are unsigned; the direction is applied when the event is built.
+struct DockSwipeSample {
+    let delay: TimeInterval
+    let progress: Double
+}
+
+/// The progress schedule Debut shows the Dock to make a switch take a chosen length of time.
+///
+/// Without this, a switch is a Began+Ended pair and the Dock alone decides how long the
+/// transition takes — which for any velocity much above 80 is "no transition at all". Driving
+/// progress on a timer is what lets the setting be a duration in milliseconds instead of an
+/// opaque speed scalar that looked identical at every value.
+enum DockSwipeAnimation {
+
+    /// One sample per display frame. Finer sampling only posts events the Dock coalesces.
+    static let sampleRate: Double = 120
+
+    /// Samples for a single desktop of travel, easing out so the slide settles rather than
+    /// stopping dead. Empty for a non-positive duration, which is the instant path.
+    static func samples(duration: TimeInterval,
+                        sampleRate: Double = sampleRate) -> [DockSwipeSample] {
+        guard duration > 0, sampleRate > 0 else { return [] }
+
+        // Two samples minimum: one point is a flick, not a drag.
+        let count = max(2, Int((duration * sampleRate).rounded()))
+        return (1...count).map { step in
+            let fraction = Double(step) / Double(count)
+            return DockSwipeSample(delay: duration * fraction,
+                                   progress: 1 - pow(1 - fraction, 3))
+        }
+    }
 }
 
 enum DockSwipeEvent {
@@ -123,7 +171,8 @@ enum DockSwipeEvent {
     /// decides between snapping and animating.
     static func make(phase: DockSwipePhase,
                      direction: SpaceSwitchDirection,
-                     velocity: Double = AppSettings.defaultSpaceSwitchVelocity) -> CGEvent? {
+                     velocity: Double = kInstantSwitchVelocity,
+                     progress: Double = kInstantSwitchProgress) -> CGEvent? {
         guard let event = CGEvent(source: nil) else { return nil }
 
         event.setIntegerValueField(kCGSEventTypeField, value: kCGSEventDockControl)
@@ -138,9 +187,17 @@ enum DockSwipeEvent {
         event.setDoubleValueField(kCGEventGestureZoomDeltaX,
                                   value: Double(Float.leastNonzeroMagnitude))
 
-        if phase == .ended {
+        switch phase {
+        case .began:
+            break
+        case .changed:
+            // No velocity: a driven slide is a finger still on the glass, and the Dock only
+            // reads velocity when deciding what to do with the release.
             event.setDoubleValueField(kCGEventGestureSwipeProgress,
-                                      value: direction.sign * kInstantSwitchProgress)
+                                      value: direction.sign * progress)
+        case .ended:
+            event.setDoubleValueField(kCGEventGestureSwipeProgress,
+                                      value: direction.sign * progress)
             event.setDoubleValueField(kCGEventGestureSwipeVelocityX,
                                       value: direction.sign * velocity)
             event.setDoubleValueField(kCGEventGestureSwipeVelocityY, value: 0)
@@ -170,6 +227,55 @@ enum DockSwipeEvent {
             envelope.post(tap: .cgSessionEventTap)
         }
         return true
+    }
+
+    /// Posts one hop as a gesture whose progress Debut drives across `samples`, so the slide
+    /// takes as long as the samples say rather than as long as the Dock feels like.
+    ///
+    /// Blocks for the length of the animation, so it belongs off the main thread. `isCancelled`
+    /// is consulted between samples; a cancelled slide still Ends, because abandoning an open
+    /// gesture leaves the Dock rubber-banding on its own.
+    @discardableResult
+    static func postDrivenSwitch(direction: SpaceSwitchDirection,
+                                 samples: [DockSwipeSample],
+                                 isCancelled: () -> Bool = { false }) -> Bool {
+        guard let began = make(phase: .began, direction: direction, velocity: 0),
+              let beganEnvelope = makeEnvelope(),
+              let ended = make(phase: .ended, direction: direction,
+                               velocity: kAnimatedReleaseVelocity, progress: 1),
+              let endedEnvelope = makeEnvelope()
+        else { return false }
+
+        let start = DispatchTime.now()
+        began.post(tap: .cgSessionEventTap)
+        beganEnvelope.post(tap: .cgSessionEventTap)
+
+        for sample in samples.dropLast() {
+            guard !isCancelled() else { break }
+            wait(untilElapsed: sample.delay, since: start)
+            guard let changed = make(phase: .changed, direction: direction,
+                                     progress: sample.progress),
+                  let envelope = makeEnvelope()
+            else { continue }
+            changed.post(tap: .cgSessionEventTap)
+            envelope.post(tap: .cgSessionEventTap)
+        }
+
+        if !isCancelled(), let last = samples.last {
+            wait(untilElapsed: last.delay, since: start)
+        }
+        ended.post(tap: .cgSessionEventTap)
+        endedEnvelope.post(tap: .cgSessionEventTap)
+        return true
+    }
+
+    /// Sleeps until `elapsed` has passed since `start`, measured against the monotonic clock
+    /// so posting cost is absorbed rather than accumulated across samples.
+    private static func wait(untilElapsed elapsed: TimeInterval, since start: DispatchTime) {
+        let target = start.uptimeNanoseconds + UInt64(max(0, elapsed) * 1_000_000_000)
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard target > now else { return }
+        Thread.sleep(forTimeInterval: Double(target - now) / 1_000_000_000)
     }
 }
 
@@ -210,16 +316,25 @@ public extension SpaceSwitching {
 /// Reads and changes which macOS Space is showing, and which Space a window lives on.
 public final class SpaceService: SpaceSwitching {
 
-    /// How hard the forged swipe throws the desktop. Clamped here rather than only at the
-    /// slider, because a zero velocity posts a gesture the Dock resolves by rubber-banding.
-    public var switchVelocity: Double = AppSettings.defaultSpaceSwitchVelocity {
+    /// How long one desktop of travel takes. Clamped here rather than only at the slider,
+    /// because a settings file edited by hand could otherwise schedule samples into the past.
+    public var switchDuration: TimeInterval = AppSettings.defaultSpaceSwitchDuration {
         didSet {
-            switchVelocity = min(
-                max(switchVelocity, AppSettings.minimumSpaceSwitchVelocity),
-                AppSettings.maximumSpaceSwitchVelocity
+            switchDuration = min(
+                max(switchDuration, AppSettings.minimumSpaceSwitchDuration),
+                AppSettings.maximumSpaceSwitchDuration
             )
         }
     }
+
+    /// A driven slide blocks for its whole duration, and the main thread runs the event tap.
+    private let switchQueue = DispatchQueue(label: "com.thomplth.debut.space-switch")
+
+    /// Identifies the switch currently being drawn, so a newer one can cut it short instead
+    /// of queueing behind it — otherwise a quick run through several stages plays every
+    /// intermediate slide in full.
+    private let generationLock = NSLock()
+    private var switchGeneration = 0
 
     /// Confirming a move means re-reading the assignment until the window server catches up.
     /// That settles in single-digit milliseconds, but it is still a wait, and the main thread
@@ -320,10 +435,15 @@ public final class SpaceService: SpaceSwitching {
 
     // MARK: Switching
 
-    /// Switches the visible desktop by forging a high-velocity trackpad swipe.
+    /// Switches the visible desktop by forging a trackpad swipe.
     ///
-    /// Velocity is scaled by the number of steps so a long jump snaps straight to the target
-    /// rather than animating through each desktop on the way.
+    /// At a zero duration this is a single high-velocity flick per hop, which the Dock
+    /// resolves by cutting straight to the target. At any other duration Debut drives the
+    /// gesture's progress itself, and the switch takes `switchDuration` per desktop crossed.
+    ///
+    /// Returns whether the switch was started. A driven slide runs off the main thread, so
+    /// the desktop has not changed by the time this returns — callers wanting the new desktop
+    /// wait for `activeSpaceDidChangeNotification`, which they must do regardless.
     @discardableResult
     public func switchToDesktop(index target: Int) -> Bool {
         guard canSwitchSpaces else { return false }
@@ -332,13 +452,41 @@ public final class SpaceService: SpaceSwitching {
               let plan = SpaceSwitchPlan(from: current, to: target, desktopCount: desktops.count)
         else { return false }
 
-        let velocity = plan.velocity(base: switchVelocity)
-        for _ in 0..<plan.steps {
-            guard DockSwipeEvent.postSwitch(direction: plan.direction, velocity: velocity) else {
-                return false
+        let samples = DockSwipeAnimation.samples(duration: switchDuration)
+        guard !samples.isEmpty else {
+            let velocity = plan.velocity(base: kInstantSwitchVelocity)
+            for _ in 0..<plan.steps {
+                guard DockSwipeEvent.postSwitch(direction: plan.direction,
+                                                velocity: velocity) else { return false }
+            }
+            return true
+        }
+
+        // Progress saturates at one desktop per gesture, so a multi-desktop jump is that many
+        // driven hops rather than one gesture ramped further.
+        let generation = beginSwitch()
+        switchQueue.async { [self] in
+            for _ in 0..<plan.steps {
+                guard isCurrentSwitch(generation) else { return }
+                DockSwipeEvent.postDrivenSwitch(direction: plan.direction, samples: samples) {
+                    !isCurrentSwitch(generation)
+                }
             }
         }
         return true
+    }
+
+    private func beginSwitch() -> Int {
+        generationLock.lock()
+        defer { generationLock.unlock() }
+        switchGeneration += 1
+        return switchGeneration
+    }
+
+    private func isCurrentSwitch(_ generation: Int) -> Bool {
+        generationLock.lock()
+        defer { generationLock.unlock() }
+        return switchGeneration == generation
     }
 
     // MARK: Moving
