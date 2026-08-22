@@ -103,6 +103,34 @@ struct WindowDiscoveryServiceTests {
         #expect(desktopIndexes == [1: 0, 2: 2])
     }
 
+    // Dragging a window to another desktop activates no app, so the activation snapshot never
+    // fires and the assignment stayed stale until the user clicked the window — the move was
+    // invisible in Debut until then. A desktop change has to take its own snapshot.
+    @Test("A desktop refresh snapshots where every window now is")
+    func desktopRefreshSnapshotsDesktops() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1), liveWindow(2)]
+        windowService.allWindowIDList = [1, 2]
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        spaces.windowDesktops = [1: 0, 2: 2]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        var snapshot: RuntimeWindowSnapshot?
+        service.onDesktopsChanged = { snapshot = $0 }
+
+        service.refreshDesktopAssignments()
+
+        #expect(snapshot?.desktopIndexes == [1: 0, 2: 2])
+        #expect(snapshot?.liveWindows.map(\.windowID) == [1, 2])
+        // Nothing was activated, so naming a focused window would reorder a stage on a
+        // refresh that is only meant to answer "where is everything now".
+        #expect(snapshot?.focusedWindowID == nil)
+    }
+
     @Test("Startup reconcile places each window on the desktop it is actually on")
     func startupReconcilePlacesByDesktop() {
         let windowService = MockWindowService()

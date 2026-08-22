@@ -286,6 +286,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 }
             }
         }
+        discovery.onDesktopsChanged = { [weak self] snapshot in
+            DispatchQueue.main.async {
+                guard let self, let controller = self.stageController else { return }
+                let result = self.runtimeWindowReconciler.reconcile(
+                    snapshot,
+                    stageManager: &controller.stageManager
+                )
+                guard result.didMutate else { return }
+                self.diag.report("runtime_windows_reconciled", details: [
+                    "added": "\(result.addedCount)",
+                    "reassigned": "\(result.reassignedCount)",
+                    "trigger": "desktop_changed",
+                ])
+                self.reportAssignmentEvents(result.events, trigger: "desktop_changed")
+                self.debouncedSaver?.scheduleSave(controller.stageManager)
+            }
+        }
         discovery.onAppTerminated = { [weak self] ownerPID in
             DispatchQueue.main.async {
                 guard let self, let controller = self.stageController else { return }
@@ -343,7 +360,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     /// only needs the active stage adopted.
     @objc private func activeSpaceDidChange(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
-            self?.stageController?.desktopDidChange()
+            guard let self else { return }
+            self.stageController?.desktopDidChange()
+            // Moving a window between desktops activates no app, so without this the move is
+            // only noticed the next time the user clicks the window.
+            self.windowDiscovery?.refreshDesktopAssignments()
         }
     }
 
@@ -1021,8 +1042,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let client: any TelemetryClient = namespace.isEmpty || appID.isEmpty
             ? UnavailableTelemetryClient()
             : TelemetryDeckClient(namespace: namespace, appID: appID)
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Debut")
+        let support = DebutCore.applicationSupportDirectory
         let exporter = TelemetryExporter(
             client: client,
             queue: DiskTelemetryQueue(file: support.appendingPathComponent("telemetry-queue.json")),

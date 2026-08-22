@@ -21,6 +21,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onWindowTitleChanged: ((CGWindowID, String) -> Void)?
     public var onFrontmostAppChanged: ((String?) -> Void)?
     public var onAppActivated: ((RuntimeWindowSnapshot) -> Void)?
+    public var onDesktopsChanged: ((RuntimeWindowSnapshot) -> Void)?
     public var onAppTerminated: ((pid_t) -> Void)?
     public var excludedBundleIDs: Set<String> = []
     /// Stages are desktops, so every snapshot carries the desktop macOS reports for each
@@ -565,6 +566,24 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         // Move the focus observer to this app
         installFocusObserver(for: pid)
+    }
+
+    /// Re-reads which desktop every window is on.
+    ///
+    /// Activation was the only thing that asked, so a window the user dragged to another
+    /// desktop kept its old stage until they clicked it — the move was invisible in Debut
+    /// until then. Deliberately carries no focused window and registers no AX observers:
+    /// nothing was activated, and the only question being asked is where things are now.
+    public func refreshDesktopAssignments() {
+        let liveWindows = windowService.listWindows().filter {
+            !excludedBundleIDs.contains($0.ownerBundleID)
+        }
+        onDesktopsChanged?(RuntimeWindowSnapshot(
+            liveWindows: liveWindows,
+            allWindowIDs: windowService.listAllWindowIDs(),
+            unarmedWindowIDs: unarmedWindowIDs,
+            desktopIndexes: desktopIndexes(for: liveWindows)
+        ))
     }
 
     func handleAppActivation(_ app: AppInfo) {
