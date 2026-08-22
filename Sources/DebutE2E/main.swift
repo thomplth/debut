@@ -16,6 +16,8 @@ let skipsSyntheticDrags = isGitHubHosted || skipsVirtualizedDrags
 let hostedDragTests: Set<String> = [
     "Dragging the revealed handle reorders the stage",
     "A reverse handle drag restores the original stage order",
+    "Dropping a window updates the source and destination stage models",
+    "The refreshed destination plate supports an immediate reverse drag",
 ]
 
 // Disposable runners tell the app to skip live capture, so these assertions can only ever see
@@ -279,6 +281,62 @@ func platePoint(
     return CGPoint(
         x: center.x + ((relativeX - 0.5) * width + xOffset) * scale,
         y: center.y
+    )
+}
+
+func windowCenter(
+    stageIndex: Int,
+    windowIndex: Int,
+    windowCounts: [Int],
+    activeStageIndex: Int,
+    inactiveScale: CGFloat
+) -> CGPoint? {
+    guard windowCounts.indices.contains(stageIndex),
+          windowCounts.indices.contains(activeStageIndex),
+          (0..<windowCounts[stageIndex]).contains(windowIndex)
+    else { return nil }
+
+    let screen = CGDisplayBounds(CGMainDisplayID())
+    let thumbnail = PlateConstants.thumbnailSize(
+        forWindowCount: windowCounts.max() ?? 0,
+        screenWidth: screen.width
+    )
+    let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
+    let layoutScale: (Int) -> CGFloat = { $0 == activeStageIndex ? 1 : inactiveScale }
+    let topWithinLayout: (Int) -> CGFloat = { index in
+        (0..<index).reduce(0) { partial, precedingIndex in
+            partial + plateHeight * layoutScale(precedingIndex) + PlateConstants.stageSpacing
+        }
+    }
+    let layoutOffset = screen.midY
+        - topWithinLayout(activeStageIndex)
+        - plateHeight / 2
+    // Window hit testing is expressed in the overlay window's screen space,
+    // unlike drag destinations, which use the named SwiftUI coordinate space.
+    let center = CGPoint(
+        x: screen.midX,
+        y: layoutOffset
+            + topWithinLayout(stageIndex)
+            + plateHeight * layoutScale(stageIndex) / 2
+    )
+    let plateWidth = PlateConstants.plateWidth(
+        forWindowCount: windowCounts[stageIndex],
+        thumbnailWidth: thumbnail.width
+    )
+    let scale: CGFloat = stageIndex == activeStageIndex ? 1 : inactiveScale
+    let windowStride = thumbnail.width
+        + PlateConstants.windowCardExtraWidth
+        + PlateConstants.windowSpacing
+    let unscaledX = PlateConstants.padding
+        + PlateConstants.windowCardPadding
+        + thumbnail.width / 2
+        + CGFloat(windowIndex) * windowStride
+    let unscaledY = PlateConstants.topPadding
+        + PlateConstants.windowCardPadding
+        + thumbnail.height / 2
+    return CGPoint(
+        x: center.x + (unscaledX - plateWidth / 2) * scale,
+        y: center.y + (unscaledY - plateHeight / 2) * scale
     )
 }
 
@@ -841,8 +899,8 @@ test("Clicking a window card commits the pointer selection") {
     return false
 }
 
-// --- 10. Stage handle drag ---
-header("10. Only the revealed handle reorders a stage")
+// --- 10. Window-drop plate refresh ---
+header("10. Window drop refreshes both plates immediately")
 let originalDropState = readState()
 let originalStageCount = Int(originalDropState["stageCount"] ?? "") ?? 0
 let originalWindowCounts = stageWindowCounts(in: originalDropState)
@@ -869,6 +927,7 @@ let preparedDropState = readState()
 let preparedWindowCounts = stageWindowCounts(in: preparedDropState)
 let destinationStageIndex = Int(preparedDropState["selectedStageIndex"] ?? "") ?? -1
 let sourceStageIndex = destinationStageIndex - 1
+let moveEventCount = readEvents().filter { $0["event"] == "window_moved_by_drag" }.count
 info("  Original drop state: stages=\(originalStageCount), windows=\(originalWindowCounts)")
 info("  Prepared drop state: active=\(destinationStageIndex), windows=\(preparedWindowCounts)")
 
@@ -1004,6 +1063,79 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
     }
 } else {
     fail("Could not calculate the stage-handle drag path")
+}
+
+postMouseMove(to: neutralPointerLocation)
+wait(0.3)
+
+if preparedWindowCounts.indices.contains(sourceStageIndex),
+   preparedWindowCounts.indices.contains(destinationStageIndex),
+   let sourcePoint = windowCenter(
+        stageIndex: sourceStageIndex,
+        windowIndex: 0,
+        windowCounts: preparedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
+   ),
+   let destinationPoint = plateCenter(
+        stageIndex: destinationStageIndex,
+        windowCounts: preparedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
+   ) {
+    info("  Drag path: \(sourcePoint) -> \(destinationPoint)")
+    postMouseDrag(from: sourcePoint, to: destinationPoint)
+    for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
+        if readEvents().filter({ $0["event"] == "window_moved_by_drag" }).count > moveEventCount {
+            break
+        }
+        wait(0.1)
+    }
+
+    let movedWindowCounts = stageWindowCounts(in: readState())
+    info("  State after drop: windows=\(movedWindowCounts)")
+    let _ = takeScreenshot("11_window_drop_refreshed")
+    test("Dropping a window updates the source and destination stage models") {
+        readEvents().filter { $0["event"] == "window_moved_by_drag" }.count > moveEventCount
+            && movedWindowCounts.indices.contains(sourceStageIndex)
+            && movedWindowCounts.indices.contains(destinationStageIndex)
+            && movedWindowCounts[sourceStageIndex] == preparedWindowCounts[sourceStageIndex] - 1
+            && movedWindowCounts[destinationStageIndex] == 1
+    }
+
+    if let returnedWindowPoint = windowCenter(
+        stageIndex: destinationStageIndex,
+        windowIndex: 0,
+        windowCounts: movedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
+    ), let returnedStagePoint = plateCenter(
+        stageIndex: sourceStageIndex,
+        windowCounts: movedWindowCounts,
+        activeStageIndex: destinationStageIndex,
+        inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
+    ) {
+        info("  Reverse drag path: \(returnedWindowPoint) -> \(returnedStagePoint)")
+        postMouseDrag(from: returnedWindowPoint, to: returnedStagePoint)
+        for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
+            if readEvents().filter({ $0["event"] == "window_moved_by_drag" }).count > moveEventCount + 1 {
+                break
+            }
+            wait(0.1)
+        }
+        test("The refreshed destination plate supports an immediate reverse drag") {
+            readEvents().filter { $0["event"] == "window_moved_by_drag" }.count > moveEventCount + 1
+                && stageWindowCounts(in: readState()) == preparedWindowCounts
+        }
+    } else {
+        if skipsSyntheticDrags {
+            skipDragTest("The refreshed destination plate supports an immediate reverse drag")
+        } else {
+            fail("Could not calculate the reverse window-drop path")
+        }
+    }
+} else {
+    fail("Could not calculate the window-drop path")
 }
 
 if stageWindowCounts(in: readState()).count == originalStageCount + 1 {
