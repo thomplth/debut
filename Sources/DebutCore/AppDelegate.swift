@@ -517,7 +517,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 toStageIndex: toIndex,
                 toWindowIndex: toWindowIndex
             ) else { return }
-            self.diag.report("window_moved_by_drag", details: [
+            self.diag.report("window_move_previewed_by_drag", level: .transient, details: [
                 "windowID": "\(windowID)",
                 "fromStageIndex": "\(fromIndex)",
                 "fromWindowIndex": "\(fromWindowIndex)",
@@ -579,7 +579,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let display = overlayDisplay(focusedWindowFrame: stageController.focusedWindowFrame)
         overlayWindow.targetScreenFrame = display?.frame
         let vm = OverlayViewModel(
-            stageManager: stageController.stageManager,
+            stageManager: stageController.overlayStageManager,
             activeStageIndex: stageController.selectedStageIndex,
             selectedWindowIndex: stageController.selectedWindowIndex,
             windowPreviews: stageController.windowPreviews,
@@ -683,7 +683,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let display = overlayDisplay(focusedWindowFrame: stageController.focusedWindowFrame)
         overlayWindow.targetScreenFrame = display?.frame
         let vm = OverlayViewModel(
-            stageManager: stageController.stageManager,
+            stageManager: stageController.overlayStageManager,
             activeStageIndex: stageController.selectedStageIndex,
             selectedWindowIndex: stageController.selectedWindowIndex,
             windowPreviews: stageController.windowPreviews,

@@ -990,7 +990,7 @@ let preparedWindowCounts = stageWindowCounts(in: preparedDropState)
 // Plate geometry scales around whichever stage is selected, and nothing selects the
 // destination for us now that it is not freshly created.
 let plateActiveStageIndex = Int(preparedDropState["selectedStageIndex"] ?? "") ?? 0
-let moveEventCount = readEvents().filter { $0["event"] == "window_moved_by_drag" }.count
+let moveEventCount = readEvents().filter { $0["event"] == "window_move_previewed_by_drag" }.count
 info("  Original drop state: stages=\(originalStageCount), windows=\(originalWindowCounts)")
 info("  Drop fixture: source=\(sourceStageIndex), destination=\(destinationStageIndex), windows=\(preparedWindowCounts)")
 
@@ -1031,7 +1031,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
     info("  Drag path: \(sourcePoint) -> \(destinationPoint)")
     postMouseDrag(from: sourcePoint, to: destinationPoint)
     for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
-        if readEvents().filter({ $0["event"] == "window_moved_by_drag" }).count > moveEventCount {
+        if readEvents().filter({ $0["event"] == "window_move_previewed_by_drag" }).count > moveEventCount {
             break
         }
         wait(0.1)
@@ -1041,7 +1041,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
     info("  State after drop: windows=\(movedWindowCounts)")
     let _ = takeScreenshot("11_window_drop_refreshed")
     test("Dropping a window updates the source and destination stage models") {
-        readEvents().filter { $0["event"] == "window_moved_by_drag" }.count > moveEventCount
+        readEvents().filter { $0["event"] == "window_move_previewed_by_drag" }.count > moveEventCount
             && movedWindowCounts.indices.contains(sourceStageIndex)
             && movedWindowCounts.indices.contains(destinationStageIndex)
             && movedWindowCounts[sourceStageIndex] == preparedWindowCounts[sourceStageIndex] - 1
@@ -1063,13 +1063,13 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         info("  Reverse drag path: \(returnedWindowPoint) -> \(returnedStagePoint)")
         postMouseDrag(from: returnedWindowPoint, to: returnedStagePoint)
         for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
-            if readEvents().filter({ $0["event"] == "window_moved_by_drag" }).count > moveEventCount + 1 {
+            if readEvents().filter({ $0["event"] == "window_move_previewed_by_drag" }).count > moveEventCount + 1 {
                 break
             }
             wait(0.1)
         }
         test("The refreshed destination plate supports an immediate reverse drag") {
-            readEvents().filter { $0["event"] == "window_moved_by_drag" }.count > moveEventCount + 1
+            readEvents().filter { $0["event"] == "window_move_previewed_by_drag" }.count > moveEventCount + 1
                 && stageWindowCounts(in: readState()) == preparedWindowCounts
         }
     } else {
@@ -1157,17 +1157,30 @@ if keyboardMoveStageCount < 2 {
         postKeyDown(keyCode: CGKeyCode(kVK_DownArrow), flags: [.maskCommand])
         wait(1.0)
 
-        let moveEvents = readEvents().filter { $0["event"] == "window_moved_by_key" }
-        let afterCounts = stageWindowCounts(in: readState())
-        info("  After the keyboard move: windows=\(afterCounts)")
+        let previewEvents = readEvents().filter { $0["event"] == "window_moved_by_key" }
+        let previewCounts = stageWindowCounts(in: readState())
+        let waitedForCommit = previewEvents.count == movesBefore
+        info("  Before Cmd release: windows=\(previewCounts), committed=\(!waitedForCommit)")
         let _ = takeScreenshot("12_keyboard_window_move")
 
+        postFlagsChanged(flags: [])
+        for _ in 0..<30 {
+            if readEvents().filter({ $0["event"] == "window_moved_by_key" }).count > movesBefore {
+                break
+            }
+            wait(0.1)
+        }
+
+        let moveEvents = readEvents().filter { $0["event"] == "window_moved_by_key" }
+        let committedCounts = stageWindowCounts(in: readState())
         test("The keyboard move is reported and lands the window where the model says") {
             originSelected
+                && waitedForCommit
                 && moveEvents.count > movesBefore
-                && afterCounts.indices.contains(originStage + 1)
-                && afterCounts[originStage] == beforeCounts[originStage] - 1
-                && afterCounts[originStage + 1] == beforeCounts[originStage + 1] + 1
+                && previewCounts == committedCounts
+                && committedCounts.indices.contains(originStage + 1)
+                && committedCounts[originStage] == beforeCounts[originStage] - 1
+                && committedCounts[originStage + 1] == beforeCounts[originStage + 1] + 1
         }
 
         test("A keyboard move puts the window on the next stage's desktop") {
@@ -1179,9 +1192,12 @@ if keyboardMoveStageCount < 2 {
         }
 
         // Put it back so later sections see the stage layout they were written against.
+        postFlagsChanged(flags: [.maskCommand])
+        wait(0.1)
+        postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+        wait(0.8)
         postKeyDown(keyCode: CGKeyCode(kVK_UpArrow), flags: [.maskCommand])
-        wait(1.0)
-        postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+        wait(0.2)
         postFlagsChanged(flags: [])
         wait(0.5)
 
