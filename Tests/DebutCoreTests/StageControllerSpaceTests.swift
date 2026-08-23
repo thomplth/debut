@@ -11,6 +11,8 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     var windowDesktops: [CGWindowID: Int] = [:]
     var moveSucceeds = true
     var canMoveWindows = true
+    var completesMovesImmediately = true
+    private var pendingMoveCompletions: [(@Sendable () -> Void)] = []
 
     init(desktops: Int = 3, current: Int = 0) {
         self.desktops = desktops
@@ -33,8 +35,26 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     func moveWindow(windowID: CGWindowID, toDesktop: Int,
                     completion: (@Sendable (Bool) -> Void)?) {
         moveRequests.append((windowID, toDesktop))
-        if moveSucceeds { windowDesktops[windowID] = toDesktop }
-        completion?(moveSucceeds)
+        let finish: @Sendable () -> Void = { [self] in
+            if moveSucceeds { windowDesktops[windowID] = toDesktop }
+            completion?(moveSucceeds)
+        }
+        if completesMovesImmediately {
+            finish()
+        } else {
+            pendingMoveCompletions.append(finish)
+        }
+    }
+
+    func completePendingMoves() {
+        let completions = pendingMoveCompletions
+        pendingMoveCompletions.removeAll()
+        completions.forEach { $0() }
+    }
+
+    func completeNextMove() {
+        guard !pendingMoveCompletions.isEmpty else { return }
+        pendingMoveCompletions.removeFirst()()
     }
 }
 
@@ -421,8 +441,10 @@ struct StageControllerSpaceTests {
     }
 
     @Test("Arrow-key moves reach the window server only when the session commits")
+    @MainActor
     func keyboardMoveWaitsForCommit() {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.completesMovesImmediately = false
         let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
         let stageA = controller.stageManager.stages[0].id
         controller.stageManager.createStage(position: .below)
@@ -442,8 +464,64 @@ struct StageControllerSpaceTests {
 
         #expect(spaces.moveRequests.map(\.windowID) == [101])
         #expect(spaces.moveRequests.map(\.desktop) == [1])
+        #expect(spaces.switchRequests.isEmpty)
+        #expect(controller.isStageManagerVisible)
         #expect(controller.stageManager.stageContainingWindow(windowID: 101)
                 == controller.stageManager.stages[1].id)
+
+        spaces.completePendingMoves()
+
+        #expect(spaces.switchRequests == [1])
+        #expect(!controller.isStageManagerVisible)
+    }
+
+    @Test("Stage focus waits for every committed window move")
+    @MainActor
+    func stageFocusWaitsForEveryWindowMove() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.completesMovesImmediately = false
+        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
+        let stageA = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.activateStage(id: stageA)
+        for windowID in [CGWindowID(101), 202] {
+            controller.stageManager.addWindow(
+                StageWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.\(windowID)",
+                    ownerName: "App",
+                    windowTitle: "Window"
+                ),
+                toStageID: stageA
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(controller.moveWindowByDrag(
+            windowID: 101,
+            fromStageIndex: 0,
+            toStageIndex: 1,
+            toWindowIndex: 0
+        ))
+        #expect(controller.moveWindowByDrag(
+            windowID: 202,
+            fromStageIndex: 0,
+            toStageIndex: 1,
+            toWindowIndex: 1
+        ))
+        controller.jumpToStage(index: 1)
+
+        keyboardService.simulateEvent(.cmdRelease)
+        #expect(spaces.moveRequests.map(\.windowID) == [101, 202])
+        #expect(spaces.switchRequests.isEmpty)
+
+        spaces.completeNextMove()
+        #expect(spaces.switchRequests.isEmpty)
+        #expect(controller.isStageManagerVisible)
+
+        spaces.completeNextMove()
+        #expect(spaces.switchRequests == [1])
+        #expect(!controller.isStageManagerVisible)
     }
 
     @Test("Reordering within a stage does not move the window between desktops")
