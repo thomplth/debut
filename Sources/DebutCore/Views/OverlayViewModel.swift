@@ -44,8 +44,10 @@ public struct OverlayViewModel: Sendable {
         guard appearance.shouldShowCommandHint(for: .nextDisplayStack),
               let combo = appearance.keyBindings.combo(for: .nextDisplayStack)
         else { return "" }
-        return "⌘ " + combo.commandHintDisplayString
+        return combo.commandHintDisplayString
     }
+
+    public var displayStackShortcutSpacing: CGFloat { 3.5 }
 
     public var displayStackIndicatorTopPadding: CGFloat {
         max(0, displaySafeAreaTopInset) + 18
