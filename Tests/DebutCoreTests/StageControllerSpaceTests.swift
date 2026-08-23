@@ -422,4 +422,62 @@ struct StageControllerSpaceTests {
 
         #expect(controller.stageManager.stages.count == 4)
     }
+
+    // Reconciling only at launch means a desktop added from Mission Control is invisible for
+    // the rest of the session: the stage list stops equalling the desktop list, and every
+    // window on the new desktop reports an index past the end of the stage array. Debut cannot
+    // ask to be relaunched, so the notification that already tells it the Space changed has to
+    // recheck the shape of the desktop list too.
+    @Test("A desktop added while Debut runs becomes a stage")
+    func desktopChangeGrowsTheStageList() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileStagesWithDesktops()
+
+        spaces.desktops = 4
+        controller.desktopDidChange()
+
+        #expect(controller.stageManager.stages.count == 4)
+    }
+
+    @Test("A desktop removed while Debut runs stops being a stage")
+    func desktopChangeShrinksTheStageList() {
+        let spaces = MockSpaceSwitcher(desktops: 4, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileStagesWithDesktops()
+
+        spaces.desktops = 2
+        controller.desktopDidChange()
+
+        #expect(controller.stageManager.stages.count == 2)
+    }
+
+    // A window server that answers "no desktops" is answered with silence: the stage list is
+    // left alone, which is right, but the caller cannot tell that apart from a host that
+    // genuinely has one desktop. E2E caught Debut launching with one stage against three real
+    // desktops and there was nothing in the log to say which step had declined.
+    @Test("A reconcile that cannot see any desktop reports that it refused")
+    func refusalIsObservable() {
+        var manager = StageManager()
+        manager.createStage(position: .below)
+
+        let outcome = StageController.reconcileStages(&manager, desktopCount: 0)
+
+        #expect(outcome.refused)
+        #expect(outcome.stagesBefore == 2)
+        #expect(outcome.stagesAfter == 2)
+        #expect(manager.stages.count == 2)
+    }
+
+    @Test("A reconcile reports the desktop count it acted on")
+    func reconciliationReportsWhatItSaw() {
+        var manager = StageManager()
+
+        let outcome = StageController.reconcileStages(&manager, desktopCount: 3)
+
+        #expect(!outcome.refused)
+        #expect(outcome.desktopCount == 3)
+        #expect(outcome.stagesBefore == 1)
+        #expect(outcome.stagesAfter == 3)
+    }
 }

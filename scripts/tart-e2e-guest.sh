@@ -181,6 +181,12 @@ as_console open -na TextEdit "$FIXTURE_DIR/one.txt"
 as_console open -na TextEdit "$FIXTURE_DIR/two.txt"
 wait_for_fixture_apps
 
+# A freshly cloned VM logs in with one desktop, and a stage is a desktop, so without this the
+# suite cannot switch a stage or move a window between two. Debut builds its stage list at
+# launch, so the desktops have to exist first.
+echo "Provisioning desktops so stages have somewhere to be..."
+as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 3
+
 echo "Launching Debut in the guest Aqua session..."
 as_console open "$APP_PATH"
 wait_for_debut_ready
