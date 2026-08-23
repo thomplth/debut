@@ -63,6 +63,17 @@ struct ScreenshotTests {
         return frames
     }
 
+    private func renderCommandHintFrames<V: View>(_ view: V, size: NSSize) -> [String: CGRect] {
+        var frames: [String: CGRect] = [:]
+        let rootView = view
+            .frame(width: size.width, height: size.height)
+            .onPreferenceChange(CommandHintFramePreferenceKey.self) { frames = $0 }
+        let hostingView = NSHostingView(rootView: rootView)
+        hostingView.frame = NSRect(origin: .zero, size: size)
+        hostingView.layoutSubtreeIfNeeded()
+        return frames
+    }
+
     private func saveImage(_ image: NSImage, name: String) throws {
         let url = Self.outputDir.appendingPathComponent("\(name).png")
         guard let tiff = image.tiffRepresentation,
@@ -146,6 +157,32 @@ struct ScreenshotTests {
         }
         try saveImage(img, name: "05_selection_state")
         #expect(vm.selectedWindowIndex == 2)
+    }
+
+    @Test("Leading command hints sit fully outside their plates")
+    func leadingCommandHintsSitOutsidePlates() throws {
+        var appearance = AppSettings()
+        appearance.inactivePlateScale = 1
+        let sample = makeSampleViewModel(
+            stageCount: 3,
+            windowsPerStage: [2, 2, 2],
+            activeIndex: 1
+        )
+        let vm = OverlayViewModel(
+            stageManager: sample.stageManager,
+            activeStageIndex: 1,
+            selectedWindowIndex: 0,
+            appearance: appearance
+        )
+        let size = NSSize(width: 1200, height: 600)
+        let view = OverlaySwiftUIView(viewModel: vm)
+        let plates = renderPlateFrames(view, size: size)
+        let hints = renderCommandHintFrames(view, size: size)
+        let plate = try #require(plates[0])
+        let hint = try #require(hints["jumpToStage1:previousStage"])
+
+        let gap = plate.minX - hint.maxX
+        #expect(abs(gap - PlateConstants.commandHintLeadingGap) < 0.5)
     }
 
     @Test("Dragging a window preview does not shift the plate stack")

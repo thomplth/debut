@@ -1330,19 +1330,19 @@ test("A persisted custom shortcut replaces Command-Tab activation") {
 func hintLayoutIsContextual() -> Bool {
     guard let layout = readEvents().last(where: { $0["event"] == "command_hints_laid_out" }),
           let footerHintCount = Int(layout["footerHintCount"] ?? ""),
-          let footerIconCount = Int(layout["footerIconCount"] ?? ""),
+          let footerTextLabelCount = Int(layout["footerTextLabelCount"] ?? ""),
           let stageLeadingHintCount = Int(layout["stageLeadingHintCount"] ?? "")
     else { return false }
     let windowCount = Int(readState()["windowsInActiveStage"] ?? "0") ?? 0
     return stageLeadingHintCount > 0
         && footerHintCount > 0
-        && footerIconCount == footerHintCount
+        && footerTextLabelCount == footerHintCount
         && (windowCount < 2 || layout["nextWindowIndex"] != "none")
 }
 
 // The overlay flushes its layout diagnostics asynchronously, so poll instead of
 // reading once after a fixed wait.
-test("Command hints use contextual placements and purpose icons") {
+test("Command hints use contextual placements and text labels") {
     for _ in 0..<30 where !hintLayoutIsContextual() {
         wait(0.1)
     }

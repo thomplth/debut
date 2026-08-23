@@ -1018,65 +1018,71 @@ public struct OverlaySwiftUIView: View {
                         )
                         let footerHints = isActive ? activeFooterHints : []
 
-                        PlateSwiftUIView(
-                            plate: plate,
-                            selectedWindowIndex: selectedWindowIndex,
-                            thumbnailWidth: tSize.width,
-                            thumbnailHeight: tSize.height,
-                            appearance: viewModel.appearance,
-                            wallpaperLuminance: viewModel.wallpaperLuminance,
-                            stageNumberHint: stageNumberHint,
-                            footerHints: footerHints,
-                            windowDrag: $windowDrag,
-                            layoutWindowDrag: layoutWindowDrag,
-                            settlingWindowID: settlingWindowDrop?.request.windowID,
-                            plateFrames: $plateFrames,
-                            windowFrames: $windowFrames,
-                            stageIndex: index,
-                            onPointerSelectionChanged: { selection, isHovering, location in
-                                if isHovering && !pointerMovementGate.observe(at: location) {
-                                    return
+                        HStack(spacing: PlateConstants.commandHintLeadingGap) {
+                            if let stageNumberHint {
+                                CommandHintStrip(hints: [stageNumberHint])
+                            }
+                            PlateSwiftUIView(
+                                plate: plate,
+                                selectedWindowIndex: selectedWindowIndex,
+                                thumbnailWidth: tSize.width,
+                                thumbnailHeight: tSize.height,
+                                appearance: viewModel.appearance,
+                                wallpaperLuminance: viewModel.wallpaperLuminance,
+                                footerHints: footerHints,
+                                windowDrag: $windowDrag,
+                                layoutWindowDrag: layoutWindowDrag,
+                                settlingWindowID: settlingWindowDrop?.request.windowID,
+                                plateFrames: $plateFrames,
+                                windowFrames: $windowFrames,
+                                stageIndex: index,
+                                onPointerSelectionChanged: { selection, isHovering, location in
+                                    if isHovering && !pointerMovementGate.observe(at: location) {
+                                        return
+                                    }
+                                    let nextSelection = PlateInteraction.pointerSelection(
+                                        current: pointerSelection,
+                                        target: selection,
+                                        isHovering: isHovering
+                                    )
+                                    guard nextSelection != pointerSelection else { return }
+                                    pointerSelection = nextSelection
+                                    onPointerSelectionChanged?(
+                                        nextSelection?.stageIndex,
+                                        nextSelection?.windowIndex
+                                    )
+                                },
+                                onWindowSelected: onWindowSelected,
+                                onWindowDropRequested: { request in
+                                    finishWindowDrop(
+                                        request,
+                                        transition: windowReorderTransition,
+                                        cardStride: tSize.width
+                                            + PlateConstants.windowCardExtraWidth
+                                            + PlateConstants.windowSpacing
+                                    )
                                 }
-                                let nextSelection = PlateInteraction.pointerSelection(
-                                    current: pointerSelection,
-                                    target: selection,
-                                    isHovering: isHovering
-                                )
-                                guard nextSelection != pointerSelection else { return }
-                                pointerSelection = nextSelection
-                                onPointerSelectionChanged?(
-                                    nextSelection?.stageIndex,
-                                    nextSelection?.windowIndex
-                                )
-                            },
-                            onWindowSelected: onWindowSelected,
-                            onWindowDropRequested: { request in
-                                finishWindowDrop(
-                                    request,
-                                    transition: windowReorderTransition,
-                                    cardStride: tSize.width
-                                        + PlateConstants.windowCardExtraWidth
-                                        + PlateConstants.windowSpacing
+                            )
+                            .frame(width: plateWidth, height: pHeight)
+                            .background {
+                                PlateSurfaceView(
+                                    stageIndex: index,
+                                    size: CGSize(width: plateWidth, height: pHeight),
+                                    cornerRadius: CGFloat(viewModel.appearance.plateCornerRadius),
+                                    appearance: viewModel.appearance
                                 )
                             }
-                        )
-                        .frame(width: plateWidth, height: pHeight)
-                        .background {
-                            PlateSurfaceView(
-                                stageIndex: index,
-                                size: CGSize(width: plateWidth, height: pHeight),
-                                cornerRadius: CGFloat(viewModel.appearance.plateCornerRadius),
-                                appearance: viewModel.appearance
+                            .background(
+                                GeometryReader { plateGeo in
+                                    Color.clear.preference(
+                                        key: PlateFramePreferenceKey.self,
+                                        value: [index: plateGeo.frame(in: .named("overlay"))]
+                                    )
+                                }
                             )
                         }
-                        .background(
-                            GeometryReader { plateGeo in
-                                Color.clear.preference(
-                                    key: PlateFramePreferenceKey.self,
-                                    value: [index: plateGeo.frame(in: .named("overlay"))]
-                                )
-                            }
-                        )
+                        .fixedSize(horizontal: true, vertical: false)
+                        .frame(width: plateWidth, height: pHeight, alignment: .trailing)
                         .scaleEffect(scale)
                         .shadow(
                             color: .black.opacity(lift.shadowOpacity),
@@ -1102,7 +1108,7 @@ public struct OverlaySwiftUIView: View {
                                 Text("⌘")
                                 Text(viewModel.displayStackShortcut)
                             }
-                            .modifier(CommandHintTextStyle())
+                            .font(.system(.caption, design: .monospaced, weight: .semibold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
                             .background(.black.opacity(0.18), in: Capsule())
@@ -1365,7 +1371,6 @@ struct PlateSwiftUIView: View {
     let thumbnailHeight: CGFloat
     let appearance: AppSettings
     let wallpaperLuminance: Double?
-    let stageNumberHint: CommandHintPresentation?
     let footerHints: [CommandHintPresentation]
     @Binding var windowDrag: WindowDragState?
     let layoutWindowDrag: WindowDragState?
@@ -1486,14 +1491,6 @@ struct PlateSwiftUIView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .overlay(alignment: .leading) {
-            if let stageNumberHint {
-                CommandHintStrip(hints: [stageNumberHint])
-                    .alignmentGuide(.leading) { dimensions in
-                        dimensions[.trailing] + PlateConstants.commandHintLeadingGap
-                    }
-            }
-        }
         .overlay(alignment: .bottom) {
             if !footerHints.isEmpty {
                 CommandHintStrip(hints: footerHints)
@@ -1665,14 +1662,13 @@ struct CommandHintStrip: View {
         HStack(spacing: 4) {
             ForEach(hints) { hint in
                 HStack(spacing: 3) {
-                    if let iconSystemName = hint.iconSystemName {
-                        Image(systemName: iconSystemName)
-                            .font(.system(size: 8, weight: .semibold))
+                    if hint.placement == .plateFooter {
+                        Text(hint.label)
                     }
                     Text(hint.shortcut)
-                        .modifier(CommandHintTextStyle())
                 }
-                    .foregroundStyle(.white.opacity(0.92))
+                    .font(.system(.caption, design: .monospaced, weight: .semibold))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .padding(.horizontal, 5)
@@ -1684,19 +1680,23 @@ struct CommandHintStrip: View {
                     .help("\(hint.label): \(hint.shortcut)")
             }
         }
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: CommandHintFramePreferenceKey.self,
+                    value: Dictionary(
+                        uniqueKeysWithValues: hints.map {
+                            ($0.id, geometry.frame(in: .named("overlay")))
+                        }
+                    )
+                )
+            }
+        }
         .allowsHitTesting(false)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             hints.map { "\($0.label), \($0.shortcut)" }.joined(separator: "; ")
         )
-    }
-}
-
-private struct CommandHintTextStyle: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .font(.system(.caption, design: .monospaced, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.92))
     }
 }
 

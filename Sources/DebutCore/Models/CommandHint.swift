@@ -11,7 +11,6 @@ public struct CommandHintPresentation: Identifiable, Equatable, Sendable {
     public let label: String
     public let shortcut: String
     public let placement: CommandHintPlacement
-    public let iconSystemName: String?
 
     public var id: String {
         actions.map(\.rawValue).joined(separator: ":")
@@ -45,7 +44,6 @@ public enum CommandHintCatalog {
             label: "Select stage",
             actions: actions,
             placement: .stageLeading,
-            iconSystemName: nil,
             settings: settings
         )
     }
@@ -58,25 +56,20 @@ public enum CommandHintCatalog {
     ) -> [CommandHintPresentation] {
         guard isActive else { return [] }
 
-        var groups: [(String, [KeyAction], String)] = []
+        var groups: [(String, [KeyAction])] = []
         if hasSelectedWindow {
-            groups.append(("Move window", [.moveWindowUp, .moveWindowDown], "arrow.up.and.down"))
-            groups.append((
-                "Reorder window",
-                [.moveWindowLeft, .moveWindowRight],
-                "arrow.left.arrow.right"
-            ))
+            groups.append(("Move window", [.moveWindowUp, .moveWindowDown]))
+            groups.append(("Reorder window", [.moveWindowLeft, .moveWindowRight]))
             // Transitive, so `shouldShowCommandHint` drops it. Listed anyway to keep this a
             // full inventory of the commands the footer covers.
-            groups.append(("Quit app", [.quitSelectedApp], "power"))
+            groups.append(("Quit app", [.quitSelectedApp]))
         }
-        groups.append(("Close overlay", [.dismissOverlay], "escape"))
-        return groups.compactMap { label, actions, iconSystemName in
+        groups.append(("Close", [.dismissOverlay]))
+        return groups.compactMap { label, actions in
             hint(
                 label: label,
                 actions: actions,
                 placement: .plateFooter,
-                iconSystemName: iconSystemName,
                 settings: settings
             )
         }
@@ -104,7 +97,6 @@ public enum CommandHintCatalog {
                 label: "Select window",
                 actions: actions,
                 placement: .nextWindow,
-                iconSystemName: nil,
                 settings: settings
               )
         else { return [] }
@@ -115,7 +107,6 @@ public enum CommandHintCatalog {
         label: String,
         actions: [KeyAction],
         placement: CommandHintPlacement,
-        iconSystemName: String?,
         settings: AppSettings
     ) -> CommandHintPresentation? {
         let visibleActions = actions.filter(settings.shouldShowCommandHint(for:))
@@ -127,8 +118,7 @@ public enum CommandHintCatalog {
             actions: visibleActions,
             label: label,
             shortcut: shortcuts.joined(separator: " / "),
-            placement: placement,
-            iconSystemName: iconSystemName
+            placement: placement
         )
     }
 }
@@ -139,9 +129,9 @@ extension KeyCombo {
             .replacingOccurrences(of: "Shift+", with: "⇧")
             .replacingOccurrences(of: "Option+", with: "⌥")
             .replacingOccurrences(of: "Delete", with: "⌫")
-            .replacingOccurrences(of: "↑", with: "▲")
-            .replacingOccurrences(of: "↓", with: "▼")
-            .replacingOccurrences(of: "←", with: "◀")
-            .replacingOccurrences(of: "→", with: "▶")
+            .replacingOccurrences(of: "↑", with: "Up")
+            .replacingOccurrences(of: "↓", with: "Down")
+            .replacingOccurrences(of: "←", with: "Left")
+            .replacingOccurrences(of: "→", with: "Right")
     }
 }

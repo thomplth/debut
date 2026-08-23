@@ -677,7 +677,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
         diag.report("command_hints_laid_out", details: [
             "footerHintCount": "\(footerHints.count)",
-            "footerIconCount": "\(footerHints.compactMap(\.iconSystemName).count)",
+            "footerTextLabelCount": "\(footerHints.count)",
             "nextWindowIndex": nextWindowIndex.map(String.init) ?? "none",
             "stageLeadingHintCount": "\(leadingHintCount)",
         ])

@@ -188,7 +188,6 @@ struct CommandHintTests {
         #expect(nextDestination?.actions == [.jumpToStage3, .nextStage])
         #expect(nextDestination?.shortcut == "3 / ⌥Tab")
         #expect(nextDestination?.placement == .stageLeading)
-        #expect(nextDestination?.iconSystemName == nil)
     }
 
     @Test("Stage cycling hints wrap and share a destination when there are two stages")
@@ -207,7 +206,7 @@ struct CommandHintTests {
         #expect(sharedDestination?.shortcut == "2 / ⌥Tab / ⇧⌥Tab")
     }
 
-    @Test("Active plate actions sit below the plate and use purpose icons")
+    @Test("Active plate actions sit below the plate and use concise text labels")
     func plateFooterCatalog() {
         var settings = AppSettings()
         settings.keyBindings.bindings[.moveWindowLeft] = KeyCombo(keyCode: kVK_ANSI_B)
@@ -232,7 +231,7 @@ struct CommandHintTests {
         #expect(!activeHints.flatMap(\.actions).contains(.previousStage))
         #expect(activeHints.first(where: { $0.actions.contains(.moveWindowLeft) })?.shortcut.contains("B") == true)
         #expect(activeHints.allSatisfy { $0.placement == .plateFooter })
-        #expect(activeHints.allSatisfy { $0.iconSystemName != nil })
+        #expect(activeHints.map(\.label) == ["Move window", "Reorder window", "Close"])
     }
 
     @Test("Forward and backward Tab hints appear on their respective windows")
@@ -264,7 +263,6 @@ struct CommandHintTests {
         #expect(wrappedHints.flatMap(\.actions) == [.previousWindow])
         #expect(wrappedHints.first?.shortcut == "⇧Tab")
         #expect(nextHints.allSatisfy { $0.placement == .nextWindow })
-        #expect(nextHints.allSatisfy { $0.iconSystemName == nil })
         #expect(!wrappedHints.isEmpty)
     }
 
@@ -281,12 +279,12 @@ struct CommandHintTests {
         #expect(hints.first?.shortcut == "Tab / ⇧Tab")
     }
 
-    @Test("Command hints use the triangle legends printed on Mac arrow keys")
+    @Test("Command hints name arrow keys instead of representing them with symbols")
     func arrowKeyLegends() {
-        #expect(KeyCombo(keyCode: kVK_UpArrow).commandHintDisplayString == "▲")
-        #expect(KeyCombo(keyCode: kVK_DownArrow).commandHintDisplayString == "▼")
-        #expect(KeyCombo(keyCode: kVK_LeftArrow).commandHintDisplayString == "◀")
-        #expect(KeyCombo(keyCode: kVK_RightArrow).commandHintDisplayString == "▶")
+        #expect(KeyCombo(keyCode: kVK_UpArrow).commandHintDisplayString == "Up")
+        #expect(KeyCombo(keyCode: kVK_DownArrow).commandHintDisplayString == "Down")
+        #expect(KeyCombo(keyCode: kVK_LeftArrow).commandHintDisplayString == "Left")
+        #expect(KeyCombo(keyCode: kVK_RightArrow).commandHintDisplayString == "Right")
     }
 
     @Test("Leading and footer hints use the same distance from their plate")
@@ -308,7 +306,7 @@ struct CommandHintTests {
         let moveHint = hints.first(where: { $0.label == "Move window" })
 
         #expect(moveHint?.actions == [.moveWindowDown])
-        #expect(moveHint?.shortcut == "▼")
+        #expect(moveHint?.shortcut == "Down")
     }
 
     @Test("Key events map to hint usage without counting auto-repeat")
