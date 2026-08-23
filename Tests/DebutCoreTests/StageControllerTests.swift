@@ -562,7 +562,8 @@ struct StageControllerTests {
         #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(delegate.overlayOpened.wait(timeout: .now() + 0.1) == .timedOut)
         #expect(controller.selectedStageIndex == 1)
-        #expect(controller.stageManager.stages[1].windows.map(\.windowID) == [101])
+        #expect(controller.stageManager.stages[1].windows.isEmpty)
+        #expect(controller.overlayStageManager.stages[1].windows.map(\.windowID) == [101])
     }
 
     @Test("Configured overlay presentation delay controls the hold threshold")
@@ -957,7 +958,7 @@ struct StageControllerTests {
         #expect(controller.selectedWindowIndex == 0) // release and press Tab again
     }
 
-    @Test("Left and right arrows reorder the selected window inside its stage")
+    @Test("Left and right arrows preview a reorder and apply it only on commit")
     func reorderWindowWithinStage() {
         let (controller, _, keyboardSvc) = makeController()
         let stageID = controller.stageManager.stages[0].id
@@ -969,21 +970,49 @@ struct StageControllerTests {
         #expect(controller.selectedWindowIndex == 1)
 
         keyboardSvc.simulateEvent(.moveWindowRight)
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 303, 202])
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 202, 303])
+        #expect(controller.overlayStageManager.stages[0].windows.map(\.windowID) == [101, 303, 202])
         #expect(controller.selectedWindowIndex == 2)
 
         keyboardSvc.simulateEvent(.moveWindowRight)
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 303, 202])
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 202, 303])
         #expect(controller.selectedWindowIndex == 2)
 
         keyboardSvc.simulateEvent(.moveWindowLeft)
         keyboardSvc.simulateEvent(.moveWindowLeft)
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [202, 101, 303])
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 202, 303])
+        #expect(controller.overlayStageManager.stages[0].windows.map(\.windowID) == [202, 101, 303])
         #expect(controller.selectedWindowIndex == 0)
 
         keyboardSvc.simulateEvent(.moveWindowLeft)
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [202, 101, 303])
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 202, 303])
         #expect(controller.selectedWindowIndex == 0)
+
+        keyboardSvc.simulateEvent(.cmdRelease)
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [202, 101, 303])
+    }
+
+    @Test("Escape discards pending plate-stack moves")
+    func escapeDiscardsPendingPlateStackMoves() {
+        let (controller, _, keyboardSvc) = makeController()
+        let firstStageID = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: firstStageID
+        )
+        controller.stageManager.activateStage(id: firstStageID)
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        keyboardSvc.simulateEvent(.moveWindowDown)
+
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101])
+        #expect(controller.overlayStageManager.stages[1].windows.map(\.windowID) == [101])
+
+        keyboardSvc.simulateEvent(.escape)
+
+        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101])
+        #expect(controller.stageManager.stages[1].windows.isEmpty)
     }
 
     @Test("Held backward Tab stops at the first window and a fresh press wraps")

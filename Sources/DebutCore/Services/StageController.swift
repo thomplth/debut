@@ -157,6 +157,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public var onDesktopReveal: (() -> Void)?
 
     private var pendingStageFocus: (stageID: UUID, windowID: CGWindowID)?
+    private var plateStackTransaction = PlateStackTransaction()
 
     public private(set) var isStageManagerVisible: Bool = false
     public var selectedStageIndex: Int = 0
@@ -165,6 +166,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public var overlayPresentationDelay: TimeInterval
     public var previewRefreshPolicy: PreviewRefreshPolicy
     public var previewCacheTTL: TimeInterval
+
+    /// The model rendered by the overlay, including interactions that are still waiting for
+    /// the session commit. The persisted `stageManager` remains the last committed state.
+    public var overlayStageManager: StageManager {
+        plateStackTransaction.preview(applyingTo: stageManager)
+    }
 
     /// Window previews captured when overlay opens
     public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
@@ -235,20 +242,21 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// cursor. They are only the same while the overlay drives the switch — a desktop the
     /// user changes themselves moves one and not the other.
     public var diagnosticState: [String: String] {
-        let activeStageIndex = stageManager.stages
-            .firstIndex(where: { $0.id == stageManager.activeStageID }) ?? 0
+        let visibleStageManager = isStageManagerVisible ? overlayStageManager : stageManager
+        let activeStageIndex = visibleStageManager.stages
+            .firstIndex(where: { $0.id == visibleStageManager.activeStageID }) ?? 0
         return [
             "overlayVisible": "\(isStageManagerVisible)",
             "focusedWindowFullscreen": "\(focusedWindowIsFullscreen)",
-            "stageCount": "\(stageManager.stages.count)",
+            "stageCount": "\(visibleStageManager.stages.count)",
             "activeStageIndex": "\(activeStageIndex)",
             "selectedStageIndex": "\(selectedStageIndex)",
             "selectedWindowIndex": "\(selectedWindowIndex)",
             "eventTapRunning": "\(keyboardService.isRunning)",
             "eventTapStarted": "\(keyboardServiceStarted)",
-            "windowsInActiveStage": "\(stageManager.activeStage.windows.count)",
-            "maxWindowsInStage": "\(stageManager.stages.map(\.windows.count).max() ?? 0)",
-            "windowCountsByStage": stageManager.stages
+            "windowsInActiveStage": "\(visibleStageManager.activeStage.windows.count)",
+            "maxWindowsInStage": "\(visibleStageManager.stages.map(\.windows.count).max() ?? 0)",
+            "windowCountsByStage": visibleStageManager.stages
                 .map { String($0.windows.count) }
                 .joined(separator: ","),
             "windowPreviewCount": "\(windowPreviews.count)",
@@ -693,6 +701,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         backtickCycleIndex = 0
 
         if isStageManagerVisible {
+            plateStackTransaction.discard()
             isStageManagerVisible = false
             if let tapService = keyboardService as? EventTapKeyboardService {
                 tapService.overlayVisible = false
@@ -805,6 +814,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
         backtickCycleWindows = []
         backtickCycleIndex = 0
+        plateStackTransaction.discard()
 
         isStageManagerVisible = true
         if let tapService = keyboardService as? EventTapKeyboardService {
@@ -1067,6 +1077,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func commitSelection() {
         guard isStageManagerVisible else { return }
+        commitPlateStackTransaction()
         isStageManagerVisible = false
         if let tapService = keyboardService as? EventTapKeyboardService {
             tapService.overlayVisible = false
@@ -1093,9 +1104,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     /// Commit a window chosen with the pointer without waiting for Command release.
     public func commitOverlaySelection(stageIndex: Int, windowIndex: Int) {
+        let preview = overlayStageManager
         guard isStageManagerVisible,
-              stageManager.stages.indices.contains(stageIndex),
-              stageManager.stages[stageIndex].windows.indices.contains(windowIndex)
+              preview.stages.indices.contains(stageIndex),
+              preview.stages[stageIndex].windows.indices.contains(windowIndex)
         else { return }
 
         selectedStageIndex = stageIndex
@@ -1106,6 +1118,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// Close the switcher and expose Finder's real desktop surface.
     public func revealDesktop() {
         guard isStageManagerVisible else { return }
+        plateStackTransaction.discard()
         isStageManagerVisible = false
         if let tapService = keyboardService as? EventTapKeyboardService {
             tapService.overlayVisible = false
@@ -1122,34 +1135,33 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         toStageIndex: Int,
         toWindowIndex: Int
     ) -> Bool {
-        guard stageManager.stages.indices.contains(fromStageIndex),
-              stageManager.stages.indices.contains(toStageIndex),
+        let preview = overlayStageManager
+        guard isStageManagerVisible,
+              preview.stages.indices.contains(fromStageIndex),
+              preview.stages.indices.contains(toStageIndex),
               canRelocate(from: fromStageIndex, to: toStageIndex),
-              stageManager.stages[fromStageIndex].windows.contains(where: {
+              preview.stages[fromStageIndex].windows.contains(where: {
                   $0.windowID == windowID
               })
         else { return false }
 
-        let fromStageID = stageManager.stages[fromStageIndex].id
-        let toStageID = stageManager.stages[toStageIndex].id
-        stageManager.moveWindow(
+        let fromStageID = preview.stages[fromStageIndex].id
+        let toStageID = preview.stages[toStageIndex].id
+        plateStackTransaction.stageMove(
             windowID: windowID,
             fromStageID: fromStageID,
             toStageID: toStageID,
-            at: toWindowIndex
+            windowIndex: toWindowIndex,
+            source: .pointer
         )
-        relocateToStageDesktop(windowID: windowID,
-                               fromStageIndex: fromStageIndex,
-                               toStageIndex: toStageIndex)
 
         if selectedStageIndex == toStageIndex,
-           let movedIndex = stageManager.stages[toStageIndex].windows.firstIndex(where: {
+           let movedIndex = overlayStageManager.stages[toStageIndex].windows.firstIndex(where: {
                $0.windowID == windowID
            }) {
             selectedWindowIndex = movedIndex
         }
 
-        delegate?.stageControllerDidMutateState(self)
         notifyOverlayUpdated()
         return true
     }
@@ -1158,6 +1170,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// Next Cmd+Tab or Cmd+Option+Tab reopens the overlay.
     private func discardOverlay() {
         guard isStageManagerVisible else { return }
+        plateStackTransaction.discard()
         isStageManagerVisible = false
         if let tapService = keyboardService as? EventTapKeyboardService {
             tapService.overlayVisible = false
@@ -1171,8 +1184,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func cycleWindow(forward: Bool, wraps: Bool = true) {
         guard isStageManagerVisible,
-              stageManager.stages.indices.contains(selectedStageIndex) else { return }
-        let stage = stageManager.stages[selectedStageIndex]
+              overlayStageManager.stages.indices.contains(selectedStageIndex) else { return }
+        let stage = overlayStageManager.stages[selectedStageIndex]
         guard !stage.windows.isEmpty else { return }
 
         if wraps {
@@ -1213,7 +1226,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// the selection is an index, so it has to be pulled back in range before the overlay is
     /// redrawn against the shorter stage.
     public func handleLiveWindowsRemoved() {
-        let windowCount = stageManager.stages[safe: selectedStageIndex]?.windows.count ?? 0
+        let windowCount = overlayStageManager.stages[safe: selectedStageIndex]?.windows.count ?? 0
         selectedWindowIndex = max(0, min(selectedWindowIndex, windowCount - 1))
         notifyOverlayUpdated()
     }
@@ -1251,8 +1264,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func moveWindow(direction: SwapDirection) {
         guard isStageManagerVisible,
-              stageManager.stages.indices.contains(selectedStageIndex) else { return }
-        let stage = stageManager.stages[selectedStageIndex]
+              overlayStageManager.stages.indices.contains(selectedStageIndex) else { return }
+        let preview = overlayStageManager
+        let stage = preview.stages[selectedStageIndex]
         guard stage.windows.indices.contains(selectedWindowIndex) else { return }
         let window = stage.windows[selectedWindowIndex]
 
@@ -1262,7 +1276,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             guard selectedStageIndex > 0 else { return }
             targetStageIndex = selectedStageIndex - 1
         case .down:
-            guard selectedStageIndex < stageManager.stages.count - 1 else { return }
+            guard selectedStageIndex < preview.stages.count - 1 else { return }
             targetStageIndex = selectedStageIndex + 1
         }
         guard canRelocate(from: selectedStageIndex, to: targetStageIndex) else {
@@ -1274,14 +1288,16 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
 
-        let targetStageID = stageManager.stages[targetStageIndex].id
-        stageManager.moveWindow(windowID: window.windowID, fromStageID: stage.id, toStageID: targetStageID)
-        relocateToStageDesktop(windowID: window.windowID,
-                               fromStageIndex: selectedStageIndex,
-                               toStageIndex: targetStageIndex)
-        // The pointer path reports its own move. Without this the keyboard path changed a
-        // window's desktop and left no trace, which is the one thing a stage mutation may not do.
-        diag.report("window_moved_by_key", details: [
+        let targetStageID = preview.stages[targetStageIndex].id
+        let targetIndex = preview.stages[targetStageIndex].windows.count
+        plateStackTransaction.stageMove(
+            windowID: window.windowID,
+            fromStageID: stage.id,
+            toStageID: targetStageID,
+            windowIndex: targetIndex,
+            source: .keyboard
+        )
+        diag.report("window_move_previewed_by_key", level: .transient, details: [
             "windowID": "\(window.windowID)",
             "fromStageIndex": "\(selectedStageIndex)",
             "toStageIndex": "\(targetStageIndex)",
@@ -1289,39 +1305,66 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
         // Follow the moved window to the target stage
         selectedStageIndex = targetStageIndex
-        let targetWindows = stageManager.stages[targetStageIndex].windows
+        let targetWindows = overlayStageManager.stages[targetStageIndex].windows
         selectedWindowIndex = targetWindows.firstIndex(where: { $0.windowID == window.windowID }) ?? 0
 
-        delegate?.stageControllerDidMutateState(self)
         notifyOverlayUpdated()
     }
 
     private func moveWindowWithinStage(offset: Int) {
         guard isStageManagerVisible,
-              stageManager.stages.indices.contains(selectedStageIndex) else { return }
-        let stage = stageManager.stages[selectedStageIndex]
+              overlayStageManager.stages.indices.contains(selectedStageIndex) else { return }
+        let stage = overlayStageManager.stages[selectedStageIndex]
         guard stage.windows.indices.contains(selectedWindowIndex) else { return }
         let targetIndex = selectedWindowIndex + offset
         guard stage.windows.indices.contains(targetIndex) else { return }
 
-        stageManager.moveWindow(
+        plateStackTransaction.stageMove(
             windowID: stage.windows[selectedWindowIndex].windowID,
             fromStageID: stage.id,
             toStageID: stage.id,
-            at: targetIndex
+            windowIndex: targetIndex,
+            source: .keyboard
         )
         selectedWindowIndex = targetIndex
 
-        delegate?.stageControllerDidMutateState(self)
         notifyOverlayUpdated()
+    }
+
+    /// The only path from plate-stack preview state to the persisted assignment model.
+    private func commitPlateStackTransaction() {
+        let commit = plateStackTransaction.commit(to: &stageManager)
+        guard commit.didMutate else { return }
+
+        for relocation in commit.relocations {
+            relocateToStageDesktop(
+                windowID: relocation.windowID,
+                fromStageIndex: relocation.fromStageIndex,
+                toStageIndex: relocation.toStageIndex
+            )
+            let event: String
+            if commit.keyboardWindowIDs.contains(relocation.windowID) {
+                event = "window_moved_by_key"
+            } else if commit.pointerWindowIDs.contains(relocation.windowID) {
+                event = "window_moved_by_drag"
+            } else {
+                event = "window_move_committed"
+            }
+            diag.report(event, details: [
+                "windowID": "\(relocation.windowID)",
+                "fromStageIndex": "\(relocation.fromStageIndex)",
+                "toStageIndex": "\(relocation.toStageIndex)",
+            ])
+        }
+        delegate?.stageControllerDidMutateState(self)
     }
 
     /// The overlay stays open so the user can keep working through the stage. Assignments are
     /// left alone here: the process-exit monitor makes them dormant once the app actually goes.
     private func quitSelectedApp() {
         guard isStageManagerVisible,
-              stageManager.stages.indices.contains(selectedStageIndex) else { return }
-        let stage = stageManager.stages[selectedStageIndex]
+              overlayStageManager.stages.indices.contains(selectedStageIndex) else { return }
+        let stage = overlayStageManager.stages[selectedStageIndex]
         guard stage.windows.indices.contains(selectedWindowIndex) else { return }
         let window = stage.windows[selectedWindowIndex]
 
