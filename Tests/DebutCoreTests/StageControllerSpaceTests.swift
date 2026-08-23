@@ -58,6 +58,16 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     }
 }
 
+private final class SpaceMutationDelegate: StageControllerDelegate {
+    private(set) var mutationCount = 0
+
+    func stageControllerDidOpenOverlay(_ controller: StageController) {}
+    func stageControllerDidCloseOverlay(_ controller: StageController) {}
+    func stageControllerDidUpdateSelection(_ controller: StageController) {}
+    func stageControllerDidSwitchStage(_ controller: StageController) {}
+    func stageControllerDidMutateState(_ controller: StageController) { mutationCount += 1 }
+}
+
 @Suite("StageController on real Spaces")
 struct StageControllerSpaceTests {
 
@@ -625,6 +635,26 @@ struct StageControllerSpaceTests {
         controller.desktopDidChange()
 
         #expect(controller.stageManager.stages.count == 2)
+    }
+
+    // Removing an inactive desktop in Mission Control does not necessarily change the active
+    // Space, so AppKit may give Debut no active-space notification to react to. The overlay is
+    // the first place the stale stage becomes visible and must recheck macOS before presenting.
+    @Test("Opening the overlay detects an inactive desktop removed in Mission Control")
+    func overlayOpenShrinksTheStageList() {
+        let spaces = MockSpaceSwitcher(desktops: 5, current: 0)
+        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.reconcileStagesWithDesktops()
+        #expect(controller.stageManager.stages.count == 5)
+        let delegate = SpaceMutationDelegate()
+        controller.delegate = delegate
+
+        spaces.desktops = 4
+        keyboardService.simulateEvent(.cmdOptionTabHold)
+
+        #expect(controller.stageManager.stages.count == 4)
+        #expect(controller.overlayStageManager.stages.count == 4)
+        #expect(delegate.mutationCount == 1)
     }
 
     // A window server that answers "no desktops" is answered with silence: the stage list is
