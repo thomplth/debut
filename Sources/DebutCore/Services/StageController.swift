@@ -401,7 +401,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         return "Stage \(index + 1)"
     }
 
-    public func switchToStage(id targetID: UUID, raiseWindowID: CGWindowID? = nil) {
+    /// - Parameter focusesWindow: When false the desktop moves and nothing is focused, leaving
+    ///   the choice of frontmost app to macOS. Debut's own focus lands within a few milliseconds
+    ///   of the Space flip, so the two race, and `recordWindowActivation` writes a lost race into
+    ///   the stage's MRU head — which makes a single loss permanent.
+    public func switchToStage(id targetID: UUID, raiseWindowID: CGWindowID? = nil,
+                              focusesWindow: Bool = true) {
         let targetStage = stageManager.stages.first(where: { $0.id == targetID })
         let workload = PerformanceWorkload(
             stages: stageManager.stages.count,
@@ -446,13 +451,16 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
         // Focus the selected window and activate its app (single activation, no flash).
         // A desktop still settling cannot be focused yet — see `applyPendingStageFocus`.
-        if let focusWindowID = raiseWindowID ?? targetStage?.windows.first?.windowID {
+        if focusesWindow, let focusWindowID = raiseWindowID ?? targetStage?.windows.first?.windowID {
             if desktopIsSettling {
                 pendingStageFocus = (stageID: targetID, windowID: focusWindowID)
             } else {
                 pendingStageFocus = nil
                 focusWindow(focusWindowID, inStageID: targetID)
             }
+        } else {
+            // A focus queued by an earlier switch to this same stage would otherwise still fire.
+            pendingStageFocus = nil
         }
 
         delegate?.stageControllerDidMutateState(self)
@@ -696,7 +704,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             dismissOverlayPresentation()
         }
 
-        switchToStage(id: targetStage.id, raiseWindowID: matchingWindowID)
+        // Keeping the current application is the whole point of that chord, so it still focuses.
+        switchToStage(id: targetStage.id, raiseWindowID: matchingWindowID,
+                      focusesWindow: keepingCurrentApplication)
         selectedStageIndex = index
         selectedWindowIndex = 0
     }
