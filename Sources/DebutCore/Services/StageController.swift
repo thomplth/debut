@@ -326,6 +326,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 "stagesBefore": "\(stageCountBefore)",
                 "stagesAfter": "\(stageCountAfter)",
             ])
+            delegate?.stageControllerDidMutateState(self)
         }
     }
 
@@ -881,6 +882,11 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         backtickCycleWindows = []
         backtickCycleIndex = 0
         plateStackTransaction.discard()
+
+        // Removing an inactive desktop need not change the Space currently showing, so there
+        // may be no active-space notification. Recheck at the point where a stale stage would
+        // otherwise become visible; this is event-driven by the user's overlay command.
+        reconcileStagesWithDesktops()
 
         isStageManagerVisible = true
         if let tapService = keyboardService as? EventTapKeyboardService {
