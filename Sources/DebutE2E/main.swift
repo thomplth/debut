@@ -74,11 +74,8 @@ func test(_ name: String, _ body: () -> Bool) {
 
 // MARK: - Diagnostic file
 
-let diagnosticFile: URL = {
-    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        .appendingPathComponent("Debut")
-    return dir.appendingPathComponent("diagnostic.json")
-}()
+let diagnosticFile: URL = DebutCore.applicationSupportDirectory
+    .appendingPathComponent("diagnostic.json")
 
 let settingsFile: URL = diagnosticFile
     .deletingLastPathComponent()
@@ -449,35 +446,10 @@ func setWindowFullscreen(_ window: AXUIElement, _ enabled: Bool, timeout: TimeIn
     return false
 }
 
-func desktopSurfaceIsOnScreen(for processIdentifier: pid_t) -> Bool {
-    guard let rawWindows = CGWindowListCopyWindowInfo(
-        [.optionOnScreenOnly, .excludeDesktopElements],
-        kCGNullWindowID
-    ) as? [[String: Any]] else { return false }
-
-    let screen = CGDisplayBounds(CGMainDisplayID())
-    return rawWindows.contains { window in
-        guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processIdentifier,
-              (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
-              let boundsDictionary = window[kCGWindowBounds as String] as? NSDictionary,
-              let bounds = CGRect(dictionaryRepresentation: boundsDictionary),
-              (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0 > 0
-        else { return false }
-        return abs(bounds.width - screen.width) < 2
-            && abs(bounds.height - screen.height) < 2
-    }
-}
-
-func waitForDesktopSurface(
-    onScreen expected: Bool,
-    processIdentifier: pid_t,
-    timeout: TimeInterval = 5
-) -> Bool {
+func waitForStageCount(_ expected: Int, timeout: TimeInterval = 5) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     repeat {
-        if desktopSurfaceIsOnScreen(for: processIdentifier) == expected {
-            return true
-        }
+        if Int(readState()["stageCount"] ?? "") == expected { return true }
         wait(0.1)
     } while Date() < deadline
     return false
@@ -588,70 +560,44 @@ test("Windows discovered") {
     return (Int(windowCount) ?? 0) > 0
 }
 
-// --- 1b. Wallpaper store integration ---
-header("1b. Desktop wallpaper store integration")
-let wallpaperRefreshCount = readEvents().filter { $0["event"] == "desktop_wallpaper_refreshed" }.count
-let wallpaperStore = URL(fileURLWithPath: NSHomeDirectory())
-    .appendingPathComponent("Library/Application Support/com.apple.wallpaper/Store")
-let wallpaperTrigger = wallpaperStore.appendingPathComponent(".debut-e2e-trigger")
-try? FileManager.default.createDirectory(at: wallpaperStore, withIntermediateDirectories: true)
-try? Data("e2e".utf8).write(to: wallpaperTrigger, options: .atomic)
-try? FileManager.default.removeItem(at: wallpaperTrigger)
-wait(3)
+// --- 1b. Stages track the desktops macOS has ---
+// This replaced a section asserting that Debut painted its own full-screen desktop surface.
+// Stages are real desktops now, so macOS draws the desktop and the only thing left to hold
+// honest is that Debut's stage list agrees with the window server's desktop list.
+header("1b. Stages match the desktop list")
+let userDesktopCount = SpaceService().userDesktops().count
+info("  User desktops: \(userDesktopCount)")
 
-test("Wallpaper store changes refresh the desktop surface") {
-    let refreshEvents = readEvents().filter { $0["event"] == "desktop_wallpaper_refreshed" }
-    if refreshEvents.last?["loaded"] == "false" {
-        info("  Wallpaper source is unavailable; fallback surface refreshed")
-    }
-    return refreshEvents.count > wallpaperRefreshCount
+test("A stage exists for every desktop and no others") {
+    userDesktopCount > 0 && waitForStageCount(userDesktopCount)
 }
 
 // --- 1c. System window overviews ---
+// Mission Control and App Exposé can change the Space behind Debut's back. Debut must follow
+// a desktop it did not switch to, and must not invent or drop a stage on the way through.
 header("1c. Mission Control and App Exposé")
-let overviewApplication = NSRunningApplication.runningApplications(
-    withBundleIdentifier: "com.thomplth.Debut"
-).first
-let overviewPID = overviewApplication?.processIdentifier ?? 0
-
-test("Desktop surface is visible during normal stage management") {
-    overviewPID > 0 && desktopSurfaceIsOnScreen(for: overviewPID)
-}
 
 info("Opening Mission Control with Control-Up...")
 toggleSystemWindowOverview(mode: 0)
 let _ = takeScreenshot("00_mission_control")
+toggleSystemWindowOverview(mode: 0)
 
-test("Desktop surface yields while Mission Control presents windows") {
-    guard screenRecordingAvailable else {
-        info("  Screen Recording unavailable; using the transient-window regression test")
-        return overviewPID > 0
-    }
-    return overviewPID > 0
-        && waitForDesktopSurface(onScreen: false, processIdentifier: overviewPID)
+test("The stage list survives Mission Control") {
+    waitForStageCount(userDesktopCount)
 }
 
-toggleSystemWindowOverview(mode: 0)
-test("Desktop surface returns after Mission Control closes") {
-    overviewPID > 0 && waitForDesktopSurface(onScreen: true, processIdentifier: overviewPID)
+test("The active stage still points at a real desktop after Mission Control") {
+    let index = Int(readState()["activeStageIndex"] ?? "") ?? -1
+    return index >= 0 && index < userDesktopCount
 }
 
 info("Opening App Exposé with Control-Down...")
 toggleSystemWindowOverview(mode: 2)
 let _ = takeScreenshot("00_app_expose")
-
-test("Desktop surface yields while App Exposé presents windows") {
-    guard screenRecordingAvailable else {
-        info("  Screen Recording unavailable; using the transient-window regression test")
-        return overviewPID > 0
-    }
-    return overviewPID > 0
-        && waitForDesktopSurface(onScreen: false, processIdentifier: overviewPID)
-}
-
 toggleSystemWindowOverview(mode: 2)
-test("Desktop surface returns after App Exposé closes") {
-    overviewPID > 0 && waitForDesktopSurface(onScreen: true, processIdentifier: overviewPID)
+
+test("The stage list survives App Exposé") {
+    waitForStageCount(userDesktopCount)
 }
 
 // --- 2. Open overlay with Cmd+Tab ---
@@ -911,6 +857,18 @@ let interactionSettings = (try? StateStore().loadSettings()) ?? AppSettings()
 let screenBounds = CGDisplayBounds(CGMainDisplayID())
 let neutralPointerLocation = CGPoint(x: screenBounds.maxX - 4, y: screenBounds.maxY - 4)
 
+// This fixture used to press Cmd-N for a throwaway destination stage. Stages are desktops
+// now and Debut cannot make one, so the drop target has to be a desktop the host already
+// has: an empty stage with a populated stage before it. A single-desktop runner has none,
+// which is a reason to skip rather than to fail.
+let destinationStageIndex = originalWindowCounts.indices.first {
+    $0 > 0 && originalWindowCounts[$0] == 0 && originalWindowCounts[$0 - 1] > 0
+} ?? -1
+let sourceStageIndex = destinationStageIndex - 1
+let dropFixtureSkipReason = destinationStageIndex < 0
+    ? "This host has no empty desktop following a populated one; the drag fixture needs both"
+    : nil
+
 postMouseMove(to: neutralPointerLocation)
 wait(0.5)
 
@@ -918,31 +876,30 @@ postFlagsChanged(flags: [.maskCommand])
 wait(0.1)
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
 wait(0.8)
-postKeyDown(keyCode: CGKeyCode(kVK_ANSI_N), flags: [.maskCommand])
-for _ in 0..<30 {
-    if (Int(readState()["stageCount"] ?? "") ?? 0) == originalStageCount + 1 {
-        break
-    }
-    wait(0.1)
-}
 
 let preparedDropState = readState()
 let preparedWindowCounts = stageWindowCounts(in: preparedDropState)
-let destinationStageIndex = Int(preparedDropState["activeStageIndex"] ?? "") ?? -1
-let sourceStageIndex = destinationStageIndex - 1
+// Plate geometry scales around whichever stage is selected, and nothing selects the
+// destination for us now that it is not freshly created.
+let plateActiveStageIndex = Int(preparedDropState["selectedStageIndex"] ?? "") ?? 0
 let moveEventCount = readEvents().filter { $0["event"] == "window_moved_by_drag" }.count
 info("  Original drop state: stages=\(originalStageCount), windows=\(originalWindowCounts)")
-info("  Prepared drop state: active=\(destinationStageIndex), windows=\(preparedWindowCounts)")
+info("  Drop fixture: source=\(sourceStageIndex), destination=\(destinationStageIndex), windows=\(preparedWindowCounts)")
 
 postMouseMove(to: neutralPointerLocation)
 wait(0.5)
 
-test("E2E prepared an empty destination stage without losing source windows") {
-    preparedWindowCounts.indices.contains(sourceStageIndex)
-        && preparedWindowCounts.indices.contains(destinationStageIndex)
-        && preparedWindowCounts[sourceStageIndex] > 0
-        && preparedWindowCounts[destinationStageIndex] == 0
-        && preparedWindowCounts.count == originalStageCount + 1
+let emptyDestinationTest = "E2E found an empty destination stage next to a populated one"
+if let reason = dropFixtureSkipReason {
+    skipTest(emptyDestinationTest, reason: reason)
+} else {
+    test(emptyDestinationTest) {
+        preparedWindowCounts.indices.contains(sourceStageIndex)
+            && preparedWindowCounts.indices.contains(destinationStageIndex)
+            && preparedWindowCounts[sourceStageIndex] > 0
+            && preparedWindowCounts[destinationStageIndex] == 0
+            && preparedWindowCounts.count == originalStageCount
+    }
 }
 
 // Reordering is deliberately handle-only: dragging elsewhere on a plate must
@@ -958,7 +915,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
    let sourceBodyPoint = platePoint(
         stageIndex: sourceStageIndex,
         windowCounts: preparedWindowCounts,
-        activeStageIndex: destinationStageIndex,
+        activeStageIndex: plateActiveStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
         relativeX: 1,
         xOffset: -10
@@ -966,13 +923,13 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
    let destinationCenter = plateCenter(
         stageIndex: destinationStageIndex,
         windowCounts: preparedWindowCounts,
-        activeStageIndex: destinationStageIndex,
+        activeStageIndex: plateActiveStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
    ),
    let handleHotspot = platePoint(
         stageIndex: sourceStageIndex,
         windowCounts: preparedWindowCounts,
-        activeStageIndex: destinationStageIndex,
+        activeStageIndex: plateActiveStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
         relativeX: 0,
         xOffset: 12
@@ -1027,7 +984,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
     wait(0.3)
     let reorderedState = readState()
     let reorderedWindowCounts = stageWindowCounts(in: reorderedState)
-    let reorderedActiveStageIndex = Int(reorderedState["activeStageIndex"] ?? "") ?? -1
+    let reorderedActiveStageIndex = Int(reorderedState["selectedStageIndex"] ?? "") ?? -1
     if reorderedWindowCounts.indices.contains(destinationStageIndex),
        let reverseHotspot = platePoint(
             stageIndex: destinationStageIndex,
@@ -1064,6 +1021,11 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
     } else {
         fail("Could not calculate the reverse stage-handle drag path")
     }
+} else if let reason = dropFixtureSkipReason {
+    skipTest("Dragging the plate body does not reorder stages", reason: reason)
+    skipTest("Hovering the leading edge reveals the stage drag handle", reason: reason)
+    skipTest("Dragging the revealed handle reorders the stage", reason: reason)
+    skipTest("A reverse handle drag restores the original stage order", reason: reason)
 } else {
     fail("Could not calculate the stage-handle drag path")
 }
@@ -1077,13 +1039,13 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         stageIndex: sourceStageIndex,
         windowIndex: 0,
         windowCounts: preparedWindowCounts,
-        activeStageIndex: destinationStageIndex,
+        activeStageIndex: plateActiveStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
    ),
    let destinationPoint = plateCenter(
         stageIndex: destinationStageIndex,
         windowCounts: preparedWindowCounts,
-        activeStageIndex: destinationStageIndex,
+        activeStageIndex: plateActiveStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
    ) {
     info("  Drag path: \(sourcePoint) -> \(destinationPoint)")
@@ -1110,12 +1072,12 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         stageIndex: destinationStageIndex,
         windowIndex: 0,
         windowCounts: movedWindowCounts,
-        activeStageIndex: destinationStageIndex,
+        activeStageIndex: plateActiveStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
     ), let returnedStagePoint = plateCenter(
         stageIndex: sourceStageIndex,
         windowCounts: movedWindowCounts,
-        activeStageIndex: destinationStageIndex,
+        activeStageIndex: plateActiveStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
     ) {
         info("  Reverse drag path: \(returnedWindowPoint) -> \(returnedStagePoint)")
@@ -1137,13 +1099,11 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
             fail("Could not calculate the reverse window-drop path")
         }
     }
+} else if let reason = dropFixtureSkipReason {
+    skipTest("Dropping a window updates the source and destination stage models", reason: reason)
+    skipTest("The refreshed destination plate supports an immediate reverse drag", reason: reason)
 } else {
     fail("Could not calculate the window-drop path")
-}
-
-if stageWindowCounts(in: readState()).count == originalStageCount + 1 {
-    postKeyDown(keyCode: CGKeyCode(kVK_Delete), flags: [.maskCommand])
-    wait(0.5)
 }
 postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
 postFlagsChanged(flags: [])
@@ -1154,224 +1114,11 @@ test("Window-drop E2E cleanup restores the original stages") {
         && stageWindowCounts(in: readState()) == originalWindowCounts
 }
 
-// --- 11. Stage add and delete buttons ---
-// Deliberately ahead of the relaunch scenarios: those provoke a system-modal TCC alert that
-// takes over input for the rest of the run, which no overlay affordance can be tested through.
-header("11. Hover and click the stage add and delete buttons")
-
-/// The buttons only exist while revealed, and only the app knows where it drew them. Sweep the
-/// pointer along a path until the app reports the reveal, then click exactly where it says.
-func sweepForStageButton(_ kind: String, along path: [CGPoint]) -> CGPoint? {
-    for point in path {
-        postMouseMove(to: point)
-        wait(0.15)
-        if let center = revealedStageButtonCenter(kind) { return center }
-    }
-    return nil
-}
-
-func revealedStageButtonCenter(_ kind: String) -> CGPoint? {
-    let reveals = readEvents().filter {
-        $0["event"] == "overlay_stage_button_revealed" && $0["button"] == kind
-    }
-    guard let last = reveals.last, last["revealed"] == "true" else { return nil }
-    let parts = (last["center"] ?? "").split(separator: ",").compactMap { Double($0) }
-    guard parts.count == 2 else { return nil }
-    return CGPoint(x: parts[0], y: parts[1])
-}
-
-func currentStageCount() -> Int { Int(readState()["stageCount"] ?? "") ?? 0 }
-
-/// Only regions the pointer is actually in. An `ended` from a previously dismissed overlay can
-/// land in the log after a scenario starts, and counting it reads as hover being alive when it
-/// is not.
-func pointerRegionEventCount() -> Int {
-    readEvents().filter {
-        $0["event"] == "overlay_pointer_region_changed" && $0["region"] != "ended"
-    }.count
-}
-
-/// Hover is not live the instant the overlay is shown — in the VM it takes a second or two of
-/// render and capture work before the first pointer event lands. Jiggle until the app reports a
-/// region so a sweep cannot silently run against a surface that is not listening yet.
-func waitForOverlayHover(near point: CGPoint) -> Bool {
-    let before = pointerRegionEventCount()
-    for step in 0..<40 {
-        postMouseMove(to: CGPoint(x: point.x + (step.isMultiple(of: 2) ? 8 : -8), y: point.y))
-        wait(0.15)
-        if pointerRegionEventCount() > before { return true }
-    }
-    return false
-}
-
-/// The active plate's rect on screen, derived the same way `firstWindowCenter` derives a card.
-func activePlateFrame(in state: [String: String]) -> CGRect? {
-    guard let maxWindows = Int(state["maxWindowsInStage"] ?? ""), maxWindows > 0,
-          let activeWindows = Int(state["windowsInActiveStage"] ?? "")
-    else { return nil }
-    let screen = CGDisplayBounds(CGMainDisplayID())
-    let thumbnail = PlateConstants.thumbnailSize(
-        forWindowCount: maxWindows,
-        screenWidth: screen.width
-    )
-    let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
-    let plateWidth = PlateConstants.plateWidth(
-        forWindowCount: activeWindows,
-        thumbnailWidth: thumbnail.width
-    )
-    return CGRect(
-        x: screen.midX - plateWidth / 2,
-        y: screen.midY - plateHeight / 2,
-        width: plateWidth,
-        height: plateHeight
-    )
-}
-
-let baselineStageCount = currentStageCount()
-info("Stage count before the button checks: \(baselineStageCount)")
-
-postFlagsChanged(flags: [.maskCommand])
-wait(0.1)
-postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
-wait(0.8)
-
-/// Every check below reaches its target by hovering, so a host that does not deliver hover to the
-/// overlay cannot say anything about the buttons either way. Reporting that as failure is worse
-/// than saying nothing: it buries a real regression among expected red.
-let stageButtonChecks = [
-    "Hovering above the stack reveals the add-stage button",
-    "Clicking the add-stage button routes to an insert, not the desktop",
-    "Clicking the add-stage button adds a stage",
-    "Hovering a plate corner reveals the delete-stage button",
-    "Clicking the delete-stage button routes to a delete, not the desktop",
-    "Clicking the delete-stage button removes a stage",
-]
-
-func skipStageButtonChecks(reason: String) {
-    for name in stageButtonChecks { skipTest(name, reason: reason) }
-}
-
-if let plateFrame = activePlateFrame(in: readState()) {
-    info("Active plate frame: \(plateFrame)")
-    let regionEventsBefore = pointerRegionEventCount()
-    let hoverLive = waitForOverlayHover(near: CGPoint(x: plateFrame.midX, y: plateFrame.midY))
-    info("Overlay hover became live: \(hoverLive)")
-
-    if !hoverLive {
-        // Virtualized hosts drop overlay hover entirely once a system alert steals activation,
-        // and the overlay is borderless so it never becomes key to get it back.
-        skipStageButtonChecks(
-            reason: "The overlay reported no pointer region at all, so hover is not reaching it "
-                + "on this host; verify the stage buttons on real hardware"
-        )
-        postFlagsChanged(flags: [])
-        postKeyDown(keyCode: CGKeyCode(kVK_Escape))
-        postKeyUp(keyCode: CGKeyCode(kVK_Escape))
-        wait(0.5)
-    } else {
-
-    // Walk up the middle of the plate and out through its top edge into the insert band.
-    let insertSweep = stride(from: plateFrame.minY + 12, to: plateFrame.minY - 72, by: -6)
-        .map { CGPoint(x: plateFrame.midX, y: $0) }
-    let insertCenter = sweepForStageButton("insert", along: insertSweep)
-    let _ = takeScreenshot("11_stage_insert_sweep")
-
-    for region in readEvents().filter({ $0["event"] == "overlay_pointer_region_changed" })
-        .dropFirst(regionEventsBefore) {
-        info("Pointer region: \(region["region"] ?? "?") at \(region["location"] ?? "?") "
-            + "top=\(region["topBoundary"] ?? "?") bottom=\(region["bottomBoundary"] ?? "?")")
-    }
-
-    test("Hovering above the stack reveals the add-stage button") {
-        insertCenter != nil
-    }
-
-    if let insertCenter {
-        info("App reported the add-stage button at \(insertCenter)")
-        postMouseClick(at: insertCenter)
-        wait(0.6)
-
-        test("Clicking the add-stage button routes to an insert, not the desktop") {
-            readEvents().last { $0["event"] == "overlay_tap_routed" }?["target"]?
-                .hasPrefix("insertStage") == true
-        }
-        test("Clicking the add-stage button adds a stage") {
-            for _ in 0..<20 {
-                if currentStageCount() == baselineStageCount + 1 { return true }
-                wait(0.1)
-            }
-            return false
-        }
-    } else {
-        // Bare fail() prints but does not count, so the run would under-report its own failures.
-        test("Clicking the add-stage button routes to an insert, not the desktop") { false }
-        test("Clicking the add-stage button adds a stage") { false }
-    }
-
-    // Debut refuses to delete the only stage, so the delete check needs a second one whether or
-    // not the add-stage click above produced it.
-    if currentStageCount() < 2 {
-        postKeyDown(keyCode: CGKeyCode(kVK_ANSI_N), flags: [.maskCommand])
-        for _ in 0..<30 where currentStageCount() < 2 { wait(0.1) }
-    }
-    let deleteFrame = activePlateFrame(in: readState()) ?? plateFrame
-    info("Active plate frame for the delete check: \(deleteFrame)")
-    let _ = waitForOverlayHover(near: CGPoint(x: deleteFrame.midX, y: deleteFrame.midY))
-
-    // The delete button rides a plate's top-right corner, so sweep a grid around that corner.
-    let corner = CGPoint(x: deleteFrame.maxX, y: deleteFrame.minY)
-    let closeSweep = stride(from: -18.0, through: 18.0, by: 6.0).flatMap { dy in
-        stride(from: -18.0, through: 18.0, by: 6.0).map {
-            CGPoint(x: corner.x + $0, y: corner.y + dy)
-        }
-    }
-    let closeCenter = sweepForStageButton("close", along: closeSweep)
-    let _ = takeScreenshot("11_stage_close_sweep")
-
-    test("Hovering a plate corner reveals the delete-stage button") {
-        closeCenter != nil
-    }
-
-    if let closeCenter {
-        info("App reported the delete-stage button at \(closeCenter)")
-        let countBeforeDelete = currentStageCount()
-        postMouseClick(at: closeCenter)
-        wait(0.6)
-
-        test("Clicking the delete-stage button routes to a delete, not the desktop") {
-            readEvents().last { $0["event"] == "overlay_tap_routed" }?["target"] == "deleteStage"
-        }
-        test("Clicking the delete-stage button removes a stage") {
-            for _ in 0..<20 {
-                if currentStageCount() == countBeforeDelete - 1 { return true }
-                wait(0.1)
-            }
-            return false
-        }
-    } else {
-        test("Clicking the delete-stage button routes to a delete, not the desktop") { false }
-        test("Clicking the delete-stage button removes a stage") { false }
-    }
-    }
-} else {
-    fail("Could not calculate the active plate frame")
-    skipStageButtonChecks(reason: "The active plate frame could not be calculated")
-}
-
-postFlagsChanged(flags: [])
-postKeyDown(keyCode: CGKeyCode(kVK_Escape))
-postKeyUp(keyCode: CGKeyCode(kVK_Escape))
-wait(0.5)
-
-if currentStageCount() != baselineStageCount {
-    info("Stage count drifted to \(currentStageCount()); restoring is left to the next scenario's relaunch")
-}
-
-// --- 11b. Fullscreen Spaces ---
-// A fullscreen app owns a Space of its own, which the desktop surface deliberately never
-// joins. The plates have to reach it anyway, or the activation shortcut is dead exactly
-// where the user cannot see their other windows.
-header("11b. Overlay inside a fullscreen Space")
+// --- 11. Fullscreen Spaces ---
+// A fullscreen app owns a Space of its own, which is not a stage and never gets one. The
+// plates have to reach it anyway, or the activation shortcut is dead exactly where the user
+// cannot see their other windows.
+header("11. Overlay inside a fullscreen Space")
 
 let fullscreenFixture = NSRunningApplication
     .runningApplications(withBundleIdentifier: "com.apple.TextEdit")
@@ -1390,7 +1137,7 @@ if enteredFullscreen {
     wait(0.1)
     postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
     wait(1.5)
-    let _ = takeScreenshot("11b_overlay_in_fullscreen")
+    let _ = takeScreenshot("11_overlay_in_fullscreen")
 
     test("Overlay opens over a fullscreen Space") {
         for _ in 0..<30 {

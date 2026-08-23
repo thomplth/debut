@@ -304,6 +304,10 @@ public struct SettingsView: View {
         }
     }
 
+    static func switchDurationLabel(_ duration: TimeInterval) -> String {
+        duration <= 0 ? "Instant" : "\(Int((duration * 1000).rounded())) ms"
+    }
+
     private var keyboardShortcutsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Keyboard Shortcuts")
@@ -396,6 +400,25 @@ public struct SettingsView: View {
                     step: 0.01
                 )
                 Text("Shortest gap between steps while a cycling shortcut is held, so a fast key-repeat setting cannot race the selection past what you can follow. Off falls back to your system key-repeat rate.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Stage switch duration")
+                    Spacer()
+                    Text(Self.switchDurationLabel(viewModel.settings.spaceSwitchDuration))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: $viewModel.settings.spaceSwitchDuration,
+                    in: AppSettings.minimumSpaceSwitchDuration...AppSettings.maximumSpaceSwitchDuration,
+                    step: 0.01
+                )
+                Text("How long the desktop takes to slide across when switching stages, per stage crossed. Instant cuts straight to the stage with no transition.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

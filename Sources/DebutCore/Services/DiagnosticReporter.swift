@@ -17,8 +17,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         // session is diagnosed from, and has already produced false evidence.
         let dir: URL
         if isHostedByDebutApp {
-            dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                .appendingPathComponent("Debut")
+            dir = DebutCore.applicationSupportDirectory
         } else {
             dir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("DebutDiagnostics-\(ProcessInfo.processInfo.processIdentifier)")

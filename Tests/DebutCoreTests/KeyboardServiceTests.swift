@@ -228,24 +228,6 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdOptionTabHold, .jumpToLastStage])
     }
 
-    @Test("Stage management events")
-    func stageManagement() {
-        let svc = MockKeyboardService()
-        let delegate = TestKeyboardDelegate()
-        _ = svc.start(delegate: delegate)
-
-        svc.simulateEvent(.cmdTabHold)
-        svc.simulateEvent(.newStageBelow)
-        svc.simulateEvent(.newStageAbove)
-        svc.simulateEvent(.deleteStage)
-        svc.simulateEvent(.cmdRelease)
-
-        #expect(delegate.receivedEvents.count == 5)
-        #expect(delegate.receivedEvents[1] == .newStageBelow)
-        #expect(delegate.receivedEvents[2] == .newStageAbove)
-        #expect(delegate.receivedEvents[3] == .deleteStage)
-    }
-
     @Test("Quick switch events")
     func quickSwitch() {
         let svc = MockKeyboardService()

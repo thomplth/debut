@@ -21,7 +21,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     private var windowService: AccessibilityWindowService?
     private var keyboardService: EventTapKeyboardService?
-    private var desktopSurfaces: DesktopSurfaceCoordinator?
+    private var spaceService: SpaceService?
     private var currentSettings: AppSettings = AppSettings()
     private var pendingStageManager: StageManager?
     private var debouncedSaver: DebouncedSaver?
@@ -104,6 +104,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         // Apply exclusion list
         discovery.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
 
+        let spaceService = SpaceService()
+        spaceService.switchDuration = currentSettings.spaceSwitchDuration
+        self.spaceService = spaceService
+        discovery.spaceSwitcher = spaceService
+
+        // Windows are placed by the desktop they are on, so the stage list has to cover
+        // every desktop before the first reconcile. Growing it afterwards would leave the
+        // tail desktops' answers out of range, and those windows would land on stage 1.
+        StageController.reconcileStages(&stageManager, desktopCount: spaceService.desktopCount())
+
         // Remove stale window IDs, remap live window IDs from snapshot
         let reconcileID = PerformanceRecorder.shared.begin(
             .windowReconciliation,
@@ -121,8 +131,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             stageManager.removeAllWindows(forBundleID: bundleID)
         }
 
-        // Remove empty stages (unless all are empty)
-        stageManager.removeEmptyStages()
+        // Empty stages are deliberately kept: a desktop with nothing on it is still a
+        // desktop, and pruning it would shift every later stage off the desktop it maps to.
 
         if stageManager.stages.allSatisfy({ $0.windows.isEmpty }) &&
             stageManager.dormantWindowAssignments.isEmpty {
@@ -146,17 +156,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             sizes: AppIconCache.overlayIconSizes
         )
 
-        // Create desktop surfaces — one per display, sitting between active and inactive
-        // stage windows
-        let surfaces = DesktopSurfaceCoordinator(onFileDragEntered: { [weak self] in
-            guard let self else { return }
-            self.desktopSurfaces?.orderOut()
-            NSWorkspace.shared.hideOtherApplications()
-            self.diag.report("real_desktop_presented_for_file_drag")
-        })
-        surfaces.orderToFront()
-        self.desktopSurfaces = surfaces
-
         let controller = StageController(
             windowService: windowService,
             keyboardService: keyboardService,
@@ -166,7 +165,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             previewCacheTTL: currentSettings.previewCacheTTL
         )
         controller.delegate = self
-        controller.desktopSurfaces = surfaces
+        controller.spaceSwitcher = spaceService
         controller.onCommandUsed = { [weak self] action in
             DispatchQueue.main.async {
                 self?.recordCommandUsage(action)
@@ -174,7 +173,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
         controller.onDesktopReveal = { [weak self] in
             DispatchQueue.main.async {
-                self?.desktopSurfaces?.orderOut()
                 NSWorkspace.shared.hideOtherApplications()
                 self?.diag.report("real_desktop_presented")
             }
@@ -190,8 +188,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             currentSettings.quickSwitchSameApplicationModifiers
         keyboardService.heldCycleMinimumInterval = currentSettings.heldCycleMinimumInterval
 
-        // Raise active stage windows above the desktop surface
-        controller.switchToStage(id: stageManager.activeStageID)
+        // Stages are the user's desktops, so the persisted stage list is only a starting
+        // guess — desktops may have been added or removed while Debut was not running.
+        controller.reconcileStagesWithDesktops()
+
+        // Adopt the desktop already showing instead of switching to the persisted stage.
+        // Yanking the user to another desktop on launch would be both surprising and, for a
+        // login-item launch, invisible until they wondered where their windows went.
+        if let current = spaceService.currentDesktopIndex(),
+           controller.stageManager.stages.indices.contains(current) {
+            controller.stageManager.activateStage(id: controller.stageManager.stages[current].id)
+        }
 
         discovery.onWindowsDiscovered = { [weak self] windows in
             DispatchQueue.main.async {
@@ -199,7 +206,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 let result = self.runtimeWindowReconciler.reconcile(
                     RuntimeWindowSnapshot(
                         liveWindows: windows,
-                        allWindowIDs: nil
+                        allWindowIDs: nil,
+                        desktopIndexes: self.spaceService?.desktopIndexes(
+                            forWindows: windows.map(\.windowID)
+                        ) ?? [:]
                     ),
                     stageManager: &controller.stageManager
                 )
@@ -276,6 +286,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 }
             }
         }
+        discovery.onDesktopsChanged = { [weak self] snapshot in
+            DispatchQueue.main.async {
+                guard let self, let controller = self.stageController else { return }
+                let result = self.runtimeWindowReconciler.reconcile(
+                    snapshot,
+                    stageManager: &controller.stageManager
+                )
+                guard result.didMutate else { return }
+                self.diag.report("runtime_windows_reconciled", details: [
+                    "added": "\(result.addedCount)",
+                    "reassigned": "\(result.reassignedCount)",
+                    "trigger": "desktop_changed",
+                ])
+                self.reportAssignmentEvents(result.events, trigger: "desktop_changed")
+                self.debouncedSaver?.scheduleSave(controller.stageManager)
+            }
+        }
         discovery.onAppTerminated = { [weak self] ownerPID in
             DispatchQueue.main.async {
                 guard let self, let controller = self.stageController else { return }
@@ -292,6 +319,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             }
         }
         discovery.startObserving()
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(activeSpaceDidChange(_:)),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
 
         diag.report("controller_setup", details: [
             "eventTapStarted": "\(controller.keyboardServiceStarted)",
@@ -319,6 +353,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             object: nil
         )
         observingAccessibilityChanges = false
+    }
+
+    /// Fires for Debut's own switches as well as the user's. Debut's own switches are the
+    /// ones waiting on this to focus their target; a user's switch has nothing pending and
+    /// only needs the active stage adopted.
+    @objc private func activeSpaceDidChange(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.stageController?.desktopDidChange()
+            // Moving a window between desktops activates no app, so without this the move is
+            // only noticed the next time the user clicks the window.
+            self.windowDiscovery?.refreshDesktopAssignments()
+        }
     }
 
     @objc private func workspaceApplicationActivated(_ notification: Notification) {
@@ -495,26 +542,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             ])
         }
 
-        overlayWindow.onStageInsertRequested = { [weak self] edge in
-            guard let self, let ctrl = self.stageController else { return }
-            ctrl.insertStage(atEdge: edge)
-            self.diag.report("stage_inserted_from_overlay", details: [
-                "edge": "\(edge)",
-                "stageCount": "\(ctrl.stageManager.stages.count)",
-            ])
-            self.updateOverlay()
-        }
-
-        overlayWindow.onStageDeleteRequested = { [weak self] index in
-            guard let self, let ctrl = self.stageController else { return }
-            ctrl.deleteStage(atIndex: index)
-            self.diag.report("stage_deleted_from_overlay", details: [
-                "stageIndex": "\(index)",
-                "stageCount": "\(ctrl.stageManager.stages.count)",
-            ])
-            self.updateOverlay()
-        }
-
         overlayWindow.onStageScrollSelected = { [weak self] index in
             guard let self, let ctrl = self.stageController else { return }
             ctrl.jumpToStage(index: index)
@@ -533,22 +560,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             ])
         }
 
-        overlayWindow.onStageButtonRevealed = { [weak self] kind, center in
-            self?.diag.report("overlay_stage_button_revealed", details: [
-                "button": kind,
-                "revealed": "\(center != nil)",
-                "center": center.map(formatOverlayPoint) ?? "none",
-            ])
-        }
-
-        // A tap that resolves to nothing is indistinguishable from a tap that never arrived,
-        // which is how the stage buttons stayed dead behind a green test suite.
+        // A tap that resolves to nothing is indistinguishable from a tap that never arrived.
         overlayWindow.onOverlayTapRouted = { [weak self] tap in
             self?.diag.report("overlay_tap_routed", details: [
                 "target": tap.target.diagnosticName,
                 "location": formatOverlayPoint(tap.location),
-                "insertButtonCenter": tap.insertButtonCenter.map(formatOverlayPoint) ?? "none",
-                "closeButtonCenter": tap.closeButtonCenter.map(formatOverlayPoint) ?? "none",
             ])
         }
 
@@ -580,9 +596,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             selectedWindowIndex: stageController.selectedWindowIndex,
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings,
-            wallpaperLuminance: desktopSurfaces?.wallpaperLuminance(
-                forDisplay: display?.displayID
-            )
+            wallpaperLuminance: nil
         )
         reportCommandHintLayout(viewModel: vm)
         let createdHostingView = overlayWindow.update(viewModel: vm)
@@ -686,9 +700,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             selectedWindowIndex: stageController.selectedWindowIndex,
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings,
-            wallpaperLuminance: desktopSurfaces?.wallpaperLuminance(
-                forDisplay: display?.displayID
-            )
+            wallpaperLuminance: nil
         )
         overlayWindow.update(viewModel: vm)
     }
@@ -860,6 +872,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.stageController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
                 self.stageController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
                 self.stageController?.previewCacheTTL = newSettings.previewCacheTTL
+                self.spaceService?.switchDuration = newSettings.spaceSwitchDuration
                 self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
                     newSettings.quickSwitchExcludedBundleIDs
                 )
@@ -922,12 +935,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         if let controller = stageController, let discovery = windowDiscovery {
             controller.rebuildWindowCache(using: discovery)
 
-            // Rebuild the z-order as well as the model so windows that were on
-            // an inactive stage become visible immediately after the reset.
-            desktopSurfaces?.orderToFront()
-            for window in controller.stageManager.activeStage.windows {
-                _ = controller.windowService.raiseWindow(windowID: window.windowID)
-            }
+            // No z-order to rebuild — the windows of the active stage are the windows on
+            // the current desktop, and macOS is already showing them.
             if let firstWindow = controller.stageManager.activeStage.windows.first {
                 _ = controller.windowService.activateApp(bundleID: firstWindow.ownerBundleID)
             }
@@ -1035,8 +1044,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let client: any TelemetryClient = namespace.isEmpty || appID.isEmpty
             ? UnavailableTelemetryClient()
             : TelemetryDeckClient(namespace: namespace, appID: appID)
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Debut")
+        let support = DebutCore.applicationSupportDirectory
         let exporter = TelemetryExporter(
             client: client,
             queue: DiskTelemetryQueue(file: support.appendingPathComponent("telemetry-queue.json")),

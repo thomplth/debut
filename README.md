@@ -115,8 +115,6 @@ overlay. Holding past it presents the plates.
 | `←` `→` | Reorder the window inside its stage |
 | `↑` `↓` | Move the window to the stage above or below |
 | `⌥ ↑` / `⌥ ↓` | Swap this stage's position with its neighbour |
-| `N` / `⇧ N` | New stage below / above |
-| `⌫` / `⌦` | Delete this stage; its windows overflow into a neighbour |
 | `Q` | Quit the selected app |
 | `Esc` | Close the overlay without ending the session |
 
@@ -131,10 +129,23 @@ once — the browser window you need for this task, and the four you do not.
 **Stages are not named.** A stage's label is its 1-based position, so creating,
 deleting, and reordering need no bookkeeping and no rename step.
 
-**Inactive stages are occluded, not moved.** Debut owns a full-screen desktop surface
-that sits in z-order between the active and inactive windows. Switching orders that
-surface to the front and raises the active stage above it. Nothing is minimised,
-nothing is repositioned, and no window is moved off-screen.
+**A stage is a real macOS desktop.** Stage 3 is desktop 3, and macOS — not Debut — is
+the source of truth for which desktop a window is on. Switching a stage is therefore
+one composited transition drawn by the window server, so the whole stage appears at
+once instead of its windows being raised one by one. Debut follows desktops it did not
+switch, so Mission Control and Control-Arrow stay in sync.
+
+**Switching is a gesture Debut forges.** macOS offers no supported way to change
+desktop on demand, so Debut synthesises the trackpad swipe — a technique from
+[InstantSpaceSwitcher](https://github.com/jurplel/InstantSpaceSwitcher) by way of
+[Space Rabbit](https://github.com/Tahul/space-rabbit) — and drives its progress on a
+timer rather than handing the transition to the Dock. That is what lets the switch
+setting be a duration in milliseconds, from an instant cut up to a slide you can
+follow.
+
+**Moving a window between stages does not move your cursor.** The reassignment goes
+through the window server directly and settles in a few milliseconds. Nothing is
+dragged, nothing is minimised, and your session stays on the desktop it was on.
 
 **Layout survives quitting and rebooting.** Assignments persist by bundle ID and
 window title, with a bundle-only fallback because titles are not stable keys —

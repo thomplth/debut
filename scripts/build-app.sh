@@ -31,7 +31,7 @@ cp "$PROJECT_DIR/Resources/PrivacyInfo.xcprivacy" "$RESOURCES/PrivacyInfo.xcpriv
 
 # Generate a simple app icon using sips (theater mask from SF Symbols isn't available as icns,
 # so we create a minimal colored icon)
-ICON_DIR="$BUILD_DIR/Debut.iconset"
+ICON_DIR="$BUILD_DIR/$APP_NAME.iconset"
 mkdir -p "$ICON_DIR"
 for size in 16 32 64 128 256 512; do
     /usr/bin/sips -z $size $size -s format png /System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericApplicationIcon.icns --out "$ICON_DIR/icon_${size}x${size}.png" 2>/dev/null || true

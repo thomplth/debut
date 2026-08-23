@@ -316,7 +316,10 @@ struct StageControllerTests {
         return (controller, windowService, keyboardService)
     }
 
-    @Test("Cross-stage switch raises every target stage window")
+    // Raising every window was the desktop-surface architecture lifting them above the
+    // wallpaper overlay one at a time. Stages are real desktops now, so macOS reveals the
+    // whole stage in one transition and only the requested window is touched.
+    @Test("Cross-stage switch raises the requested window")
     func switchStage() {
         let (controller, windowSvc, _) = makeController()
         let stageAID = controller.stageManager.stages[0].id
@@ -330,7 +333,8 @@ struct StageControllerTests {
 
         controller.switchToStage(id: stageBID, raiseWindowID: 202)
 
-        #expect(Set(windowSvc.raisedWindowIDs).isSuperset(of: Set<CGWindowID>([202, 303])))
+        #expect(windowSvc.raisedWindowIDs.contains(202))
+        #expect(!windowSvc.raisedWindowIDs.contains(303))
     }
 
     @Test("Dispatched commands report hint usage")
@@ -339,10 +343,10 @@ struct StageControllerTests {
         let recorder = CommandUsageRecorder()
         controller.onCommandUsed = { recorder.record($0) }
 
-        keyboardService.simulateEvent(.newStageBelow)
+        keyboardService.simulateEvent(.swapStageUp)
         keyboardService.simulateEvent(.nextWindowRepeat)
 
-        #expect(recorder.actions == [.newStageBelow])
+        #expect(recorder.actions == [.swapStageUp])
     }
 
     @Test("Window switch raises selected window")
@@ -956,72 +960,6 @@ struct StageControllerTests {
         #expect(controller.selectedStageIndex == 1)
     }
 
-    @Test("An overlay edge insert adds a stage at that end and focuses it")
-    func insertStageAtEdge() {
-        let (controller, _, keyboardSvc) = makeController()
-        let originalID = controller.stageManager.stages[0].id
-        keyboardSvc.simulateEvent(.cmdTabHold)
-
-        controller.insertStage(atEdge: .top)
-
-        #expect(controller.stageManager.stages.count == 2)
-        #expect(controller.stageManager.stages[1].id == originalID)
-        #expect(controller.selectedStageIndex == 0)
-        #expect(controller.selectedWindowIndex == 0)
-
-        controller.insertStage(atEdge: .bottom)
-
-        #expect(controller.stageManager.stages.count == 3)
-        #expect(controller.selectedStageIndex == 2)
-    }
-
-    @Test("Edge inserts are ignored while the overlay is closed")
-    func insertStageRequiresVisibleOverlay() {
-        let (controller, _, _) = makeController()
-
-        controller.insertStage(atEdge: .bottom)
-
-        #expect(controller.stageManager.stages.count == 1)
-    }
-
-    @Test("An overlay close button deletes that stage and clamps the selection")
-    func deleteStageAtIndex() {
-        let (controller, _, keyboardSvc) = makeController()
-        let originalID = controller.stageManager.stages[0].id
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        controller.insertStage(atEdge: .bottom)
-        controller.insertStage(atEdge: .bottom)
-        #expect(controller.stageManager.stages.count == 3)
-
-        controller.deleteStage(atIndex: 2)
-
-        #expect(controller.stageManager.stages.count == 2)
-        #expect(controller.stageManager.stages[0].id == originalID)
-        #expect(controller.selectedStageIndex == 1)
-        #expect(controller.selectedWindowIndex == 0)
-
-        controller.deleteStage(atIndex: 0)
-
-        #expect(controller.stageManager.stages.count == 1)
-        #expect(controller.stageManager.stages[0].id != originalID)
-        #expect(controller.selectedStageIndex == 0)
-    }
-
-    @Test("Stage deletes are ignored while the overlay is closed or out of range")
-    func deleteStageRequiresVisibleOverlayAndValidIndex() {
-        let (controller, _, keyboardSvc) = makeController()
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        controller.insertStage(atEdge: .bottom)
-        let order = controller.stageManager.stages.map(\.id)
-
-        controller.deleteStage(atIndex: 5)
-        #expect(controller.stageManager.stages.map(\.id) == order)
-
-        keyboardSvc.simulateEvent(.escape)
-        controller.deleteStage(atIndex: 0)
-        #expect(controller.stageManager.stages.map(\.id) == order)
-    }
-
     @Test("Held backward Tab stops at the first window and a fresh press wraps")
     func backwardTabCycle() {
         let (controller, _, keyboardSvc) = makeController()
@@ -1186,9 +1124,14 @@ struct StageControllerTests {
         #expect(windowIDs == [101, 303, 202])
     }
 
-    @Test("Cross-stage window activation switches to owning stage")
-    func crossStageSwitches() {
+    // Stages are desktops, so when macOS reports a focused window on the desktop showing,
+    // that outranks whatever Debut recorded earlier. The window moves to the showing stage
+    // rather than the user being moved to the window, and it must not end up in both.
+    @Test("Cross-stage window activation moves the window, not the user")
+    func crossStageActivationMovesTheWindow() {
         let (controller, _, _) = makeController()
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        controller.spaceSwitcher = spaces
         let stageAID = controller.stageManager.stages[0].id
         controller.stageManager.createStage(position: .below)
         let stageBID = controller.stageManager.stages[1].id
@@ -1196,17 +1139,15 @@ struct StageControllerTests {
         controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageAID)
         controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageBID)
 
-        // Switch to stage B
+        spaces.windowDesktops = [101: 1, 202: 1]
         controller.switchToStage(id: stageBID)
         #expect(controller.stageManager.activeStageID == stageBID)
 
-        // Activate window from stage A while in stage B — should switch back to A
         controller.recordWindowActivation(windowID: 101)
-        #expect(controller.stageManager.activeStageID == stageAID)
 
-        // Window stays only in stage A (no duplication)
-        #expect(controller.stageManager.stages[0].windows.contains(where: { $0.windowID == 101 }))
-        #expect(!controller.stageManager.stages[1].windows.contains(where: { $0.windowID == 101 }))
+        #expect(controller.stageManager.activeStageID == stageBID)
+        #expect(!controller.stageManager.stages[0].windows.contains(where: { $0.windowID == 101 }))
+        #expect(controller.stageManager.stages[1].windows.contains(where: { $0.windowID == 101 }))
     }
 
     @Test("Window cache reset can report diagnostics while rebuilding controller state")

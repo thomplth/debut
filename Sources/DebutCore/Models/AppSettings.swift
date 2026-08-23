@@ -69,6 +69,19 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Paces held cycling independently of the user's key-repeat rate.
     public static let defaultHeldCycleMinimumInterval: TimeInterval = 0.06
 
+    /// How long one desktop's worth of slide takes when switching stages.
+    ///
+    /// This replaced a velocity scalar, which was not a duration and did not behave like
+    /// one: the Dock ignores progress and skips the transition outright above roughly 80,
+    /// and the old slider's whole 100–1000 range sat above that, so every value on it
+    /// looked identical and instant. Debut now drives the swipe's progress itself on a
+    /// timer, which is what makes a number in milliseconds honest.
+    public static let defaultSpaceSwitchDuration: TimeInterval = 0.15
+    /// Zero is a real setting, not a degenerate one: it posts the original high-velocity
+    /// flick and the Dock cuts straight to the target desktop with no transition.
+    public static let minimumSpaceSwitchDuration: TimeInterval = 0
+    public static let maximumSpaceSwitchDuration: TimeInterval = 0.4
+
     public var launchAtLogin: Bool
     public var excludedBundleIDs: [String]
     public var shareAnonymousTelemetry: Bool
@@ -85,6 +98,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var quickSwitchExcludedBundleIDs: [String]
     public var quickSwitchModifiers: ShortcutModifiers
     public var quickSwitchSameApplicationModifiers: ShortcutModifiers
+
+    // Stage switching
+    public var spaceSwitchDuration: TimeInterval
 
     // Window previews
     public var previewRefreshPolicy: PreviewRefreshPolicy
@@ -112,6 +128,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
             control: true,
             option: true
         )
+        self.spaceSwitchDuration = Self.defaultSpaceSwitchDuration
         self.previewRefreshPolicy = .lastActiveOnly
         self.previewCacheTTL = Self.defaultPreviewCacheTTL
         self.commandHintVisibility = .automatic
@@ -137,6 +154,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
             TimeInterval.self,
             forKey: .heldCycleMinimumInterval
         ) ?? Self.defaultHeldCycleMinimumInterval
+        spaceSwitchDuration = try container.decodeIfPresent(
+            TimeInterval.self,
+            forKey: .spaceSwitchDuration
+        ) ?? Self.defaultSpaceSwitchDuration
         keyBindings = try container.decodeIfPresent(KeyBindings.self, forKey: .keyBindings) ?? KeyBindings()
         quickSwitchExcludedBundleIDs = try container.decodeIfPresent(
             [String].self,
