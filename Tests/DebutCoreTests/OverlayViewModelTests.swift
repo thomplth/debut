@@ -103,7 +103,7 @@ struct OverlayViewModelTests {
         #expect(vm.selectedWindow?.ownerBundleID == "com.e")
     }
 
-    @Test("Display stack shortcut separates the held Command key from Return")
+    @Test("Display stack shortcut uses a half-width gap between Command and Return")
     func displayStackShortcutSpacing() {
         let vm = OverlayViewModel(
             stageManager: multiDisplayManager(),
@@ -111,7 +111,8 @@ struct OverlayViewModelTests {
             selectedWindowIndex: 0
         )
 
-        #expect(vm.displayStackShortcut == "⌘ Return")
+        #expect(vm.displayStackShortcut == "Return")
+        #expect(vm.displayStackShortcutSpacing == 3.5)
     }
 
     @Test("Display stack shortcut retires through the standard command hint policy")

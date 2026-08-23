@@ -1095,11 +1095,14 @@ public struct OverlaySwiftUIView: View {
                         Text("\(viewModel.displayStackPosition) of \(viewModel.displayStackCount)")
                             .foregroundStyle(.secondary)
                         if !viewModel.displayStackShortcut.isEmpty {
-                            Text(viewModel.displayStackShortcut)
-                                .font(.system(.caption, design: .monospaced, weight: .semibold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(.black.opacity(0.18), in: Capsule())
+                            HStack(spacing: viewModel.displayStackShortcutSpacing) {
+                                Text("⌘")
+                                Text(viewModel.displayStackShortcut)
+                            }
+                            .font(.system(.caption, design: .monospaced, weight: .semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(.black.opacity(0.18), in: Capsule())
                         }
                     }
                     .font(.callout)
