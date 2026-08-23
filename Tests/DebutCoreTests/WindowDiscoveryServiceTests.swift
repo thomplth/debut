@@ -238,6 +238,34 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshotFocusedWindowID == 3)
     }
 
+    @Test("Activation replaces a stale focused window with the frontmost live window")
+    func activationReplacesStaleFocusedWindow() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 30, isHidden: false),
+        ]
+        windowService.windowList = [
+            liveWindow(3, ownerPID: 30),
+            liveWindow(4, ownerPID: 30),
+        ]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 99 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var activatedWindowIDs: [CGWindowID] = []
+        var snapshotFocusedWindowID: CGWindowID?
+        service.onWindowActivated = { activatedWindowIDs.append($0) }
+        service.onAppActivated = { snapshotFocusedWindowID = $0.focusedWindowID }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 30, isHidden: false)
+        )
+
+        #expect(activatedWindowIDs == [3])
+        #expect(snapshotFocusedWindowID == 3)
+    }
+
     @Test("Empty window snapshot does not erase state while apps are running")
     func emptySnapshotWithRunningApps() {
         let windowService = MockWindowService()
