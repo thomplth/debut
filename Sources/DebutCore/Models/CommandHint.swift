@@ -19,16 +19,31 @@ public struct CommandHintPresentation: Identifiable, Equatable, Sendable {
 }
 
 public enum CommandHintCatalog {
-    public static func stageNumberHint(
+    public static func stageHint(
         stageIndex: Int,
+        activeStageIndex: Int,
+        stageCount: Int,
         settings: AppSettings
     ) -> CommandHintPresentation? {
-        guard let jumpAction = KeyAction.jumpAction(forStageIndex: stageIndex) else {
+        guard stageCount > 0,
+              (0..<stageCount).contains(stageIndex),
+              (0..<stageCount).contains(activeStageIndex),
+              let jumpAction = KeyAction.jumpAction(forStageIndex: stageIndex)
+        else {
             return nil
         }
+        var actions = [jumpAction]
+        if stageCount > 1 {
+            if stageIndex == (activeStageIndex + 1) % stageCount {
+                actions.append(.nextStage)
+            }
+            if stageIndex == (activeStageIndex - 1 + stageCount) % stageCount {
+                actions.append(.previousStage)
+            }
+        }
         return hint(
-            label: "Jump to stage",
-            actions: [jumpAction],
+            label: "Select stage",
+            actions: actions,
             placement: .stageLeading,
             iconSystemName: nil,
             settings: settings
@@ -43,9 +58,7 @@ public enum CommandHintCatalog {
     ) -> [CommandHintPresentation] {
         guard isActive else { return [] }
 
-        var groups: [(String, [KeyAction], String)] = [
-            ("Select stage", [.nextStage, .previousStage], "rectangle.stack"),
-        ]
+        var groups: [(String, [KeyAction], String)] = []
         if hasSelectedWindow {
             groups.append(("Move window", [.moveWindowUp, .moveWindowDown], "arrow.up.and.down"))
             groups.append((
@@ -77,10 +90,19 @@ public enum CommandHintCatalog {
     ) -> [CommandHintPresentation] {
         guard windowCount > 1,
               (0..<windowCount).contains(selectedWindowIndex),
-              windowIndex == (selectedWindowIndex + 1) % windowCount,
-              let navigationHint = hint(
+              (0..<windowCount).contains(windowIndex)
+        else { return [] }
+
+        var actions: [KeyAction] = []
+        if windowIndex == (selectedWindowIndex + 1) % windowCount {
+            actions.append(.nextWindow)
+        }
+        if windowIndex == (selectedWindowIndex - 1 + windowCount) % windowCount {
+            actions.append(.previousWindow)
+        }
+        guard let navigationHint = hint(
                 label: "Select window",
-                actions: [.nextWindow, .previousWindow],
+                actions: actions,
                 placement: .nextWindow,
                 iconSystemName: nil,
                 settings: settings
@@ -117,5 +139,9 @@ extension KeyCombo {
             .replacingOccurrences(of: "Shift+", with: "⇧")
             .replacingOccurrences(of: "Option+", with: "⌥")
             .replacingOccurrences(of: "Delete", with: "⌫")
+            .replacingOccurrences(of: "↑", with: "▲")
+            .replacingOccurrences(of: "↓", with: "▼")
+            .replacingOccurrences(of: "←", with: "◀")
+            .replacingOccurrences(of: "→", with: "▶")
     }
 }

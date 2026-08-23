@@ -747,6 +747,7 @@ public struct PlateConstants {
     public static let compactStageSpacing: CGFloat = 14
     public static let stageSpacing: CGFloat = 34
     public static let commandHintFooterOffset: CGFloat = 24
+    public static let commandHintLeadingGap: CGFloat = commandHintFooterOffset
     public static let edgeHoverRegion: CGFloat = 56
     public static let edgeScrollMargin: CGFloat = 28
     public static let stageScrollTravelPerStage: CGFloat = 30
@@ -1009,8 +1010,10 @@ public struct OverlaySwiftUIView: View {
                         let selectedWindowIndex = pointerSelection?.stageIndex == index
                             ? pointerSelection?.windowIndex
                             : (isActive ? viewModel.selectedWindowIndex : nil)
-                        let stageNumberHint = CommandHintCatalog.stageNumberHint(
+                        let stageNumberHint = CommandHintCatalog.stageHint(
                             stageIndex: index,
+                            activeStageIndex: viewModel.activeStageIndex,
+                            stageCount: plates.count,
                             settings: viewModel.appearance
                         )
                         let footerHints = isActive ? activeFooterHints : []
@@ -1099,7 +1102,7 @@ public struct OverlaySwiftUIView: View {
                                 Text("⌘")
                                 Text(viewModel.displayStackShortcut)
                             }
-                            .font(.system(.caption, design: .monospaced, weight: .semibold))
+                            .modifier(CommandHintTextStyle())
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
                             .background(.black.opacity(0.18), in: Capsule())
@@ -1486,7 +1489,9 @@ struct PlateSwiftUIView: View {
         .overlay(alignment: .leading) {
             if let stageNumberHint {
                 CommandHintStrip(hints: [stageNumberHint])
-                    .offset(x: -18)
+                    .alignmentGuide(.leading) { dimensions in
+                        dimensions[.trailing] + PlateConstants.commandHintLeadingGap
+                    }
             }
         }
         .overlay(alignment: .bottom) {
@@ -1665,7 +1670,7 @@ struct CommandHintStrip: View {
                             .font(.system(size: 8, weight: .semibold))
                     }
                     Text(hint.shortcut)
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .modifier(CommandHintTextStyle())
                 }
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
@@ -1684,6 +1689,14 @@ struct CommandHintStrip: View {
         .accessibilityLabel(
             hints.map { "\($0.label), \($0.shortcut)" }.joined(separator: "; ")
         )
+    }
+}
+
+private struct CommandHintTextStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.system(.caption, design: .monospaced, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.92))
     }
 }
 

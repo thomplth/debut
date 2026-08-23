@@ -652,7 +652,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     private func reportCommandHintLayout(viewModel: OverlayViewModel) {
         let leadingHintCount = viewModel.plates.indices.compactMap { index in
-            CommandHintCatalog.stageNumberHint(stageIndex: index, settings: currentSettings)
+            CommandHintCatalog.stageHint(
+                stageIndex: index,
+                activeStageIndex: viewModel.activeStageIndex,
+                stageCount: viewModel.plates.count,
+                settings: currentSettings
+            )
         }.count
         guard viewModel.plates.indices.contains(viewModel.activeStageIndex) else { return }
         let activePlate = viewModel.plates[viewModel.activeStageIndex]

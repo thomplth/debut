@@ -171,19 +171,40 @@ struct CommandHintTests {
         #expect(settings.shouldShowCommandHint(for: .moveWindowLeft))
     }
 
-    @Test("Stage number hints sit left of every plate without an icon")
+    @Test("Stage hints combine the number with the shortcuts that cycle to their plate")
     func stageHintCatalog() {
         var settings = AppSettings()
         settings.keyBindings.bindings[.moveWindowLeft] = KeyCombo(keyCode: kVK_ANSI_B)
 
-        let numberHint = CommandHintCatalog.stageNumberHint(
-            stageIndex: 0,
-            settings: settings
+        let previousDestination = CommandHintCatalog.stageHint(
+            stageIndex: 0, activeStageIndex: 1, stageCount: 3, settings: settings
+        )
+        let nextDestination = CommandHintCatalog.stageHint(
+            stageIndex: 2, activeStageIndex: 1, stageCount: 3, settings: settings
         )
 
-        #expect(numberHint?.actions == [.jumpToStage1])
-        #expect(numberHint?.placement == .stageLeading)
-        #expect(numberHint?.iconSystemName == nil)
+        #expect(previousDestination?.actions == [.jumpToStage1, .previousStage])
+        #expect(previousDestination?.shortcut == "1 / ⇧⌥Tab")
+        #expect(nextDestination?.actions == [.jumpToStage3, .nextStage])
+        #expect(nextDestination?.shortcut == "3 / ⌥Tab")
+        #expect(nextDestination?.placement == .stageLeading)
+        #expect(nextDestination?.iconSystemName == nil)
+    }
+
+    @Test("Stage cycling hints wrap and share a destination when there are two stages")
+    func stageHintCyclingWraps() {
+        let settings = AppSettings()
+
+        let wrappedNext = CommandHintCatalog.stageHint(
+            stageIndex: 0, activeStageIndex: 2, stageCount: 3, settings: settings
+        )
+        let sharedDestination = CommandHintCatalog.stageHint(
+            stageIndex: 1, activeStageIndex: 0, stageCount: 2, settings: settings
+        )
+
+        #expect(wrappedNext?.actions == [.jumpToStage1, .nextStage])
+        #expect(sharedDestination?.actions == [.jumpToStage2, .nextStage, .previousStage])
+        #expect(sharedDestination?.shortcut == "2 / ⌥Tab / ⇧⌥Tab")
     }
 
     @Test("Active plate actions sit below the plate and use purpose icons")
@@ -207,12 +228,14 @@ struct CommandHintTests {
         #expect(inactiveHints.isEmpty)
         #expect(activeHints.flatMap(\.actions).contains(.moveWindowLeft))
         #expect(activeHints.flatMap(\.actions).contains(.moveWindowUp))
+        #expect(!activeHints.flatMap(\.actions).contains(.nextStage))
+        #expect(!activeHints.flatMap(\.actions).contains(.previousStage))
         #expect(activeHints.first(where: { $0.actions.contains(.moveWindowLeft) })?.shortcut.contains("B") == true)
         #expect(activeHints.allSatisfy { $0.placement == .plateFooter })
         #expect(activeHints.allSatisfy { $0.iconSystemName != nil })
     }
 
-    @Test("Tab hint appears on the next selectable window")
+    @Test("Forward and backward Tab hints appear on their respective windows")
     func windowHintCatalog() {
         let settings = AppSettings()
 
@@ -230,16 +253,45 @@ struct CommandHintTests {
         )
         let wrappedHints = CommandHintCatalog.windowHints(
             windowIndex: 0,
-            selectedWindowIndex: 2,
+            selectedWindowIndex: 1,
             windowCount: 3,
             settings: settings
         )
 
         #expect(currentHints.isEmpty)
-        #expect(nextHints.flatMap(\.actions).contains(.nextWindow))
+        #expect(nextHints.flatMap(\.actions) == [.nextWindow])
+        #expect(nextHints.first?.shortcut == "Tab")
+        #expect(wrappedHints.flatMap(\.actions) == [.previousWindow])
+        #expect(wrappedHints.first?.shortcut == "⇧Tab")
         #expect(nextHints.allSatisfy { $0.placement == .nextWindow })
         #expect(nextHints.allSatisfy { $0.iconSystemName == nil })
         #expect(!wrappedHints.isEmpty)
+    }
+
+    @Test("Two-window cycles combine both directions on the other window")
+    func twoWindowCycleHintsShareDestination() {
+        let hints = CommandHintCatalog.windowHints(
+            windowIndex: 1,
+            selectedWindowIndex: 0,
+            windowCount: 2,
+            settings: AppSettings()
+        )
+
+        #expect(hints.flatMap(\.actions) == [.nextWindow, .previousWindow])
+        #expect(hints.first?.shortcut == "Tab / ⇧Tab")
+    }
+
+    @Test("Command hints use the triangle legends printed on Mac arrow keys")
+    func arrowKeyLegends() {
+        #expect(KeyCombo(keyCode: kVK_UpArrow).commandHintDisplayString == "▲")
+        #expect(KeyCombo(keyCode: kVK_DownArrow).commandHintDisplayString == "▼")
+        #expect(KeyCombo(keyCode: kVK_LeftArrow).commandHintDisplayString == "◀")
+        #expect(KeyCombo(keyCode: kVK_RightArrow).commandHintDisplayString == "▶")
+    }
+
+    @Test("Leading and footer hints use the same distance from their plate")
+    func plateHintPadding() {
+        #expect(PlateConstants.commandHintLeadingGap == PlateConstants.commandHintFooterOffset)
     }
 
     @Test("A hidden action is omitted from its contextual group")
@@ -256,7 +308,7 @@ struct CommandHintTests {
         let moveHint = hints.first(where: { $0.label == "Move window" })
 
         #expect(moveHint?.actions == [.moveWindowDown])
-        #expect(moveHint?.shortcut == "↓")
+        #expect(moveHint?.shortcut == "▼")
     }
 
     @Test("Key events map to hint usage without counting auto-repeat")
