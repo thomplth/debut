@@ -129,14 +129,15 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     public func populateDefaultStage(_ stageManager: inout StageManager) {
         let windows = discoverRunningWindows()
-        let desktopIndexes = spaceSwitcher?
-            .desktopIndexes(forWindows: windows.map(\.windowID)) ?? [:]
+        let desktopLocations = spaceSwitcher?
+            .desktopLocations(forWindows: windows.map(\.windowID)) ?? [:]
 
         for window in windows {
             // This path never reaches the reconciler, so the desktop rule is applied here
             // too — otherwise a first run collapses every desktop onto stage 1.
-            let desktopStageID = desktopIndexes[window.windowID]
-                .flatMap { stageManager.stages.indices.contains($0) ? stageManager.stages[$0].id : nil }
+            let desktopStageID = desktopLocations[window.windowID].flatMap {
+                stageManager.stageID(stackID: $0.stackID, at: $0.index)
+            }
             stageManager.addWindow(window, toStageID: desktopStageID ?? stageManager.stages[0].id)
             trackAndRegister(windowID: window.windowID, pid: window.ownerPID ?? 0)
         }
@@ -169,7 +170,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             workload: .init(windows: liveWindows.count)
         )
         var untrackableDormantCount = 0
-        for stage in stageManager.stages {
+        for stage in stageManager.allStages {
             for windowID in stage.windowIDs where untrackableWindowIDs.contains(windowID) {
                 guard let assignment = stageManager.makeWindowDormant(windowID: windowID) else { continue }
                 untrackableDormantCount += 1
@@ -177,7 +178,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     "windowID": "\(windowID)",
                     "bundleID": assignment.window.ownerBundleID,
                     "windowTitle": assignment.window.windowTitle,
-                    "fromStage": "\(stageManager.stages.firstIndex(where: { $0.id == assignment.stageID }) ?? -1)",
+                    "fromStage": "\(stageManager.stageIndex(id: assignment.stageID) ?? -1)",
                     "reason": "untrackable",
                 ])
             }
@@ -200,7 +201,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         let runningPIDs = Set(runningApps.map(\.pid))
         let runningBundleIDs = Set(runningApps.map(\.bundleID))
-        let stoppedPIDs: Set<pid_t> = Set(stageManager.stages.flatMap(\.windows).compactMap { window -> pid_t? in
+        let stoppedPIDs: Set<pid_t> = Set(stageManager.allStages.flatMap(\.windows).compactMap { window -> pid_t? in
             guard let ownerPID = window.ownerPID,
                   !runningPIDs.contains(ownerPID),
                   !runningBundleIDs.contains(window.ownerBundleID)
@@ -217,7 +218,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             RuntimeWindowSnapshot(
                 liveWindows: liveWindows,
                 allWindowIDs: windowService.listAllWindowIDs(),
-                desktopIndexes: desktopIndexes(for: liveWindows)
+                desktopIndexes: desktopIndexes(for: liveWindows),
+                desktopLocations: desktopLocations(for: liveWindows)
             ),
             stageManager: &stageManager,
             newWindowStageID: firstStageID
@@ -524,6 +526,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         spaceSwitcher?.desktopIndexes(forWindows: windows.map(\.windowID)) ?? [:]
     }
 
+    private func desktopLocations(for windows: [WindowInfo]) -> [CGWindowID: DesktopLocation] {
+        spaceSwitcher?.desktopLocations(forWindows: windows.map(\.windowID)) ?? [:]
+    }
+
     private func discoverLaunchedWindows(for app: AppInfo) {
         let pid = app.pid
         let windows = windowService.listWindows().filter { $0.ownerPID == pid }
@@ -582,7 +588,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             liveWindows: liveWindows,
             allWindowIDs: windowService.listAllWindowIDs(),
             unarmedWindowIDs: unarmedWindowIDs,
-            desktopIndexes: desktopIndexes(for: liveWindows)
+            desktopIndexes: desktopIndexes(for: liveWindows),
+            desktopLocations: desktopLocations(for: liveWindows)
         ))
     }
 
@@ -632,7 +639,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             allWindowIDs: windowService.listAllWindowIDs(),
             focusedWindowID: focusedWindowID,
             unarmedWindowIDs: unarmedWindowIDs,
-            desktopIndexes: desktopIndexes(for: liveWindows)
+            desktopIndexes: desktopIndexes(for: liveWindows),
+            desktopLocations: desktopLocations(for: liveWindows)
         ))
         if let focusedWindowID {
             onWindowActivated?(focusedWindowID)

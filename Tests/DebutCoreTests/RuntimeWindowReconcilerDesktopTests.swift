@@ -197,4 +197,44 @@ struct RuntimeWindowReconcilerDesktopTests {
 
         #expect(manager.stageContainingWindow(windowID: 7) == manager.stages[2].id)
     }
+
+    @Test("The same desktop index on another display maps to another stack")
+    func displayQualifiedDesktopLocation() {
+        let topology = SpaceTopology(separateSpaces: true, stacks: [
+            SpaceStackDescriptor(
+                id: "a", displayID: 1, displayName: "A", frame: .zero,
+                desktopIDs: [10, 11], currentDesktopID: 10
+            ),
+            SpaceStackDescriptor(
+                id: "b", displayID: 2, displayName: "B", frame: .zero,
+                desktopIDs: [20, 21], currentDesktopID: 20
+            ),
+        ])
+        var manager = StageManager()
+        manager.reconcileStageStacks(with: topology)
+        manager.addWindow(
+            StageWindow(
+                windowID: 7,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "Window",
+                ownerPID: 10
+            ),
+            toStageID: manager.stageID(stackID: "a", at: 1)!
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        _ = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(7)],
+                allWindowIDs: [7],
+                desktopLocations: [
+                    7: DesktopLocation(stackID: "b", desktopID: 21, index: 1),
+                ]
+            ),
+            stageManager: &manager
+        )
+
+        #expect(manager.stageContainingWindow(windowID: 7) == manager.stageID(stackID: "b", at: 1))
+    }
 }

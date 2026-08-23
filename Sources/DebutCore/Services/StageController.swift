@@ -189,6 +189,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var focusedWindowIsFullscreen: Bool = false
 
     private var preOverlayStageID: UUID?
+    private var preOverlayStageStackID: String?
     private var previousStageID: UUID?
     private var backtickCycleWindows: [CGWindowID] = []
     private var backtickCycleIndex: Int = 0
@@ -249,6 +250,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             "overlayVisible": "\(isStageManagerVisible)",
             "focusedWindowFullscreen": "\(focusedWindowIsFullscreen)",
             "stageCount": "\(visibleStageManager.stages.count)",
+            "stageStackCount": "\(visibleStageManager.connectedStageStacks.count)",
+            "selectedStageStackID": visibleStageManager.selectedStageStackID,
+            "selectedDisplayName": visibleStageManager.selectedStageStack?.displayName ?? "unknown",
+            "stageCountsByStack": visibleStageManager.connectedStageStacks
+                .map { "\($0.displayName):\($0.stages.count)" }
+                .joined(separator: ","),
             "activeStageIndex": "\(activeStageIndex)",
             "selectedStageIndex": "\(selectedStageIndex)",
             "selectedWindowIndex": "\(selectedWindowIndex)",
@@ -278,12 +285,24 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             diag.report("stages_reconcile_refused", details: ["reason": "noSpaceSwitcher"])
             return
         }
-        let outcome = Self.reconcileStages(&stageManager,
-                                           desktopCount: spaceSwitcher.desktopCount())
-        // Every Space change runs this, so reporting a reconcile that changed nothing would
-        // push the events that explain a session out of the capped log within a few switches.
-        if outcome.refused || outcome.didChange {
-            diag.report(outcome.diagnosticEvent, details: outcome.diagnosticDetails)
+        let topology = spaceSwitcher.spaceTopology()
+        guard !topology.stacks.isEmpty else {
+            diag.report("stages_reconcile_refused", details: ["reason": "noDesktopsReported"])
+            return
+        }
+        let stackCountBefore = stageManager.connectedStageStacks.count
+        let stageCountBefore = stageManager.allStages.count
+        stageManager.reconcileStageStacks(with: topology)
+        let stackCountAfter = stageManager.connectedStageStacks.count
+        let stageCountAfter = stageManager.allStages.count
+        if stackCountBefore != stackCountAfter || stageCountBefore != stageCountAfter {
+            diag.report("stages_reconciled", details: [
+                "separateSpaces": "\(topology.separateSpaces)",
+                "stackCountBefore": "\(stackCountBefore)",
+                "stackCountAfter": "\(stackCountAfter)",
+                "stagesBefore": "\(stageCountBefore)",
+                "stagesAfter": "\(stageCountAfter)",
+            ])
         }
     }
 
@@ -346,8 +365,17 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// have nowhere to go. The notification fires once the Space change has settled, so this is
     /// the earliest honest point to re-ask.
     public func desktopDidChange() {
+        let previousActiveStageID = stageManager.activeStageID
         reconcileStagesWithDesktops()
-        syncActiveStageWithCurrentDesktop()
+        if stageManager.activeStageID != previousActiveStageID {
+            previousStageID = previousActiveStageID
+            diag.report("active_stage_synced", details: [
+                "to": stageLabel(forID: stageManager.activeStageID),
+                "reason": "desktop_changed_externally",
+            ])
+            delegate?.stageControllerDidMutateState(self)
+            delegate?.stageControllerDidSwitchStage(self)
+        }
         applyPendingStageFocus()
     }
 
@@ -358,9 +386,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// restored its own idea of focus as the Space settled and overwrote the choice.
     private func applyPendingStageFocus() {
         guard let pending = pendingStageFocus else { return }
-        guard let index = spaceSwitcher?.currentDesktopIndex(),
-              stageManager.stages.indices.contains(index),
-              stageManager.stages[index].id == pending.stageID
+        guard let stackID = stageManager.stageStackID(containingStageID: pending.stageID),
+              let index = stageManager.stageIndex(id: pending.stageID),
+              let stack = spaceSwitcher?.spaceTopology().stack(id: stackID),
+              stack.currentDesktopIndex == index
         else {
             // The user overtook the switch. Dragging focus back to the stage they left is
             // worse than leaving it wherever they landed.
@@ -375,7 +404,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     private func focusWindow(_ windowID: CGWindowID, inStageID stageID: UUID) {
         _ = windowService.raiseWindow(windowID: windowID)
         stageManager.bringWindowToFront(windowID: windowID, inStageID: stageID)
-        if let bundleID = stageManager.stages.first(where: { $0.id == stageID })?
+        if let bundleID = stageManager.allStages.first(where: { $0.id == stageID })?
             .windows.first(where: { $0.windowID == windowID })?.ownerBundleID {
             _ = windowService.activateApp(bundleID: bundleID)
         }
@@ -387,12 +416,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// clicking a window on another desktop all do it — and until this runs, Debut's active
     /// stage is simply wrong. Call it whenever macOS reports the active Space changed.
     public func syncActiveStageWithCurrentDesktop() {
-        guard let index = spaceSwitcher?.currentDesktopIndex(),
-              stageManager.stages.indices.contains(index)
+        guard let topology = spaceSwitcher?.spaceTopology(),
+              let stack = topology.stack(id: stageManager.selectedStageStackID),
+              let index = stack.currentDesktopIndex,
+              let stageID = stageManager.stageID(stackID: stack.id, at: index),
+              stageID != stageManager.activeStageID
         else { return }
-        let stageID = stageManager.stages[index].id
-        guard stageID != stageManager.activeStageID else { return }
-
         previousStageID = stageManager.activeStageID
         stageManager.activateStage(id: stageID)
         diag.report("active_stage_synced", details: [
@@ -405,8 +434,11 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
     /// Position-based label for a stage, e.g. "Stage 2". Used for diagnostics only.
     private func stageLabel(forID id: UUID) -> String {
-        guard let index = stageManager.stages.firstIndex(where: { $0.id == id }) else { return "?" }
-        return "Stage \(index + 1)"
+        guard let index = stageManager.stageIndex(id: id),
+              let stackID = stageManager.stageStackID(containingStageID: id),
+              let stack = stageManager.stageStacks.first(where: { $0.id == stackID })
+        else { return "?" }
+        return "\(stack.displayName) Stage \(index + 1)"
     }
 
     /// - Parameter focusesWindow: When false the desktop moves and nothing is focused, leaving
@@ -415,7 +447,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     ///   the stage's MRU head — which makes a single loss permanent.
     public func switchToStage(id targetID: UUID, raiseWindowID: CGWindowID? = nil,
                               focusesWindow: Bool = true) {
-        let targetStage = stageManager.stages.first(where: { $0.id == targetID })
+        let targetStage = stageManager.allStages.first(where: { $0.id == targetID })
         let workload = PerformanceWorkload(
             stages: stageManager.stages.count,
             windows: targetStage?.windows.count ?? 0
@@ -444,9 +476,11 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 .stageRaise,
                 workload: .init(windows: targetStage?.windows.count ?? 0)
             )
-            if let index = stageManager.stages.firstIndex(where: { $0.id == targetID }),
+            if let index = stageManager.stageIndex(id: targetID),
+               let stackID = stageManager.stageStackID(containingStageID: targetID),
+               let location = spaceSwitcher?.spaceTopology().stack(id: stackID)?.location(at: index),
                let switcher = spaceSwitcher {
-                desktopIsSettling = switcher.switchToDesktop(index: index)
+                desktopIsSettling = switcher.switchToDesktop(location)
             }
             _ = PerformanceRecorder.shared.end(raiseID)
 
@@ -513,9 +547,15 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         // silence as "the desktop showing" dragged its plate onto whichever stage was last
         // visited. Silence leaves the assignment for a later real answer to correct.
         let ownerStageID = stageOwningWindow(windowID: windowID)
-        let desktopStageID = spaceSwitcher?.desktopIndex(forWindow: windowID)
-            .flatMap { stageManager.stages.indices.contains($0) ? stageManager.stages[$0].id : nil }
+        let desktopLocation = spaceSwitcher?.desktopLocation(forWindow: windowID)
+        let desktopStageID = desktopLocation.flatMap {
+            stageManager.stageID(stackID: $0.stackID, at: $0.index)
+        }
         let targetStageID = desktopStageID ?? ownerStageID ?? stageManager.activeStageID
+
+        if !isStageManagerVisible, let stackID = desktopLocation?.stackID {
+            stageManager.selectStageStack(id: stackID)
+        }
 
         if ownerStageID == targetStageID {
             stageManager.bringWindowToFront(windowID: windowID, inStageID: targetStageID)
@@ -524,7 +564,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         if let ownerStageID,
-           let window = stageManager.stages.first(where: { $0.id == ownerStageID })?
+           let window = stageManager.allStages.first(where: { $0.id == ownerStageID })?
                .windows.first(where: { $0.windowID == windowID }) {
             diag.report("window_reassigned", details: [
                 "windowID": "\(windowID)",
@@ -659,6 +699,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             cycleStage(forward: true)
         case .previousStage:
             cycleStage(forward: false)
+        case .nextDisplayStack:
+            cycleDisplayStack()
         case .jumpToStage(let index):
             jumpToStage(index: index - 1)
         case .jumpToLastStage:
@@ -824,7 +866,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             selectedStageIndex = index
         }
         preOverlayStageID = stageManager.activeStageID
-        let assignedWindowIDs = stageManager.stages.flatMap { $0.windows.map(\.windowID) }
+        preOverlayStageStackID = stageManager.selectedStageStackID
+        let assignedWindowIDs = stageManager.allStages.flatMap { $0.windows.map(\.windowID) }
         pruneWindowPreviews(assignedWindowIDs: Set(assignedWindowIDs))
         let cachedCount = variedWindowPreviewIDs.intersection(assignedWindowIDs).count
         pendingPreviewCaptureIDs = windowIDsNeedingCapture()
@@ -967,7 +1010,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// The windows whose cached preview cannot be trusted for this activation. Everything else
     /// is served from `windowPreviews` without a capture.
     private func windowIDsNeedingCapture() -> [CGWindowID] {
-        let assignedWindows = stageManager.stages.flatMap(\.windows)
+        let assignedWindows = stageManager.allStages.flatMap(\.windows)
         guard previewRefreshPolicy == .lastActiveOnly else {
             return assignedWindows.map(\.windowID)
         }
@@ -1032,7 +1075,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 DispatchQueue.main.async { [weak self] in
                     guard let self,
                           self.previewCaptureGeneration == generation,
-                          let window = self.stageManager.stages
+                          let window = self.stageManager.allStages
                               .flatMap(\.windows)
                               .first(where: { $0.windowID == capture.windowID })
                     else { return }
@@ -1175,6 +1218,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         if let tapService = keyboardService as? EventTapKeyboardService {
             tapService.overlayVisible = false
         }
+        if let preOverlayStageStackID {
+            stageManager.selectStageStack(id: preOverlayStageStackID)
+        }
         selectedStageIndex = stageManager.stages.firstIndex(where: { $0.id == preOverlayStageID }) ?? 0
         selectedWindowIndex = 0
         dismissOverlayPresentation()
@@ -1214,6 +1260,33 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         notifyOverlayUpdated()
     }
 
+    private func cycleDisplayStack() {
+        guard isStageManagerVisible else { return }
+        let previous = stageManager.selectedStageStackID
+        stageManager.selectNextStageStack()
+        guard stageManager.selectedStageStackID != previous else { return }
+        selectedStageIndex = stageManager.stages.firstIndex(where: {
+            $0.id == stageManager.activeStageID
+        }) ?? 0
+        selectedWindowIndex = 0
+        diag.report("display_stack_selected", details: [
+            "stackID": stageManager.selectedStageStackID,
+            "displayName": stageManager.selectedStageStack?.displayName ?? "unknown",
+        ])
+        delegate?.stageControllerDidMutateState(self)
+        notifyOverlayUpdated()
+    }
+
+    /// Aligns the initially shown stack with the display holding the focused window.
+    public func selectStageStack(forDisplayID displayID: CGDirectDisplayID) {
+        guard let stackID = spaceSwitcher?.spaceTopology().stack(displayID: displayID)?.id,
+              stackID != stageManager.selectedStageStackID
+        else { return }
+        stageManager.selectStageStack(id: stackID)
+        selectedStageIndex = stageManager.stageIndex(id: stageManager.activeStageID) ?? 0
+        selectedWindowIndex = 0
+    }
+
     public func jumpToStage(index: Int) {
         guard isStageManagerVisible,
               stageManager.stages.indices.contains(index) else { return }
@@ -1251,7 +1324,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                                         toStageIndex: Int) {
         guard fromStageIndex != toStageIndex, let spaceSwitcher else { return }
 
-        spaceSwitcher.moveWindow(windowID: windowID, toDesktop: toStageIndex) {
+        guard let stackID = stageManager.stageStackID(containingStageID: stageManager.stages[toStageIndex].id),
+              let location = spaceSwitcher.spaceTopology().stack(id: stackID)?.location(at: toStageIndex)
+        else { return }
+        spaceSwitcher.moveWindow(windowID: windowID, to: location) {
             [weak self] moved in
             guard !moved else { return }
             DispatchQueue.main.async {

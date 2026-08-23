@@ -26,6 +26,23 @@ public struct OverlayViewModel: Sendable {
     /// Mean brightness of the wallpaper the overlay is drawn over, when it could be measured.
     public var wallpaperLuminance: Double?
 
+    public var displayStackName: String {
+        stageManager.selectedStageStack?.displayName ?? "Display"
+    }
+
+    public var displayStackPosition: Int {
+        (stageManager.connectedStageStacks.firstIndex {
+            $0.id == stageManager.selectedStageStackID
+        } ?? 0) + 1
+    }
+
+    public var displayStackCount: Int { stageManager.connectedStageStacks.count }
+
+    public var displayStackShortcut: String {
+        guard let combo = appearance.keyBindings.combo(for: .nextDisplayStack) else { return "" }
+        return "⌘" + combo.commandHintDisplayString
+    }
+
     public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil) {
         self.stageManager = stageManager
         self.activeStageIndex = activeStageIndex

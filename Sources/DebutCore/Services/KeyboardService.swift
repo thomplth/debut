@@ -14,6 +14,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case previousWindowRepeat   // Held Shift+Tab auto-repeat (stops at the first window)
     case nextStage              // Option+Tab
     case previousStage          // Shift+Option+Tab
+    case nextDisplayStack       // Cmd+Return (Return relative to the held Cmd session)
     case jumpToStage(Int)       // 1-8 (selects stage within open overlay)
     case jumpToLastStage        // 9 (selects the final stage within open overlay)
     case switchToStage(Int)     // Configured modifier + 1-9 (global immediate switch)
@@ -42,6 +43,8 @@ public enum DebutKeyEvent: Equatable, Sendable {
             .nextStage
         case .cmdOptionShiftTabHold, .previousStage:
             .previousStage
+        case .nextDisplayStack:
+            .nextDisplayStack
         case .jumpToStage(let position):
             KeyAction.jumpAction(forStageIndex: position - 1)
         case .jumpToLastStage:

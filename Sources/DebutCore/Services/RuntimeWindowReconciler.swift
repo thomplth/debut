@@ -11,19 +11,24 @@ public struct RuntimeWindowSnapshot: Sendable {
     /// The desktop macOS reports for each window. Absent means macOS gave no single
     /// answer — an all-Spaces or fullscreen window — which must not be read as desktop 0.
     public let desktopIndexes: [CGWindowID: Int]
+    /// Display-qualified desktop locations. New snapshots use this so desktop 1 on two
+    /// displays cannot collapse into the same stage.
+    public let desktopLocations: [CGWindowID: DesktopLocation]
 
     public init(
         liveWindows: [WindowInfo],
         allWindowIDs: Set<CGWindowID>?,
         focusedWindowID: CGWindowID? = nil,
         unarmedWindowIDs: Set<CGWindowID> = [],
-        desktopIndexes: [CGWindowID: Int] = [:]
+        desktopIndexes: [CGWindowID: Int] = [:],
+        desktopLocations: [CGWindowID: DesktopLocation] = [:]
     ) {
         self.liveWindows = liveWindows
         self.allWindowIDs = allWindowIDs
         self.focusedWindowID = focusedWindowID
         self.unarmedWindowIDs = unarmedWindowIDs
         self.desktopIndexes = desktopIndexes
+        self.desktopLocations = desktopLocations
     }
 }
 
@@ -151,7 +156,7 @@ public struct RuntimeWindowReconciler: Sendable {
                 ) else { continue }
 
                 stageManager.updateWindowIDs(
-                    stageIndex: location.stageIndex,
+                    stageID: location.stageID,
                     windowIndex: location.windowIndex,
                     windowID: match.info.windowID,
                     ownerPID: match.info.ownerPID,
@@ -187,7 +192,7 @@ public struct RuntimeWindowReconciler: Sendable {
         )
         for match in sortedByStagePosition(dormantMatches, stageManager: stageManager) {
             let previousStage = stageManager.stageContainingWindow(windowID: match.info.windowID)
-                .flatMap { id in stageManager.stages.firstIndex(where: { $0.id == id }) }
+                .flatMap(stageManager.stageIndex(id:))
             stageManager.removeLiveWindowFromAllStages(windowID: match.info.windowID)
             guard stageManager.restoreDormantWindow(
                 assignmentID: match.assignment.window.id,
@@ -204,7 +209,7 @@ public struct RuntimeWindowReconciler: Sendable {
                 bundleID: match.info.ownerBundleID,
                 windowTitle: match.info.title,
                 fromStage: previousStage,
-                toStage: stageManager.stages.firstIndex(where: { $0.id == match.assignment.stageID }),
+                toStage: stageManager.stageIndex(id: match.assignment.stageID),
                 reason: .dormantRestored
             ))
         }
@@ -221,12 +226,12 @@ public struct RuntimeWindowReconciler: Sendable {
                       stageManager: stageManager
                   ),
                   desktopStageID != currentStageID,
-                  let window = stageManager.stages
+                  let window = stageManager.allStages
                       .first(where: { $0.id == currentStageID })?
                       .windows.first(where: { $0.windowID == info.windowID })
             else { continue }
 
-            let fromStage = stageManager.stages.firstIndex(where: { $0.id == currentStageID })
+            let fromStage = stageManager.stageIndex(id: currentStageID)
             stageManager.removeLiveWindowFromAllStages(windowID: info.windowID)
             stageManager.addWindow(window, toStageID: desktopStageID)
             provisionalWindowIDs.remove(info.windowID)
@@ -238,7 +243,7 @@ public struct RuntimeWindowReconciler: Sendable {
                 bundleID: info.ownerBundleID,
                 windowTitle: info.title,
                 fromStage: fromStage,
-                toStage: stageManager.stages.firstIndex(where: { $0.id == desktopStageID }),
+                toStage: stageManager.stageIndex(id: desktopStageID),
                 reason: .desktopChanged
             ))
         }
@@ -246,7 +251,7 @@ public struct RuntimeWindowReconciler: Sendable {
         // AX metadata is still useful for additions, but never for destructive
         // absence checks. Existing assignments are left untouched.
         let targetStageID = newWindowStageID.flatMap { requestedID in
-            stageManager.stages.contains(where: { $0.id == requestedID }) ? requestedID : nil
+            stageManager.allStages.contains(where: { $0.id == requestedID }) ? requestedID : nil
         } ?? stageManager.activeStageID
         var addedWindowIDs = Set<CGWindowID>()
         for info in snapshot.liveWindows where
@@ -292,7 +297,7 @@ public struct RuntimeWindowReconciler: Sendable {
                 bundleID: info.ownerBundleID,
                 windowTitle: info.title,
                 fromStage: nil,
-                toStage: stageManager.stages.firstIndex(where: { $0.id == placementStageID }),
+                toStage: stageManager.stageIndex(id: placementStageID),
                 reason: desktopStageID == nil && strandedStageID != nil
                     ? .strandedStageRecovered
                     : .new
@@ -322,10 +327,11 @@ public struct RuntimeWindowReconciler: Sendable {
         snapshot: RuntimeWindowSnapshot,
         stageManager: StageManager
     ) -> UUID? {
-        guard let index = snapshot.desktopIndexes[windowID],
-              stageManager.stages.indices.contains(index)
-        else { return nil }
-        return stageManager.stages[index].id
+        if let location = snapshot.desktopLocations[windowID] {
+            return stageManager.stageID(stackID: location.stackID, at: location.index)
+        }
+        guard let index = snapshot.desktopIndexes[windowID] else { return nil }
+        return stageManager.stage(atIndex: index)?.id
     }
 
     /// The stage a replacement window should join. Only answerable when every
@@ -339,13 +345,13 @@ public struct RuntimeWindowReconciler: Sendable {
         guard let stageIDs = strandedStageIDs[bundleID],
               stageIDs.count == 1,
               let stageID = stageIDs.first,
-              stageManager.stages.contains(where: { $0.id == stageID })
+              stageManager.allStages.contains(where: { $0.id == stageID })
         else { return nil }
         return stageID
     }
 
     private func assignments(in stageManager: StageManager) -> [WindowAssignment] {
-        stageManager.stages.flatMap { stage in
+        stageManager.allStages.flatMap { stage in
             stage.windows.enumerated().map { windowIndex, window in
                 WindowAssignment(stageID: stage.id, windowIndex: windowIndex, window: window)
             }
@@ -407,7 +413,7 @@ public struct RuntimeWindowReconciler: Sendable {
         stageManager: StageManager
     ) -> [RecoveryMatch] {
         let stageOrder = Dictionary(
-            uniqueKeysWithValues: stageManager.stages.enumerated().map { ($0.element.id, $0.offset) }
+            uniqueKeysWithValues: stageManager.allStages.enumerated().map { ($0.element.id, $0.offset) }
         )
         return matches.sorted {
             let lhsStage = stageOrder[$0.assignment.stageID, default: .max]
@@ -421,12 +427,12 @@ public struct RuntimeWindowReconciler: Sendable {
     private func location(
         of windowID: CGWindowID,
         in stageManager: StageManager
-    ) -> (stageIndex: Int, windowIndex: Int)? {
-        for stageIndex in stageManager.stages.indices {
-            if let windowIndex = stageManager.stages[stageIndex].windows.firstIndex(where: {
+    ) -> (stageID: UUID, stageIndex: Int, windowIndex: Int)? {
+        for stage in stageManager.allStages {
+            if let windowIndex = stage.windows.firstIndex(where: {
                 $0.windowID == windowID
             }) {
-                return (stageIndex, windowIndex)
+                return (stage.id, stageManager.stageIndex(id: stage.id) ?? 0, windowIndex)
             }
         }
         return nil

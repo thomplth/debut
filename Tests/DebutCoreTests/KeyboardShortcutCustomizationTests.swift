@@ -35,6 +35,9 @@ struct KeyboardShortcutCustomizationTests {
             command: true
         ))
         #expect(bindings.combo(for: .dismissOverlay) == KeyCombo(keyCode: kVK_Escape))
+        // The Command modifier that opened the session is implicit here, so Return means
+        // physical Command-Return while the plates are visible.
+        #expect(bindings.combo(for: .nextDisplayStack) == KeyCombo(keyCode: kVK_Return))
         #expect(KeyAction.allCases.allSatisfy { bindings.combo(for: $0) != nil })
     }
 

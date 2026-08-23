@@ -1087,6 +1087,34 @@ public struct OverlaySwiftUIView: View {
                 }
                 .frame(width: geo.size.width, height: pHeight, alignment: .top)
                 .offset(y: yOffset)
+
+                if viewModel.displayStackCount > 1 {
+                    HStack(spacing: 8) {
+                        Text(viewModel.displayStackName)
+                            .fontWeight(.semibold)
+                        Text("\(viewModel.displayStackPosition) of \(viewModel.displayStackCount)")
+                            .foregroundStyle(.secondary)
+                        if !viewModel.displayStackShortcut.isEmpty {
+                            Text(viewModel.displayStackShortcut)
+                                .font(.system(.caption, design: .monospaced, weight: .semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(.black.opacity(0.18), in: Capsule())
+                        }
+                    }
+                    .font(.callout)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .frame(width: geo.size.width)
+                    .padding(.top, 18)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel(
+                        "\(viewModel.displayStackName), display stack "
+                            + "\(viewModel.displayStackPosition) of \(viewModel.displayStackCount)"
+                    )
+                    .zIndex(4)
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             // The frame above only grows the layout bounds; hit testing still follows the drawn

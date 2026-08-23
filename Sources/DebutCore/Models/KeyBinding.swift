@@ -23,6 +23,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case previousWindowAlternate
     case nextStage
     case previousStage
+    case nextDisplayStack
     case jumpToStage1, jumpToStage2, jumpToStage3
     case jumpToStage4, jumpToStage5, jumpToStage6
     case jumpToStage7, jumpToStage8, jumpToStage9
@@ -56,6 +57,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .previousWindowAlternate: "Previous window (alternate)"
         case .nextStage: "Next stage"
         case .previousStage: "Previous stage"
+        case .nextDisplayStack: "Next display stack"
         case .jumpToStage1: "Jump to stage 1"
         case .jumpToStage2: "Jump to stage 2"
         case .jumpToStage3: "Jump to stage 3"
@@ -107,6 +109,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .previousWindowAlternate: .previousWindow
         case .nextStage: .nextStage
         case .previousStage: .previousStage
+        case .nextDisplayStack: .nextDisplayStack
         case .jumpToStage1: .jumpToStage(1)
         case .jumpToStage2: .jumpToStage(2)
         case .jumpToStage3: .jumpToStage(3)
@@ -191,6 +194,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
              .nextAppWindow, .previousAppWindow,
              .nextWindow, .previousWindow, .previousWindowAlternate,
              .nextStage, .previousStage:
+            true
+        case .nextDisplayStack:
             true
         default:
             false
@@ -379,6 +384,7 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .previousWindowAlternate: KeyCombo(keyCode: kVK_ANSI_Grave),
             .nextStage: KeyCombo(keyCode: kVK_Tab, option: true),
             .previousStage: KeyCombo(keyCode: kVK_Tab, shift: true, option: true),
+            .nextDisplayStack: KeyCombo(keyCode: kVK_Return),
             .jumpToStage1: KeyCombo(keyCode: kVK_ANSI_1),
             .jumpToStage2: KeyCombo(keyCode: kVK_ANSI_2),
             .jumpToStage3: KeyCombo(keyCode: kVK_ANSI_3),
