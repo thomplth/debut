@@ -52,15 +52,15 @@ When E2E is justified, prioritize the headless Tart VM first:
 
 This runs the stable virtualized suite without taking over the foreground developer session. It explicitly skips the synthetic drag gestures that neither Tart nor GitHub-hosted macOS delivers; the script's own output is the authority on how many scenarios pass. Setup and evidence locations are documented in `docs/local-e2e.md`.
 
-Use `./scripts/tart-e2e.sh run-all` only when diagnosing those virtualized drag checks. If Tart is unavailable, use the free GitHub-hosted macOS 26 workflow in `.github/workflows/e2e.yml` as the fallback or remote confirmation. Do not manually trigger or wait for E2E on routine changes merely because the hosted workflow exists.
+Use `./scripts/tart-e2e.sh run-all` only when diagnosing those virtualized drag checks.
 
-`./scripts/e2e-test.sh` runs against the foreground developer session and is a last resort for validating physical drag delivery. Warn the user before running it because it displays the overlay, injects global input, and captures the live desktop.
+All agent-initiated E2E validation must run inside the headless Tart VM. Never run `./scripts/e2e-test.sh` or otherwise run the E2E executable against the developer's foreground session: it displays the overlay, injects global input, and captures the live desktop. This prohibition has no last-resort exception, including physical-drag validation. If Tart is unavailable or the VM cannot exercise a scenario, stop and report that limitation; do not fall back to the foreground session or manually trigger a hosted workflow.
 
 `./scripts/rebuild.sh` only builds, installs, and launches the app locally; it never runs E2E.
 
 #### Disposable hosts start with one desktop, and a stage is a desktop
 
-A hosted runner and a freshly cloned Tart VM both log in with exactly one Space. Since stages are desktops, such a host cannot switch a stage, move a window across one, or time a switch — the whole architecture goes untested while the suite still reports green. `DebutE2E provision-desktops <n>` therefore runs before Debut launches, from `scripts/ci-e2e.sh` and `scripts/tart-e2e-guest.sh`. It is a separate invocation and never implied, because the same suite runs against the developer's own session, where adding desktops would be a change to the user's machine rather than to a fixture.
+A hosted runner and a freshly cloned Tart VM both log in with exactly one Space. Since stages are desktops, such a host cannot switch a stage, move a window across one, or time a switch — the whole architecture goes untested while the suite still reports green. `DebutE2E provision-desktops <n>` therefore runs before Debut launches, from `scripts/ci-e2e.sh` and `scripts/tart-e2e-guest.sh`. It is a separate invocation and never implied, so provisioning remains an explicit fixture operation confined to disposable hosts.
 
 The desktop has to come from Mission Control's own add button, found on the Dock by the accessibility identifier `mc.spaces.add`. Seeding the Dock's `com.apple.spaces` plist is a dead end that looks like it works: the entry survives, and after a reboot the window server really does report a second Space — but every seeded desktop carries the *first* desktop's `id64`, so `SpaceService.index(of:in:)` maps them all to stage 0. `killall Dock` does not apply the file at all. A duplicate identity is worse than a missing desktop, because the suite then passes against a broken map.
 
