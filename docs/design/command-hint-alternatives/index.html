@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Debut Command Hint Alternatives</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #111214;
+      --panel: #1b1d20;
+      --line: #303238;
+      --text: #f2f2f3;
+      --muted: #a5a7ad;
+      --accent: #8ca7ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    }
+    header, main, footer { width: min(1500px, calc(100% - 40px)); margin-inline: auto; }
+    header { padding: 64px 0 34px; }
+    h1 { margin: 0 0 12px; font-size: clamp(32px, 5vw, 60px); letter-spacing: -.04em; line-height: 1; }
+    header p { max-width: 760px; margin: 0; color: var(--muted); font-size: 17px; }
+    .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+    .facts span { border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; color: var(--muted); font-size: 13px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    article { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
+    .image-link { display: block; background: #08090a; }
+    img { display: block; width: 100%; height: auto; }
+    .copy { padding: 20px 22px 24px; }
+    .number { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .12em; }
+    h2 { margin: 3px 0 8px; font-size: 23px; letter-spacing: -.02em; }
+    .copy p { margin: 0; color: var(--muted); }
+    .tradeoff { margin-top: 10px !important; color: var(--text) !important; font-size: 13px; }
+    .tradeoff strong { color: var(--accent); }
+    footer { padding: 38px 0 64px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 820px) {
+      header, main, footer { width: min(100% - 24px, 1500px); }
+      header { padding-top: 36px; }
+      .grid { grid-template-columns: 1fr; gap: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Command hint directions</h1>
+    <p>Ten treatments of the same overlay and the same concise, action-first language. Click any screenshot to inspect the full-resolution capture.</p>
+    <div class="facts">
+      <span>Captured in the headless Tart VM</span>
+      <span>2880 × 1800 each</span>
+      <span>3 stages · 9 windows</span>
+      <span>Production UI fixture</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <article data-variant="01">
+      <a class="image-link" href="screenshots/variant-01.png"><img src="screenshots/variant-01.png" alt="Bare Legend command hints"></a>
+      <div class="copy"><span class="number">01</span><h2>Bare Legend</h2><p>Text floats beside the plates with almost no chrome, making the overlay itself the dominant object.</p><p class="tradeoff"><strong>Tradeoff:</strong> quietest option, but more dependent on text shadow and the desktop behind it.</p></div>
+    </article>
+
+    <article data-variant="02">
+      <a class="image-link" href="screenshots/variant-02.png"><img src="screenshots/variant-02.png" alt="Soft Glass command hints"></a>
+      <div class="copy"><span class="number">02</span><h2>Soft Glass</h2><p>Subtle translucent capsules echo the plate material without competing with window content.</p><p class="tradeoff"><strong>Tradeoff:</strong> feels native and cohesive, though the smallest labels become restrained.</p></div>
+    </article>
+
+    <article data-variant="03">
+      <a class="image-link" href="screenshots/variant-03.png"><img src="screenshots/variant-03.png" alt="Nested Keycaps command hints"></a>
+      <div class="copy"><span class="number">03</span><h2>Nested Keycaps</h2><p>Plain-language actions sit beside compact shortcut keycaps, separating meaning from input at a glance.</p><p class="tradeoff"><strong>Tradeoff:</strong> clearest command grammar, with moderately more visual weight.</p></div>
+    </article>
+
+    <article data-variant="04">
+      <a class="image-link" href="screenshots/variant-04.png"><img src="screenshots/variant-04.png" alt="Unified Dock command hints"></a>
+      <div class="copy"><span class="number">04</span><h2>Unified Dock</h2><p>All bottom actions share one continuous control strip while stage and window hints remain anchored locally.</p><p class="tradeoff"><strong>Tradeoff:</strong> exceptionally orderly, but reads more like a toolbar than annotation.</p></div>
+    </article>
+
+    <article data-variant="05">
+      <a class="image-link" href="screenshots/variant-05.png"><img src="screenshots/variant-05.png" alt="Accent Categories command hints"></a>
+      <div class="copy"><span class="number">05</span><h2>Accent Categories</h2><p>Color assigns quick identities to navigation, movement, quitting, and closing.</p><p class="tradeoff"><strong>Tradeoff:</strong> fastest to scan and most expressive, but intentionally less neutral.</p></div>
+    </article>
+
+    <article data-variant="06">
+      <a class="image-link" href="screenshots/variant-06.png"><img src="screenshots/variant-06.png" alt="Two-Line Tiles command hints"></a>
+      <div class="copy"><span class="number">06</span><h2>Two-Line Tiles</h2><p>A micro-label names the action above a larger shortcut, giving both pieces equal structure.</p><p class="tradeoff"><strong>Tradeoff:</strong> highly legible hierarchy, at the cost of a taller footprint.</p></div>
+    </article>
+
+    <article data-variant="07">
+      <a class="image-link" href="screenshots/variant-07.png"><img src="screenshots/variant-07.png" alt="Outline Brackets command hints"></a>
+      <div class="copy"><span class="number">07</span><h2>Outline Brackets</h2><p>Open corner brackets frame each hint without introducing another filled surface.</p><p class="tradeoff"><strong>Tradeoff:</strong> distinctive and airy, but the most stylized direction in the set.</p></div>
+    </article>
+
+    <article data-variant="08">
+      <a class="image-link" href="screenshots/variant-08.png"><img src="screenshots/variant-08.png" alt="Editorial command hints"></a>
+      <div class="copy"><span class="number">08</span><h2>Editorial</h2><p>Warm parchment tones and rounded typography make the guidance feel like marginal notes.</p><p class="tradeoff"><strong>Tradeoff:</strong> approachable and memorable, while deliberately departing from the cool overlay palette.</p></div>
+    </article>
+
+    <article data-variant="09">
+      <a class="image-link" href="screenshots/variant-09.png"><img src="screenshots/variant-09.png" alt="Status Dots command hints"></a>
+      <div class="copy"><span class="number">09</span><h2>Status Dots</h2><p>Small semantic dots add scanning landmarks to otherwise restrained dark pills.</p><p class="tradeoff"><strong>Tradeoff:</strong> compact with a touch of character, though dot meaning is learned rather than literal.</p></div>
+    </article>
+
+    <article data-variant="10">
+      <a class="image-link" href="screenshots/variant-10.png"><img src="screenshots/variant-10.png" alt="High Contrast command hints"></a>
+      <div class="copy"><span class="number">10</span><h2>High Contrast</h2><p>Bright labels with inset black keys maximize separation from both plates and desktop content.</p><p class="tradeoff"><strong>Tradeoff:</strong> strongest readability, and also the loudest visual presence.</p></div>
+    </article>
+  </main>
+
+  <footer>These are exploration captures, not production selections. The shipped command hints remain unchanged until a direction is chosen.</footer>
+</body>
+</html>
