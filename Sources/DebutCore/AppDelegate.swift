@@ -599,7 +599,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             selectedWindowIndex: stageController.selectedWindowIndex,
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings,
-            wallpaperLuminance: nil
+            wallpaperLuminance: nil,
+            displaySafeAreaTopInset: display?.safeAreaTopInset ?? 0
         )
         reportCommandHintLayout(viewModel: vm)
         let createdHostingView = overlayWindow.update(viewModel: vm)
@@ -707,7 +708,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             selectedWindowIndex: stageController.selectedWindowIndex,
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings,
-            wallpaperLuminance: nil
+            wallpaperLuminance: nil,
+            displaySafeAreaTopInset: display?.safeAreaTopInset ?? 0
         )
         overlayWindow.update(viewModel: vm)
     }
@@ -717,7 +719,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     /// only the winner is translated back into Cocoa's.
     private func overlayDisplay(
         focusedWindowFrame: CGRect?
-    ) -> (displayID: CGDirectDisplayID, frame: CGRect)? {
+    ) -> (displayID: CGDirectDisplayID, frame: CGRect, safeAreaTopInset: CGFloat)? {
         let displays = NSScreen.screens.map {
             DesktopScreenDescriptor(displayID: $0.displayID, frame: CGDisplayBounds($0.displayID))
         }
@@ -727,7 +729,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             mainDisplayID: NSScreen.main?.displayID
         ), let screen = NSScreen.screens.first(where: { $0.displayID == displayID })
         else { return nil }
-        return (displayID, screen.frame)
+        return (displayID, screen.frame, screen.safeAreaInsets.top)
     }
 
     private func recordCommandUsage(_ action: KeyAction) {

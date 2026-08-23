@@ -25,6 +25,8 @@ public struct OverlayViewModel: Sendable {
     public var appearance: AppSettings
     /// Mean brightness of the wallpaper the overlay is drawn over, when it could be measured.
     public var wallpaperLuminance: Double?
+    /// The inset macOS reserves at the top of the display for hardware such as a camera housing.
+    public var displaySafeAreaTopInset: CGFloat
 
     public var displayStackName: String {
         stageManager.selectedStageStack?.displayName ?? "Display"
@@ -39,17 +41,24 @@ public struct OverlayViewModel: Sendable {
     public var displayStackCount: Int { stageManager.connectedStageStacks.count }
 
     public var displayStackShortcut: String {
-        guard let combo = appearance.keyBindings.combo(for: .nextDisplayStack) else { return "" }
-        return "⌘" + combo.commandHintDisplayString
+        guard appearance.shouldShowCommandHint(for: .nextDisplayStack),
+              let combo = appearance.keyBindings.combo(for: .nextDisplayStack)
+        else { return "" }
+        return "⌘ " + combo.commandHintDisplayString
     }
 
-    public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil) {
+    public var displayStackIndicatorTopPadding: CGFloat {
+        max(0, displaySafeAreaTopInset) + 18
+    }
+
+    public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, displaySafeAreaTopInset: CGFloat = 0) {
         self.stageManager = stageManager
         self.activeStageIndex = activeStageIndex
         self.selectedWindowIndex = selectedWindowIndex
         self.windowPreviews = windowPreviews
         self.appearance = appearance
         self.wallpaperLuminance = wallpaperLuminance
+        self.displaySafeAreaTopInset = displaySafeAreaTopInset
     }
 
     public var plates: [PlateData] {

@@ -1107,7 +1107,7 @@ public struct OverlaySwiftUIView: View {
                     .padding(.vertical, 8)
                     .background(.regularMaterial, in: Capsule())
                     .frame(width: geo.size.width)
-                    .padding(.top, 18)
+                    .padding(.top, viewModel.displayStackIndicatorTopPadding)
                     .allowsHitTesting(false)
                     .accessibilityLabel(
                         "\(viewModel.displayStackName), display stack "

@@ -5,6 +5,21 @@ import Foundation
 @Suite("OverlayViewModel")
 struct OverlayViewModelTests {
 
+    private func multiDisplayManager() -> StageManager {
+        var manager = StageManager()
+        manager.reconcileStageStacks(with: SpaceTopology(separateSpaces: true, stacks: [
+            SpaceStackDescriptor(
+                id: "display-a", displayID: 1, displayName: "Built-in Display", frame: .zero,
+                desktopIDs: [10], currentDesktopID: 10
+            ),
+            SpaceStackDescriptor(
+                id: "display-b", displayID: 2, displayName: "Studio Display", frame: .zero,
+                desktopIDs: [20], currentDesktopID: 20
+            ),
+        ]))
+        return manager
+    }
+
     private func makeViewModel() -> OverlayViewModel {
         var sm = StageManager()
         sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "AppA", windowTitle: "Window A"), toStageID: sm.stages[0].id)
@@ -86,5 +101,42 @@ struct OverlayViewModelTests {
         vm.activeStageIndex = 1
         vm.selectedWindowIndex = 2
         #expect(vm.selectedWindow?.ownerBundleID == "com.e")
+    }
+
+    @Test("Display stack shortcut separates the held Command key from Return")
+    func displayStackShortcutSpacing() {
+        let vm = OverlayViewModel(
+            stageManager: multiDisplayManager(),
+            activeStageIndex: 0,
+            selectedWindowIndex: 0
+        )
+
+        #expect(vm.displayStackShortcut == "⌘ Return")
+    }
+
+    @Test("Display stack shortcut retires through the standard command hint policy")
+    func displayStackShortcutRetires() {
+        var settings = AppSettings()
+        settings.commandUsageCounts[.nextDisplayStack] = AppSettings.commandHintRetirementUses
+        let vm = OverlayViewModel(
+            stageManager: multiDisplayManager(),
+            activeStageIndex: 0,
+            selectedWindowIndex: 0,
+            appearance: settings
+        )
+
+        #expect(vm.displayStackShortcut.isEmpty)
+    }
+
+    @Test("Display stack indicator starts below the screen safe area")
+    func displayStackIndicatorSafeArea() {
+        let vm = OverlayViewModel(
+            stageManager: multiDisplayManager(),
+            activeStageIndex: 0,
+            selectedWindowIndex: 0,
+            displaySafeAreaTopInset: 38
+        )
+
+        #expect(vm.displayStackIndicatorTopPadding == 56)
     }
 }
