@@ -11,18 +11,18 @@ REPORT="$REPORT_DIR/index.html"
 }
 
 variant_count="$(grep -c 'data-variant=' "$REPORT")"
-[[ "$variant_count" -eq 10 ]] || {
-    echo "Expected 10 report variants, found $variant_count" >&2
+[[ "$variant_count" -eq 20 ]] || {
+    echo "Expected 20 report variants, found $variant_count" >&2
     exit 1
 }
 
 unified_indicator_count="$(grep -c 'data-unified-indicator="true"' "$REPORT" || true)"
-[[ "$unified_indicator_count" -eq 10 ]] || {
+[[ "$unified_indicator_count" -eq 20 ]] || {
     echo "Expected every variant to include the unified top indicator, found $unified_indicator_count" >&2
     exit 1
 }
 
-for number in {1..10}; do
+for number in {1..20}; do
     index="$(printf '%02d' "$number")"
     image="$REPORT_DIR/screenshots/variant-$index.png"
     [[ -f "$image" ]] || {
