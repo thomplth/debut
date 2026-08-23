@@ -608,10 +608,6 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         } else {
             sampledFocusedWindowID = nil
         }
-        if let focusedWindowID = sampledFocusedWindowID {
-            trackAndRegister(windowID: focusedWindowID, pid: pid)
-        }
-
         let runningApps = windowService.listRunningApps()
         var runningPIDs = Set(runningApps.map(\.pid))
         // The activation notification is authoritative even if Launch Services has not
@@ -627,13 +623,28 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         for window in liveWindows where window.ownerPID == pid {
             trackAndRegister(windowID: window.windowID, pid: window.ownerPID)
         }
-        // Newly launched apps can report no AX-focused window during the activation
-        // notification. CGWindowList is front-to-back, so use the activated process's
-        // first enumerated window until the delayed AX confirmation arrives.
-        let focusedWindowID = sampledFocusedWindowID
-            ?? (shouldTrackActivation
-                ? liveWindows.first(where: { $0.ownerPID == pid })?.windowID
-                : nil)
+        // AX focus can be nil while an app launches, or can briefly retain the ID of a
+        // document window the app just replaced. Trust the early sample only when the
+        // activated process still enumerates that window. Re-read once after enumeration
+        // before falling back to CGWindowList's front-to-back order.
+        let activatedWindows = liveWindows.filter { $0.ownerPID == pid }
+        let activatedWindowIDs = Set(activatedWindows.map(\.windowID))
+        let focusedWindowID: CGWindowID?
+        if let sampledFocusedWindowID,
+           activatedWindowIDs.contains(sampledFocusedWindowID) {
+            focusedWindowID = sampledFocusedWindowID
+        } else if shouldTrackActivation {
+            let refreshedFocusedWindowID = focusedWindowProvider?(pid)
+                ?? self.focusedWindowID(for: pid)
+            focusedWindowID = refreshedFocusedWindowID.flatMap {
+                activatedWindowIDs.contains($0) ? $0 : nil
+            } ?? activatedWindows.first?.windowID
+        } else {
+            focusedWindowID = nil
+        }
+        if let focusedWindowID {
+            trackAndRegister(windowID: focusedWindowID, pid: pid)
+        }
         onAppActivated?(RuntimeWindowSnapshot(
             liveWindows: liveWindows,
             allWindowIDs: windowService.listAllWindowIDs(),
