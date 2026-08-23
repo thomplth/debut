@@ -27,6 +27,15 @@ let previewCaptureTests: Set<String> = [
     "Window previews contain non-uniform captured pixels",
 ]
 
+// Provisioning is a separate invocation rather than a step of the suite, because the desktops
+// have to exist before Debut launches and builds its stage list. It is never implied: the suite
+// also runs against the developer's own session, where silently adding desktops would be a
+// change to the user's machine rather than to a fixture.
+if CommandLine.arguments.dropFirst().first == "provision-desktops" {
+    let target = Int(CommandLine.arguments.dropFirst(2).first ?? "") ?? 3
+    exit(DesktopProvisioning.ensureDesktops(target) ? 0 : 1)
+}
+
 func color(_ text: String, _ code: Int) -> String { "\u{001B}[\(code)m\(text)\u{001B}[0m" }
 func pass(_ msg: String) { print(color("  PASS", 32) + "  \(msg)") }
 func fail(_ msg: String) { print(color("  FAIL", 31) + "  \(msg)") }
@@ -132,6 +141,44 @@ func postKeyDown(keyCode: CGKeyCode, flags: CGEventFlags = [], isAutoRepeat: Boo
         event.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
     }
     event.post(tap: .cgSessionEventTap)
+}
+
+/// ANSI digit keycodes are not contiguous — 6 and 5 are transposed, and 7, 8, 9 jump.
+func digitKeyCode(_ digit: Int) -> CGKeyCode {
+    let codes = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5,
+                 kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
+    return CGKeyCode(codes[digit - 1])
+}
+
+/// Posts the global quick-switch chord and waits for the desktop to actually land.
+///
+/// The settle afterwards is not padding. Each request aborts whatever driven gesture is still in
+/// flight, so a chord posted while the Dock is mid-transition lands on a moving target.
+func quickSwitch(to index: Int, using service: SpaceService) -> Bool {
+    let from = service.currentDesktopIndex()
+    let modelBefore = readState()["activeStageIndex"] ?? "none"
+    let switchesBefore = readEvents().filter { $0["event"] == "stage_switched" }.count
+    // The key-up is not symmetry for its own sake. Without it the digit stays logically held, so a
+    // later press of the *same* digit arrives as an auto-repeat and never reaches the handler —
+    // which is why each desktop could be reached exactly once per run, and why every switch back
+    // read as a chord Debut had ignored.
+    let digit = digitKeyCode(index + 1)
+    postKeyDown(keyCode: digit, flags: [.maskControl])
+    postKeyUp(keyCode: digit, flags: [.maskControl])
+    let landed = waitFor { service.currentDesktopIndex() == index }
+    wait(0.5)
+    if !landed {
+        // Whether Debut reported a switch separates a chord that never arrived from a gesture
+        // the Dock did not honour, and those have nothing in common but the symptom.
+        let switchesAfter = readEvents().filter { $0["event"] == "stage_switched" }
+        info("  Switch \(from.map(String.init) ?? "none") -> \(index) did not land; "
+            + "Debut's active stage was \(modelBefore) when asked, now "
+            + "\(readState()["activeStageIndex"] ?? "none"); "
+            + "reported \(switchesAfter.count - switchesBefore) switch(es), "
+            + "last: \(switchesAfter.last ?? [:]), now on "
+            + "\(service.currentDesktopIndex().map(String.init) ?? "none")")
+    }
+    return landed
 }
 
 func postKeyUp(keyCode: CGKeyCode, flags: CGEventFlags = []) {
@@ -446,6 +493,17 @@ func setWindowFullscreen(_ window: AXUIElement, _ enabled: Bool, timeout: TimeIn
     return false
 }
 
+/// A desktop transition is a composited animation the Dock drives, so nothing about it is ready
+/// on the next line; polling the window server is the signal, not a sleep long enough to hope.
+func waitFor(timeout: TimeInterval = 5, _ condition: () -> Bool) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    repeat {
+        if condition() { return true }
+        wait(0.1)
+    } while Date() < deadline
+    return false
+}
+
 func waitForStageCount(_ expected: Int, timeout: TimeInterval = 5) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     repeat {
@@ -598,6 +656,83 @@ toggleSystemWindowOverview(mode: 2)
 
 test("The stage list survives App Exposé") {
     waitForStageCount(userDesktopCount)
+}
+
+// --- 1d. A stage switch moves the real desktop ---
+// This is what the architecture is for, and until desktops were provisioned there was no check
+// of it anywhere: a one-desktop host makes every SpaceSwitchPlan nil, so the switch path was
+// never entered. The quick-switch chord is used rather than the overlay because it is a global
+// immediate switch, so the assertion is about the desktop rather than about overlay timing.
+//
+// The window server is the authority here. Debut's own activeStageIndex agreeing with itself
+// proves nothing; it has to agree with the desktop macOS is actually showing.
+header("1d. A stage switch changes the desktop macOS shows")
+
+let switchSpaceService = SpaceService()
+
+// Which desktop the host happens to be showing is not this suite's to decide — a reused VM
+// starts on whichever one the last run left. Switching is therefore expressed as "away from
+// here and back", not as a jump to a hardcoded desktop 2.
+if userDesktopCount < 2 {
+    skipTest("Quick-switching to another stage moves macOS to that stage's desktop",
+             reason: "This host has one desktop, so there is nothing to switch to")
+    skipTest("Debut's active stage follows the desktop it switched to",
+             reason: "This host has one desktop, so there is nothing to switch to")
+    skipTest("Quick-switching back returns to the original desktop",
+             reason: "This host has one desktop, so there is nothing to switch to")
+} else if let startingDesktop = switchSpaceService.currentDesktopIndex() {
+    let targetDesktop = startingDesktop == 0 ? 1 : 0
+    info("  Switching from desktop \(startingDesktop) to \(targetDesktop)")
+
+    let switched = quickSwitch(to: targetDesktop, using: switchSpaceService)
+    let _ = takeScreenshot("00_stage_switch_desktop_2")
+
+    test("Quick-switching to another stage moves macOS to that stage's desktop") {
+        switched
+    }
+
+    test("Debut's active stage follows the desktop it switched to") {
+        waitFor { Int(readState()["activeStageIndex"] ?? "") == targetDesktop }
+    }
+
+    let returned = quickSwitch(to: startingDesktop, using: switchSpaceService)
+
+    test("Quick-switching back returns to the original desktop") {
+        returned && waitFor { Int(readState()["activeStageIndex"] ?? "") == startingDesktop }
+    }
+
+    // Dock progress saturates at one desktop per gesture, so `switchToDesktop` drives one
+    // gesture per desktop crossed. Every check above is a single hop, which is the one distance
+    // that loop cannot get wrong.
+    if userDesktopCount >= 3 {
+        let atFirst = quickSwitch(to: 0, using: switchSpaceService)
+        let jumped = quickSwitch(to: 2, using: switchSpaceService)
+        info("  Two-desktop jump from 0: reached first desktop \(atFirst), landed on "
+            + "\(switchSpaceService.currentDesktopIndex().map(String.init) ?? "none")")
+
+        test("A jump across two desktops lands on the far desktop") {
+            atFirst && jumped
+        }
+    } else {
+        skipTest("A jump across two desktops lands on the far desktop",
+                 reason: "This host has fewer than three desktops, so there is no two-hop jump")
+    }
+
+    // Every later section needs window cards to select, hover and move, so this parts on the stage
+    // that actually holds the fixture windows rather than on desktop 0. Provisioning puts them on
+    // whichever desktop was showing when the fixtures launched, which is not reliably the first —
+    // parting on desktop 0 stranded the run on an empty stage and sent Tab navigation red.
+    if let populated = stageWindowCounts(in: readState()).firstIndex(where: { $0 > 0 }) {
+        let normalized = quickSwitch(to: populated, using: switchSpaceService)
+        info("  Parting on stage \(populated), which holds the fixture windows: \(normalized)")
+    }
+} else {
+    // A fullscreen Space is showing, so there is no user desktop index to switch away from.
+    let reason = "No user desktop is showing, so there is no starting point to switch from"
+    skipTest("Quick-switching to another stage moves macOS to that stage's desktop", reason: reason)
+    skipTest("Debut's active stage follows the desktop it switched to", reason: reason)
+    skipTest("Quick-switching back returns to the original desktop", reason: reason)
+    skipTest("A jump across two desktops lands on the far desktop", reason: reason)
 }
 
 // --- 2. Open overlay with Cmd+Tab ---
@@ -792,28 +927,39 @@ let pointerSelectionCount = readEvents().filter {
 let pointerHoverCount = readEvents().filter {
     $0["event"] == "overlay_pointer_selection_changed"
 }.count
+
+// Section 8 commits a stage switch, and which stage that lands on follows the MRU order the
+// earlier sections happened to build — on a host with an empty last stage it can be the one
+// with no windows at all. Hovering needs a card, so this section picks its own fixture rather
+// than inheriting whatever the previous one left showing.
+let populatedStage = stageWindowCounts(in: readState()).firstIndex { $0 > 0 }
+if let populatedStage, Int(readState()["activeStageIndex"] ?? "") != populatedStage {
+    info("Switching to stage \(populatedStage), which has windows to hover")
+    let landed = quickSwitch(to: populatedStage, using: SpaceService())
+    info("  Switch landed: \(landed)")
+}
+
 let pointerTarget = firstWindowCenter(in: readState())
 
+// Hovering needs a window card under the pointer, so an active stage with no windows is a
+// missing fixture rather than a broken affordance. Reporting it as a failure sent the whole
+// section red when an earlier section had merely left the session on an empty stage.
 if let pointerTarget {
     info("Placing pointer over the first window before opening the overlay at \(pointerTarget)")
     postMouseMove(to: pointerTarget)
     wait(0.3)
-} else {
-    fail("Could not calculate a stationary window-card target")
-}
 
-postFlagsChanged(flags: [.maskCommand])
-wait(0.1)
-postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
-wait(0.8)
+    postFlagsChanged(flags: [.maskCommand])
+    wait(0.1)
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+    wait(0.8)
 
-test("A stationary pointer does not select or magnify a window") {
-    readEvents().filter {
-        $0["event"] == "overlay_pointer_selection_changed"
-    }.count == pointerHoverCount
-}
+    test("A stationary pointer does not select or magnify a window") {
+        readEvents().filter {
+            $0["event"] == "overlay_pointer_selection_changed"
+        }.count == pointerHoverCount
+    }
 
-if let pointerTarget {
     let movedPoint = CGPoint(x: pointerTarget.x + 8, y: pointerTarget.y)
     info("Moving pointer within the first window to \(movedPoint)")
     postMouseMove(to: movedPoint)
@@ -827,25 +973,28 @@ if let pointerTarget {
             && hoverEvents.last?["windowIndex"] == "0"
     }
     postMouseClick(at: movedPoint)
-} else {
-    fail("Could not calculate a window-card click target")
-}
-wait(0.8)
-postFlagsChanged(flags: [])
+    wait(0.8)
+    postFlagsChanged(flags: [])
 
-test("Clicking a window card commits the pointer selection") {
-    for _ in 0..<20 {
-        let pointerEvents = readEvents().filter {
-            $0["event"] == "overlay_window_selected_by_pointer"
+    test("Clicking a window card commits the pointer selection") {
+        for _ in 0..<20 {
+            let pointerEvents = readEvents().filter {
+                $0["event"] == "overlay_window_selected_by_pointer"
+            }
+            if pointerEvents.count > pointerSelectionCount,
+               pointerEvents.last?["windowIndex"] == "0",
+               readState()["overlayVisible"] == "false" {
+                return true
+            }
+            wait(0.1)
         }
-        if pointerEvents.count > pointerSelectionCount,
-           pointerEvents.last?["windowIndex"] == "0",
-           readState()["overlayVisible"] == "false" {
-            return true
-        }
-        wait(0.1)
+        return false
     }
-    return false
+} else {
+    let reason = "The active stage has no window card for the pointer to land on"
+    skipTest("A stationary pointer does not select or magnify a window", reason: reason)
+    skipTest("Moving the pointer enables hover selection", reason: reason)
+    skipTest("Clicking a window card commits the pointer selection", reason: reason)
 }
 
 // --- 10. Window-drop plate refresh ---
@@ -866,8 +1015,17 @@ let destinationStageIndex = originalWindowCounts.indices.first {
 } ?? -1
 let sourceStageIndex = destinationStageIndex - 1
 let dropFixtureSkipReason = destinationStageIndex < 0
-    ? "This host has no empty desktop following a populated one; the drag fixture needs both"
+    ? "This host has no empty desktop following a populated one; the drop fixture needs both"
     : nil
+
+// Reordering a plate needs two stages to move between, and the hover affordance needs only a
+// plate to hover. Neither needs an *empty* destination. Sharing the drop fixture's gate hid
+// both behind a precondition they do not have.
+let reorderSourceIndex = 0
+let reorderDestinationIndex = 1
+let reorderFixtureSkipReason = originalStageCount >= 2
+    ? nil
+    : "This host has one desktop, so there is no second stage to reorder against"
 
 postMouseMove(to: neutralPointerLocation)
 wait(0.5)
@@ -910,10 +1068,10 @@ let handleRevealEventCount = readEvents().filter {
         && $0["isRevealed"] == "true"
 }.count
 
-if preparedWindowCounts.indices.contains(sourceStageIndex),
-   preparedWindowCounts.indices.contains(destinationStageIndex),
+if preparedWindowCounts.indices.contains(reorderSourceIndex),
+   preparedWindowCounts.indices.contains(reorderDestinationIndex),
    let sourceBodyPoint = platePoint(
-        stageIndex: sourceStageIndex,
+        stageIndex: reorderSourceIndex,
         windowCounts: preparedWindowCounts,
         activeStageIndex: plateActiveStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
@@ -921,13 +1079,13 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
         xOffset: -10
    ),
    let destinationCenter = plateCenter(
-        stageIndex: destinationStageIndex,
+        stageIndex: reorderDestinationIndex,
         windowCounts: preparedWindowCounts,
         activeStageIndex: plateActiveStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
    ),
    let handleHotspot = platePoint(
-        stageIndex: sourceStageIndex,
+        stageIndex: reorderSourceIndex,
         windowCounts: preparedWindowCounts,
         activeStageIndex: plateActiveStageIndex,
         inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
@@ -961,7 +1119,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
                 && $0["isRevealed"] == "true"
         }
         return reveals.count > handleRevealEventCount
-            && reveals.last?["stageIndex"] == "\(sourceStageIndex)"
+            && reveals.last?["stageIndex"] == "\(reorderSourceIndex)"
     }
 
     postMouseDrag(
@@ -985,9 +1143,9 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
     let reorderedState = readState()
     let reorderedWindowCounts = stageWindowCounts(in: reorderedState)
     let reorderedActiveStageIndex = Int(reorderedState["selectedStageIndex"] ?? "") ?? -1
-    if reorderedWindowCounts.indices.contains(destinationStageIndex),
+    if reorderedWindowCounts.indices.contains(reorderDestinationIndex),
        let reverseHotspot = platePoint(
-            stageIndex: destinationStageIndex,
+            stageIndex: reorderDestinationIndex,
             windowCounts: reorderedWindowCounts,
             activeStageIndex: reorderedActiveStageIndex,
             inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
@@ -995,7 +1153,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
             xOffset: 12
        ),
        let reverseDestination = plateCenter(
-            stageIndex: sourceStageIndex,
+            stageIndex: reorderSourceIndex,
             windowCounts: reorderedWindowCounts,
             activeStageIndex: reorderedActiveStageIndex,
             inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
@@ -1021,7 +1179,7 @@ if preparedWindowCounts.indices.contains(sourceStageIndex),
     } else {
         fail("Could not calculate the reverse stage-handle drag path")
     }
-} else if let reason = dropFixtureSkipReason {
+} else if let reason = reorderFixtureSkipReason {
     skipTest("Dragging the plate body does not reorder stages", reason: reason)
     skipTest("Hovering the leading edge reveals the stage drag handle", reason: reason)
     skipTest("Dragging the revealed handle reorders the stage", reason: reason)
@@ -1112,6 +1270,103 @@ wait(0.5)
 test("Window-drop E2E cleanup restores the original stages") {
     readState()["stageCount"] == "\(originalStageCount)"
         && stageWindowCounts(in: readState()) == originalWindowCounts
+}
+
+// --- 10b. Moving a window between stages with the keyboard ---
+// The pointer path above is a synthetic drag, which neither hosted nor virtualized macOS
+// delivers, so on every disposable host it is a skip. The keyboard path reaches the same
+// bridged window-server move and *is* delivered, which makes this the only place a cross-stage
+// move is actually proven off a developer's machine.
+//
+// The model is not the evidence. A refused bridge move must not update the model either, so
+// asking the window server where the window ended up is what separates a real move from a
+// plausible-looking one.
+header("10b. Moving a window between stages with the keyboard")
+
+let keyboardMoveSpaceService = SpaceService()
+let keyboardMoveStageCount = Int(readState()["stageCount"] ?? "") ?? 0
+
+if keyboardMoveStageCount < 2 {
+    skipTest("A keyboard move puts the window on the next stage's desktop",
+             reason: "This host has one desktop, so there is no stage to move a window to")
+    skipTest("The keyboard move is reported and lands the window where the model says",
+             reason: "This host has one desktop, so there is no stage to move a window to")
+} else if !keyboardMoveSpaceService.canMoveWindows {
+    let reason = "The bridged window-server move is inert on this host, so a move must be refused"
+    skipTest("A keyboard move puts the window on the next stage's desktop", reason: reason)
+    skipTest("The keyboard move is reported and lands the window where the model says", reason: reason)
+} else {
+    let movesBefore = readEvents().filter { $0["event"] == "window_moved_by_key" }.count
+
+    postFlagsChanged(flags: [.maskCommand])
+    wait(0.1)
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+    wait(0.8)
+
+    // Select a stage that has a window to move and a stage below it to receive one.
+    let openState = readState()
+    let openCounts = stageWindowCounts(in: openState)
+    let originStage = openCounts.indices.first {
+        $0 < openCounts.count - 1 && openCounts[$0] > 0
+    } ?? -1
+
+    if originStage < 0 {
+        postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+        postFlagsChanged(flags: [])
+        skipTest("A keyboard move puts the window on the next stage's desktop",
+                 reason: "No stage has a window with a stage below it to receive one")
+        skipTest("The keyboard move is reported and lands the window where the model says",
+                 reason: "No stage has a window with a stage below it to receive one")
+    } else {
+        // Digits select a stage inside the open overlay and are 1-based. Option+Down would have
+        // swapped two stages rather than selecting one.
+        //
+        // The digit is pressed unconditionally. The overlay opens on whichever stage is active,
+        // not on stage 1, so treating stage 1 as already selected measured one stage and moved a
+        // window out of another — and the counts still shifted by one either way, which is what
+        // made the mismatch look like a plausible pass.
+        postKeyDown(keyCode: digitKeyCode(originStage + 1), flags: [.maskCommand])
+        let originSelected = waitFor {
+            Int(readState()["selectedStageIndex"] ?? "") == originStage
+        }
+        let beforeCounts = stageWindowCounts(in: readState())
+        info("  Keyboard move: stage \(originStage) -> \(originStage + 1), windows=\(beforeCounts)")
+
+        postKeyDown(keyCode: CGKeyCode(kVK_DownArrow), flags: [.maskCommand])
+        wait(1.0)
+
+        let moveEvents = readEvents().filter { $0["event"] == "window_moved_by_key" }
+        let afterCounts = stageWindowCounts(in: readState())
+        info("  After the keyboard move: windows=\(afterCounts)")
+        let _ = takeScreenshot("12_keyboard_window_move")
+
+        test("The keyboard move is reported and lands the window where the model says") {
+            originSelected
+                && moveEvents.count > movesBefore
+                && afterCounts.indices.contains(originStage + 1)
+                && afterCounts[originStage] == beforeCounts[originStage] - 1
+                && afterCounts[originStage + 1] == beforeCounts[originStage + 1] + 1
+        }
+
+        test("A keyboard move puts the window on the next stage's desktop") {
+            guard let moved = moveEvents.last,
+                  let windowID = UInt32(moved["windowID"] ?? ""),
+                  let reportedStage = Int(moved["toStageIndex"] ?? "")
+            else { return false }
+            return keyboardMoveSpaceService.desktopIndex(forWindow: windowID) == reportedStage
+        }
+
+        // Put it back so later sections see the stage layout they were written against.
+        postKeyDown(keyCode: CGKeyCode(kVK_UpArrow), flags: [.maskCommand])
+        wait(1.0)
+        postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+        postFlagsChanged(flags: [])
+        wait(0.5)
+
+        test("The keyboard move is reversible") {
+            stageWindowCounts(in: readState()) == beforeCounts
+        }
+    }
 }
 
 // --- 11. Fullscreen Spaces ---

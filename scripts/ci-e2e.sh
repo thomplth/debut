@@ -50,6 +50,9 @@ app_path="/Applications/$(basename "$app_bundle")"
 sudo rm -rf "$app_path"
 sudo cp -R "$app_bundle" "$app_path"
 bundle_id="$(/usr/bin/defaults read "$app_path/Contents/Info" CFBundleIdentifier)"
+# .build/release is a symlink to a triple-specific directory, and a TCC path grant has to name
+# the path the kernel sees rather than the one this script typed.
+e2e_path="$(realpath .build/release/DebutE2E)"
 
 echo "Granting Accessibility access inside the disposable runner..."
 requirement=$(codesign -d -r- "$app_path" 2>&1 | awk -F ' => ' '/designated/{print $2}')
@@ -57,6 +60,12 @@ csreq_hex=$(printf '%s' "$requirement" | csreq -r- -b /dev/stdout | xxd -p | tr 
 timestamp=$(date +%s)
 sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceAccessibility','$bundle_id',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+# The suite itself reads Mission Control's accessibility tree to provision desktops, which is a
+# separate client from the app bundle.
+e2e_requirement=$(codesign -d -r- "$e2e_path" 2>&1 | awk -F ' => ' '/designated/{print $2}')
+e2e_csreq_hex=$(printf '%s' "$e2e_requirement" | csreq -r- -b /dev/stdout | xxd -p | tr -d '\n')
+sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
+'kTCCServiceAccessibility','$e2e_path',1,2,4,1,X'$e2e_csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sudo killall tccd 2>/dev/null || true
 
 # launchctl reaches the app, which `open` spawns through launchd; the export reaches the suite,
@@ -74,8 +83,14 @@ open -na TextEdit "$fixture_dir/one.txt"
 open -na TextEdit "$fixture_dir/two.txt"
 sleep 2
 
+# A runner logs in with one desktop, and a stage is a desktop, so without this the suite cannot
+# switch a stage or move a window between two. Debut builds its stage list at launch, so the
+# desktops have to exist first.
+echo "Provisioning desktops so stages have somewhere to be..."
+"$e2e_path" provision-desktops 3
+
 echo "Launching Debut..."
 open "$app_path"
 sleep 4
 
-.build/release/DebutE2E
+"$e2e_path"
