@@ -43,14 +43,21 @@ struct StageControllerSpaceTests {
 
     private func makeController(spaces: MockSpaceSwitcher)
         -> (StageController, MockWindowService) {
+        let (controller, windowService, _) = makeKeyedController(spaces: spaces)
+        return (controller, windowService)
+    }
+
+    private func makeKeyedController(spaces: MockSpaceSwitcher)
+        -> (StageController, MockWindowService, MockKeyboardService) {
         let windowService = MockWindowService()
+        let keyboardService = MockKeyboardService()
         let controller = StageController(
             windowService: windowService,
-            keyboardService: MockKeyboardService(),
+            keyboardService: keyboardService,
             focusedWindowSnapshotProvider: { .unfocused }
         )
         controller.spaceSwitcher = spaces
-        return (controller, windowService)
+        return (controller, windowService, keyboardService)
     }
 
     @Test("Switching stage switches to the matching desktop")
@@ -298,6 +305,61 @@ struct StageControllerSpaceTests {
         controller.desktopDidChange()
         #expect(windowService.raisedWindowIDs.contains(55))
         #expect(windowService.activatedBundleID == "com.b")
+    }
+
+    // The settling path is where the race lives: Debut's deferred focus lands within a few
+    // milliseconds of macOS restoring the destination's remembered app. Plain quick switch
+    // must queue nothing, so the desktop settles on whatever macOS chose.
+    @Test("Quick switch queues no focus for the settled desktop")
+    func quickSwitchQueuesNoFocus() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        let stageB = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 55, ownerBundleID: "com.b", ownerName: "B", windowTitle: "W"),
+            toStageID: stageB)
+        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
+
+        keyboardService.simulateEvent(.switchToStage(2))
+        controller.desktopDidChange()
+
+        #expect(spaces.switchRequests == [1])
+        #expect(controller.stageManager.activeStageID == stageB)
+        #expect(windowService.raisedWindowIDs.isEmpty)
+        #expect(windowService.activatedBundleID == nil)
+    }
+
+    // Skipping the focus is not enough on its own. A focus queued by an earlier switch that is
+    // still settling survives, and firing it later would activate an app the plain switch was
+    // supposed to leave to macOS. `applyPendingStageFocus` only drops a queue whose stage is
+    // not the one that settled, so a re-switch to that same stage slips straight through it.
+    @Test("Quick switch clears a focus queued by an earlier switch")
+    func quickSwitchClearsPendingFocus() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        let stageA = controller.stageManager.stages[0].id
+        let stageB = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 11, ownerBundleID: "com.a", ownerName: "A", windowTitle: "WA"),
+            toStageID: stageA)
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 22, ownerBundleID: "com.a", ownerName: "A", windowTitle: "WB"),
+            toStageID: stageB)
+        controller.stageManager.activateStage(id: stageA)
+
+        // Control+Option+2 still focuses, so this queues window 22 while the desktop settles.
+        keyboardService.simulateEvent(.switchToStageKeepingCurrentApplication(2))
+        #expect(windowService.raisedWindowIDs.isEmpty)
+
+        // A plain Control+2 on the stage already being switched to must discard that queue.
+        keyboardService.simulateEvent(.switchToStage(2))
+        controller.desktopDidChange()
+
+        #expect(controller.stageManager.activeStageID == stageB)
+        #expect(windowService.raisedWindowIDs.isEmpty)
+        #expect(windowService.activatedBundleID == nil)
     }
 
     // Nothing has to settle when the desktop is already right, and waiting for a change that
