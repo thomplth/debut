@@ -1234,7 +1234,11 @@ struct StageControllerTests {
         #expect(controller.stageManager.activeStage.windows.first?.windowID == 303)
     }
 
-    @Test("Quick switch defaults to the target stage's MRU window")
+    // Debut and macOS both write focus within a few milliseconds of the Space flip, so the
+    // winner varies run to run, and `recordWindowActivation` then writes a lost race into the
+    // stage's MRU head — making a single loss permanent. Plain quick switch therefore moves the
+    // desktop and leaves the choice of app to macOS.
+    @Test("Quick switch moves the desktop without focusing anything")
     func quickSwitchDefaultsToTargetMRU() {
         let (controller, windowService, keyboardService) = makeController()
         let sourceStageID = controller.stageManager.activeStageID
@@ -1255,8 +1259,9 @@ struct StageControllerTests {
 
         keyboardService.simulateEvent(.switchToStage(2))
 
-        #expect(windowService.raisedWindowID == 202)
-        #expect(windowService.activatedBundleID == "com.other")
+        #expect(controller.stageManager.activeStageID == targetStageID)
+        #expect(windowService.raisedWindowID == nil)
+        #expect(windowService.activatedBundleID == nil)
     }
 
     @Test("Quick switch falls back to the target stage's MRU window when the current app is absent")
