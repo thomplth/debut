@@ -222,12 +222,6 @@ callbacks the cycle itself generates cannot scramble the MRU order mid-cycle.
   precisely when an index is supplied, which is what makes in-stage reordering by
   drag possible.</dd>
 
-  <dt>Swap and reorder <span class="src">StageManager.swift:109</span></dt>
-  <dd>Neither touches <code>activeStageID</code>. Because labels are positional,
-  reordering needs no further bookkeeping — but the controller must fix up its own
-  <code>selectedStageIndex</code>, and the drag path re-finds the index by stage
-  ID afterwards.</dd>
-
   <dt>Prune <span class="src">StageManager.swift:138</span></dt>
   <dd><code>removeEmptyStages()</code> keeps any stage holding dormant
   assignments, and keeps everything if all stages are empty. There is always at

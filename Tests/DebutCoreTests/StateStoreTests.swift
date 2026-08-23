@@ -67,7 +67,7 @@ struct StateStoreTests {
         settings.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
         settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(command: true)
         settings.commandHintVisibility = .always
-        _ = settings.recordCommandUsage(.swapStageUp)
+        _ = settings.recordCommandUsage(.moveWindowLeft)
 
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
@@ -78,7 +78,28 @@ struct StateStoreTests {
         #expect(loaded.quickSwitchModifiers == ShortcutModifiers(control: true, option: true))
         #expect(loaded.quickSwitchSameApplicationModifiers == ShortcutModifiers(command: true))
         #expect(loaded.commandHintVisibility == .always)
-        #expect(loaded.commandUsageCounts[.swapStageUp] == 1)
+        #expect(loaded.commandUsageCounts[.moveWindowLeft] == 1)
+    }
+
+    @Test("Older settings drop usage counts for retired commands")
+    func legacySettingsDropRetiredCommandUsage() throws {
+        var settings = AppSettings()
+        _ = settings.recordCommandUsage(.moveWindowLeft)
+        var object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any]
+        )
+        var counts = try #require(object["commandUsageCounts"] as? [Any])
+        counts.append("swapStageUp")
+        counts.append(7)
+        object["commandUsageCounts"] = counts
+
+        let decoded = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        #expect(decoded.commandUsageCounts[.moveWindowLeft] == 1)
+        #expect(decoded.commandUsageCounts.count == 1)
     }
 
     @Test("Older settings use Control and Control-Option quick-switch defaults")

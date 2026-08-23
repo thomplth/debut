@@ -114,20 +114,22 @@ why the frontmost bundle ID has to be read from cache.
 - `moveWindowUp` and `moveWindowDown` move the selected window to the adjacent
   stage; the selection follows it, and the source stage remains even if it
   empties.
-- `swapStageUp` and `swapStageDown` exchange the selected stage's position with
-  its neighbor.
-
 Stages cannot be renamed. Position numbers drive shortcuts but are not displayed
 on plates.
+
+Stages cannot be reordered either. A stage *is* the desktop at its index, so
+reordering stages means reordering desktops, and the Dock — not the window server —
+owns that order: `SLSMoveManagedSpaceToDisplayIndex` moves a desktop instantly and
+invisibly, but the Dock keeps navigating by its own stale copy, which breaks the
+forged swipe that switches a stage, and the new order is reverted at the next
+reboot. A reorder that cannot be made either transparent or durable is worse than
+no reorder at all.
 
 ## Pointer
 
 A window preview can be dragged onto another plate to move that window between
-stages, and a plate's handle can be dragged to reorder stages within the stack.
-A held plate travels by slot: it keeps its column and its full size while the rest
-of the stack reflows around its current destination, and committing the drag makes
-the moved stage the active one. Both paths emit diagnostic events — `window_moved_by_drag` and
-`stage_reordered_by_drag` — which the E2E suite asserts against. Virtualized and
+stages. Plates themselves are not draggable. The move emits a diagnostic event —
+`window_moved_by_drag` — which the E2E suite asserts against. Virtualized and
 GitHub-hosted macOS do not deliver synthetic drags; see docs/local-e2e.md.
 
 ## Not yet implemented

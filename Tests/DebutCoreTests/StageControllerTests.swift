@@ -343,10 +343,10 @@ struct StageControllerTests {
         let recorder = CommandUsageRecorder()
         controller.onCommandUsed = { recorder.record($0) }
 
-        keyboardService.simulateEvent(.swapStageUp)
+        keyboardService.simulateEvent(.moveWindowLeft)
         keyboardService.simulateEvent(.nextWindowRepeat)
 
-        #expect(recorder.actions == [.swapStageUp])
+        #expect(recorder.actions == [.moveWindowLeft])
     }
 
     @Test("Window switch raises selected window")
@@ -928,36 +928,6 @@ struct StageControllerTests {
         keyboardSvc.simulateEvent(.moveWindowLeft)
         #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [202, 101, 303])
         #expect(controller.selectedWindowIndex == 0)
-    }
-
-    @Test("A dragged stage lands in its new slot and becomes the current stage")
-    func reorderStageByDrag() {
-        let (controller, _, _) = makeController()
-        let first = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        controller.stageManager.createStage(position: .below)
-        let second = controller.stageManager.stages[1].id
-        let third = controller.stageManager.stages[2].id
-        controller.selectedStageIndex = 0
-
-        controller.reorderStage(fromIndex: 2, toIndex: 0)
-
-        #expect(controller.stageManager.stages.map(\.id) == [third, first, second])
-        #expect(controller.selectedStageIndex == 0)
-        #expect(controller.stageManager.activeStageID == third)
-    }
-
-    @Test("A stage dropped back where it started changes nothing")
-    func reorderStageToSameSlot() {
-        let (controller, _, _) = makeController()
-        controller.stageManager.createStage(position: .below)
-        let order = controller.stageManager.stages.map(\.id)
-        controller.selectedStageIndex = 1
-
-        controller.reorderStage(fromIndex: 0, toIndex: 0)
-
-        #expect(controller.stageManager.stages.map(\.id) == order)
-        #expect(controller.selectedStageIndex == 1)
     }
 
     @Test("Held backward Tab stops at the first window and a fresh press wraps")

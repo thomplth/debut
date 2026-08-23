@@ -28,8 +28,6 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     var onStageScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     public var onWindowSelected: ((Int, Int) -> Void)?
     public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
-    public var onStageReordered: ((Int, Int) -> Void)?
-    public var onStageHandleVisibilityChanged: ((Int, Bool) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onDesktopSelected: (() -> Void)?
     var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
@@ -63,8 +61,6 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
             viewModel: viewModel,
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
-            onStageReordered: onStageReordered,
-            onStageHandleVisibilityChanged: onStageHandleVisibilityChanged,
             onPointerSelectionChanged: onPointerSelectionChanged,
             onDesktopSelected: onDesktopSelected
         )
