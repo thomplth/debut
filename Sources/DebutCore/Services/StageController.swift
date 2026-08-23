@@ -1014,6 +1014,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 // Luminance analysis draws the capture through Core Graphics. Doing it here
                 // rather than in the main-queue hop keeps the render path free.
                 let hasVariedLuminance = WindowImageStatistics.hasVariedLuminance(capture.image)
+                // A non-nil image is not proof that ScreenCaptureKit returned window content.
+                // Keep the last good bitmap and its original timestamp when validation fails,
+                // so an expired entry remains visible and eligible for another refresh.
+                guard hasVariedLuminance else { return }
                 let capturedAt = clock()
                 DispatchQueue.main.async { [weak self] in
                     guard let self,
@@ -1028,11 +1032,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                         capturedAt: capturedAt,
                         windowTitle: window.windowTitle
                     )
-                    if hasVariedLuminance {
-                        self.variedWindowPreviewIDs.insert(capture.windowID)
-                    } else {
-                        self.variedWindowPreviewIDs.remove(capture.windowID)
-                    }
+                    self.variedWindowPreviewIDs.insert(capture.windowID)
                     self.scheduleOverlayPreviewFlush()
                 }
             }
