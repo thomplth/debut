@@ -1165,18 +1165,26 @@ if keyboardMoveStageCount < 2 {
 
         postFlagsChanged(flags: [])
         for _ in 0..<30 {
-            if readEvents().filter({ $0["event"] == "window_moved_by_key" }).count > movesBefore {
+            if readEvents().filter({ $0["event"] == "window_moved_by_key" }).count > movesBefore,
+               readState()["overlayVisible"] == "false" {
                 break
             }
             wait(0.1)
         }
 
-        let moveEvents = readEvents().filter { $0["event"] == "window_moved_by_key" }
+        let committedEvents = readEvents()
+        let moveEvents = committedEvents.filter { $0["event"] == "window_moved_by_key" }
+        let moveEventIndex = committedEvents.lastIndex { $0["event"] == "window_moved_by_key" }
+        let stageSwitchIndex = committedEvents.lastIndex { $0["event"] == "stage_switched" }
+        let windowMovePrecededStageSwitch = moveEventIndex.map { moveIndex in
+            stageSwitchIndex.map { moveIndex < $0 } ?? false
+        } ?? false
         let committedCounts = stageWindowCounts(in: readState())
         test("The keyboard move is reported and lands the window where the model says") {
             originSelected
                 && waitedForCommit
                 && moveEvents.count > movesBefore
+                && windowMovePrecededStageSwitch
                 && previewCounts == committedCounts
                 && committedCounts.indices.contains(originStage + 1)
                 && committedCounts[originStage] == beforeCounts[originStage] - 1
