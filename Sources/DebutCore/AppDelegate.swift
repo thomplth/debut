@@ -112,7 +112,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         // Windows are placed by the desktop they are on, so the stage list has to cover
         // every desktop before the first reconcile. Growing it afterwards would leave the
         // tail desktops' answers out of range, and those windows would land on stage 1.
-        StageController.reconcileStages(&stageManager, desktopCount: spaceService.desktopCount())
+        let launchReconciliation = StageController.reconcileStages(
+            &stageManager,
+            desktopCount: spaceService.desktopCount()
+        )
+        diag.report(launchReconciliation.diagnosticEvent,
+                    details: launchReconciliation.diagnosticDetails)
 
         // Remove stale window IDs, remap live window IDs from snapshot
         let reconcileID = PerformanceRecorder.shared.begin(

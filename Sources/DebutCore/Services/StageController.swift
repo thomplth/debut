@@ -266,14 +266,58 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// silently does nothing, and a desktop with no stage is invisible to the switcher.
     /// Called on launch and whenever the desktop set may have changed.
     public func reconcileStagesWithDesktops() {
-        guard let spaceSwitcher else { return }
-        Self.reconcileStages(&stageManager, desktopCount: spaceSwitcher.desktopCount())
+        guard let spaceSwitcher else {
+            diag.report("stages_reconcile_refused", details: ["reason": "noSpaceSwitcher"])
+            return
+        }
+        let outcome = Self.reconcileStages(&stageManager,
+                                           desktopCount: spaceSwitcher.desktopCount())
+        // Every Space change runs this, so reporting a reconcile that changed nothing would
+        // push the events that explain a session out of the capped log within a few switches.
+        if outcome.refused || outcome.didChange {
+            diag.report(outcome.diagnosticEvent, details: outcome.diagnosticDetails)
+        }
+    }
+
+    /// What a reconcile saw and did.
+    ///
+    /// Refusing to act on a zero desktop count is right — an empty answer from the window
+    /// server is not evidence the desktops are gone — but a silent refusal is indistinguishable
+    /// from a host that really has one desktop, and that ambiguity hid a launch where Debut
+    /// built one stage against three real desktops.
+    public struct StageReconciliation: Equatable {
+        public let desktopCount: Int
+        public let stagesBefore: Int
+        public let stagesAfter: Int
+
+        public var refused: Bool { desktopCount <= 0 }
+
+        public var didChange: Bool { stagesBefore != stagesAfter }
+
+        var diagnosticEvent: String { refused ? "stages_reconcile_refused" : "stages_reconciled" }
+
+        var diagnosticDetails: [String: String] {
+            var details = [
+                "desktopCount": "\(desktopCount)",
+                "stagesBefore": "\(stagesBefore)",
+                "stagesAfter": "\(stagesAfter)",
+            ]
+            if refused { details["reason"] = "noDesktopsReported" }
+            return details
+        }
     }
 
     /// Exposed separately because startup has to grow the stage list before windows are
     /// reconciled, which happens before any controller exists.
-    public static func reconcileStages(_ stageManager: inout StageManager, desktopCount: Int) {
-        guard desktopCount > 0 else { return }
+    @discardableResult
+    public static func reconcileStages(_ stageManager: inout StageManager,
+                                       desktopCount: Int) -> StageReconciliation {
+        let before = stageManager.stages.count
+        guard desktopCount > 0 else {
+            return StageReconciliation(desktopCount: desktopCount,
+                                       stagesBefore: before,
+                                       stagesAfter: before)
+        }
 
         while stageManager.stages.count > desktopCount {
             stageManager.deleteStage(id: stageManager.stages[stageManager.stages.count - 1].id)
@@ -281,10 +325,20 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         while stageManager.stages.count < desktopCount {
             stageManager.createStage(position: .below)
         }
+        return StageReconciliation(desktopCount: desktopCount,
+                                   stagesBefore: before,
+                                   stagesAfter: stageManager.stages.count)
     }
 
     /// Call whenever macOS reports the active Space changed.
+    ///
+    /// The desktop set is rechecked first, not only the active index. Mission Control can add
+    /// or remove a desktop at any moment, and reconciling solely at launch left the stage list
+    /// wrong for the rest of the session — windows on a desktop past the end of the stage array
+    /// have nowhere to go. The notification fires once the Space change has settled, so this is
+    /// the earliest honest point to re-ask.
     public func desktopDidChange() {
+        reconcileStagesWithDesktops()
         syncActiveStageWithCurrentDesktop()
         applyPendingStageFocus()
     }
@@ -1220,13 +1274,27 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             guard selectedStageIndex < stageManager.stages.count - 1 else { return }
             targetStageIndex = selectedStageIndex + 1
         }
-        guard canRelocate(from: selectedStageIndex, to: targetStageIndex) else { return }
+        guard canRelocate(from: selectedStageIndex, to: targetStageIndex) else {
+            diag.report("window_move_refused", details: [
+                "windowID": "\(window.windowID)",
+                "fromStageIndex": "\(selectedStageIndex)",
+                "toStageIndex": "\(targetStageIndex)",
+            ])
+            return
+        }
 
         let targetStageID = stageManager.stages[targetStageIndex].id
         stageManager.moveWindow(windowID: window.windowID, fromStageID: stage.id, toStageID: targetStageID)
         relocateToStageDesktop(windowID: window.windowID,
                                fromStageIndex: selectedStageIndex,
                                toStageIndex: targetStageIndex)
+        // The pointer path reports its own move. Without this the keyboard path changed a
+        // window's desktop and left no trace, which is the one thing a stage mutation may not do.
+        diag.report("window_moved_by_key", details: [
+            "windowID": "\(window.windowID)",
+            "fromStageIndex": "\(selectedStageIndex)",
+            "toStageIndex": "\(targetStageIndex)",
+        ])
 
         // Follow the moved window to the target stage
         selectedStageIndex = targetStageIndex

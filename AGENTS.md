@@ -58,6 +58,14 @@ Use `./scripts/tart-e2e.sh run-all` only when diagnosing those virtualized drag 
 
 `./scripts/rebuild.sh` only builds, installs, and launches the app locally; it never runs E2E.
 
+#### Disposable hosts start with one desktop, and a stage is a desktop
+
+A hosted runner and a freshly cloned Tart VM both log in with exactly one Space. Since stages are desktops, such a host cannot switch a stage, move a window across one, or time a switch — the whole architecture goes untested while the suite still reports green. `DebutE2E provision-desktops <n>` therefore runs before Debut launches, from `scripts/ci-e2e.sh` and `scripts/tart-e2e-guest.sh`. It is a separate invocation and never implied, because the same suite runs against the developer's own session, where adding desktops would be a change to the user's machine rather than to a fixture.
+
+The desktop has to come from Mission Control's own add button, found on the Dock by the accessibility identifier `mc.spaces.add`. Seeding the Dock's `com.apple.spaces` plist is a dead end that looks like it works: the entry survives, and after a reboot the window server really does report a second Space — but every seeded desktop carries the *first* desktop's `id64`, so `SpaceService.index(of:in:)` maps them all to stage 0. `killall Dock` does not apply the file at all. A duplicate identity is worse than a missing desktop, because the suite then passes against a broken map.
+
+Before adding a check that needs two desktops, decide what it should do on a host that has one, and gate it on the precondition it actually has. Reordering plates needs two stages; the hover affordance needs only a plate; the window-drop fixture needs an empty stage after a populated one. Sharing one gate across all three hides checks behind conditions they do not have.
+
 ## Releases
 
 Releases are automated in GitHub Actions and are never cut by hand. Both paths gate on the full CI suite (`.github/workflows/ci.yml`) and the full E2E suite before anything is tagged or published.
