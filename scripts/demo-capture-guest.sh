@@ -102,7 +102,7 @@ Shipped
   * The overlay opens on the display holding the focused window, not
     on whichever display macOS calls main.
   * The plates reach inside a full-screen app's Space.
-  * Stage labels follow position, so reordering needs no rename.
+  * Stage labels follow position, so they need no rename.
   * Quitting an app no longer forgets where its windows lived; the
     assignments go dormant and come back on the next launch.
 

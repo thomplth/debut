@@ -14,8 +14,6 @@ let isGitHubHosted = environment["GITHUB_ACTIONS"] == "true"
 let skipsVirtualizedDrags = environment["DEBUT_SKIP_VIRTUALIZED_DRAGS"] == "1"
 let skipsSyntheticDrags = isGitHubHosted || skipsVirtualizedDrags
 let hostedDragTests: Set<String> = [
-    "Dragging the revealed handle reorders the stage",
-    "A reverse handle drag restores the original stage order",
     "Dropping a window updates the source and destination stage models",
     "The refreshed destination plate supports an immediate reverse drag",
 ]
@@ -204,12 +202,6 @@ func postMouseMove(to point: CGPoint) {
     event.post(tap: .cgSessionEventTap)
 }
 
-func postMouseHover(to point: CGPoint) {
-    postMouseMove(to: CGPoint(x: point.x + 4, y: point.y))
-    wait(0.35)
-    postMouseMove(to: point)
-}
-
 func postMouseClick(at point: CGPoint) {
     for type in [CGEventType.leftMouseDown, .leftMouseUp] {
         guard let event = CGEvent(
@@ -295,39 +287,6 @@ func plateCenter(
     return CGPoint(
         x: screen.midX,
         y: visualCenterY
-    )
-}
-
-func platePoint(
-    stageIndex: Int,
-    windowCounts: [Int],
-    activeStageIndex: Int,
-    inactiveScale: CGFloat,
-    relativeX: CGFloat,
-    xOffset: CGFloat = 0
-) -> CGPoint? {
-    guard windowCounts.indices.contains(stageIndex),
-          let center = plateCenter(
-            stageIndex: stageIndex,
-            windowCounts: windowCounts,
-            activeStageIndex: activeStageIndex,
-            inactiveScale: inactiveScale
-          )
-    else { return nil }
-
-    let screen = CGDisplayBounds(CGMainDisplayID())
-    let thumbnail = PlateConstants.thumbnailSize(
-        forWindowCount: windowCounts.max() ?? 0,
-        screenWidth: screen.width
-    )
-    let width = PlateConstants.plateWidth(
-        forWindowCount: windowCounts[stageIndex],
-        thumbnailWidth: thumbnail.width
-    )
-    let scale: CGFloat = stageIndex == activeStageIndex ? 1 : inactiveScale
-    return CGPoint(
-        x: center.x + ((relativeX - 0.5) * width + xOffset) * scale,
-        y: center.y
     )
 }
 
@@ -1018,15 +977,6 @@ let dropFixtureSkipReason = destinationStageIndex < 0
     ? "This host has no empty desktop following a populated one; the drop fixture needs both"
     : nil
 
-// Reordering a plate needs two stages to move between, and the hover affordance needs only a
-// plate to hover. Neither needs an *empty* destination. Sharing the drop fixture's gate hid
-// both behind a precondition they do not have.
-let reorderSourceIndex = 0
-let reorderDestinationIndex = 1
-let reorderFixtureSkipReason = originalStageCount >= 2
-    ? nil
-    : "This host has one desktop, so there is no second stage to reorder against"
-
 postMouseMove(to: neutralPointerLocation)
 wait(0.5)
 
@@ -1058,134 +1008,6 @@ if let reason = dropFixtureSkipReason {
             && preparedWindowCounts[destinationStageIndex] == 0
             && preparedWindowCounts.count == originalStageCount
     }
-}
-
-// Reordering is deliberately handle-only: dragging elsewhere on a plate must
-// not mutate stage order, while hovering the leading edge reveals the handle.
-let reorderEventCount = readEvents().filter { $0["event"] == "stage_reordered_by_drag" }.count
-let handleRevealEventCount = readEvents().filter {
-    $0["event"] == "stage_drag_handle_visibility_changed"
-        && $0["isRevealed"] == "true"
-}.count
-
-if preparedWindowCounts.indices.contains(reorderSourceIndex),
-   preparedWindowCounts.indices.contains(reorderDestinationIndex),
-   let sourceBodyPoint = platePoint(
-        stageIndex: reorderSourceIndex,
-        windowCounts: preparedWindowCounts,
-        activeStageIndex: plateActiveStageIndex,
-        inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
-        relativeX: 1,
-        xOffset: -10
-   ),
-   let destinationCenter = plateCenter(
-        stageIndex: reorderDestinationIndex,
-        windowCounts: preparedWindowCounts,
-        activeStageIndex: plateActiveStageIndex,
-        inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
-   ),
-   let handleHotspot = platePoint(
-        stageIndex: reorderSourceIndex,
-        windowCounts: preparedWindowCounts,
-        activeStageIndex: plateActiveStageIndex,
-        inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
-        relativeX: 0,
-        xOffset: 12
-   ) {
-    postMouseDrag(
-        from: sourceBodyPoint,
-        to: CGPoint(x: sourceBodyPoint.x, y: destinationCenter.y)
-    )
-    wait(0.5)
-    test("Dragging the plate body does not reorder stages") {
-        readEvents().filter { $0["event"] == "stage_reordered_by_drag" }.count
-            == reorderEventCount
-    }
-
-    postMouseHover(to: handleHotspot)
-    for _ in 0..<20 {
-        if readEvents().filter({
-            $0["event"] == "stage_drag_handle_visibility_changed"
-                && $0["isRevealed"] == "true"
-        }).count > handleRevealEventCount {
-            break
-        }
-        wait(0.1)
-    }
-    let _ = takeScreenshot("11_stage_drag_handle_revealed")
-    test("Hovering the leading edge reveals the stage drag handle") {
-        let reveals = readEvents().filter {
-            $0["event"] == "stage_drag_handle_visibility_changed"
-                && $0["isRevealed"] == "true"
-        }
-        return reveals.count > handleRevealEventCount
-            && reveals.last?["stageIndex"] == "\(reorderSourceIndex)"
-    }
-
-    postMouseDrag(
-        from: handleHotspot,
-        to: CGPoint(x: handleHotspot.x, y: destinationCenter.y)
-    )
-    for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
-        if readEvents().filter({ $0["event"] == "stage_reordered_by_drag" }).count
-            > reorderEventCount {
-            break
-        }
-        wait(0.1)
-    }
-    test("Dragging the revealed handle reorders the stage") {
-        readEvents().filter { $0["event"] == "stage_reordered_by_drag" }.count
-            > reorderEventCount
-    }
-
-    postMouseMove(to: neutralPointerLocation)
-    wait(0.3)
-    let reorderedState = readState()
-    let reorderedWindowCounts = stageWindowCounts(in: reorderedState)
-    let reorderedActiveStageIndex = Int(reorderedState["selectedStageIndex"] ?? "") ?? -1
-    if reorderedWindowCounts.indices.contains(reorderDestinationIndex),
-       let reverseHotspot = platePoint(
-            stageIndex: reorderDestinationIndex,
-            windowCounts: reorderedWindowCounts,
-            activeStageIndex: reorderedActiveStageIndex,
-            inactiveScale: CGFloat(interactionSettings.inactivePlateScale),
-            relativeX: 0,
-            xOffset: 12
-       ),
-       let reverseDestination = plateCenter(
-            stageIndex: reorderSourceIndex,
-            windowCounts: reorderedWindowCounts,
-            activeStageIndex: reorderedActiveStageIndex,
-            inactiveScale: CGFloat(interactionSettings.inactivePlateScale)
-       ) {
-        postMouseHover(to: reverseHotspot)
-        wait(0.4)
-        postMouseDrag(
-            from: reverseHotspot,
-            to: CGPoint(x: reverseHotspot.x, y: reverseDestination.y)
-        )
-        for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
-            if readEvents().filter({ $0["event"] == "stage_reordered_by_drag" }).count
-                > reorderEventCount + 1 {
-                break
-            }
-            wait(0.1)
-        }
-        test("A reverse handle drag restores the original stage order") {
-            readEvents().filter { $0["event"] == "stage_reordered_by_drag" }.count
-                > reorderEventCount + 1
-                && stageWindowCounts(in: readState()) == preparedWindowCounts
-        }
-    } else {
-        fail("Could not calculate the reverse stage-handle drag path")
-    }
-} else if let reason = reorderFixtureSkipReason {
-    skipTest("Dragging the plate body does not reorder stages", reason: reason)
-    skipTest("Hovering the leading edge reveals the stage drag handle", reason: reason)
-    skipTest("Dragging the revealed handle reorders the stage", reason: reason)
-    skipTest("A reverse handle drag restores the original stage order", reason: reason)
-} else {
-    fail("Could not calculate the stage-handle drag path")
 }
 
 postMouseMove(to: neutralPointerLocation)

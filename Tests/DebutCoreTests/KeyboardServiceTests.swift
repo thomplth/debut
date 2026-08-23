@@ -473,10 +473,13 @@ struct KeyboardServiceTests {
 
         svc.simulateEvent(.moveWindowUp)
         svc.simulateEvent(.moveWindowDown)
-        svc.simulateEvent(.swapStageUp)
-        svc.simulateEvent(.swapStageDown)
+        svc.simulateEvent(.moveWindowLeft)
+        svc.simulateEvent(.moveWindowRight)
 
-        #expect(delegate.receivedEvents == [.moveWindowUp, .moveWindowDown, .swapStageUp, .swapStageDown])
+        #expect(
+            delegate.receivedEvents
+                == [.moveWindowUp, .moveWindowDown, .moveWindowLeft, .moveWindowRight]
+        )
     }
 
     @Test("Escape event")

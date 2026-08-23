@@ -52,8 +52,7 @@ the selected window between stages, and the selection travels with it.
 
 <img src="docs/media/window-move.gif" alt="Moving a window down a stage and back with the arrow keys" width="760">
 
-The pointer works too: drag a preview onto another plate to move that window, or drag
-a plate by its handle to reorder the stack.
+The pointer works too: drag a preview onto another plate to move that window.
 
 ## Install
 
@@ -114,7 +113,6 @@ overlay. Holding past it presents the plates.
 | `1` … `9` | Jump to that stage — `9` means the *last* one |
 | `←` `→` | Reorder the window inside its stage |
 | `↑` `↓` | Move the window to the stage above or below |
-| `⌥ ↑` / `⌥ ↓` | Swap this stage's position with its neighbour |
 | `Q` | Quit the selected app |
 | `Esc` | Close the overlay without ending the session |
 
@@ -126,8 +124,8 @@ session alive, so the next navigation key brings it straight back.
 **Stages hold windows, not apps.** One app can have windows on several stages at
 once — the browser window you need for this task, and the four you do not.
 
-**Stages are not named.** A stage's label is its 1-based position, so creating,
-deleting, and reordering need no bookkeeping and no rename step.
+**Stages are not named.** A stage's label is its 1-based position, so adding or
+removing a desktop needs no bookkeeping and no rename step.
 
 **A stage is a real macOS desktop.** Stage 3 is desktop 3, and macOS — not Debut — is
 the source of truth for which desktop a window is on. Switching a stage is therefore
