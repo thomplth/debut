@@ -112,12 +112,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         // Windows are placed by the desktop they are on, so the stage list has to cover
         // every desktop before the first reconcile. Growing it afterwards would leave the
         // tail desktops' answers out of range, and those windows would land on stage 1.
-        let launchReconciliation = StageController.reconcileStages(
-            &stageManager,
-            desktopCount: spaceService.desktopCount()
-        )
-        diag.report(launchReconciliation.diagnosticEvent,
-                    details: launchReconciliation.diagnosticDetails)
+        let launchTopology = spaceService.spaceTopology()
+        let launchStagesBefore = stageManager.allStages.count
+        stageManager.reconcileStageStacks(with: launchTopology)
+        diag.report("stages_reconciled", details: [
+            "separateSpaces": "\(launchTopology.separateSpaces)",
+            "stackCount": "\(launchTopology.stacks.count)",
+            "stagesBefore": "\(launchStagesBefore)",
+            "stagesAfter": "\(stageManager.allStages.count)",
+        ])
 
         // Remove stale window IDs, remap live window IDs from snapshot
         let reconcileID = PerformanceRecorder.shared.begin(
@@ -139,7 +142,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         // Empty stages are deliberately kept: a desktop with nothing on it is still a
         // desktop, and pruning it would shift every later stage off the desktop it maps to.
 
-        if stageManager.stages.allSatisfy({ $0.windows.isEmpty }) &&
+        if stageManager.allStages.allSatisfy({ $0.windows.isEmpty }) &&
             stageManager.dormantWindowAssignments.isEmpty {
             discovery.populateDefaultStage(&stageManager)
         }
@@ -151,6 +154,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
            let focusedWID = discovery.focusedWindowID(for: frontApp.processIdentifier),
            let owningStage = stageManager.stageContainingWindow(windowID: focusedWID) {
             startStageID = owningStage
+            if let stackID = stageManager.stageStackID(containingStageID: owningStage) {
+                stageManager.selectStageStack(id: stackID)
+            }
         } else {
             startStageID = stageManager.stages[0].id
         }
@@ -193,17 +199,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             currentSettings.quickSwitchSameApplicationModifiers
         keyboardService.heldCycleMinimumInterval = currentSettings.heldCycleMinimumInterval
 
-        // Stages are the user's desktops, so the persisted stage list is only a starting
-        // guess — desktops may have been added or removed while Debut was not running.
+        // Stages are the user's desktops, so the persisted lists are only a starting guess.
+        // Reconciliation also adopts each display's currently visible desktop without moving it.
         controller.reconcileStagesWithDesktops()
-
-        // Adopt the desktop already showing instead of switching to the persisted stage.
-        // Yanking the user to another desktop on launch would be both surprising and, for a
-        // login-item launch, invisible until they wondered where their windows went.
-        if let current = spaceService.currentDesktopIndex(),
-           controller.stageManager.stages.indices.contains(current) {
-            controller.stageManager.activateStage(id: controller.stageManager.stages[current].id)
-        }
 
         discovery.onWindowsDiscovered = { [weak self] windows in
             DispatchQueue.main.async {
@@ -212,7 +210,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                     RuntimeWindowSnapshot(
                         liveWindows: windows,
                         allWindowIDs: nil,
-                        desktopIndexes: self.spaceService?.desktopIndexes(
+                        desktopLocations: self.spaceService?.desktopLocations(
                             forWindows: windows.map(\.windowID)
                         ) ?? [:]
                     ),
@@ -232,10 +230,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         discovery.onWindowClosed = { [weak self] windowID in
             DispatchQueue.main.async {
                 guard let self else { return }
-                let window = self.stageController?.stageManager.stages
+                let window = self.stageController?.stageManager.allStages
                     .flatMap(\.windows)
                     .first { $0.windowID == windowID }
-                for stage in self.stageController?.stageManager.stages ?? [] {
+                for stage in self.stageController?.stageManager.allStages ?? [] {
                     self.stageController?.stageManager.removeWindow(windowID: windowID, fromStageID: stage.id)
                 }
                 self.diag.report("window_retired", details: [
@@ -331,6 +329,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             name: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange(_:)),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
 
         diag.report("controller_setup", details: [
             "eventTapStarted": "\(controller.keyboardServiceStarted)",
@@ -369,6 +373,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             self.stageController?.desktopDidChange()
             // Moving a window between desktops activates no app, so without this the move is
             // only noticed the next time the user clicks the window.
+            self.windowDiscovery?.refreshDesktopAssignments()
+        }
+    }
+
+    @objc private func screenParametersDidChange(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.stageController?.reconcileStagesWithDesktops()
             self.windowDiscovery?.refreshDesktopAssignments()
         }
     }
@@ -577,6 +589,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
 
         let display = overlayDisplay(focusedWindowFrame: stageController.focusedWindowFrame)
+        if let displayID = display?.displayID {
+            stageController.selectStageStack(forDisplayID: displayID)
+        }
         overlayWindow.targetScreenFrame = display?.frame
         let vm = OverlayViewModel(
             stageManager: stageController.overlayStageManager,
@@ -681,7 +696,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private func updateOverlay() {
         guard let stageController, let overlayWindow else { return }
         let display = overlayDisplay(focusedWindowFrame: stageController.focusedWindowFrame)
-        overlayWindow.targetScreenFrame = display?.frame
+        // Stack cycling deliberately keeps the overlay on its current screen; the header
+        // changes to identify the remote display whose plates are being inspected.
+        if stageController.stageManager.connectedStageStacks.count <= 1 {
+            overlayWindow.targetScreenFrame = display?.frame
+        }
         let vm = OverlayViewModel(
             stageManager: stageController.overlayStageManager,
             activeStageIndex: stageController.selectedStageIndex,

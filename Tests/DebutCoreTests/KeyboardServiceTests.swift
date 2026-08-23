@@ -183,6 +183,32 @@ struct KeyboardServiceTests {
         ])
     }
 
+    @Test("Return cycles display stacks while the Command session is active")
+    func returnCyclesDisplayStacks() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let commandTab = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        commandTab.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: commandTab) == nil)
+        service.overlayVisible = true
+
+        let commandReturn = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Return),
+            keyDown: true
+        )!
+        commandReturn.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: commandReturn) == nil)
+        #expect(delegate.receivedEvents.last == .nextDisplayStack)
+    }
+
     @Test("Overlay 9 targets the last stage and 0 has no default binding")
     func lastStageKeyMapping() {
         let bindings = KeyBindings()

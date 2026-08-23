@@ -183,8 +183,10 @@ enum DockSwipeEvent {
     static func make(phase: DockSwipePhase,
                      direction: SpaceSwitchDirection,
                      velocity: Double = kInstantSwitchVelocity,
-                     progress: Double = kInstantSwitchProgress) -> CGEvent? {
+                     progress: Double = kInstantSwitchProgress,
+                     location: CGPoint? = nil) -> CGEvent? {
         guard let event = CGEvent(source: nil) else { return nil }
+        if let location { event.location = location }
 
         event.setIntegerValueField(kCGSEventTypeField, value: kCGSEventDockControl)
         event.setIntegerValueField(kCGEventGestureHIDType, value: kIOHIDEventTypeDockSwipe)
@@ -217,8 +219,9 @@ enum DockSwipeEvent {
     }
 
     /// The envelope event the Dock expects alongside each dock-control event.
-    static func makeEnvelope() -> CGEvent? {
+    static func makeEnvelope(location: CGPoint? = nil) -> CGEvent? {
         guard let event = CGEvent(source: nil) else { return nil }
+        if let location { event.location = location }
         event.setIntegerValueField(kCGSEventTypeField, value: kCGSEventGesture)
         return event
     }
@@ -226,11 +229,17 @@ enum DockSwipeEvent {
     /// Posts one complete Began+Ended pair. Both phases are built before either is posted,
     /// so an allocation failure cannot leave the Dock holding an unmatched Began.
     @discardableResult
-    static func postSwitch(direction: SpaceSwitchDirection, velocity: Double) -> Bool {
-        guard let began = make(phase: .began, direction: direction, velocity: 0),
-              let beganEnvelope = makeEnvelope(),
-              let ended = make(phase: .ended, direction: direction, velocity: velocity),
-              let endedEnvelope = makeEnvelope()
+    static func postSwitch(
+        direction: SpaceSwitchDirection,
+        velocity: Double,
+        location: CGPoint? = nil
+    ) -> Bool {
+        guard let began = make(
+            phase: .began, direction: direction, velocity: 0, location: location
+        ), let beganEnvelope = makeEnvelope(location: location),
+              let ended = make(
+                phase: .ended, direction: direction, velocity: velocity, location: location
+              ), let endedEnvelope = makeEnvelope(location: location)
         else { return false }
 
         for (control, envelope) in [(began, beganEnvelope), (ended, endedEnvelope)] {
@@ -249,12 +258,15 @@ enum DockSwipeEvent {
     @discardableResult
     static func postDrivenSwitch(direction: SpaceSwitchDirection,
                                  samples: [DockSwipeSample],
+                                 location: CGPoint? = nil,
                                  isCancelled: () -> Bool = { false }) -> Bool {
-        guard let began = make(phase: .began, direction: direction, velocity: 0),
-              let beganEnvelope = makeEnvelope(),
+        guard let began = make(
+            phase: .began, direction: direction, velocity: 0, location: location
+        ), let beganEnvelope = makeEnvelope(location: location),
               let ended = make(phase: .ended, direction: direction,
-                               velocity: kAnimatedReleaseVelocity, progress: 1),
-              let endedEnvelope = makeEnvelope()
+                               velocity: kAnimatedReleaseVelocity, progress: 1,
+                               location: location),
+              let endedEnvelope = makeEnvelope(location: location)
         else { return false }
 
         let start = DispatchTime.now()
@@ -265,8 +277,8 @@ enum DockSwipeEvent {
             guard !isCancelled() else { break }
             wait(untilElapsed: sample.delay, since: start)
             guard let changed = make(phase: .changed, direction: direction,
-                                     progress: sample.progress),
-                  let envelope = makeEnvelope()
+                                     progress: sample.progress, location: location),
+                  let envelope = makeEnvelope(location: location)
             else { continue }
             changed.post(tap: .cgSessionEventTap)
             envelope.post(tap: .cgSessionEventTap)
@@ -296,6 +308,9 @@ enum DockSwipeEvent {
 /// tested without a window server — nothing else about a Space switch is observable in a
 /// unit test.
 public protocol SpaceSwitching: AnyObject {
+    func spaceTopology() -> SpaceTopology
+    func desktopLocation(forWindow windowID: CGWindowID) -> DesktopLocation?
+    func desktopLocations(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: DesktopLocation]
     func desktopCount() -> Int
     func currentDesktopIndex() -> Int?
     func desktopIndex(forWindow windowID: CGWindowID) -> Int?
@@ -303,14 +318,48 @@ public protocol SpaceSwitching: AnyObject {
     /// implementation is reached through an `any SpaceSwitching` too.
     func desktopIndexes(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: Int]
     @discardableResult func switchToDesktop(index: Int) -> Bool
+    @discardableResult func switchToDesktop(_ location: DesktopLocation) -> Bool
     /// Whether this conformer can reassign a window's desktop at all. False means the move
     /// commands should stay inert rather than mutate the model and lie about the result.
     var canMoveWindows: Bool { get }
     func moveWindow(windowID: CGWindowID, toDesktop: Int,
                     completion: (@Sendable (Bool) -> Void)?)
+    func moveWindow(windowID: CGWindowID, to location: DesktopLocation,
+                    completion: (@Sendable (Bool) -> Void)?)
 }
 
 public extension SpaceSwitching {
+    func spaceTopology() -> SpaceTopology {
+        let count = desktopCount()
+        let desktops = (0..<count).map(CGSSpaceID.init)
+        return SpaceTopology(separateSpaces: false, stacks: [
+            SpaceStackDescriptor(
+                id: SpaceTopology.sharedStackID,
+                displayID: nil,
+                displayName: "All Displays",
+                frame: .zero,
+                desktopIDs: desktops,
+                currentDesktopID: currentDesktopIndex().flatMap { index in
+                    desktops.indices.contains(index) ? desktops[index] : nil
+                }
+            ),
+        ])
+    }
+
+    func desktopLocation(forWindow windowID: CGWindowID) -> DesktopLocation? {
+        guard let index = desktopIndex(forWindow: windowID),
+              let stack = spaceTopology().stacks.first,
+              stack.desktopIDs.indices.contains(index)
+        else { return nil }
+        return stack.location(at: index)
+    }
+
+    func desktopLocations(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: DesktopLocation] {
+        windowIDs.reduce(into: [:]) { result, windowID in
+            result[windowID] = desktopLocation(forWindow: windowID)
+        }
+    }
+
     func moveWindow(windowID: CGWindowID, toDesktop: Int) {
         moveWindow(windowID: windowID, toDesktop: toDesktop, completion: nil)
     }
@@ -321,6 +370,16 @@ public extension SpaceSwitching {
         windowIDs.reduce(into: [:]) { result, windowID in
             result[windowID] = desktopIndex(forWindow: windowID)
         }
+    }
+
+    @discardableResult
+    func switchToDesktop(_ location: DesktopLocation) -> Bool {
+        switchToDesktop(index: location.index)
+    }
+
+    func moveWindow(windowID: CGWindowID, to location: DesktopLocation,
+                    completion: (@Sendable (Bool) -> Void)?) {
+        moveWindow(windowID: windowID, toDesktop: location.index, completion: completion)
     }
 }
 
@@ -354,7 +413,7 @@ public final class SpaceService: SpaceSwitching {
 
     public init() {}
 
-    public func desktopCount() -> Int { userDesktops().count }
+    public func desktopCount() -> Int { spaceTopology().stacks.first?.desktopIDs.count ?? 0 }
 
     private var connection: CGSConnectionID? {
         guard let cgsMainConnectionID else { return nil }
@@ -372,32 +431,98 @@ public final class SpaceService: SpaceSwitching {
 
     // MARK: Reading
 
-    /// User desktops on the main display, in the order Mission Control shows them.
-    ///
-    /// Fullscreen and tiled Spaces are excluded — only `type == 0` entries are desktops a
-    /// stage can map onto.
-    public func userDesktops() -> [CGSSpaceID] {
-        guard let connection, let cgsCopyManagedDisplaySpaces,
-              let displays = cgsCopyManagedDisplaySpaces(connection, nil)?
-                .takeRetainedValue() as? [[String: Any]],
-              let main = displays.first,
-              let spaces = main["Spaces"] as? [[String: Any]]
-        else { return [] }
+    private func managedDisplaySpaces() -> [[String: Any]] {
+        guard let connection, let cgsCopyManagedDisplaySpaces else { return [] }
+        return cgsCopyManagedDisplaySpaces(connection, nil)?
+            .takeRetainedValue() as? [[String: Any]] ?? []
+    }
 
+    private static func desktopIDs(in display: [String: Any]) -> [CGSSpaceID] {
+        let spaces = display["Spaces"] as? [[String: Any]] ?? []
         return spaces.compactMap { space in
             guard (space["type"] as? NSNumber)?.intValue ?? 0 == 0 else { return nil }
             return (space["id64"] as? NSNumber)?.uint64Value
         }
     }
 
-    public func currentDesktop() -> CGSSpaceID? {
-        guard let connection, let cgsCopyManagedDisplaySpaces,
-              let displays = cgsCopyManagedDisplaySpaces(connection, nil)?
-                .takeRetainedValue() as? [[String: Any]],
-              let main = displays.first,
-              let current = (main["Current Space"] as? [String: Any])?["id64"] as? NSNumber
+    private static func currentDesktopID(in display: [String: Any]) -> CGSSpaceID? {
+        ((display["Current Space"] as? [String: Any])?["id64"] as? NSNumber)?.uint64Value
+    }
+
+    private static func displayUUID(_ displayID: CGDirectDisplayID) -> String? {
+        guard let uuid = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue()
         else { return nil }
-        return current.uint64Value
+        return CFUUIDCreateString(nil, uuid) as String
+    }
+
+    /// The display-scoped desktop lists Mission Control owns right now.
+    public func spaceTopology() -> SpaceTopology {
+        let managed = managedDisplaySpaces()
+        guard !managed.isEmpty else { return SpaceTopology(separateSpaces: false, stacks: []) }
+
+        let screens = NSScreen.screens
+        let separate = NSScreen.screensHaveSeparateSpaces
+        if !separate {
+            let display = managed.first(where: {
+                ($0["Display Identifier"] as? String) == "Main"
+            }) ?? managed[0]
+            let frames = screens.map(\.frame)
+            let frame = frames.dropFirst().reduce(frames.first ?? .zero) { $0.union($1) }
+            return SpaceTopology(separateSpaces: false, stacks: [
+                SpaceStackDescriptor(
+                    id: SpaceTopology.sharedStackID,
+                    displayID: NSScreen.main?.displayID,
+                    displayName: "All Displays",
+                    frame: frame,
+                    desktopIDs: Self.desktopIDs(in: display),
+                    currentDesktopID: Self.currentDesktopID(in: display)
+                ),
+            ])
+        }
+
+        var remaining = managed
+        var descriptors: [SpaceStackDescriptor] = []
+        for screen in screens {
+            guard let uuid = Self.displayUUID(screen.displayID),
+                  let index = remaining.firstIndex(where: {
+                      ($0["Display Identifier"] as? String) == uuid
+                  })
+            else { continue }
+            let display = remaining.remove(at: index)
+            let name = screen.localizedName.isEmpty ? "Display \(descriptors.count + 1)" : screen.localizedName
+            descriptors.append(SpaceStackDescriptor(
+                id: uuid,
+                displayID: screen.displayID,
+                displayName: name,
+                frame: screen.frame,
+                desktopIDs: Self.desktopIDs(in: display),
+                currentDesktopID: Self.currentDesktopID(in: display)
+            ))
+        }
+        for display in remaining {
+            guard let identifier = display["Display Identifier"] as? String else { continue }
+            descriptors.append(SpaceStackDescriptor(
+                id: identifier,
+                displayID: nil,
+                displayName: "Display \(descriptors.count + 1)",
+                frame: .zero,
+                desktopIDs: Self.desktopIDs(in: display),
+                currentDesktopID: Self.currentDesktopID(in: display)
+            ))
+        }
+        return SpaceTopology(separateSpaces: true, stacks: descriptors)
+    }
+
+    /// User desktops on the first stack, retained for compatibility with index-only callers.
+    ///
+    /// Fullscreen and tiled Spaces are excluded — only `type == 0` entries are desktops a
+    /// stage can map onto.
+    public func userDesktops() -> [CGSSpaceID] {
+        spaceTopology().stacks.first?.desktopIDs ?? []
+    }
+
+    public func currentDesktop() -> CGSSpaceID? {
+        spaceTopology().stacks.first?.currentDesktopID
     }
 
     public func currentDesktopIndex() -> Int? {
@@ -416,17 +541,28 @@ public final class SpaceService: SpaceSwitching {
 
     /// Which stage a window belongs to, or `nil` when it does not belong to exactly one.
     public func desktopIndex(forWindow windowID: CGWindowID) -> Int? {
-        Self.soleIndex(of: spaces(forWindow: windowID), in: userDesktops())
+        desktopLocation(forWindow: windowID)?.index
+    }
+
+    public func desktopLocation(forWindow windowID: CGWindowID) -> DesktopLocation? {
+        let topology = spaceTopology()
+        let locations = spaces(forWindow: windowID).compactMap(topology.location(ofSpace:))
+        guard locations.count == 1 else { return nil }
+        return locations[0]
     }
 
     /// `SLSCopySpacesForWindows` returns a flat space list with no per-window attribution,
     /// so windows are still resolved one at a time. What this avoids is the copy of the
     /// whole display topology that `userDesktops()` makes on every single lookup.
     public func desktopIndexes(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: Int] {
-        let desktops = userDesktops()
-        guard !desktops.isEmpty else { return [:] }
+        desktopLocations(forWindows: windowIDs).mapValues(\.index)
+    }
+
+    public func desktopLocations(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: DesktopLocation] {
+        let topology = spaceTopology()
         return windowIDs.reduce(into: [:]) { result, windowID in
-            result[windowID] = Self.soleIndex(of: spaces(forWindow: windowID), in: desktops)
+            let locations = spaces(forWindow: windowID).compactMap(topology.location(ofSpace:))
+            if locations.count == 1 { result[windowID] = locations[0] }
         }
     }
 
@@ -457,18 +593,39 @@ public final class SpaceService: SpaceSwitching {
     /// wait for `activeSpaceDidChangeNotification`, which they must do regardless.
     @discardableResult
     public func switchToDesktop(index target: Int) -> Bool {
+        guard let location = spaceTopology().stacks.first?.location(at: target) else { return false }
+        return switchToDesktop(location)
+    }
+
+    /// Switches a particular display's visible desktop. The synthetic gesture is located
+    /// on that display so the Dock applies it to the matching Space list when displays use
+    /// separate Spaces.
+    @discardableResult
+    public func switchToDesktop(_ location: DesktopLocation) -> Bool {
         guard canSwitchSpaces else { return false }
-        let desktops = userDesktops()
-        guard let current = currentDesktopIndex(),
-              let plan = SpaceSwitchPlan(from: current, to: target, desktopCount: desktops.count)
+        let topology = spaceTopology()
+        guard let stack = topology.stack(id: location.stackID),
+              stack.desktopIDs.indices.contains(location.index),
+              stack.desktopIDs[location.index] == location.desktopID,
+              let current = stack.currentDesktopIndex,
+              let plan = SpaceSwitchPlan(
+                  from: current,
+                  to: location.index,
+                  desktopCount: stack.desktopIDs.count
+              )
         else { return false }
+        let eventLocation: CGPoint? = stack.displayID.map { displayID in
+            let bounds = CGDisplayBounds(displayID)
+            return CGPoint(x: bounds.midX, y: bounds.midY)
+        }
 
         let samples = DockSwipeAnimation.samples(duration: switchDuration)
         guard !samples.isEmpty else {
             let velocity = plan.velocity(base: kInstantSwitchVelocity)
             for _ in 0..<plan.steps {
                 guard DockSwipeEvent.postSwitch(direction: plan.direction,
-                                                velocity: velocity) else { return false }
+                                                velocity: velocity,
+                                                location: eventLocation) else { return false }
             }
             return true
         }
@@ -479,7 +636,11 @@ public final class SpaceService: SpaceSwitching {
         switchQueue.async { [self] in
             for _ in 0..<plan.steps {
                 guard isCurrentSwitch(generation) else { return }
-                DockSwipeEvent.postDrivenSwitch(direction: plan.direction, samples: samples) {
+                DockSwipeEvent.postDrivenSwitch(
+                    direction: plan.direction,
+                    samples: samples,
+                    location: eventLocation
+                ) {
                     !isCurrentSwitch(generation)
                 }
             }
@@ -515,16 +676,27 @@ public final class SpaceService: SpaceSwitching {
     public func moveWindow(windowID: CGWindowID,
                            toDesktop target: Int,
                            completion: (@Sendable (Bool) -> Void)? = nil) {
-        let desktops = userDesktops()
-        guard desktops.indices.contains(target),
-              BridgedWindowManagement.moveWindows([windowID], toSpace: desktops[target])
+        guard let location = spaceTopology().stacks.first?.location(at: target) else {
+            completion?(false)
+            return
+        }
+        moveWindow(windowID: windowID, to: location, completion: completion)
+    }
+
+    public func moveWindow(windowID: CGWindowID,
+                           to location: DesktopLocation,
+                           completion: (@Sendable (Bool) -> Void)? = nil) {
+        guard let stack = spaceTopology().stack(id: location.stackID),
+              stack.desktopIDs.indices.contains(location.index),
+              stack.desktopIDs[location.index] == location.desktopID,
+              BridgedWindowManagement.moveWindows([windowID], toSpace: location.desktopID)
         else {
             completion?(false)
             return
         }
         guard let completion else { return }
         moveQueue.async { [self] in
-            completion(waitForWindow(windowID, toReachSpace: desktops[target]))
+            completion(waitForWindow(windowID, toReachSpace: location.desktopID))
         }
     }
 
