@@ -78,10 +78,9 @@ inactive stages are not moved, resized, minimised, or sent to another Space. The
 stay exactly where they are and are simply <em>occluded</em> by a full-screen
 window Debut owns. Switching stages therefore has no animation to wait for and
 cannot disturb your layout. Second, a stage has <strong>no name</strong>. Its
-label is its 1-based position in the list, computed on demand. Creating,
-deleting, reordering, and swapping stages therefore require no bookkeeping at
-all: after any of those operations the labels are already correct, because they
-were never stored.
+label is its 1-based position in the list, computed on demand. A change in the
+stage list therefore requires no bookkeeping at all: afterwards the labels are
+already correct, because they were never stored.
 </p>
 
 <div class="why">

@@ -337,38 +337,24 @@ the delegate side, the overlay rebuild is deliberately deferred by one run-loop
 hop: "let SwiftUI finish the drag transaction before replacing its root view."
 </p>
 
-<h3>Reordering stages</h3>
+<h3>Why stages cannot be reordered</h3>
 
 <p>
-Reordering is <strong>handle-only</strong>. The reveal zone is computed from the
-stack's own geometry rather than from the plate's local coordinate space: measuring
-hover inside a space that the reveal itself expands is a feedback loop, and it made
-the handle boomerang under a still cursor. Each plate's hit frame is widened on the
-leading edge by a 40&nbsp;pt gutter (scaled with the plate), so drifting left toward
-the handle keeps the plate magnified instead of dropping focus and hiding the very
-handle the pointer is heading for. Within a plate's vertical band, the reveal zone
-runs from the gutter's outer edge through 24&nbsp;pt of hover width; while that plate
-is already revealed the reach grows by the 36&nbsp;pt reveal width as hysteresis&nbsp;<span class="src">PlateView.swift:511</span>.
+The overlay once let a plate be dragged by a handle to reorder the stack. A stage
+is now the desktop at its index, so reordering stages means reordering desktops —
+and while <code>SLSMoveManagedSpaceToDisplayIndex</code> does reorder a desktop
+instantly and with no visible transition, the Dock keeps navigating by its own
+stale copy of the order, which misdirects the forged swipe that switches a stage.
+The new order also does not survive a reboot: three VM trials reverted it, with
+<code>com.apple.spaces</code> never taking it in four minutes of polling and
+<code>killall Dock</code> making no difference. A reorder that is neither
+transparent nor durable is worse than none, so the handle, its reveal zone and its
+slot-based drag were removed rather than rebuilt on a stored permutation.
 </p>
 
 <p>
-The drag itself is <strong>slot-based, not pointer-following</strong>. Vertical
-translation maps to a destination index using the stride between plates, and
-<code>PlateMotion.stageDragSlots</code> then renders the whole stack as the
-already-reordered arrangement&nbsp;<span class="src">PlateView.swift:126</span>. Three properties fall out of that one
-decision: the held plate is the focus index, so it stays at full size rather than
-shrinking as it passes over its neighbours; the other plates shift the instant the
-destination changes; and there is no horizontal offset to leak, so the held plate
-stays column-aligned with the stack. Committing a move also moves focus — the moved
-stage becomes both the selection and the active stage&nbsp;<span class="src">StageController.reorderStage</span>.
-Dragging the plate body does <em>not</em> reorder, and the E2E suite asserts that
-negative explicitly.
-</p>
-
-<p>
-Both drag paths emit diagnostic events — <code>window_moved_by_drag</code> and
-<code>stage_reordered_by_drag</code> — which is how the E2E harness verifies them
-without reading pixels.
+The window drag remains, and emits <code>window_moved_by_drag</code> — which is how
+the E2E harness verifies it without reading pixels.
 </p>
 
 <h2>Liquid Glass</h2>

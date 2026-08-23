@@ -32,15 +32,6 @@ struct WindowLayoutKey: Equatable {
     let stageWindowIDs: [[CGWindowID]]
 }
 
-/// The held plate travels by slot rather than by pointer offset, so the gesture cannot drift
-/// sideways out of the stack and the other plates always have somewhere to sit.
-struct StageDragState: Equatable {
-    let stageIndex: Int
-    let stageID: UUID
-    var verticalTranslation: CGFloat
-    var destinationIndex: Int
-}
-
 struct PointerSelection: Equatable {
     let stageIndex: Int
     let windowIndex: Int

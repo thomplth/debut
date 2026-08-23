@@ -530,23 +530,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             }
         }
 
-        overlayWindow.onStageReordered = { [weak self] fromIndex, toIndex in
-            guard let self, let ctrl = self.stageController else { return }
-            ctrl.reorderStage(fromIndex: fromIndex, toIndex: toIndex)
-            self.diag.report("stage_reordered_by_drag", details: [
-                "fromStageIndex": "\(fromIndex)",
-                "toStageIndex": "\(toIndex)",
-            ])
-            self.updateOverlay()
-        }
-
-        overlayWindow.onStageHandleVisibilityChanged = { [weak self] stageIndex, isRevealed in
-            self?.diag.report("stage_drag_handle_visibility_changed", level: .transient, details: [
-                "stageIndex": "\(stageIndex)",
-                "isRevealed": "\(isRevealed)",
-            ])
-        }
-
         overlayWindow.onStageScrollSelected = { [weak self] index in
             guard let self, let ctrl = self.stageController else { return }
             ctrl.jumpToStage(index: index)

@@ -659,10 +659,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             moveWindowWithinStage(offset: -1)
         case .moveWindowRight:
             moveWindowWithinStage(offset: 1)
-        case .swapStageUp:
-            swapStage(direction: .up)
-        case .swapStageDown:
-            swapStage(direction: .down)
         case .quitSelectedApp:
             quitSelectedApp()
         }
@@ -1203,21 +1199,6 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         notifyOverlayUpdated()
     }
 
-    /// A committed plate drag also moves focus: the plate the user was holding is the one they
-    /// are looking at, and the magnification during the drag already promised it would stay.
-    public func reorderStage(fromIndex: Int, toIndex: Int) {
-        guard stageManager.stages.indices.contains(fromIndex),
-              stageManager.stages.indices.contains(toIndex),
-              fromIndex != toIndex else { return }
-        let movedID = stageManager.stages[fromIndex].id
-        stageManager.moveStage(fromIndex: fromIndex, toIndex: toIndex)
-        stageManager.activateStage(id: movedID)
-        selectedStageIndex = stageManager.stages.firstIndex(where: { $0.id == movedID }) ?? toIndex
-        selectedWindowIndex = 0
-        delegate?.stageControllerDidMutateState(self)
-        notifyOverlayUpdated()
-    }
-
     /// Windows can vanish while the overlay is on screen — an app quits, a window closes — and
     /// the selection is an index, so it has to be pulled back in range before the overlay is
     /// redrawn against the shorter stage.
@@ -1350,20 +1331,5 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             "ownerPID": "\(ownerPID)",
             "requested": "\(requested)",
         ])
-    }
-
-    private func swapStage(direction: SwapDirection) {
-        guard isStageManagerVisible,
-              stageManager.stages.indices.contains(selectedStageIndex) else { return }
-        let stageID = stageManager.stages[selectedStageIndex].id
-        stageManager.swapStage(id: stageID, direction: direction)
-
-        switch direction {
-        case .up where selectedStageIndex > 0: selectedStageIndex -= 1
-        case .down where selectedStageIndex < stageManager.stages.count - 1: selectedStageIndex += 1
-        default: break
-        }
-        delegate?.stageControllerDidMutateState(self)
-        notifyOverlayUpdated()
     }
 }

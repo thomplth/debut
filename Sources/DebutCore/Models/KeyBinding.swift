@@ -30,8 +30,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case moveWindowDown
     case moveWindowLeft
     case moveWindowRight
-    case swapStageUp
-    case swapStageDown
     case quitSelectedApp
     case dismissOverlay
 
@@ -71,8 +69,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .moveWindowDown: "Move window down"
         case .moveWindowLeft: "Move window left in stage"
         case .moveWindowRight: "Move window right in stage"
-        case .swapStageUp: "Swap stage up"
-        case .swapStageDown: "Swap stage down"
         case .quitSelectedApp: "Quit selected app"
         case .dismissOverlay: "Close overlay"
         }
@@ -124,8 +120,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .moveWindowDown: .moveWindowDown
         case .moveWindowLeft: .moveWindowLeft
         case .moveWindowRight: .moveWindowRight
-        case .swapStageUp: .swapStageUp
-        case .swapStageDown: .swapStageDown
         case .quitSelectedApp: .quitSelectedApp
         case .dismissOverlay: .escape
         }
@@ -398,8 +392,6 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .moveWindowDown: KeyCombo(keyCode: kVK_DownArrow),
             .moveWindowLeft: KeyCombo(keyCode: kVK_LeftArrow),
             .moveWindowRight: KeyCombo(keyCode: kVK_RightArrow),
-            .swapStageUp: KeyCombo(keyCode: kVK_UpArrow, option: true),
-            .swapStageDown: KeyCombo(keyCode: kVK_DownArrow, option: true),
             // Session combos are matched with the held primary modifier stripped, so this is
             // the physical Cmd+Q the user already reaches for.
             .quitSelectedApp: KeyCombo(keyCode: kVK_ANSI_Q),

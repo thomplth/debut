@@ -117,29 +117,6 @@ public struct StageManager: Codable, Sendable {
         activeStageID = stages[newActiveIndex].id
     }
 
-    // MARK: - Stage reordering
-
-    public mutating func swapStage(id: UUID, direction: SwapDirection) {
-        guard let index = stages.firstIndex(where: { $0.id == id }) else { return }
-        switch direction {
-        case .up:
-            guard index > 0 else { return }
-            stages.swapAt(index, index - 1)
-        case .down:
-            guard index < stages.count - 1 else { return }
-            stages.swapAt(index, index + 1)
-        }
-    }
-
-    public mutating func moveStage(fromIndex: Int, toIndex: Int) {
-        guard stages.indices.contains(fromIndex),
-              toIndex >= 0, toIndex < stages.count,
-              fromIndex != toIndex
-        else { return }
-        let stage = stages.remove(at: fromIndex)
-        stages.insert(stage, at: toIndex)
-    }
-
     // MARK: - Active stage
 
     public mutating func activateStage(id: UUID) {
