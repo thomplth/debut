@@ -305,6 +305,17 @@ struct StageControllerTests {
         return ctx.makeImage()!
     }
 
+    private func makeUniformTestImage() -> CGImage {
+        let ctx = CGContext(
+            data: nil, width: 2, height: 1, bitsPerComponent: 8, bytesPerRow: 8,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        ctx.setFillColor(CGColor(gray: 0.5, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: 2, height: 1))
+        return ctx.makeImage()!
+    }
+
     private func makeController() -> (StageController, MockWindowService, MockKeyboardService) {
         let windowService = MockWindowService()
         let keyboardService = MockKeyboardService()
@@ -786,6 +797,51 @@ struct StageControllerTests {
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(waitUntil { windowSvc.captureRequests.count == 3 })
         #expect(Set(windowSvc.captureRequests[2]).contains(202), "An expired preview must be refreshed")
+        keyboardSvc.simulateEvent(.escape)
+    }
+
+    @Test("An expired preview stays visible until a valid refresh replaces it")
+    func expiredPreviewUsesStaleWhileRevalidate() throws {
+        let clock = TestClock()
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(ttl: 60, clock: clock)
+        let activeStageID = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        let otherStageID = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: activeStageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toStageID: otherStageID
+        )
+        controller.stageManager.activateStage(id: activeStageID)
+
+        let staleImage = makeTestImage()
+        windowSvc.capturedImages = [101: staleImage, 202: staleImage]
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { controller.windowPreviews[202] === staleImage })
+        keyboardSvc.simulateEvent(.escape)
+
+        clock.advance(by: 61)
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeUniformTestImage()]
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
+        #expect(waitUntil { Set(windowSvc.captureRequests[1]).contains(202) })
+        #expect(controller.windowPreviews[202] === staleImage,
+                "A corrupt refresh must not evict the last good preview")
+        keyboardSvc.simulateEvent(.escape)
+
+        let refreshedImage = makeTestImage()
+        windowSvc.capturedImages = [101: makeTestImage(), 202: refreshedImage]
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 3 })
+        #expect(Set(try #require(windowSvc.captureRequests.last)).contains(202),
+                "A failed refresh must leave the stale preview eligible for retry")
+        #expect(waitUntil { controller.windowPreviews[202] === refreshedImage })
         keyboardSvc.simulateEvent(.escape)
     }
 
