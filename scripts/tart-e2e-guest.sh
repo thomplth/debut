@@ -190,7 +190,7 @@ as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 3
 
 echo "Launching Debut in the guest Aqua session..."
 as_console launchctl setenv DEBUT_FORCE_DISPLAY_STACK_INDICATOR 1
-as_console open "$APP_PATH" --args --force-display-stack-indicator
+as_console env DEBUT_FORCE_DISPLAY_STACK_INDICATOR=1 "$APP_PATH/Contents/MacOS/Debut" --force-display-stack-indicator >/tmp/debut-e2e-debut.log 2>&1 </dev/null &
 wait_for_debut_ready
 
 if [[ "$DRAG_SKIP" == "1" ]]; then
