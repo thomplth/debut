@@ -21,6 +21,7 @@ final class OverlayScrollRelay {
 
 public final class OverlayWindow: NSWindow, @unchecked Sendable {
     private var hostingView: NSHostingView<OverlaySwiftUIView>?
+    private var renderedWindowIDs: Set<CGWindowID> = []
     private let scrollRelay = OverlayScrollRelay()
     private var scrollSequence = 0
     private var scrollMonitor: Any?
@@ -57,6 +58,18 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     @discardableResult
     public func update(viewModel: OverlayViewModel) -> Bool {
         synchronizeFrameToTargetScreen(display: false)
+        let nextWindowIDs = Set(
+            viewModel.stageManager.allStages.flatMap { $0.windows.map(\.windowID) }
+        )
+        let removedWindowIDs = renderedWindowIDs.subtracting(nextWindowIDs)
+        if !removedWindowIDs.isEmpty {
+            // SwiftUI's outgoing card transition can remain attached in this inactive,
+            // non-key window until another input causes a render pass. Detach the old tree so
+            // a lifecycle removal such as Command-W cannot leave that card on screen.
+            hostingView?.removeFromSuperview()
+            hostingView = nil
+        }
+        renderedWindowIDs = nextWindowIDs
         var view = OverlaySwiftUIView(
             viewModel: viewModel,
             onWindowSelected: onWindowSelected,
@@ -152,6 +165,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
                 // Remove the hosting view to stop SwiftUI layout passes
                 self?.hostingView?.removeFromSuperview()
                 self?.hostingView = nil
+                self?.renderedWindowIDs = []
             }
         })
     }
