@@ -57,6 +57,10 @@ struct PlateStackTransaction: Sendable {
         ))
     }
 
+    mutating func removeWindow(windowID: CGWindowID) {
+        moves.removeAll { $0.windowID == windowID }
+    }
+
     mutating func commit(to stageManager: inout StageManager) -> Commit {
         let before = stageManager
         let affectedWindowIDs = Set(moves.map(\.windowID))

@@ -9,6 +9,7 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public var raisedWindowIDs: [CGWindowID] = []
     public var raisedWindowID: CGWindowID?
     public var closedWindowIDs: [CGWindowID] = []
+    public var closeWindowResult: Bool = true
     public var activatedBundleID: String?
     public var terminatedPIDs: [pid_t] = []
     public var capturedImages: [CGWindowID: CGImage] = [:]
@@ -50,7 +51,7 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
 
     public func closeWindow(windowID: CGWindowID) -> Bool {
         closedWindowIDs.append(windowID)
-        return true
+        return closeWindowResult
     }
 
     public func activateApp(bundleID: String) -> Bool {
