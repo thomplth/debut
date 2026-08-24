@@ -135,7 +135,7 @@ struct OverlayViewModelTests {
             stageManager: multiDisplayManager(),
             activeStageIndex: 0,
             selectedWindowIndex: 0,
-            displaySafeAreaTopInset: 38
+            displayTopContentInset: 38
         )
 
         #expect(vm.displayStackIndicatorTopPadding == 56)
