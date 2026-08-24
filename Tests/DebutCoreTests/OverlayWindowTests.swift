@@ -32,6 +32,52 @@ struct OverlayWindowTests {
         #expect(created)
     }
 
+    @Test("Removing a window replaces the rendered tree immediately")
+    func windowRemovalReplacesRenderedTree() {
+        let window = OverlayWindow()
+        var stageManager = StageManager()
+        let stageID = stageManager.activeStageID
+        stageManager.addWindow(
+            StageWindow(
+                windowID: 101,
+                ownerBundleID: "com.example.One",
+                ownerName: "One",
+                windowTitle: "One"
+            ),
+            toStageID: stageID
+        )
+        stageManager.addWindow(
+            StageWindow(
+                windowID: 202,
+                ownerBundleID: "com.example.Two",
+                ownerName: "Two",
+                windowTitle: "Two"
+            ),
+            toStageID: stageID
+        )
+        let createdInitialTree = window.update(viewModel: OverlayViewModel(
+            stageManager: stageManager,
+            activeStageIndex: 0,
+            selectedWindowIndex: 1
+        ))
+        let reusedTree = window.update(viewModel: OverlayViewModel(
+            stageManager: stageManager,
+            activeStageIndex: 0,
+            selectedWindowIndex: 0
+        ))
+
+        stageManager.removeWindow(windowID: 202, fromStageID: stageID)
+        let replacedTree = window.update(viewModel: OverlayViewModel(
+            stageManager: stageManager,
+            activeStageIndex: 0,
+            selectedWindowIndex: 0
+        ))
+
+        #expect(createdInitialTree)
+        #expect(!reusedTree)
+        #expect(replacedTree)
+    }
+
     @Test("The overlay opens on the display it was pointed at")
     func showOverlayUsesTargetDisplayFrame() async throws {
         let screen = try #require(NSScreen.main ?? NSScreen.screens.first)
