@@ -57,6 +57,7 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
     var onOverlayOpened: (@Sendable () -> Void)?
     private let lock = NSLock()
     private var storedPreviewSets: [Set<CGWindowID>] = []
+    private var storedOverlayWindowIDSets: [Set<CGWindowID>] = []
     private var storedPresentationContexts: [OverlayPresentationContext] = []
 
     var previewSets: [Set<CGWindowID>] {
@@ -65,6 +66,10 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
 
     var presentationContexts: [OverlayPresentationContext] {
         lock.withLock { storedPresentationContexts }
+    }
+
+    var overlayWindowIDSets: [Set<CGWindowID>] {
+        lock.withLock { storedOverlayWindowIDSets }
     }
 
     func stageControllerDidOpenOverlay(_ controller: StageController) {
@@ -88,7 +93,12 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
     }
 
     func stageControllerDidUpdateSelection(_ controller: StageController) {
-        lock.withLock { storedPreviewSets.append(Set(controller.windowPreviews.keys)) }
+        lock.withLock {
+            storedPreviewSets.append(Set(controller.windowPreviews.keys))
+            storedOverlayWindowIDSets.append(Set(
+                controller.overlayStageManager.allStages.flatMap { $0.windows.map(\.windowID) }
+            ))
+        }
         overlayUpdated.signal()
     }
 
@@ -1093,6 +1103,8 @@ struct StageControllerTests {
     @Test("Close requests the selected window, not its owning app")
     func closeSelectedWindow() {
         let (controller, windowService, keyboardService) = makeController()
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
         let stageID = controller.stageManager.activeStageID
         controller.stageManager.addWindow(
             StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 11),
@@ -1104,6 +1116,7 @@ struct StageControllerTests {
         )
 
         keyboardService.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(controller.selectedWindowIndex == 1)
         keyboardService.simulateEvent(.closeSelectedWindow)
 
@@ -1113,6 +1126,8 @@ struct StageControllerTests {
         #expect(controller.stageManager.activeStage.windows.map(\.windowID) == [101])
         #expect(controller.overlayStageManager.activeStage.windows.map(\.windowID) == [101])
         #expect(controller.selectedWindowIndex == 0)
+        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { delegate.overlayWindowIDSets.last == [101] })
     }
 
     @Test("Close does nothing when the stage has no windows")
