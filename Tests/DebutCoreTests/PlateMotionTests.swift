@@ -53,8 +53,9 @@ struct PlateMotionTests {
     func windowRemovalUsesShrinkingMotion() {
         #expect(
             PlateMotion.windowRemovalTransition(reduceMotion: false)
-                == .spring(duration: 0.28, bounce: 0)
+                == .spring(duration: 0.36, bounce: 0)
         )
+        #expect(PlateMotion.windowRemovalScale == 0.55)
         #expect(
             PlateMotion.windowRemovalTransition(reduceMotion: true)
                 == .fade(duration: 0.12)
