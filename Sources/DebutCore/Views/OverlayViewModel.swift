@@ -27,6 +27,9 @@ public struct OverlayViewModel: Sendable {
     public var wallpaperLuminance: Double?
     /// The inset macOS reserves at the top of the display for the menu bar or hardware.
     public var displayTopContentInset: CGFloat
+    /// Test-only presentation mode used by the single-display Tart guest so screenshots can
+    /// review the display indicator without changing normal display-stack behavior.
+    public var forceDisplayStackIndicator: Bool
 
     public var displayStackName: String {
         stageManager.selectedStageStack?.displayName ?? "Display"
@@ -38,7 +41,11 @@ public struct OverlayViewModel: Sendable {
         } ?? 0) + 1
     }
 
-    public var displayStackCount: Int { stageManager.connectedStageStacks.count }
+    public var displayStackCount: Int {
+        max(stageManager.connectedStageStacks.count, forceDisplayStackIndicator ? 2 : 0)
+    }
+
+    public var shouldShowDisplayStackIndicator: Bool { displayStackCount > 1 }
 
     public var displayStackShortcut: String {
         guard appearance.shouldShowCommandHint(for: .nextDisplayStack),
@@ -53,7 +60,7 @@ public struct OverlayViewModel: Sendable {
         max(0, displayTopContentInset) + 18
     }
 
-    public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, displayTopContentInset: CGFloat = 0) {
+    public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, displayTopContentInset: CGFloat = 0, forceDisplayStackIndicator: Bool = false) {
         self.stageManager = stageManager
         self.activeStageIndex = activeStageIndex
         self.selectedWindowIndex = selectedWindowIndex
@@ -61,6 +68,7 @@ public struct OverlayViewModel: Sendable {
         self.appearance = appearance
         self.wallpaperLuminance = wallpaperLuminance
         self.displayTopContentInset = displayTopContentInset
+        self.forceDisplayStackIndicator = forceDisplayStackIndicator
     }
 
     public var plates: [PlateData] {

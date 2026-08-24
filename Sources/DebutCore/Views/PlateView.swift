@@ -1088,7 +1088,7 @@ public struct OverlaySwiftUIView: View {
                 .frame(width: geo.size.width, height: pHeight, alignment: .top)
                 .offset(y: yOffset)
 
-                if viewModel.displayStackCount > 1 {
+                if viewModel.shouldShowDisplayStackIndicator {
                     HStack(spacing: 8) {
                         Text(viewModel.displayStackName)
                             .fontWeight(.semibold)
