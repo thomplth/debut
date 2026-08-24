@@ -25,6 +25,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case moveWindowLeft         // Left Arrow — reorder within the stage
     case moveWindowRight        // Right Arrow — reorder within the stage
     case quitSelectedApp        // Cmd+Q — quit the app owning the selected window
+    case closeSelectedWindow    // Cmd+W — close the selected window
 
     case cmdBacktick            // Cmd+` — next same-app window in stage
     case cmdBacktickRepeat      // Held Cmd+` auto-repeat (stops at the last window)
@@ -59,6 +60,8 @@ public enum DebutKeyEvent: Equatable, Sendable {
             .moveWindowRight
         case .quitSelectedApp:
             .quitSelectedApp
+        case .closeSelectedWindow:
+            .closeSelectedWindow
         case .escape:
             .dismissOverlay
         case .cmdTabTap, .cmdRelease, .nextWindowRepeat, .previousWindowRepeat,

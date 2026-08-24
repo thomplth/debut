@@ -265,6 +265,21 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString) == .success
     }
 
+    /// Presses the window's native close button without terminating its owning app. Apps may not
+    /// expose a close button (or may reject the press), so the result is reported to the caller
+    /// rather than changing Debut's assignment until lifecycle reconciliation confirms the close.
+    public func closeWindow(windowID: CGWindowID) -> Bool {
+        guard let axWindow = resolveWindowElement(for: windowID) else { return false }
+        var closeButtonRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            axWindow,
+            kAXCloseButtonAttribute as CFString,
+            &closeButtonRef
+        ) == .success, let closeButtonRef else { return false }
+        let closeButton = closeButtonRef as! AXUIElement
+        return AXUIElementPerformAction(closeButton, kAXPressAction as CFString) == .success
+    }
+
     // MARK: - AX-CG bridge
 
     /// Windows discovered outside the tracking paths have no cached element, so the scan stays

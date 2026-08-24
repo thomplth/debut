@@ -56,6 +56,7 @@ public enum CommandHintCatalog {
             // Transitive, so `shouldShowCommandHint` drops it. Listed anyway to keep this a
             // full inventory of the commands the footer covers.
             groups.append(("Quit app", [.quitSelectedApp], "power"))
+            groups.append(("Close window", [.closeSelectedWindow], "xmark"))
         }
         groups.append(("Close overlay", [.dismissOverlay], "escape"))
         return groups.compactMap { label, actions, iconSystemName in

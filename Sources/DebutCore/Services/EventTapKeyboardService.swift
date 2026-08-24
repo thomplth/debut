@@ -377,12 +377,12 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
 
         let sessionAction = configuredSessionAction(keyCode: keyCode, flags: flags)
 
-        // Keep the standard app-quit shortcut available unless the user explicitly
+        // Keep the standard app quit/close shortcuts available unless the user explicitly
         // assigns that physical key combination to a Stage Manager command.
         let shortcutFlags = flags.intersection([
             .maskCommand, .maskAlternate, .maskControl, .maskShift,
         ])
-        if keyCode == Int64(kVK_ANSI_Q),
+        if (keyCode == Int64(kVK_ANSI_Q) || keyCode == Int64(kVK_ANSI_W)),
            shortcutFlags == .maskCommand,
            sessionAction == nil {
             return event
