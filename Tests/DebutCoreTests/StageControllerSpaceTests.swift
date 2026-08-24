@@ -11,6 +11,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     private(set) var moveRequests: [(windowID: CGWindowID, desktop: Int)] = []
     var windowDesktops: [CGWindowID: Int] = [:]
     var moveSucceeds = true
+    var switchChangesDesktop = true
     var canMoveWindows = true
     var completesMovesImmediately = true
     private var pendingMoveCompletions: [(@Sendable () -> Void)] = []
@@ -45,7 +46,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     func switchToDesktop(index: Int) -> Bool {
         switchRequests.append(index)
         guard (0..<desktops).contains(index) else { return false }
-        current = index
+        if switchChangesDesktop { current = index }
         return true
     }
 
@@ -120,6 +121,38 @@ struct StageControllerSpaceTests {
         controller.switchToStage(id: controller.stageManager.stages[2].id)
 
         #expect(spaces.switchRequests == [2])
+    }
+
+    @Test("A switch request does not activate its stage before macOS confirms the desktop")
+    func switchWaitsToActivateStage() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        let source = controller.stageManager.stages[0].id
+        let target = controller.stageManager.stages[1].id
+        controller.stageManager.activateStage(id: source)
+
+        controller.switchToStage(id: target)
+
+        #expect(controller.stageManager.activeStageID == source)
+        controller.desktopDidChange()
+        #expect(controller.stageManager.activeStageID == target)
+    }
+
+    @Test("A shortcut retries when Dock did not land the previous switch request")
+    func droppedSwitchCanBeRetried() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        let source = controller.stageManager.stages[0].id
+        controller.stageManager.activateStage(id: source)
+
+        keyboardService.simulateEvent(.switchToStage(2))
+        keyboardService.simulateEvent(.switchToStage(2))
+
+        #expect(spaces.switchRequests == [1, 1])
+        #expect(controller.stageManager.activeStageID == source)
     }
 
     // Under the surface architecture every window in the target stage had to be AX-raised
@@ -366,17 +399,6 @@ struct StageControllerSpaceTests {
         controller.stageManager.addWindow(
             StageWindow(windowID: 55, ownerBundleID: "com.b", ownerName: "B", windowTitle: "W"),
             toStageID: stageB)
-        windowService.windowList = [
-            WindowInfo(
-                windowID: 55,
-                ownerBundleID: "com.b",
-                ownerName: "B",
-                ownerPID: 55,
-                title: "W",
-                bounds: .zero,
-                isOnScreen: true
-            ),
-        ]
         controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
 
         keyboardService.simulateEvent(.switchToStage(2))
@@ -385,83 +407,6 @@ struct StageControllerSpaceTests {
         #expect(spaces.switchRequests == [1])
         #expect(controller.stageManager.activeStageID == stageB)
         #expect(windowService.raisedWindowIDs.isEmpty)
-        #expect(windowService.activatedBundleID == nil)
-    }
-
-    // WindowServer can complete an instant synthetic Space switch without ordering the
-    // destination windows back in, especially when displays share one Space stack. The
-    // desktop then stays bare until any destination app is activated. Waiting for the Space
-    // notification and activating only when every assigned window is still off-screen avoids
-    // the unconditional focus race that plain quick switching used to have.
-    @Test(
-        "Quick switch recovers a settled desktop whose assigned windows are all off-screen",
-        arguments: [false, true]
-    )
-    func quickSwitchRecoversSuppressedWindows(separateSpaces: Bool) {
-        let spaces = MockSpaceSwitcher(
-            desktops: 2,
-            current: 0,
-            separateSpaces: separateSpaces
-        )
-        let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
-        controller.reconcileStagesWithDesktops()
-        let stageB = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 55, ownerBundleID: "com.b", ownerName: "B", windowTitle: "W"),
-            toStageID: stageB)
-        windowService.apps = [
-            AppInfo(bundleID: "com.b", name: "B", pid: 55, isHidden: false),
-        ]
-        windowService.windowList = [
-            WindowInfo(
-                windowID: 55,
-                ownerBundleID: "com.b",
-                ownerName: "B",
-                ownerPID: 55,
-                title: "W",
-                bounds: .zero,
-                isOnScreen: false
-            ),
-        ]
-        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
-
-        keyboardService.simulateEvent(.switchToStage(2))
-        #expect(windowService.activatedBundleID == nil)
-
-        controller.desktopDidChange()
-
-        #expect(windowService.activatedBundleID == "com.b")
-        #expect(windowService.raisedWindowIDs.isEmpty)
-    }
-
-    @Test("Quick switch preserves an intentionally hidden destination app")
-    func quickSwitchPreservesHiddenApp() {
-        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
-        let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
-        controller.stageManager.createStage(position: .below)
-        let stageB = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 55, ownerBundleID: "com.b", ownerName: "B", windowTitle: "W"),
-            toStageID: stageB)
-        windowService.apps = [
-            AppInfo(bundleID: "com.b", name: "B", pid: 55, isHidden: true),
-        ]
-        windowService.windowList = [
-            WindowInfo(
-                windowID: 55,
-                ownerBundleID: "com.b",
-                ownerName: "B",
-                ownerPID: 55,
-                title: "W",
-                bounds: .zero,
-                isOnScreen: false
-            ),
-        ]
-        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
-
-        keyboardService.simulateEvent(.switchToStage(2))
-        controller.desktopDidChange()
-
         #expect(windowService.activatedBundleID == nil)
     }
 
