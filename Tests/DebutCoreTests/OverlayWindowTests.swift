@@ -32,8 +32,8 @@ struct OverlayWindowTests {
         #expect(created)
     }
 
-    @Test("Removing a window replaces the rendered tree immediately")
-    func windowRemovalReplacesRenderedTree() {
+    @Test("Removing a window updates the persistent tree so dismissal motion can run")
+    func windowRemovalKeepsRenderedTree() {
         let window = OverlayWindow()
         var stageManager = StageManager()
         let stageID = stageManager.activeStageID
@@ -67,7 +67,7 @@ struct OverlayWindowTests {
         ))
 
         stageManager.removeWindow(windowID: 202, fromStageID: stageID)
-        let replacedTree = window.update(viewModel: OverlayViewModel(
+        let reusedTreeForRemoval = window.update(viewModel: OverlayViewModel(
             stageManager: stageManager,
             activeStageIndex: 0,
             selectedWindowIndex: 0
@@ -75,7 +75,7 @@ struct OverlayWindowTests {
 
         #expect(createdInitialTree)
         #expect(!reusedTree)
-        #expect(replacedTree)
+        #expect(!reusedTreeForRemoval)
     }
 
     @Test("The overlay opens on the display it was pointed at")
