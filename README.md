@@ -220,6 +220,13 @@ drives a real macOS desktop inside that same VM. Nothing in `docs/media` is a mo
 | [spec/settings.md](spec/settings.md) | Settings sections and behaviour |
 | [AGENTS.md](AGENTS.md) | Architecture constraints, toolchain, task workflow |
 
+## License
+
+Debut is free software licensed under the
+[GNU General Public License version 3 only](LICENSE) (`GPL-3.0-only`). You may
+use, study, modify and redistribute it under those terms. Source corresponding
+to every official build is available from that release's tag.
+
 ## Releases
 
 Releases are automated and always gated on the full CI and end-to-end suites. Release
