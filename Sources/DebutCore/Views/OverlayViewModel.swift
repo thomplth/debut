@@ -25,8 +25,8 @@ public struct OverlayViewModel: Sendable {
     public var appearance: AppSettings
     /// Mean brightness of the wallpaper the overlay is drawn over, when it could be measured.
     public var wallpaperLuminance: Double?
-    /// The inset macOS reserves at the top of the display for hardware such as a camera housing.
-    public var displaySafeAreaTopInset: CGFloat
+    /// The inset macOS reserves at the top of the display for the menu bar or hardware.
+    public var displayTopContentInset: CGFloat
 
     public var displayStackName: String {
         stageManager.selectedStageStack?.displayName ?? "Display"
@@ -50,17 +50,17 @@ public struct OverlayViewModel: Sendable {
     public var displayStackShortcutSpacing: CGFloat { 3.5 }
 
     public var displayStackIndicatorTopPadding: CGFloat {
-        max(0, displaySafeAreaTopInset) + 18
+        max(0, displayTopContentInset) + 18
     }
 
-    public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, displaySafeAreaTopInset: CGFloat = 0) {
+    public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, displayTopContentInset: CGFloat = 0) {
         self.stageManager = stageManager
         self.activeStageIndex = activeStageIndex
         self.selectedWindowIndex = selectedWindowIndex
         self.windowPreviews = windowPreviews
         self.appearance = appearance
         self.wallpaperLuminance = wallpaperLuminance
-        self.displaySafeAreaTopInset = displaySafeAreaTopInset
+        self.displayTopContentInset = displayTopContentInset
     }
 
     public var plates: [PlateData] {

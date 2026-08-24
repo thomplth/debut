@@ -264,6 +264,42 @@ struct ScreenshotTests {
         #expect(abs(sourceBounds.midX - sourceSurface.midX) < 0.5)
     }
 
+    @Test("Display stack indicator clears the menu bar")
+    func displayStackIndicatorClearsMenuBar() throws {
+        var manager = makeSampleViewModel(
+            stageCount: 3,
+            windowsPerStage: [3, 2, 1],
+            activeIndex: 1
+        ).stageManager
+        manager.reconcileStageStacks(with: SpaceTopology(separateSpaces: true, stacks: [
+            SpaceStackDescriptor(
+                id: "display-a", displayID: 1, displayName: "Studio Display",
+                frame: .zero, desktopIDs: [10, 11, 12], currentDesktopID: 11
+            ),
+            SpaceStackDescriptor(
+                id: "display-b", displayID: 2, displayName: "Built-in Display",
+                frame: .zero, desktopIDs: [20], currentDesktopID: 20
+            ),
+        ]))
+        let vm = OverlayViewModel(
+            stageManager: manager,
+            activeStageIndex: 1,
+            selectedWindowIndex: 1,
+            displayTopContentInset: 22
+        )
+
+        guard let image = renderSwiftUI(
+            OverlaySwiftUIView(viewModel: vm),
+            size: NSSize(width: 1200, height: 600)
+        ) else {
+            throw ScreenshotError.renderFailed
+        }
+        try saveImage(image, name: "07_display_stack_indicator_below_menu_bar")
+
+        #expect(vm.displayStackCount == 2)
+        #expect(vm.displayStackIndicatorTopPadding == 40)
+    }
+
     @Test("Onboarding welcome screen")
     func onboardingWelcome() throws {
         let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())
