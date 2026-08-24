@@ -420,6 +420,59 @@ func visibleWindowTitles(for processIdentifier: pid_t) -> [String] {
     }
 }
 
+func windowDisplayTitlesByID() -> [CGWindowID: String] {
+    guard let rawWindows = CGWindowListCopyWindowInfo(
+        [.optionAll, .excludeDesktopElements],
+        kCGNullWindowID
+    ) as? [[String: Any]] else { return [:] }
+
+    return rawWindows.reduce(into: [:]) { titles, window in
+        guard let rawID = window[kCGWindowNumber as String] as? NSNumber else { return }
+        let title = (window[kCGWindowName as String] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (window[kCGWindowOwnerName as String] as? String)
+        if let title, !title.isEmpty {
+            titles[CGWindowID(rawID.uint32Value)] = title
+        }
+    }
+}
+
+func accessibilityStrings(for processIdentifier: pid_t) -> [String] {
+    let application = AXUIElementCreateApplication(processIdentifier)
+    var strings: [String] = []
+    var visited = Set<CFHashCode>()
+
+    func visit(_ element: AXUIElement) {
+        let hash = CFHash(element)
+        guard visited.insert(hash).inserted else { return }
+
+        for attribute in [kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute] {
+            var rawValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                element,
+                attribute as CFString,
+                &rawValue
+            ) == .success,
+                let value = rawValue as? String,
+                !value.isEmpty
+            else { continue }
+            strings.append(value)
+        }
+
+        var rawChildren: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXChildrenAttribute as CFString,
+            &rawChildren
+        ) == .success,
+            let children = rawChildren as? [AXUIElement]
+        else { return }
+        children.forEach(visit)
+    }
+
+    visit(application)
+    return strings
+}
+
 func focusedWindowElement(for processIdentifier: pid_t) -> AXUIElement? {
     let application = AXUIElementCreateApplication(processIdentifier)
     var focused: CFTypeRef?
@@ -1430,6 +1483,62 @@ let finalApplicationReady = waitForDebutReady(finalApplication)
 test("Debut relaunches normally after the settings check") {
     finalApplicationReady
 }
+
+// --- 15. Selected window dismissal ---
+header("15. Selected window dismissal")
+
+let dismissalApplication = finalApplication
+let dismissalPID = dismissalApplication?.processIdentifier
+postFlagsChanged(flags: [.maskCommand])
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+_ = waitFor(timeout: 5) {
+    readState()["overlayVisible"] == "true"
+        && (Int(readState()["windowsInActiveStage"] ?? "0") ?? 0) >= 2
+}
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand, .maskShift])
+postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand, .maskShift])
+_ = waitFor(timeout: 2) {
+    readState()["selectedWindowIndex"] == "0"
+}
+
+let windowsBeforeDismissal = Int(readState()["windowsInActiveStage"] ?? "0") ?? 0
+let windowTitlesBeforeDismissal = windowDisplayTitlesByID()
+let accessibleBeforeDismissal = dismissalPID.map(accessibilityStrings(for:)) ?? []
+
+postKeyDown(keyCode: CGKeyCode(kVK_ANSI_W), flags: [.maskCommand])
+postKeyUp(keyCode: CGKeyCode(kVK_ANSI_W), flags: [.maskCommand])
+_ = waitFor(timeout: 5) {
+    (Int(readState()["windowsInActiveStage"] ?? "0") ?? 0) == windowsBeforeDismissal - 1
+}
+wait(0.8)
+let _ = takeScreenshot("14_selected_window_dismissed")
+let accessibleAfterDismissal = dismissalPID.map(accessibilityStrings(for:)) ?? []
+let closedWindowID = readEvents().last(where: { $0["event"] == "close_selected_window" })
+    .flatMap { UInt32($0["windowID"] ?? "") }
+let selectedTitle = closedWindowID.flatMap { windowTitlesBeforeDismissal[$0] }
+let selectedTitleCountBefore = selectedTitle.map { title in
+    accessibleBeforeDismissal.filter { $0 == title }.count
+} ?? 0
+let selectedTitleCountAfter = selectedTitle.map { title in
+    accessibleAfterDismissal.filter { $0 == title }.count
+} ?? 0
+info(
+    "Selected dismissal fixture: id=\(closedWindowID.map(String.init) ?? "none") "
+        + "title=\(selectedTitle ?? "none") accessibilityCount=\(selectedTitleCountBefore)->\(selectedTitleCountAfter)"
+)
+
+test("Command-W dismisses the selected card before any further selection input") {
+    guard windowsBeforeDismissal >= 2, selectedTitle != nil else { return false }
+    return readState()["overlayVisible"] == "true"
+        && readState()["selectedWindowIndex"] == "0"
+        && selectedTitleCountBefore > 0
+        && selectedTitleCountAfter < selectedTitleCountBefore
+}
+
+postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+postFlagsChanged(flags: [])
+_ = terminateDebutAndWait()
 
 // --- Summary ---
 header("Results")
