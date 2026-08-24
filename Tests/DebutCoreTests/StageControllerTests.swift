@@ -1110,6 +1110,9 @@ struct StageControllerTests {
         #expect(windowService.closedWindowIDs == [202])
         #expect(windowService.terminatedPIDs.isEmpty)
         #expect(controller.isStageManagerVisible)
+        #expect(controller.stageManager.activeStage.windows.map(\.windowID) == [101])
+        #expect(controller.overlayStageManager.activeStage.windows.map(\.windowID) == [101])
+        #expect(controller.selectedWindowIndex == 0)
     }
 
     @Test("Close does nothing when the stage has no windows")
@@ -1120,6 +1123,24 @@ struct StageControllerTests {
         keyboardService.simulateEvent(.closeSelectedWindow)
 
         #expect(windowService.closedWindowIDs.isEmpty)
+    }
+
+    @Test("A rejected close keeps the selected window in the overlay")
+    func rejectedCloseSelectedWindowKeepsAssignment() {
+        let (controller, windowService, keyboardService) = makeController()
+        windowService.closeWindowResult = false
+        let stageID = controller.stageManager.activeStageID
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: stageID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.closeSelectedWindow)
+
+        #expect(controller.stageManager.activeStage.windows.map(\.windowID) == [101])
+        #expect(controller.overlayStageManager.activeStage.windows.map(\.windowID) == [101])
+        #expect(controller.selectedWindowIndex == 0)
     }
 
     @Test("A quit app's windows leave the open overlay and pull the selection back in range")
