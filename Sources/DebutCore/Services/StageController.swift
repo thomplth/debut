@@ -1538,9 +1538,9 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         ])
     }
 
-    /// The accessibility close action belongs to the selected window, not its owning app. Keep
-    /// the overlay open and let the window lifecycle event remove the assignment if the app
-    /// accepts the request.
+    /// The accessibility close action belongs to the selected window, not its owning app. Remove
+    /// a successfully requested close from both the committed model and the open overlay at
+    /// once; the later AX destruction notification is then harmlessly idempotent.
     private func closeSelectedWindow() {
         guard isStageManagerVisible,
               overlayStageManager.stages.indices.contains(selectedStageIndex) else { return }
@@ -1549,10 +1549,21 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         let window = stage.windows[selectedWindowIndex]
 
         let requested = windowService.closeWindow(windowID: window.windowID)
+        if requested {
+            plateStackTransaction.removeWindow(windowID: window.windowID)
+            if let stageID = stageManager.stageContainingWindow(windowID: window.windowID) {
+                stageManager.removeWindow(windowID: window.windowID, fromStageID: stageID)
+            } else {
+                stageManager.removeLiveWindowFromAllStages(windowID: window.windowID)
+            }
+            delegate?.stageControllerDidMutateState(self)
+        }
         diag.report("close_selected_window", details: [
             "windowID": "\(window.windowID)",
             "bundleID": window.ownerBundleID,
             "requested": "\(requested)",
+            "removed": "\(requested)",
         ])
+        if requested { handleLiveWindowsRemoved() }
     }
 }
