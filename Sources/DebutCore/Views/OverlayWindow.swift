@@ -39,6 +39,8 @@ private struct OverlayContentRootView: View {
 public final class OverlayWindow: NSWindow, @unchecked Sendable {
     private var hostingView: NSHostingView<OverlayContentRootView>?
     private var contentState: OverlayContentState?
+    private var renderedWindowIDs: Set<CGWindowID> = []
+    private var renderGeneration = 0
     private let scrollRelay = OverlayScrollRelay()
     private var scrollSequence = 0
     private var scrollMonitor: Any?
@@ -75,6 +77,15 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     @discardableResult
     public func update(viewModel: OverlayViewModel) -> Bool {
         synchronizeFrameToTargetScreen(display: false)
+        let nextWindowIDs = Set(
+            viewModel.stageManager.allStages.flatMap { $0.windows.map(\.windowID) }
+        )
+        let removedWindowIDs = renderedWindowIDs.subtracting(nextWindowIDs)
+        renderedWindowIDs = nextWindowIDs
+        if !removedWindowIDs.isEmpty {
+            renderGeneration += 1
+        }
+        let generation = renderGeneration
         var view = OverlaySwiftUIView(
             viewModel: viewModel,
             onWindowSelected: onWindowSelected,
@@ -90,7 +101,26 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         if let hostingView, let contentState {
             // Mutating observable content preserves the SwiftUI tree, so removals run the
             // card transition and animate the surviving cards into their new positions.
-            contentState.rootView = view
+            if removedWindowIDs.isEmpty {
+                contentState.rootView = view
+            } else {
+                contentState.rootView = view
+                let duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                    ? 0.12
+                    : 0.28
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = duration
+                    // Give AppKit a real animation to complete alongside SwiftUI's card
+                    // transition. The imperceptible alpha delta leaves the overlay unchanged.
+                    hostingView.animator().alphaValue = generation.isMultiple(of: 2)
+                        ? 0.999_999
+                        : 0.999_998
+                } completionHandler: { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.rebaseRenderedTree(after: generation)
+                    }
+                }
+            }
             hostingView.frame = contentView?.bounds ?? .zero
             return false
         } else {
@@ -103,6 +133,21 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
             hostingView = hv
             return true
         }
+    }
+
+    /// SwiftUI keeps an outgoing selected card attached in an inactive, non-key window even
+    /// after its removal transition reports completion. Preserve the existing tree for motion,
+    /// then rebuild it from the latest value so the completed card cannot await another input.
+    private func rebaseRenderedTree(after generation: Int) {
+        guard generation == renderGeneration, let contentState else { return }
+        hostingView?.removeFromSuperview()
+        let state = OverlayContentState(rootView: contentState.rootView)
+        let replacement = NSHostingView(rootView: OverlayContentRootView(state: state))
+        replacement.frame = contentView?.bounds ?? .zero
+        replacement.autoresizingMask = [.width, .height]
+        contentView?.addSubview(replacement)
+        self.contentState = state
+        hostingView = replacement
     }
 
     public func showOverlay(
@@ -175,6 +220,8 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
                 self?.hostingView?.removeFromSuperview()
                 self?.hostingView = nil
                 self?.contentState = nil
+                self?.renderedWindowIDs = []
+                self?.renderGeneration += 1
             }
         })
     }
