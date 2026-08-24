@@ -19,9 +19,26 @@ final class OverlayScrollRelay {
     var latest: OverlayScrollEvent?
 }
 
+@Observable
+private final class OverlayContentState {
+    var rootView: OverlaySwiftUIView
+
+    init(rootView: OverlaySwiftUIView) {
+        self.rootView = rootView
+    }
+}
+
+private struct OverlayContentRootView: View {
+    let state: OverlayContentState
+
+    var body: some View {
+        state.rootView
+    }
+}
+
 public final class OverlayWindow: NSWindow, @unchecked Sendable {
-    private var hostingView: NSHostingView<OverlaySwiftUIView>?
-    private var renderedWindowIDs: Set<CGWindowID> = []
+    private var hostingView: NSHostingView<OverlayContentRootView>?
+    private var contentState: OverlayContentState?
     private let scrollRelay = OverlayScrollRelay()
     private var scrollSequence = 0
     private var scrollMonitor: Any?
@@ -58,18 +75,6 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     @discardableResult
     public func update(viewModel: OverlayViewModel) -> Bool {
         synchronizeFrameToTargetScreen(display: false)
-        let nextWindowIDs = Set(
-            viewModel.stageManager.allStages.flatMap { $0.windows.map(\.windowID) }
-        )
-        let removedWindowIDs = renderedWindowIDs.subtracting(nextWindowIDs)
-        if !removedWindowIDs.isEmpty {
-            // SwiftUI's outgoing card transition can remain attached in this inactive,
-            // non-key window until another input causes a render pass. Detach the old tree so
-            // a lifecycle removal such as Command-W cannot leave that card on screen.
-            hostingView?.removeFromSuperview()
-            hostingView = nil
-        }
-        renderedWindowIDs = nextWindowIDs
         var view = OverlaySwiftUIView(
             viewModel: viewModel,
             onWindowSelected: onWindowSelected,
@@ -82,15 +87,19 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         view.scrollRelay = scrollRelay
         view.onStageScrollSelected = onStageScrollSelected
         view.onStageScrollRouted = onStageScrollRouted
-        if let hostingView {
-            hostingView.rootView = view
+        if let hostingView, let contentState {
+            // Mutating observable content preserves the SwiftUI tree, so removals run the
+            // card transition and animate the surviving cards into their new positions.
+            contentState.rootView = view
             hostingView.frame = contentView?.bounds ?? .zero
             return false
         } else {
-            let hv = NSHostingView(rootView: view)
+            let state = OverlayContentState(rootView: view)
+            let hv = NSHostingView(rootView: OverlayContentRootView(state: state))
             hv.frame = contentView?.bounds ?? .zero
             hv.autoresizingMask = [.width, .height]
             contentView?.addSubview(hv)
+            contentState = state
             hostingView = hv
             return true
         }
@@ -165,7 +174,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
                 // Remove the hosting view to stop SwiftUI layout passes
                 self?.hostingView?.removeFromSuperview()
                 self?.hostingView = nil
-                self?.renderedWindowIDs = []
+                self?.contentState = nil
             }
         })
     }
