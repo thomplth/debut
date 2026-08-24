@@ -179,6 +179,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     public var onDesktopReveal: (() -> Void)?
 
     private var pendingStageFocus: (stageID: UUID, windowID: CGWindowID)?
+    private var pendingStageVisibilityRecovery: UUID?
     private var plateStackTransaction = PlateStackTransaction()
     private var isPlateStackCommitInFlight = false
 
@@ -401,6 +402,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             delegate?.stageControllerDidSwitchStage(self)
         }
         applyPendingStageFocus()
+        recoverPendingStageVisibility()
     }
 
     /// Focuses the window a stage switch asked for, now that its desktop is showing.
@@ -423,6 +425,56 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         pendingStageFocus = nil
         focusWindow(pending.windowID, inStageID: pending.stageID)
         delegate?.stageControllerDidMutateState(self)
+    }
+
+    /// Repairs the WindowServer state where a completed synthetic Space switch leaves every
+    /// destination window ordered out until one of its apps is activated. A normal settled
+    /// switch already has an assigned window on-screen and is deliberately left alone, which
+    /// preserves macOS's own destination focus instead of reinstating the old focus race.
+    private func recoverPendingStageVisibility() {
+        guard let stageID = pendingStageVisibilityRecovery else { return }
+        guard let stackID = stageManager.stageStackID(containingStageID: stageID),
+              let index = stageManager.stageIndex(id: stageID),
+              let topology = spaceSwitcher?.spaceTopology(),
+              let stack = topology.stack(id: stackID),
+              stack.currentDesktopIndex == index
+        else {
+            pendingStageVisibilityRecovery = nil
+            return
+        }
+        pendingStageVisibilityRecovery = nil
+
+        guard let stage = stageManager.allStages.first(where: { $0.id == stageID }),
+              !stage.windows.isEmpty
+        else { return }
+        let assignedWindowIDs = Set(stage.windowIDs)
+        guard !windowService.listWindows().contains(where: {
+            assignedWindowIDs.contains($0.windowID) && $0.isOnScreen
+        }) else { return }
+
+        let runningApps = windowService.listRunningApps()
+        guard let window = stage.windows.first(where: { window in
+            let app = runningApps.first { app in
+                if let ownerPID = window.ownerPID { return app.pid == ownerPID }
+                return app.bundleID == window.ownerBundleID
+            }
+            return app?.isHidden != true
+        }) else {
+            diag.report("stage_visibility_recovery_skipped", details: [
+                "reason": "apps_hidden",
+                "stage": stageLabel(forID: stageID),
+            ])
+            return
+        }
+
+        let activated = windowService.activateApp(bundleID: window.ownerBundleID)
+        diag.report(activated ? "stage_visibility_recovered" : "stage_visibility_recovery_failed", details: [
+            "activated": "\(activated)",
+            "bundleID": window.ownerBundleID,
+            "separateSpaces": "\(topology.separateSpaces)",
+            "stage": stageLabel(forID: stageID),
+            "windowsInTarget": "\(stage.windows.count)",
+        ])
     }
 
     private func focusWindow(_ windowID: CGWindowID, inStageID stageID: UUID) {
@@ -465,10 +517,12 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         return "\(stack.displayName) Stage \(index + 1)"
     }
 
-    /// - Parameter focusesWindow: When false the desktop moves and nothing is focused, leaving
-    ///   the choice of frontmost app to macOS. Debut's own focus lands within a few milliseconds
-    ///   of the Space flip, so the two race, and `recordWindowActivation` writes a lost race into
-    ///   the stage's MRU head — which makes a single loss permanent.
+    /// - Parameter focusesWindow: When false the desktop normally moves without Debut focusing
+    ///   anything, leaving the choice of frontmost app to macOS. Debut's own focus lands within
+    ///   a few milliseconds of the Space flip, so the two race, and `recordWindowActivation`
+    ///   writes a lost race into the stage's MRU head — which makes a single loss permanent.
+    ///   If WindowServer instead settles with every assigned window off-screen, the notification
+    ///   path activates one app without raising or reordering a specific window.
     public func switchToStage(id targetID: UUID, raiseWindowID: CGWindowID? = nil,
                               focusesWindow: Bool = true) {
         let targetStage = stageManager.allStages.first(where: { $0.id == targetID })
@@ -518,6 +572,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         // Focus the selected window and activate its app (single activation, no flash).
         // A desktop still settling cannot be focused yet — see `applyPendingStageFocus`.
         if focusesWindow, let focusWindowID = raiseWindowID ?? targetStage?.windows.first?.windowID {
+            pendingStageVisibilityRecovery = nil
             if desktopIsSettling {
                 pendingStageFocus = (stageID: targetID, windowID: focusWindowID)
             } else {
@@ -527,6 +582,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         } else {
             // A focus queued by an earlier switch to this same stage would otherwise still fire.
             pendingStageFocus = nil
+            pendingStageVisibilityRecovery = desktopIsSettling ? targetID : nil
         }
 
         delegate?.stageControllerDidMutateState(self)
