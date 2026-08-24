@@ -6,6 +6,7 @@ cd "$(dirname "$0")/../.."
 workflow=".github/workflows/e2e.yml"
 runner="scripts/ci-e2e.sh"
 e2e_source="Sources/DebutE2E/main.swift"
+tart_guest="scripts/tart-e2e-guest.sh"
 failures=0
 
 fail() {
@@ -37,6 +38,7 @@ expect_not_contains() {
 expect_file "$workflow"
 expect_file "$runner"
 expect_file "$e2e_source"
+expect_file "$tart_guest"
 
 if [[ -f "$workflow" ]]; then
     expect_contains "$workflow" '^  pull_request:' "E2E must run for pull requests"
@@ -88,6 +90,13 @@ if [[ -f "$e2e_source" ]]; then
         "E2E must explain skips caused by disabled preview capture"
     expect_not_contains "$e2e_source" 'stage_reordered_by_drag' \
         "E2E must not assert against stage reordering, which Debut no longer does"
+fi
+
+if [[ -f "$tart_guest" ]]; then
+    expect_contains "$tart_guest" 'DEBUT_FORCE_DISPLAY_STACK_INDICATOR' \
+        "Tart E2E must enable the display indicator preview in the single-display VM"
+    expect_contains "$tart_guest" 'unsetenv DEBUT_FORCE_DISPLAY_STACK_INDICATOR' \
+        "Tart E2E must clear the display indicator preview flag during cleanup"
 fi
 
 expect_not_contains "scripts/rebuild.sh" 'e2e-test\.sh' \
