@@ -95,6 +95,8 @@ fi
 if [[ -f "$tart_guest" ]]; then
     expect_contains "$tart_guest" 'DEBUT_FORCE_DISPLAY_STACK_INDICATOR' \
         "Tart E2E must enable the display indicator preview in the single-display VM"
+    expect_contains "$tart_guest" '--args --force-display-stack-indicator' \
+        "Tart E2E must pass the display indicator preview argument to the app"
     expect_contains "$tart_guest" 'unsetenv DEBUT_FORCE_DISPLAY_STACK_INDICATOR' \
         "Tart E2E must clear the display indicator preview flag during cleanup"
 fi

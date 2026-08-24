@@ -30,6 +30,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var hiddenIdlePerformanceID: UUID?
     private let forceDisplayStackIndicator =
         ProcessInfo.processInfo.environment["DEBUT_FORCE_DISPLAY_STACK_INDICATOR"] == "1"
+        || ProcessInfo.processInfo.arguments.contains("--force-display-stack-indicator")
     private let mainQueueWatchdog = MainQueueStallWatchdog { stall in
         DiagnosticReporter.shared.report("main_queue_stalled", details: [
             "cpuPercent": stall.resourceDelta.map { String(format: "%.1f", $0.cpuPercent) } ?? "unknown",
