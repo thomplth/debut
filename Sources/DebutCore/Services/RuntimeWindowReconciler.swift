@@ -114,6 +114,16 @@ public struct RuntimeWindowReconciler: Sendable {
         var reassignedCount = 0
         var events: [WindowAssignmentEvent] = []
         var consumedLiveWindowIDs = Set<CGWindowID>()
+        let preferredStageIDs: [CGWindowID: UUID] = Dictionary(
+            uniqueKeysWithValues: snapshot.liveWindows.compactMap { info in
+                guard let stageID = desktopStageID(
+                    for: info.windowID,
+                    snapshot: snapshot,
+                    stageManager: stageManager
+                ) else { return nil }
+                return (info.windowID, stageID)
+            }
+        )
         provisionalWindowIDs = provisionalWindowIDs.filter {
             stageManager.stageContainingWindow(windowID: $0) != nil
         }
@@ -136,7 +146,8 @@ public struct RuntimeWindowReconciler: Sendable {
                 assignments: missingAssignments,
                 liveWindows: snapshot.liveWindows,
                 stageManager: stageManager,
-                allowedAssignedWindowIDs: provisionalWindowIDs
+                allowedAssignedWindowIDs: provisionalWindowIDs,
+                preferredStageIDs: preferredStageIDs
             )
             let matchedAssignmentIDs = Set(directMatches.map(\.assignment.window.id))
             for assignment in missingAssignments
@@ -188,7 +199,8 @@ public struct RuntimeWindowReconciler: Sendable {
             assignments: dormantAssignments,
             liveWindows: snapshot.liveWindows.filter { !consumedLiveWindowIDs.contains($0.windowID) },
             stageManager: stageManager,
-            allowedAssignedWindowIDs: provisionalWindowIDs
+            allowedAssignedWindowIDs: provisionalWindowIDs,
+            preferredStageIDs: preferredStageIDs
         )
         for match in sortedByStagePosition(dormantMatches, stageManager: stageManager) {
             let previousStage = stageManager.stageContainingWindow(windowID: match.info.windowID)
@@ -362,7 +374,8 @@ public struct RuntimeWindowReconciler: Sendable {
         assignments: [WindowAssignment],
         liveWindows: [WindowInfo],
         stageManager: StageManager,
-        allowedAssignedWindowIDs: Set<CGWindowID> = []
+        allowedAssignedWindowIDs: Set<CGWindowID> = [],
+        preferredStageIDs: [CGWindowID: UUID] = [:]
     ) -> [RecoveryMatch] {
         var matches: [RecoveryMatch] = []
         var usedAssignmentIDs = Set<UUID>()
@@ -384,9 +397,50 @@ public struct RuntimeWindowReconciler: Sendable {
             usedLiveWindowIDs.insert(info.windowID)
         }
 
-        // Dynamic titles require a bundle-only fallback. Use it only when all
-        // remaining assignments and unassigned live windows for that bundle form
-        // a complete one-to-one set, avoiding arbitrary partial reassignment.
+        // A desktop answer is stronger than a dynamic title. During relaunch, CGWindowList
+        // often reveals one desktop at a time, so requiring every window in a bundle to be
+        // present would leave the replacement as a new assignment and strand its old one.
+        // Match one-to-one within a desktop when that desktop has an unambiguous set.
+        let remainingAssignmentsAfterExact = assignments.filter {
+            !usedAssignmentIDs.contains($0.window.id)
+        }
+        let remainingLiveWindowsAfterExact = liveWindows.filter {
+            !usedLiveWindowIDs.contains($0.windowID) &&
+                (stageManager.stageContainingWindow(windowID: $0.windowID) == nil ||
+                    allowedAssignedWindowIDs.contains($0.windowID))
+        }
+        let stageIDs = Set(remainingAssignmentsAfterExact.map(\.stageID))
+        for stageID in stageIDs {
+            let stageAssignments = remainingAssignmentsAfterExact.filter { $0.stageID == stageID }
+            let stageWindows = remainingLiveWindowsAfterExact.filter {
+                preferredStageIDs[$0.windowID] == stageID
+            }
+            let bundleIDs = Set(stageAssignments.map { $0.window.ownerBundleID })
+            for bundleID in bundleIDs.sorted() {
+                let bundleAssignments = stageAssignments.filter {
+                    $0.window.ownerBundleID == bundleID && !usedAssignmentIDs.contains($0.window.id)
+                }
+                let bundleWindows = stageWindows.filter {
+                    $0.ownerBundleID == bundleID && !usedLiveWindowIDs.contains($0.windowID)
+                }
+                guard !bundleAssignments.isEmpty,
+                      bundleAssignments.count == bundleWindows.count
+                else { continue }
+                for (assignment, info) in zip(bundleAssignments, bundleWindows) {
+                    matches.append(RecoveryMatch(
+                        assignment: assignment,
+                        info: info,
+                        reason: .recoveredBundle
+                    ))
+                    usedAssignmentIDs.insert(assignment.window.id)
+                    usedLiveWindowIDs.insert(info.windowID)
+                }
+            }
+        }
+
+        // Dynamic titles without a desktop answer require a bundle-only fallback. Use it only
+        // when all remaining assignments and unassigned live windows for that bundle form a
+        // complete one-to-one set, avoiding arbitrary partial reassignment.
         let remainingAssignments = assignments.filter { !usedAssignmentIDs.contains($0.window.id) }
         let remainingLiveWindows = liveWindows.filter {
             !usedLiveWindowIDs.contains($0.windowID) &&
