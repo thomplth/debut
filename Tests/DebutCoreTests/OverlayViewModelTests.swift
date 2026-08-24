@@ -140,4 +140,25 @@ struct OverlayViewModelTests {
 
         #expect(vm.displayStackIndicatorTopPadding == 56)
     }
+
+    @Test("The VM preview can show a display indicator with one connected stack")
+    func vmDisplayIndicatorPreview() {
+        let normal = OverlayViewModel(
+            stageManager: StageManager(),
+            activeStageIndex: 0,
+            selectedWindowIndex: 0
+        )
+        #expect(normal.displayStackCount == 1)
+        #expect(!normal.shouldShowDisplayStackIndicator)
+
+        let vm = OverlayViewModel(
+            stageManager: StageManager(),
+            activeStageIndex: 0,
+            selectedWindowIndex: 0,
+            forceDisplayStackIndicator: true
+        )
+
+        #expect(vm.displayStackCount == 2)
+        #expect(vm.shouldShowDisplayStackIndicator)
+    }
 }

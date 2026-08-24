@@ -28,6 +28,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var runtimeWindowReconciler = RuntimeWindowReconciler()
     private var telemetryExporter: TelemetryExporter?
     private var hiddenIdlePerformanceID: UUID?
+    private let forceDisplayStackIndicator =
+        ProcessInfo.processInfo.environment["DEBUT_FORCE_DISPLAY_STACK_INDICATOR"] == "1"
     private let mainQueueWatchdog = MainQueueStallWatchdog { stall in
         DiagnosticReporter.shared.report("main_queue_stalled", details: [
             "cpuPercent": stall.resourceDelta.map { String(format: "%.1f", $0.cpuPercent) } ?? "unknown",
@@ -600,7 +602,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings,
             wallpaperLuminance: nil,
-            displayTopContentInset: display?.topContentInset ?? 0
+            displayTopContentInset: display?.topContentInset ?? 0,
+            forceDisplayStackIndicator: forceDisplayStackIndicator
         )
         reportCommandHintLayout(viewModel: vm)
         let createdHostingView = overlayWindow.update(viewModel: vm)
@@ -709,7 +712,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             windowPreviews: stageController.windowPreviews,
             appearance: currentSettings,
             wallpaperLuminance: nil,
-            displayTopContentInset: display?.topContentInset ?? 0
+            displayTopContentInset: display?.topContentInset ?? 0,
+            forceDisplayStackIndicator: forceDisplayStackIndicator
         )
         overlayWindow.update(viewModel: vm)
     }
