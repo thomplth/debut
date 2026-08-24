@@ -85,7 +85,11 @@ struct OverlayWindowTests {
         #expect(!reusedTreeForLifecycleRefresh)
         #expect(window.contentView?.subviews.first === initialHostingView)
 
-        try await Task.sleep(for: .milliseconds(500))
+        try await Task.sleep(for: .milliseconds(120))
+
+        #expect(window.contentView?.subviews.first === initialHostingView)
+
+        try await Task.sleep(for: .milliseconds(380))
 
         #expect(window.contentView?.subviews.first !== initialHostingView)
     }

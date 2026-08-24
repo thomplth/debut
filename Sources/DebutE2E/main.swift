@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import DebutCore
 import Foundation
+import ImageIO
 
 // MARK: - Output
 
@@ -128,6 +129,83 @@ func takeScreenshot(_ name: String) -> String {
         info("  Screenshot unavailable (Screen Recording permission is not granted)")
     }
     return path
+}
+
+func changedPixelRatio(
+    from beforePath: String,
+    to afterPath: String,
+    centeredAt screenPoint: CGPoint,
+    cropSizeInPoints: CGSize
+) -> Double? {
+    guard let beforeSource = CGImageSourceCreateWithURL(
+        URL(fileURLWithPath: beforePath) as CFURL,
+        nil
+    ),
+        let afterSource = CGImageSourceCreateWithURL(
+            URL(fileURLWithPath: afterPath) as CFURL,
+            nil
+        ),
+        let before = CGImageSourceCreateImageAtIndex(beforeSource, 0, nil),
+        let after = CGImageSourceCreateImageAtIndex(afterSource, 0, nil),
+        before.width == after.width,
+        before.height == after.height
+    else { return nil }
+
+    let displayBounds = CGDisplayBounds(CGMainDisplayID())
+    let scaleX = CGFloat(before.width) / displayBounds.width
+    let scaleY = CGFloat(before.height) / displayBounds.height
+    let crop = CGRect(
+        x: (screenPoint.x - cropSizeInPoints.width / 2) * scaleX,
+        y: (screenPoint.y - cropSizeInPoints.height / 2) * scaleY,
+        width: cropSizeInPoints.width * scaleX,
+        height: cropSizeInPoints.height * scaleY
+    ).integral.intersection(CGRect(x: 0, y: 0, width: before.width, height: before.height))
+    guard crop.width > 0, crop.height > 0,
+          let beforeCrop = before.cropping(to: crop),
+          let afterCrop = after.cropping(to: crop)
+    else { return nil }
+
+    let width = beforeCrop.width
+    let height = beforeCrop.height
+    let bytesPerRow = width * 4
+    var beforePixels = [UInt8](repeating: 0, count: bytesPerRow * height)
+    var afterPixels = [UInt8](repeating: 0, count: bytesPerRow * height)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+
+    guard let beforeContext = CGContext(
+        data: &beforePixels,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: colorSpace,
+        bitmapInfo: bitmapInfo
+    ),
+        let afterContext = CGContext(
+            data: &afterPixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        )
+    else { return nil }
+
+    let drawRect = CGRect(x: 0, y: 0, width: width, height: height)
+    beforeContext.draw(beforeCrop, in: drawRect)
+    afterContext.draw(afterCrop, in: drawRect)
+    var changedPixels = 0
+    for offset in stride(from: 0, to: beforePixels.count, by: 4) {
+        let difference = (0..<3).reduce(0) { sum, channel in
+            sum + abs(Int(beforePixels[offset + channel]) - Int(afterPixels[offset + channel]))
+        }
+        if difference >= 24 {
+            changedPixels += 1
+        }
+    }
+    return Double(changedPixels) / Double(width * height)
 }
 
 // MARK: - Keyboard simulation
@@ -1500,18 +1578,52 @@ postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand, .maskShift])
 _ = waitFor(timeout: 2) {
     readState()["selectedWindowIndex"] == "0"
 }
+wait(0.3)
 
-let windowsBeforeDismissal = Int(readState()["windowsInActiveStage"] ?? "0") ?? 0
+let dismissalStateBefore = readState()
+let windowsBeforeDismissal = Int(dismissalStateBefore["windowsInActiveStage"] ?? "0") ?? 0
+let selectedCardCenter = firstWindowCenter(in: dismissalStateBefore)
+let dismissalScreen = CGDisplayBounds(CGMainDisplayID())
+let dismissalThumbnail = PlateConstants.thumbnailSize(
+    forWindowCount: Int(dismissalStateBefore["maxWindowsInStage"] ?? "0") ?? 0,
+    screenWidth: dismissalScreen.width
+)
+postMouseMove(to: CGPoint(x: dismissalScreen.maxX - 20, y: dismissalScreen.maxY - 20))
+let beforeDismissalScreenshot = takeScreenshot("14_selected_window_before_dismissal")
 let windowTitlesBeforeDismissal = windowDisplayTitlesByID()
 let accessibleBeforeDismissal = dismissalPID.map(accessibilityStrings(for:)) ?? []
 
 postKeyDown(keyCode: CGKeyCode(kVK_ANSI_W), flags: [.maskCommand])
 postKeyUp(keyCode: CGKeyCode(kVK_ANSI_W), flags: [.maskCommand])
+wait(0.1)
+let motionScreenshot = takeScreenshot("15_selected_window_dismissal_motion")
+let dismissalMotionChangedPixelRatio = selectedCardCenter.flatMap { center in
+    changedPixelRatio(
+        from: beforeDismissalScreenshot,
+        to: motionScreenshot,
+        centeredAt: center,
+        cropSizeInPoints: CGSize(
+            width: dismissalThumbnail.width + PlateConstants.windowCardExtraWidth,
+            height: dismissalThumbnail.height + 40
+        )
+    )
+}
 _ = waitFor(timeout: 5) {
     (Int(readState()["windowsInActiveStage"] ?? "0") ?? 0) == windowsBeforeDismissal - 1
 }
-wait(0.8)
-let _ = takeScreenshot("14_selected_window_dismissed")
+wait(0.7)
+let finalDismissalScreenshot = takeScreenshot("16_selected_window_dismissed")
+let dismissalMotionRemainingPixelRatio = selectedCardCenter.flatMap { center in
+    changedPixelRatio(
+        from: motionScreenshot,
+        to: finalDismissalScreenshot,
+        centeredAt: CGPoint(x: dismissalScreen.midX, y: center.y),
+        cropSizeInPoints: CGSize(
+            width: dismissalScreen.width * 0.8,
+            height: dismissalThumbnail.height + 70
+        )
+    )
+}
 let accessibleAfterDismissal = dismissalPID.map(accessibilityStrings(for:)) ?? []
 let closedWindowID = readEvents().last(where: { $0["event"] == "close_selected_window" })
     .flatMap { UInt32($0["windowID"] ?? "") }
@@ -1524,8 +1636,18 @@ let selectedTitleCountAfter = selectedTitle.map { title in
 } ?? 0
 info(
     "Selected dismissal fixture: id=\(closedWindowID.map(String.init) ?? "none") "
-        + "title=\(selectedTitle ?? "none") accessibilityCount=\(selectedTitleCountBefore)->\(selectedTitleCountAfter)"
+        + "title=\(selectedTitle ?? "none") accessibilityCount=\(selectedTitleCountBefore)->\(selectedTitleCountAfter) "
+        + "motionChangedPixelRatio=\(dismissalMotionChangedPixelRatio.map { String(format: "%.4f", $0) } ?? "none") "
+        + "motionRemainingPixelRatio=\(dismissalMotionRemainingPixelRatio.map { String(format: "%.4f", $0) } ?? "none")"
 )
+
+test("Command-W visibly animates the selected card during dismissal") {
+    guard let dismissalMotionChangedPixelRatio,
+          let dismissalMotionRemainingPixelRatio
+    else { return false }
+    return dismissalMotionChangedPixelRatio >= 0.03
+        && dismissalMotionRemainingPixelRatio >= 0.03
+}
 
 test("Command-W dismisses the selected card before any further selection input") {
     guard windowsBeforeDismissal >= 2, selectedTitle != nil else { return false }

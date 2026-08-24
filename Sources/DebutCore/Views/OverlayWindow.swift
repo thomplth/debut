@@ -104,12 +104,14 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
             if removedWindowIDs.isEmpty {
                 contentState.rootView = view
             } else {
-                contentState.rootView = view
-                let duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                    ? 0.12
-                    : 0.28
+                let transition = PlateMotion.windowRemovalTransition(
+                    reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                )
+                withAnimation(transition.animation) {
+                    contentState.rootView = view
+                }
                 NSAnimationContext.runAnimationGroup { context in
-                    context.duration = duration
+                    context.duration = transition.duration
                     // Give AppKit a real animation to complete alongside SwiftUI's card
                     // transition. The imperceptible alpha delta leaves the overlay unchanged.
                     hostingView.animator().alphaValue = generation.isMultiple(of: 2)

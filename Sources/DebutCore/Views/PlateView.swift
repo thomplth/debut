@@ -21,6 +21,12 @@ enum PlateFocusTransition: Equatable {
         case .fade: false
         }
     }
+
+    var duration: TimeInterval {
+        switch self {
+        case let .spring(duration, _), let .fade(duration): duration
+        }
+    }
 }
 
 struct PlateLift: Equatable {
@@ -57,6 +63,7 @@ enum PlateMotion {
     static let minimumPlateScale: CGFloat = 0.08
     static let minimumPlateOpacity: Double = 0.12
     static let opacityScaleThreshold: CGFloat = 0.2
+    static let windowRemovalScale: CGFloat = 0.55
 
     static func layoutAnimationKey(
         stageIDs: [UUID],
@@ -107,7 +114,7 @@ enum PlateMotion {
     static func windowRemovalTransition(reduceMotion: Bool) -> PlateFocusTransition {
         reduceMotion
             ? .fade(duration: 0.12)
-            : .spring(duration: 0.28, bounce: 0)
+            : .spring(duration: 0.36, bounce: 0)
     }
 
     static func windowLayoutKey(for plates: [PlateData]) -> WindowLayoutKey {
@@ -1461,7 +1468,8 @@ struct PlateSwiftUIView: View {
                         }
                         .highPriorityGesture(windowDragGesture(window: window, windowIndex: index))
                         .transition(
-                            .scale(scale: 0.82).combined(with: .opacity)
+                            .scale(scale: PlateMotion.windowRemovalScale)
+                                .combined(with: .opacity)
                         )
                     }
                 }
