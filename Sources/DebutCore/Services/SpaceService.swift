@@ -597,6 +597,20 @@ public final class SpaceService: SpaceSwitching {
         return switchToDesktop(location)
     }
 
+    /// Dock gestures are display-scoped only when macOS maintains an independent Space stack
+    /// per display. With shared Spaces, attaching the main display's coordinates to the event
+    /// can leave the wall's desktop transition only partially composited: wallpaper changes,
+    /// while destination windows remain ordered out until an app activation repairs it.
+    static func gestureLocation(
+        for stack: SpaceStackDescriptor,
+        separateSpaces: Bool,
+        displayBounds: (CGDirectDisplayID) -> CGRect = CGDisplayBounds
+    ) -> CGPoint? {
+        guard separateSpaces, let displayID = stack.displayID else { return nil }
+        let bounds = displayBounds(displayID)
+        return CGPoint(x: bounds.midX, y: bounds.midY)
+    }
+
     /// Switches a particular display's visible desktop. The synthetic gesture is located
     /// on that display so the Dock applies it to the matching Space list when displays use
     /// separate Spaces.
@@ -614,10 +628,10 @@ public final class SpaceService: SpaceSwitching {
                   desktopCount: stack.desktopIDs.count
               )
         else { return false }
-        let eventLocation: CGPoint? = stack.displayID.map { displayID in
-            let bounds = CGDisplayBounds(displayID)
-            return CGPoint(x: bounds.midX, y: bounds.midY)
-        }
+        let eventLocation = Self.gestureLocation(
+            for: stack,
+            separateSpaces: topology.separateSpaces
+        )
 
         let samples = DockSwipeAnimation.samples(duration: switchDuration)
         guard !samples.isEmpty else {
