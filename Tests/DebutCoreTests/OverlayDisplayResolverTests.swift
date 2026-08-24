@@ -92,4 +92,28 @@ struct OverlayDisplayResolverTests {
 
         #expect(display == nil)
     }
+
+    @Test("The display top inset includes an auto-hidden menu bar")
+    func topInsetIncludesAutoHiddenMenuBar() {
+        let inset = OverlayDisplayResolver.topContentInset(
+            frame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            safeAreaTopInset: 0,
+            menuBarHeight: 22
+        )
+
+        #expect(inset == 22)
+    }
+
+    @Test("The display top inset preserves a larger hardware safe area")
+    func topInsetPreservesHardwareSafeArea() {
+        let inset = OverlayDisplayResolver.topContentInset(
+            frame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1728, height: 1093),
+            safeAreaTopInset: 38,
+            menuBarHeight: 22
+        )
+
+        #expect(inset == 38)
+    }
 }
