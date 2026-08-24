@@ -237,4 +237,54 @@ struct RuntimeWindowReconcilerDesktopTests {
 
         #expect(manager.stageContainingWindow(windowID: 7) == manager.stageID(stackID: "b", at: 1))
     }
+
+    // App windows are discovered one desktop at a time after a relaunch. A bundle-only
+    // recovery cannot wait for every Ghostty window to appear: the desktop answer already
+    // identifies which dormant assignment this replacement belongs to.
+    @Test("A partial relaunch restores a dynamic-title window by its reported desktop")
+    func partialRelaunchRestoresByDesktop() {
+        var manager = threeStages()
+        manager.addWindow(
+            StageWindow(
+                windowID: 101,
+                ownerBundleID: "com.mitchellh.ghostty",
+                ownerName: "Ghostty",
+                windowTitle: "old title",
+                ownerPID: 10
+            ),
+            toStageID: manager.stages[0].id
+        )
+        manager.addWindow(
+            StageWindow(
+                windowID: 102,
+                ownerBundleID: "com.mitchellh.ghostty",
+                ownerName: "Ghostty",
+                windowTitle: "another old title",
+                ownerPID: 10
+            ),
+            toStageID: manager.stages[1].id
+        )
+        _ = manager.makeWindowsDormant(forOwnerPID: 10)
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(
+                    201,
+                    bundleID: "com.mitchellh.ghostty",
+                    ownerName: "Ghostty",
+                    ownerPID: 20,
+                    title: "new title"
+                )],
+                allWindowIDs: [201],
+                desktopIndexes: [201: 1]
+            ),
+            stageManager: &manager
+        )
+
+        #expect(result.addedCount == 0)
+        #expect(result.reassignedCount == 1)
+        #expect(manager.dormantWindowAssignments.count == 1)
+        #expect(manager.stageContainingWindow(windowID: 201) == manager.stages[1].id)
+    }
 }
