@@ -743,6 +743,8 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             moveWindowWithinStage(offset: 1)
         case .quitSelectedApp:
             quitSelectedApp()
+        case .closeSelectedWindow:
+            closeSelectedWindow()
         }
     }
 
@@ -1532,6 +1534,24 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             "windowID": "\(window.windowID)",
             "bundleID": window.ownerBundleID,
             "ownerPID": "\(ownerPID)",
+            "requested": "\(requested)",
+        ])
+    }
+
+    /// The accessibility close action belongs to the selected window, not its owning app. Keep
+    /// the overlay open and let the window lifecycle event remove the assignment if the app
+    /// accepts the request.
+    private func closeSelectedWindow() {
+        guard isStageManagerVisible,
+              overlayStageManager.stages.indices.contains(selectedStageIndex) else { return }
+        let stage = overlayStageManager.stages[selectedStageIndex]
+        guard stage.windows.indices.contains(selectedWindowIndex) else { return }
+        let window = stage.windows[selectedWindowIndex]
+
+        let requested = windowService.closeWindow(windowID: window.windowID)
+        diag.report("close_selected_window", details: [
+            "windowID": "\(window.windowID)",
+            "bundleID": window.ownerBundleID,
             "requested": "\(requested)",
         ])
     }

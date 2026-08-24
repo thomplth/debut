@@ -32,6 +32,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case moveWindowLeft
     case moveWindowRight
     case quitSelectedApp
+    case closeSelectedWindow
     case dismissOverlay
 
     public var displayName: String {
@@ -72,6 +73,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .moveWindowLeft: "Move window left in stage"
         case .moveWindowRight: "Move window right in stage"
         case .quitSelectedApp: "Quit selected app"
+        case .closeSelectedWindow: "Close selected window"
         case .dismissOverlay: "Close overlay"
         }
     }
@@ -81,7 +83,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     /// of them: the overlay has no business advertising what it does to someone else's app.
     public var isTransitive: Bool {
         switch self {
-        case .quitSelectedApp: true
+        case .quitSelectedApp, .closeSelectedWindow: true
         default: false
         }
     }
@@ -124,6 +126,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .moveWindowLeft: .moveWindowLeft
         case .moveWindowRight: .moveWindowRight
         case .quitSelectedApp: .quitSelectedApp
+        case .closeSelectedWindow: .closeSelectedWindow
         case .dismissOverlay: .escape
         }
     }
@@ -398,9 +401,10 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .moveWindowDown: KeyCombo(keyCode: kVK_DownArrow),
             .moveWindowLeft: KeyCombo(keyCode: kVK_LeftArrow),
             .moveWindowRight: KeyCombo(keyCode: kVK_RightArrow),
-            // Session combos are matched with the held primary modifier stripped, so this is
-            // the physical Cmd+Q the user already reaches for.
+            // Session combos are matched with the held primary modifier stripped, so these are
+            // the physical Cmd+Q and Cmd+W shortcuts the user already reaches for.
             .quitSelectedApp: KeyCombo(keyCode: kVK_ANSI_Q),
+            .closeSelectedWindow: KeyCombo(keyCode: kVK_ANSI_W),
             .dismissOverlay: KeyCombo(keyCode: kVK_Escape),
         ]
     }

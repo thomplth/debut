@@ -1090,6 +1090,38 @@ struct StageControllerTests {
         #expect(windowService.terminatedPIDs.isEmpty)
     }
 
+    @Test("Close requests the selected window, not its owning app")
+    func closeSelectedWindow() {
+        let (controller, windowService, keyboardService) = makeController()
+        let stageID = controller.stageManager.activeStageID
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 11),
+            toStageID: stageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2", ownerPID: 22),
+            toStageID: stageID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(controller.selectedWindowIndex == 1)
+        keyboardService.simulateEvent(.closeSelectedWindow)
+
+        #expect(windowService.closedWindowIDs == [202])
+        #expect(windowService.terminatedPIDs.isEmpty)
+        #expect(controller.isStageManagerVisible)
+    }
+
+    @Test("Close does nothing when the stage has no windows")
+    func closeSelectedWindowWithoutSelection() {
+        let (controller, windowService, keyboardService) = makeController()
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.closeSelectedWindow)
+
+        #expect(windowService.closedWindowIDs.isEmpty)
+    }
+
     @Test("A quit app's windows leave the open overlay and pull the selection back in range")
     func liveWindowRemovalRefreshesOpenOverlay() {
         let (controller, _, keyboardService) = makeController()

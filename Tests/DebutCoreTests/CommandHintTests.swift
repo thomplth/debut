@@ -77,19 +77,21 @@ struct CommandHintTests {
         #expect(actions.contains(.dismissOverlay))
     }
 
-    @Test("Quitting the selected app is the only transitive command")
-    func quitIsTheTransitiveCommand() {
+    @Test("Quitting apps and closing windows are transitive commands")
+    func quitAndCloseAreTransitiveCommands() {
         let transitive = KeyAction.allCases.filter(\.isTransitive)
-        #expect(transitive == [.quitSelectedApp])
+        #expect(transitive == [.quitSelectedApp, .closeSelectedWindow])
     }
 
     @Test("Transitive commands never earn a hint in any visibility mode")
     func transitiveCommandsAreNeverHinted() {
         var settings = AppSettings()
         #expect(!settings.shouldShowCommandHint(for: .quitSelectedApp))
+        #expect(!settings.shouldShowCommandHint(for: .closeSelectedWindow))
 
         settings.commandHintVisibility = .always
         #expect(!settings.shouldShowCommandHint(for: .quitSelectedApp))
+        #expect(!settings.shouldShowCommandHint(for: .closeSelectedWindow))
         #expect(settings.shouldShowCommandHint(for: .dismissOverlay))
     }
 
@@ -115,6 +117,7 @@ struct CommandHintTests {
         )
 
         #expect(!hints.flatMap(\.actions).contains(.quitSelectedApp))
+        #expect(!hints.flatMap(\.actions).contains(.closeSelectedWindow))
     }
 
     @Test("The footer never offers to reorder stages")
@@ -144,6 +147,7 @@ struct CommandHintTests {
         let actions = Set(hints.flatMap(\.actions))
 
         #expect(!actions.contains(.quitSelectedApp))
+        #expect(!actions.contains(.closeSelectedWindow))
         #expect(!actions.contains(.moveWindowLeft))
         #expect(actions.contains(.dismissOverlay))
     }

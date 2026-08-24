@@ -841,6 +841,66 @@ struct KeyboardServiceTests {
         #expect(service.handleCGEvent(type: .keyDown, event: qDown) === qDown)
     }
 
+    @Test("Cmd+W closes the overlay's selected window")
+    func commandWClosesSelectedWindowVisibleOverlay() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let tabDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        tabDown.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: tabDown) == nil)
+        service.overlayVisible = true
+
+        let wDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_W),
+            keyDown: true
+        )!
+        wDown.flags = .maskCommand
+        let wUp = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_W),
+            keyDown: false
+        )!
+        wUp.flags = .maskCommand
+
+        #expect(service.handleCGEvent(type: .keyDown, event: wDown) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: wUp) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .closeSelectedWindow])
+    }
+
+    @Test("Cmd+W reaches the frontmost app when the close command is unbound")
+    func commandWPassesThroughWhenUnbound() {
+        let service = EventTapKeyboardService()
+        var bindings = KeyBindings()
+        bindings.bindings.removeValue(forKey: .closeSelectedWindow)
+        service.keyBindings = bindings
+
+        let tabDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        tabDown.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: tabDown) == nil)
+        service.overlayVisible = true
+
+        let wDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_W),
+            keyDown: true
+        )!
+        wDown.flags = .maskCommand
+
+        #expect(service.handleCGEvent(type: .keyDown, event: wDown) === wDown)
+    }
+
     @Test("Plain Q remains consumed while the overlay is visible")
     func plainQRemainsConsumedVisibleOverlay() {
         let service = EventTapKeyboardService()
