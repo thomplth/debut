@@ -97,6 +97,13 @@ struct WindowServiceTests {
         #expect(svc.raisedWindowID == 202)
     }
 
+    @Test("Close window records the targeted window")
+    func closeWindow() {
+        let svc = MockWindowService()
+        #expect(svc.closeWindow(windowID: 202))
+        #expect(svc.closedWindowIDs == [202])
+    }
+
     @Test("Activate app")
     func activateApp() {
         let svc = MockWindowService()

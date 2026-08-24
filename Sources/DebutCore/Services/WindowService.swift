@@ -118,6 +118,8 @@ public protocol WindowService: Sendable {
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async
     func raiseWindow(windowID: CGWindowID) -> Bool
+    /// Performs the target window's accessibility close action when the app exposes one.
+    func closeWindow(windowID: CGWindowID) -> Bool
     func activateApp(bundleID: String) -> Bool
     /// Addressed by PID, not bundle ID, so a second instance of the same app is not quit
     /// alongside the one the user selected.
@@ -127,4 +129,5 @@ public protocol WindowService: Sendable {
 
 public extension WindowService {
     func listUntrackableWindowIDs() -> Set<CGWindowID> { [] }
+    func closeWindow(windowID: CGWindowID) -> Bool { false }
 }
