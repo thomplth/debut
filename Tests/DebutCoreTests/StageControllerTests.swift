@@ -1092,7 +1092,7 @@ struct StageControllerTests {
 
     @Test("Quit does nothing when the stage has no windows")
     func quitSelectedAppWithoutSelection() {
-        let (controller, windowService, keyboardService) = makeController()
+        let (_, windowService, keyboardService) = makeController()
 
         keyboardService.simulateEvent(.cmdTabHold)
         keyboardService.simulateEvent(.quitSelectedApp)
@@ -1132,7 +1132,7 @@ struct StageControllerTests {
 
     @Test("Close does nothing when the stage has no windows")
     func closeSelectedWindowWithoutSelection() {
-        let (controller, windowService, keyboardService) = makeController()
+        let (_, windowService, keyboardService) = makeController()
 
         keyboardService.simulateEvent(.cmdTabHold)
         keyboardService.simulateEvent(.closeSelectedWindow)

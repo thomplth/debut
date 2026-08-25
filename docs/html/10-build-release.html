@@ -55,16 +55,10 @@ one library:
   <tr><td>—</td><td><code>AXPrivate</code></td><td>C shim exposing <code>_AXUIElementGetWindow</code>; links <code>ApplicationServices</code>.</td></tr>
   <tr><td><code>DebutE2E</code></td><td><code>DebutE2E</code></td><td>The end-to-end harness (chapter 9).</td></tr>
   <tr><td><code>DebutBenchmarks</code></td><td><code>DebutBenchmarks</code></td><td>Emits the benchmark JSON the budget gate consumes.</td></tr>
-  <tr><td><code>DebutPerformanceFixture</code></td><td>—</td><td>Drives repeatable input via <code>DebutInputDriver</code>.</td></tr>
-  <tr><td><code>DebutGlassLab</code></td><td>—</td><td>The Liquid Glass comparison lab (chapter 6).</td></tr>
+  <tr><td><code>DebutPerformanceFixture</code></td><td><code>DebutPerformanceFixture</code></td><td>Drives repeatable input via <code>DebutInputDriver</code>.</td></tr>
+  <tr><td><code>DebutDemo</code></td><td><code>DebutDemo</code></td><td>Captures the repeatable screenshots and clips used in the README.</td></tr>
   <tr><td>—</td><td><code>DebutInputDriver</code></td><td>Shared input sequences; used by the fixture <em>and</em> the test target.</td></tr>
 </table>
-
-<p>
-The test target excludes <code>Screenshots</code>&nbsp;<span class="src">Package.swift:66</span>
-— those are PNG outputs sitting inside the sources directory, and SwiftPM would
-otherwise complain about unhandled resources.
-</p>
 
 <div class="warn">
 <p>
@@ -167,7 +161,7 @@ sandbox must be explicitly disabled either way (chapter 8).
 
 <h2>The install loop</h2>
 
-<pre><code>TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test
+<pre><code>TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift test --no-parallel
 ./scripts/build-app.sh
 pkill -f "Debut.app" || true
 rm -rf /Applications/Debut.app
@@ -268,24 +262,19 @@ to prove it on the wire anyway.
   <tr><td><code>performance-test.sh</code></td><td>Benchmarks + budget gate</td><td>Yes, but results are noisy under load</td></tr>
   <tr><td><code>check-performance-regression.sh</code></td><td>Compares an artefact to the budgets</td><td>Yes — pure</td></tr>
   <tr><td><code>profile.sh</code></td><td><code>xctrace</code> record / triage / templates</td><td>Yes</td></tr>
-  <tr><td><code>build-glass-lab.sh</code>, <code>tart-glass-lab*.sh</code></td><td>The Liquid Glass comparison lab</td><td>Yes</td></tr>
 </table>
 
-<h2>What is not automated</h2>
+<h2>What is intentionally absent</h2>
 
 <p>
 Worth knowing before you look for it:
 </p>
 
 <ul>
-  <li><strong>No notarisation, no distribution.</strong> The app is self-signed for
-  local development. Shipping it to another machine would need a Developer ID and a
-  notarisation step that does not exist here.</li>
-  <li><strong>No version bumping.</strong> <code>CFBundleShortVersionString</code>
-  is hand-edited.</li>
-  <li><strong>No unit-test CI.</strong> The only workflow is <code>e2e.yml</code>.
-  Unit and screenshot tests run locally, per the AGENTS.md workflow.</li>
-  <li><strong>No designed icon.</strong> The build borrows a system icon.</li>
+  <li><strong>No notarisation or Developer ID signing.</strong> Automated releases
+  publish a self-signed DMG; there is no Apple notarisation step.</li>
+  <li><strong>No bespoke icon.</strong> The build derives an icon from the system's
+  generic application icon.</li>
   <li><strong>No dependency management</strong>, because there are no dependencies.</li>
 </ul>
 
