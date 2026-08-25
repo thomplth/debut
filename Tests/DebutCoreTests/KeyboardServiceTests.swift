@@ -901,6 +901,46 @@ struct KeyboardServiceTests {
         #expect(service.handleCGEvent(type: .keyDown, event: wDown) === wDown)
     }
 
+    @Test("Cmd-backtick passes through for excluded apps")
+    func commandBacktickPassesThroughForExcludedApp() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+        service.updateFrontmostApp(bundleIdentifier: "com.example.Excluded")
+        service.excludedBundleIDs = ["com.example.Excluded"]
+
+        let backtick = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Grave),
+            keyDown: true
+        )!
+        backtick.flags = .maskCommand
+
+        #expect(service.handleCGEvent(type: .keyDown, event: backtick) === backtick)
+        #expect(delegate.receivedEvents.isEmpty)
+    }
+
+    @Test("Cmd-shift-backtick passes through for excluded apps")
+    func commandShiftBacktickPassesThroughForExcludedApp() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+        service.updateFrontmostApp(bundleIdentifier: "com.example.Excluded")
+        service.excludedBundleIDs = ["com.example.Excluded"]
+
+        let backtick = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Grave),
+            keyDown: true
+        )!
+        backtick.flags = [.maskCommand, .maskShift]
+
+        #expect(service.handleCGEvent(type: .keyDown, event: backtick) === backtick)
+        #expect(delegate.receivedEvents.isEmpty)
+    }
+
     @Test("Plain Q remains consumed while the overlay is visible")
     func plainQRemainsConsumedVisibleOverlay() {
         let service = EventTapKeyboardService()
