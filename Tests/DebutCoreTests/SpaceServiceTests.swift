@@ -41,13 +41,125 @@ struct SpaceSwitchPlanTests {
         #expect(SpaceSwitchPlan(from: 0, to: 0, desktopCount: 1) == nil)
     }
 
-    // A two-desktop jump at single-step velocity animates through the desktop in between,
-    // which is the delay the whole gesture path exists to avoid.
-    @Test("Velocity scales with the distance travelled")
-    func velocityScalesWithDistance() {
-        #expect(SpaceSwitchPlan(from: 0, to: 1, desktopCount: 4)?.velocity(base: 400) == 400)
-        #expect(SpaceSwitchPlan(from: 0, to: 3, desktopCount: 4)?.velocity(base: 400) == 1200)
-        #expect(SpaceSwitchPlan(from: 0, to: 1, desktopCount: 4)?.velocity(base: 150) == 150)
+}
+
+@Suite("Space switch coordinator")
+struct SpaceSwitchCoordinatorTests {
+    private let desktopIDs: [CGSSpaceID] = [10, 11, 12, 13]
+
+    private func topology(current: Int, desktopIDs: [CGSSpaceID]? = nil) -> SpaceTopology {
+        let ids = desktopIDs ?? self.desktopIDs
+        return SpaceTopology(separateSpaces: false, stacks: [
+            SpaceStackDescriptor(
+                id: SpaceTopology.sharedStackID,
+                displayID: nil,
+                displayName: "All Displays",
+                frame: .zero,
+                desktopIDs: ids,
+                currentDesktopID: ids.indices.contains(current) ? ids[current] : nil
+            ),
+        ])
+    }
+
+    private func location(_ index: Int) -> DesktopLocation {
+        DesktopLocation(
+            stackID: SpaceTopology.sharedStackID,
+            desktopID: desktopIDs[index],
+            index: index
+        )
+    }
+
+    @Test("A far target starts exactly one adjacent hop")
+    func farTargetStartsOneHop() {
+        var coordinator = SpaceSwitchCoordinator()
+
+        let request = coordinator.request(to: location(3), in: topology(current: 0))
+
+        #expect(request == .post(SpaceSwitchHop(
+            stackID: SpaceTopology.sharedStackID,
+            fromDesktopID: 10,
+            toDesktopID: 11,
+            direction: .right
+        )))
+        #expect(request.hop?.instantVelocity == 400)
+        #expect(coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
+
+    @Test("Rapid targets coalesce without posting a second unconfirmed hop")
+    func rapidTargetsCoalesce() {
+        var coordinator = SpaceSwitchCoordinator()
+        let first = coordinator.request(to: location(1), in: topology(current: 0))
+
+        let second = coordinator.request(to: location(2), in: topology(current: 0))
+
+        #expect(first != .coalesced)
+        #expect(second == .coalesced)
+        #expect(coordinator.desktopDidChange(to: topology(current: 1)) == [
+            SpaceSwitchHop(
+                stackID: SpaceTopology.sharedStackID,
+                fromDesktopID: 11,
+                toDesktopID: 12,
+                direction: .right
+            ),
+        ])
+        #expect(coordinator.desktopDidChange(to: topology(current: 2)).isEmpty)
+        #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
+
+    @Test("A request back to the showing desktop is retained while a hop is in flight")
+    func reversesAfterConfirmingInFlightHop() {
+        var coordinator = SpaceSwitchCoordinator()
+        _ = coordinator.request(to: location(2), in: topology(current: 0))
+
+        let reversal = coordinator.request(to: location(0), in: topology(current: 0))
+
+        #expect(reversal == .coalesced)
+        #expect(coordinator.desktopDidChange(to: topology(current: 1)) == [
+            SpaceSwitchHop(
+                stackID: SpaceTopology.sharedStackID,
+                fromDesktopID: 11,
+                toDesktopID: 10,
+                direction: .left
+            ),
+        ])
+        #expect(coordinator.desktopDidChange(to: topology(current: 0)).isEmpty)
+        #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
+
+    @Test("An unexpected landing stops instead of posting from an uncertain state")
+    func unexpectedLandingStops() {
+        var coordinator = SpaceSwitchCoordinator()
+        _ = coordinator.request(to: location(3), in: topology(current: 0))
+
+        let next = coordinator.desktopDidChange(to: topology(current: 2))
+
+        #expect(next.isEmpty)
+        #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
+
+    @Test("Removing the desired desktop while switching stops safely")
+    func topologyChangeStops() {
+        var coordinator = SpaceSwitchCoordinator()
+        _ = coordinator.request(to: location(3), in: topology(current: 0))
+
+        let next = coordinator.desktopDidChange(
+            to: topology(current: 1, desktopIDs: [10, 11, 12])
+        )
+
+        #expect(next.isEmpty)
+        #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
+
+    @Test("A posting failure clears the matching in-flight hop")
+    func postingFailureClears() throws {
+        var coordinator = SpaceSwitchCoordinator()
+        let request = coordinator.request(to: location(2), in: topology(current: 0))
+        let hop = try #require(request.hop)
+
+        coordinator.postingFailed(hop)
+
+        #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+        #expect(coordinator.desktopDidChange(to: topology(current: 1)).isEmpty)
     }
 }
 

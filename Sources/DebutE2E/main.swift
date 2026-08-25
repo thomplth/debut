@@ -228,8 +228,8 @@ func digitKeyCode(_ digit: Int) -> CGKeyCode {
 
 /// Posts the global quick-switch chord and waits for the desktop to actually land.
 ///
-/// The settle afterwards is not padding. Each request aborts whatever driven gesture is still in
-/// flight, so a chord posted while the Dock is mid-transition lands on a moving target.
+/// The settle afterwards is not padding. A far target is a notification-confirmed chain of
+/// adjacent hops, and later scenarios should not inherit its final compositor/focus settling.
 func quickSwitch(to index: Int, using service: SpaceService) -> Bool {
     let from = service.currentDesktopIndex()
     let modelBefore = readState()["activeStageIndex"] ?? "none"
@@ -238,9 +238,7 @@ func quickSwitch(to index: Int, using service: SpaceService) -> Bool {
     // later press of the *same* digit arrives as an auto-repeat and never reaches the handler —
     // which is why each desktop could be reached exactly once per run, and why every switch back
     // read as a chord Debut had ignored.
-    let digit = digitKeyCode(index + 1)
-    postKeyDown(keyCode: digit, flags: [.maskControl])
-    postKeyUp(keyCode: digit, flags: [.maskControl])
+    postQuickSwitch(to: index)
     let landed = waitFor { service.currentDesktopIndex() == index }
     wait(0.5)
     if !landed {
@@ -255,6 +253,15 @@ func quickSwitch(to index: Int, using service: SpaceService) -> Bool {
             + "\(service.currentDesktopIndex().map(String.init) ?? "none")")
     }
     return landed
+}
+
+/// Posts one complete quick-switch chord without waiting for Dock. Burst checks use this to
+/// put a second target inside the exact unconfirmed interval that used to append another
+/// high-velocity gesture stream and overshoot the last desktop.
+func postQuickSwitch(to index: Int) {
+    let digit = digitKeyCode(index + 1)
+    postKeyDown(keyCode: digit, flags: [.maskControl])
+    postKeyUp(keyCode: digit, flags: [.maskControl])
 }
 
 func postKeyUp(keyCode: CGKeyCode, flags: CGEventFlags = []) {
@@ -791,21 +798,67 @@ if userDesktopCount < 2 {
         returned && waitFor { Int(readState()["activeStageIndex"] ?? "") == startingDesktop }
     }
 
-    // Dock progress saturates at one desktop per gesture, so `switchToDesktop` drives one
-    // gesture per desktop crossed. Every check above is a single hop, which is the one distance
-    // that loop cannot get wrong.
+    // Dock progress saturates at one desktop per gesture. The coordinator therefore advances a
+    // far target one confirmed adjacent hop at a time, using active-Space notifications as its
+    // acknowledgement before it posts the next gesture.
     if userDesktopCount >= 3 {
         let atFirst = quickSwitch(to: 0, using: switchSpaceService)
         let jumped = quickSwitch(to: 2, using: switchSpaceService)
+        let farEndpointScreenshot = takeScreenshot("00_stage_switch_far_endpoint")
         info("  Two-desktop jump from 0: reached first desktop \(atFirst), landed on "
             + "\(switchSpaceService.currentDesktopIndex().map(String.init) ?? "none")")
 
         test("A jump across two desktops lands on the far desktop") {
             atFirst && jumped
         }
+
+        let resetForBurst = quickSwitch(to: 0, using: switchSpaceService)
+        postQuickSwitch(to: 1)
+        postQuickSwitch(to: 2)
+        let burstLanded = waitFor { switchSpaceService.currentDesktopIndex() == 2 }
+        wait(0.5)
+        let burstEndpointScreenshot = takeScreenshot("00_stage_switch_burst_endpoint")
+        let display = CGDisplayBounds(CGMainDisplayID())
+        let burstEndpointDifference = changedPixelRatio(
+            from: farEndpointScreenshot,
+            to: burstEndpointScreenshot,
+            centeredAt: CGPoint(x: display.midX, y: display.midY),
+            cropSizeInPoints: CGSize(width: display.width * 0.7, height: display.height * 0.7)
+        )
+        info(
+            "  Settled far-target vs burst-target changed pixel ratio: "
+                + "\(burstEndpointDifference.map { String(format: "%.4f", $0) } ?? "none")"
+        )
+
+        test("Rapid direct targets coalesce without overshooting the last desktop") {
+            resetForBurst && burstLanded && switchSpaceService.currentDesktopIndex() == 2
+        }
+
+        test("A rapid switch settles at the same visual endpoint as a normal switch") {
+            guard let burstEndpointDifference else { return false }
+            return burstEndpointDifference < 0.02
+        }
+
+        let resetForReversal = quickSwitch(to: 0, using: switchSpaceService)
+        postQuickSwitch(to: 2)
+        postQuickSwitch(to: 0)
+        // The final target is the desktop already showing when the burst begins, so a plain
+        // waitFor would succeed before the unavoidable outbound hop lands. Give the confirmed
+        // hop and its notification-driven reversal time to complete, then inspect the result.
+        wait(1.0)
+
+        test("A rapid target reversal returns from the already-posted hop") {
+            resetForReversal && switchSpaceService.currentDesktopIndex() == 0
+        }
     } else {
         skipTest("A jump across two desktops lands on the far desktop",
                  reason: "This host has fewer than three desktops, so there is no two-hop jump")
+        skipTest("Rapid direct targets coalesce without overshooting the last desktop",
+                 reason: "This host has fewer than three desktops, so there is no burst edge")
+        skipTest("A rapid switch settles at the same visual endpoint as a normal switch",
+                 reason: "This host has fewer than three desktops, so there is no burst edge")
+        skipTest("A rapid target reversal returns from the already-posted hop",
+                 reason: "This host has fewer than three desktops, so there is no far reversal")
     }
 
     // Every later section needs window cards to select, hover and move, so this parts on the stage

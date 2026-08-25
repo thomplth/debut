@@ -115,13 +115,163 @@ struct SpaceSwitchPlan: Equatable {
         direction = target > current ? .right : .left
         steps = abs(target - current)
     }
-
-    /// Scaled by distance: at single-step velocity a two-desktop jump animates through the
-    /// desktop in between, which is the delay the gesture path exists to avoid.
-    func velocity(base: Double) -> Double { base * Double(steps) }
 }
 
 extension SpaceSwitchDirection: Equatable {}
+
+/// One adjacent, fully addressable desktop transition.
+///
+/// A far target is deliberately not represented as one large gesture. Dock owns an
+/// asynchronous state machine, so Debut confirms this hop before planning another one.
+struct SpaceSwitchHop: Equatable {
+    let stackID: String
+    let fromDesktopID: CGSSpaceID
+    let toDesktopID: CGSSpaceID
+    let direction: SpaceSwitchDirection
+
+    /// Every adjacent instant hop is the same committed flick. Distance lives in the number
+    /// of confirmed hops, never in velocity — multiplying both caused the edge overshoot.
+    var instantVelocity: Double { kInstantSwitchVelocity }
+}
+
+enum SpaceSwitchRequestResult: Equatable {
+    case declined
+    case noChange
+    case coalesced
+    case post(SpaceSwitchHop)
+
+    var hop: SpaceSwitchHop? {
+        guard case .post(let hop) = self else { return nil }
+        return hop
+    }
+}
+
+/// Keeps at most one unconfirmed Dock gesture in flight for each display Space stack.
+///
+/// WindowServer's current desktop is the only completion signal. Rapid requests merely
+/// replace `desiredTarget`; they never append another blind gesture to Dock's queue. Once
+/// `activeSpaceDidChangeNotification` arrives, the coordinator either finishes or derives
+/// exactly one new adjacent hop from the topology macOS now reports.
+struct SpaceSwitchCoordinator {
+    private struct PendingSwitch {
+        var desiredTarget: DesktopLocation
+        var originDesktopID: CGSSpaceID
+        var expectedDesktopID: CGSSpaceID
+    }
+
+    private var pendingByStackID: [String: PendingSwitch] = [:]
+
+    func isInFlight(stackID: String) -> Bool {
+        pendingByStackID[stackID] != nil
+    }
+
+    mutating func request(
+        to target: DesktopLocation,
+        in topology: SpaceTopology
+    ) -> SpaceSwitchRequestResult {
+        guard let stack = topology.stack(id: target.stackID),
+              stack.desktopIDs.indices.contains(target.index),
+              stack.desktopIDs[target.index] == target.desktopID,
+              let currentDesktopID = stack.currentDesktopID,
+              let currentIndex = stack.currentDesktopIndex
+        else { return .declined }
+
+        if var pending = pendingByStackID[target.stackID] {
+            pending.desiredTarget = target
+            pendingByStackID[target.stackID] = pending
+            return .coalesced
+        }
+
+        guard currentDesktopID != target.desktopID else { return .noChange }
+        guard let hop = Self.nextHop(from: currentIndex, toward: target, in: stack) else {
+            return .declined
+        }
+        pendingByStackID[target.stackID] = PendingSwitch(
+            desiredTarget: target,
+            originDesktopID: hop.fromDesktopID,
+            expectedDesktopID: hop.toDesktopID
+        )
+        return .post(hop)
+    }
+
+    /// Confirms completed hops and returns at most one next hop per Space stack.
+    ///
+    /// A different current desktop is a user action or a Dock result Debut did not request.
+    /// Continuing from it would fight the user, so an unexpected landing stops safely.
+    mutating func desktopDidChange(to topology: SpaceTopology) -> [SpaceSwitchHop] {
+        var nextHops: [SpaceSwitchHop] = []
+
+        for stackID in Array(pendingByStackID.keys) {
+            guard let pending = pendingByStackID[stackID],
+                  let stack = topology.stack(id: stackID),
+                  let currentDesktopID = stack.currentDesktopID,
+                  let currentIndex = stack.currentDesktopIndex,
+                  stack.desktopIDs.indices.contains(pending.desiredTarget.index),
+                  stack.desktopIDs[pending.desiredTarget.index]
+                    == pending.desiredTarget.desktopID
+            else {
+                pendingByStackID.removeValue(forKey: stackID)
+                continue
+            }
+
+            guard currentDesktopID == pending.expectedDesktopID else {
+                if currentDesktopID != pending.originDesktopID {
+                    pendingByStackID.removeValue(forKey: stackID)
+                }
+                continue
+            }
+
+            guard currentDesktopID != pending.desiredTarget.desktopID else {
+                pendingByStackID.removeValue(forKey: stackID)
+                continue
+            }
+
+            guard let hop = Self.nextHop(
+                from: currentIndex,
+                toward: pending.desiredTarget,
+                in: stack
+            ) else {
+                pendingByStackID.removeValue(forKey: stackID)
+                continue
+            }
+            pendingByStackID[stackID] = PendingSwitch(
+                desiredTarget: pending.desiredTarget,
+                originDesktopID: hop.fromDesktopID,
+                expectedDesktopID: hop.toDesktopID
+            )
+            nextHops.append(hop)
+        }
+        return nextHops
+    }
+
+    mutating func postingFailed(_ hop: SpaceSwitchHop) {
+        guard let pending = pendingByStackID[hop.stackID],
+              pending.originDesktopID == hop.fromDesktopID,
+              pending.expectedDesktopID == hop.toDesktopID
+        else { return }
+        pendingByStackID.removeValue(forKey: hop.stackID)
+    }
+
+    private static func nextHop(
+        from currentIndex: Int,
+        toward target: DesktopLocation,
+        in stack: SpaceStackDescriptor
+    ) -> SpaceSwitchHop? {
+        guard let plan = SpaceSwitchPlan(
+            from: currentIndex,
+            to: target.index,
+            desktopCount: stack.desktopIDs.count
+        ) else { return nil }
+        let nextIndex = currentIndex + (plan.direction == .right ? 1 : -1)
+        guard stack.desktopIDs.indices.contains(nextIndex) else { return nil }
+        return SpaceSwitchHop(
+            stackID: stack.id,
+            fromDesktopID: stack.desktopIDs[currentIndex],
+            toDesktopID: stack.desktopIDs[nextIndex],
+            direction: plan.direction
+        )
+    }
+}
 
 // MARK: - Gesture events
 
@@ -318,6 +468,10 @@ public protocol SpaceSwitching: AnyObject {
     func desktopIndexes(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: Int]
     @discardableResult func switchToDesktop(index: Int) -> Bool
     @discardableResult func switchToDesktop(_ location: DesktopLocation) -> Bool
+    /// True from the first posted hop until WindowServer confirms the final target.
+    func isSwitchInFlight(stackID: String) -> Bool
+    /// Advances a confirmed multi-hop switch from the topology macOS now reports.
+    func spaceDidChange()
     /// Whether this conformer can reassign a window's desktop at all. False means the move
     /// commands should stay inert rather than mutate the model and lie about the result.
     var canMoveWindows: Bool { get }
@@ -328,6 +482,9 @@ public protocol SpaceSwitching: AnyObject {
 }
 
 public extension SpaceSwitching {
+    func isSwitchInFlight(stackID: String) -> Bool { false }
+    func spaceDidChange() {}
+
     func spaceTopology() -> SpaceTopology {
         let count = desktopCount()
         let desktops = (0..<count).map(CGSSpaceID.init)
@@ -398,12 +555,8 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
 
     /// A driven slide blocks for its whole duration, and the main thread runs the event tap.
     private let switchQueue = DispatchQueue(label: "com.thomplth.debut.space-switch")
-
-    /// Identifies the switch currently being drawn, so a newer one can cut it short instead
-    /// of queueing behind it — otherwise a quick run through several stages plays every
-    /// intermediate slide in full.
-    private let generationLock = NSLock()
-    private var switchGeneration = 0
+    private let switchCoordinatorLock = NSLock()
+    private var switchCoordinator = SpaceSwitchCoordinator()
 
     /// Confirming a move means re-reading the assignment until the window server catches up.
     /// That settles in single-digit milliseconds, but it is still a wait, and the main thread
@@ -607,15 +760,52 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     public func switchToDesktop(_ location: DesktopLocation) -> Bool {
         guard canSwitchSpaces else { return false }
         let topology = spaceTopology()
-        guard let stack = topology.stack(id: location.stackID),
-              stack.desktopIDs.indices.contains(location.index),
-              stack.desktopIDs[location.index] == location.desktopID,
-              let current = stack.currentDesktopIndex,
-              let plan = SpaceSwitchPlan(
-                  from: current,
-                  to: location.index,
-                  desktopCount: stack.desktopIDs.count
-              )
+        let request = switchCoordinatorLock.withLock {
+            switchCoordinator.request(to: location, in: topology)
+        }
+
+        switch request {
+        case .declined, .noChange:
+            return false
+        case .coalesced:
+            return true
+        case .post(let hop):
+            guard post(hop, in: topology) else {
+                switchCoordinatorLock.withLock {
+                    switchCoordinator.postingFailed(hop)
+                }
+                return false
+            }
+            return true
+        }
+    }
+
+    public func isSwitchInFlight(stackID: String) -> Bool {
+        switchCoordinatorLock.withLock {
+            switchCoordinator.isInFlight(stackID: stackID)
+        }
+    }
+
+    /// Called from `activeSpaceDidChangeNotification`, after WindowServer has settled one hop.
+    public func spaceDidChange() {
+        let topology = spaceTopology()
+        let nextHops = switchCoordinatorLock.withLock {
+            switchCoordinator.desktopDidChange(to: topology)
+        }
+        for hop in nextHops where !post(hop, in: topology) {
+            switchCoordinatorLock.withLock {
+                switchCoordinator.postingFailed(hop)
+            }
+        }
+    }
+
+    /// Posts exactly one adjacent hop. Far targets return here only after each preceding hop
+    /// has generated `activeSpaceDidChangeNotification`, so Dock never receives overlapping
+    /// gesture streams and an edge is rechecked before every post.
+    private func post(_ hop: SpaceSwitchHop, in topology: SpaceTopology) -> Bool {
+        guard let stack = topology.stack(id: hop.stackID),
+              stack.currentDesktopID == hop.fromDesktopID,
+              stack.desktopIDs.contains(hop.toDesktopID)
         else { return false }
         let eventLocation = Self.gestureLocation(
             for: stack,
@@ -624,44 +814,26 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
 
         let samples = DockSwipeAnimation.samples(duration: switchDuration)
         guard !samples.isEmpty else {
-            let velocity = plan.velocity(base: kInstantSwitchVelocity)
-            for _ in 0..<plan.steps {
-                guard DockSwipeEvent.postSwitch(direction: plan.direction,
-                                                velocity: velocity,
-                                                location: eventLocation) else { return false }
-            }
-            return true
+            return DockSwipeEvent.postSwitch(
+                direction: hop.direction,
+                velocity: hop.instantVelocity,
+                location: eventLocation
+            )
         }
 
-        // Progress saturates at one desktop per gesture, so a multi-desktop jump is that many
-        // driven hops rather than one gesture ramped further.
-        let generation = beginSwitch()
         switchQueue.async { [self] in
-            for _ in 0..<plan.steps {
-                guard isCurrentSwitch(generation) else { return }
-                DockSwipeEvent.postDrivenSwitch(
-                    direction: plan.direction,
-                    samples: samples,
-                    location: eventLocation
-                ) {
-                    !isCurrentSwitch(generation)
+            let posted = DockSwipeEvent.postDrivenSwitch(
+                direction: hop.direction,
+                samples: samples,
+                location: eventLocation
+            )
+            if !posted {
+                switchCoordinatorLock.withLock {
+                    switchCoordinator.postingFailed(hop)
                 }
             }
         }
         return true
-    }
-
-    private func beginSwitch() -> Int {
-        generationLock.lock()
-        defer { generationLock.unlock() }
-        switchGeneration += 1
-        return switchGeneration
-    }
-
-    private func isCurrentSwitch(_ generation: Int) -> Bool {
-        generationLock.lock()
-        defer { generationLock.unlock() }
-        return switchGeneration == generation
     }
 
     // MARK: Moving
