@@ -23,6 +23,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private var cachedFrontmostAppBundleIdentifier: String?
     private var storedOverlayVisible: Bool = false
     private var storedKeyBindings: KeyBindings = KeyBindings()
+    private var storedExcludedBundleIDs: Set<String> = []
     private var storedQuickSwitchExcludedBundleIDs: Set<String> = []
     private var storedQuickSwitchModifiers: ShortcutModifiers = .control
     private var storedQuickSwitchSameApplicationModifiers = ShortcutModifiers(
@@ -45,6 +46,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     public var keyBindings: KeyBindings {
         get { configurationLock.withLock { storedKeyBindings } }
         set { configurationLock.withLock { storedKeyBindings = newValue } }
+    }
+    public var excludedBundleIDs: Set<String> {
+        get { configurationLock.withLock { storedExcludedBundleIDs } }
+        set { configurationLock.withLock { storedExcludedBundleIDs = newValue } }
     }
     public var quickSwitchExcludedBundleIDs: Set<String> {
         get { configurationLock.withLock { storedQuickSwitchExcludedBundleIDs } }
@@ -328,6 +333,12 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
            let globalAction = configuredAction(keyCode: keyCode, flags: flags, scope: .global) {
             if globalAction.quickSwitchPosition != nil { return event }
 
+            // Same-app cycling is Debut's replacement for macOS's Cmd-` handling. Excluded
+            // apps have no tracked windows, so leave that shortcut untouched for macOS.
+            if globalAction.isSameAppCycle && isFrontmostAppExcluded {
+                return event
+            }
+
             if globalAction.isOverlayActivation {
                 beginSession(using: globalAction)
                 let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
@@ -414,6 +425,13 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         stageManagerActive = true
         sessionPrimaryModifier = Self.primaryModifier(for: combo)
         sessionTriggerKeyCode = sessionPrimaryModifier == nil ? Int64(combo.keyCode) : nil
+    }
+
+    private var isFrontmostAppExcluded: Bool {
+        configurationLock.withLock {
+            guard let bundleID = cachedFrontmostAppBundleIdentifier else { return false }
+            return storedExcludedBundleIDs.contains(bundleID)
+        }
     }
 
     private func configuredAction(

@@ -106,6 +106,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
         // Apply exclusion list
         discovery.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
+        keyboardService.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
 
         let spaceService = SpaceService()
         spaceService.switchDuration = currentSettings.spaceSwitchDuration
@@ -878,6 +879,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self.currentSettings = newSettings
                 try? self.stateStore?.saveSettings(newSettings)
                 self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
+                self.keyboardService?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
                 self.stageController?.updateFrontmostApp(
                     isExcluded: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
                         .map(newSettings.excludedBundleIDs.contains) ?? false
