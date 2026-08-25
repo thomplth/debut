@@ -365,33 +365,6 @@ Production glass is one modifier: <code>.glassEffect(.clear or .regular, in:
 ultra-thin material. Which of the two styles is used is a user setting.
 </p>
 
-<p>
-<code>DebutGlassLab</code> is a separate executable that exists because choosing
-between glass recipes by reading documentation does not work.
-<code>GlassLabRecipe</code>&nbsp;<span class="src">Views/GlassLabRecipe.swift:48</span>
-enumerates twelve recipes across six families, each mapped to a SwiftUI or AppKit
-implementation — including private <code>NSGlassEffectView</code> styles reached
-by <code>unsafeBitCast</code> of a raw value, with the UI stamped "RESEARCH ONLY".
-The lab renders them side by side, captures them, and validates each capture with
-<code>GlassLabCaptureValidator.containsVisibleContent</code>, which downsamples to
-64×64 grayscale and rejects an image where every pixel is within 1 of the first.
-</p>
-
-<div class="why">
-  <span class="label">Why a blank-capture guard</span>
-  <p>
-  A screen capture that silently returns a uniform grey looks like a successful
-  capture. Chapter 11 covers the measurement that made this a standing rule: never
-  treat a non-nil capture as proof of content. The same assertion appears in the
-  E2E suite for window previews.
-  </p>
-</div>
-
-<p>
-The lab's findings are written up in <code>docs/KHA-422-liquid-glass-lab.md</code>
-and deliberately left the production overlay unchanged.
-</p>
-
 <h2>Settings and onboarding</h2>
 
 <p>

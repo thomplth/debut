@@ -43,8 +43,7 @@ depends on whom, how the layers talk, and which thread everything runs on.
 <p>
 Everything is SwiftPM. There is no Xcode project, no storyboard, and no
 <code>@main</code> attribute. <span class="src">Package.swift</span> declares two
-plain library targets, a C shim, and five executables — with only
-<code>DebutCore</code> exposed as a public product:
+plain library targets, a C shim, and five executables:
 </p>
 
 <table>
@@ -55,7 +54,7 @@ plain library targets, a C shim, and five executables — with only
   <tr><td><code>DebutE2E</code></td><td>executable</td><td>The end-to-end harness. Drives the <em>installed</em> app with synthesized input.</td></tr>
   <tr><td><code>DebutBenchmarks</code></td><td>executable</td><td>In-process CPU benchmarks gated against budgets.</td></tr>
   <tr><td><code>DebutPerformanceFixture</code></td><td>executable</td><td>Spawns synthetic windows and drives input, for profiling under controlled load.</td></tr>
-  <tr><td><code>DebutGlassLab</code></td><td>executable</td><td>A research harness comparing Liquid Glass material recipes side by side.</td></tr>
+  <tr><td><code>DebutDemo</code></td><td>executable</td><td>Drives the repeatable screenshots and clips used in the README.</td></tr>
   <tr><td><code>DebutInputDriver</code></td><td>library</td><td>The synthesized-input sequence shared by the fixture and its tests.</td></tr>
 </table>
 

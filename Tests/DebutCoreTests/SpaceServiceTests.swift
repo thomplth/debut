@@ -54,6 +54,12 @@ struct SpaceSwitchPlanTests {
 @Suite("SpaceService switch speed")
 struct SpaceServiceSpeedTests {
 
+    @Test("Space service is safe to capture in its dispatch work")
+    func serviceIsSendable() {
+        func requireSendable<T: Sendable>(_ value: T) {}
+        requireSendable(SpaceService())
+    }
+
     @Test("Switch duration defaults to the shipped setting")
     func defaultDuration() {
         #expect(SpaceService().switchDuration == AppSettings.defaultSpaceSwitchDuration)
@@ -175,17 +181,6 @@ struct SpaceServiceMappingTests {
         #expect(SpaceService.index(of: 4916, in: desktops) == 1)
         #expect(SpaceService.index(of: 3, in: desktops) == 0)
         #expect(SpaceService.index(of: 9999, in: desktops) == nil)
-    }
-
-    // A window assigned to every Space (Finder is, by default, on some systems)
-    // resolves to no single desktop. Reporting "the first one" would silently
-    // bind it to desktop 1 and then fight the user every time it is moved.
-    @Test("A window on many desktops resolves to no index")
-    func pinnedWindow() {
-        let desktops: [CGSSpaceID] = [3, 4916, 4921]
-        #expect(SpaceService.soleIndex(of: [3, 4916, 4921], in: desktops) == nil)
-        #expect(SpaceService.soleIndex(of: [4916], in: desktops) == 1)
-        #expect(SpaceService.soleIndex(of: [], in: desktops) == nil)
     }
 
     // The reconciler asks about every live window at once. A window with no single

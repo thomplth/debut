@@ -74,7 +74,7 @@ public final class AppIconCache: @unchecked Sendable {
 
     /// Runs once every warm request enqueued so far has finished. The queue is serial, so
     /// ordering alone gives the guarantee.
-    public func whenWarmed(_ body: @escaping () -> Void) {
+    public func whenWarmed(_ body: @escaping @Sendable () -> Void) {
         queue.async { body() }
     }
 

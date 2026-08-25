@@ -10,4 +10,3 @@ DerivedData/
 .linear
 *.xcodeproj
 Package.resolved
-Tests/DebutCoreTests/Screenshots/*.png
