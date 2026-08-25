@@ -14,6 +14,8 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     var switchChangesDesktop = true
     var canMoveWindows = true
     var completesMovesImmediately = true
+    var switchingStackIDs: Set<String> = []
+    private(set) var spaceDidChangeCount = 0
     private var pendingMoveCompletions: [(@Sendable () -> Void)] = []
 
     init(desktops: Int = 3, current: Int = 0, separateSpaces: Bool = false) {
@@ -42,6 +44,14 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     /// desktop, so macOS reports no index while one is showing.
     func currentDesktopIndex() -> Int? { (0..<desktops).contains(current) ? current : nil }
     func desktopIndex(forWindow windowID: CGWindowID) -> Int? { windowDesktops[windowID] }
+
+    func isSwitchInFlight(stackID: String) -> Bool {
+        switchingStackIDs.contains(stackID)
+    }
+
+    func spaceDidChange() {
+        spaceDidChangeCount += 1
+    }
 
     func switchToDesktop(index: Int) -> Bool {
         switchRequests.append(index)
@@ -385,6 +395,62 @@ struct StageControllerSpaceTests {
         controller.desktopDidChange()
         #expect(windowService.raisedWindowIDs.contains(55))
         #expect(windowService.activatedBundleID == "com.b")
+    }
+
+    @Test("A target that is still showing retargets an in-flight switch")
+    func showingTargetRetargetsInFlightSwitch() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.switchChangesDesktop = false
+        spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
+        let (controller, _) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        let showingStage = controller.stageManager.stages[0].id
+        let settlingStage = controller.stageManager.stages[1].id
+        controller.stageManager.activateStage(id: settlingStage)
+
+        controller.switchToStage(id: showingStage)
+
+        #expect(spaces.switchRequests == [0])
+        #expect(controller.stageManager.activeStageID == settlingStage)
+    }
+
+    @Test("A desktop change advances the switcher before stage reconciliation")
+    func desktopChangeAdvancesSwitcher() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+
+        controller.desktopDidChange()
+
+        #expect(spaces.spaceDidChangeCount == 1)
+    }
+
+    @Test("Focus survives an intermediate confirmed hop")
+    func focusSurvivesIntermediateHop() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, windowService) = makeController(spaces: spaces)
+        controller.stageManager.createStage(position: .below)
+        controller.stageManager.createStage(position: .below)
+        let target = controller.stageManager.stages[2]
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 55, ownerBundleID: "com.c", ownerName: "C", windowTitle: "W"),
+            toStageID: target.id
+        )
+        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
+
+        controller.switchToStage(id: target.id)
+        spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
+        spaces.current = 1
+        controller.desktopDidChange()
+
+        #expect(!windowService.raisedWindowIDs.contains(55))
+
+        spaces.switchingStackIDs = []
+        spaces.current = 2
+        controller.desktopDidChange()
+
+        #expect(windowService.raisedWindowIDs.contains(55))
+        #expect(windowService.activatedBundleID == "com.c")
     }
 
     // The settling path is where the race lives: Debut's deferred focus lands within a few

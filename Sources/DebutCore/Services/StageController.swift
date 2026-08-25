@@ -389,6 +389,10 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
     /// have nowhere to go. The notification fires once the Space change has settled, so this is
     /// the earliest honest point to re-ask.
     public func desktopDidChange() {
+        // Let the switcher confirm the completed hop before reconciling the model. A far
+        // target may start its next adjacent hop here, which also tells deferred focus that
+        // an intermediate desktop is expected rather than a user overtaking the switch.
+        spaceSwitcher?.spaceDidChange()
         let previousActiveStageID = stageManager.activeStageID
         reconcileStagesWithDesktops()
         if stageManager.activeStageID != previousActiveStageID {
@@ -412,11 +416,18 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         guard let pending = pendingStageFocus else { return }
         guard let stackID = stageManager.stageStackID(containingStageID: pending.stageID),
               let index = stageManager.stageIndex(id: pending.stageID),
-              let stack = spaceSwitcher?.spaceTopology().stack(id: stackID),
-              stack.currentDesktopIndex == index
+              let switcher = spaceSwitcher,
+              let stack = switcher.spaceTopology().stack(id: stackID)
         else {
-            // The user overtook the switch. Dragging focus back to the stage they left is
-            // worse than leaving it wherever they landed.
+            pendingStageFocus = nil
+            return
+        }
+
+        guard stack.currentDesktopIndex == index else {
+            // A confirmed intermediate hop is still on the way to this focus target. Only
+            // discard the request once the coordinator has stopped somewhere else; that is
+            // the signal that the user overtook the switch or Dock landed unexpectedly.
+            if switcher.isSwitchInFlight(stackID: stackID) { return }
             pendingStageFocus = nil
             return
         }
@@ -490,8 +501,11 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         let topology = spaceSwitcher?.spaceTopology()
         let targetStack = targetStackID.flatMap { topology?.stack(id: $0) }
         let targetIsShowing = targetIndex.flatMap { targetStack?.currentDesktopIndex == $0 } ?? false
+        let targetStackIsSettling = targetStackID.flatMap {
+            spaceSwitcher?.isSwitchInFlight(stackID: $0)
+        } ?? false
 
-        if targetIsShowing {
+        if targetIsShowing && !targetStackIsSettling {
             // The WindowServer is authoritative. This also repairs stale model state without
             // issuing a redundant Dock gesture.
             if previousID != targetID {
