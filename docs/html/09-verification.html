@@ -177,14 +177,16 @@ returns index 3" does not.
 <p>
 <code>ScreenshotTests</code>&nbsp;<span class="src">Tests/DebutCoreTests/ScreenshotTests.swift:8</span>
 is <code>@MainActor</code> and renders real SwiftUI through an
-<code>NSHostingView</code> into an <code>NSImage</code>, writing PNGs beside the
-test source:
+<code>NSHostingView</code> into an <code>NSImage</code>, writing disposable PNGs
+under <code>.build</code> rather than into the source tree:
 </p>
 
 <pre><code>static let outputDir: URL = {
     URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
-        .appendingPathComponent("Screenshots")
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent(".build/test-screenshots")
 }()</code></pre>
 
 <p>
@@ -222,7 +224,7 @@ standing in for the real TCC prompts.
 <h3>The harness</h3>
 
 <p>
-<code>Sources/DebutE2E/main.swift</code> is a ~1,240-line top-level executable, not
+<code>Sources/DebutE2E/main.swift</code> is a ~1,670-line top-level executable, not
 a test framework. It has a hand-rolled <code>test(_:_:)</code>&nbsp;<span class="src">DebutE2E/main.swift:40</span>
 that increments counters and prints ANSI-coloured PASS / FAIL / SKIP lines, and it
 observes the running app entirely through the diagnostic files:
@@ -394,22 +396,27 @@ only when the drag scenarios are material to the change.
 <h2>Tests about the tests</h2>
 
 <p>
-<code>Tests/CI/</code> holds four shell scripts that are not unit tests but
-contract checks over the verification machinery itself:
+<code>Tests/CI/</code> holds shell contract checks over packaging, releases, and
+the verification machinery itself:
 </p>
 
 <table>
   <tr><th>Script</th><th>Checks</th></tr>
+  <tr><td><code>AppIdentityTests.sh</code></td><td>The bundle name, identifier, support directory, and E2E installation paths stay derived from one source</td></tr>
   <tr><td><code>E2EWorkflowTests.sh</code></td><td>The workflow, <code>ci-e2e.sh</code>, and the E2E source agree — including <code>expect_not_contains</code> assertions, i.e. things that must <em>not</em> reappear</td></tr>
   <tr><td><code>E2EDocumentationTests.sh</code></td><td><code>docs/local-e2e.md</code> and AGENTS.md still describe the scripts that exist</td></tr>
+  <tr><td><code>PackagingTests.sh</code></td><td>The deployment target and built architecture agree with the package manifest</td></tr>
   <tr><td><code>TartE2ETests.sh</code></td><td>The Tart scripts' interface and guest contract</td></tr>
   <tr><td><code>PerformanceObservabilityTests.sh</code></td><td>The performance pipeline and budget wiring from chapter 8</td></tr>
+  <tr><td><code>ReleaseVersionTests.sh</code></td><td>Version planning and temporary build stamping</td></tr>
+  <tr><td><code>ReleaseWorkflowTests.sh</code></td><td>Daily and manual releases remain gated and publish only the tested commit</td></tr>
+  <tr><td><code>RepositoryHygieneTests.sh</code></td><td>Generated outputs and completed research harnesses stay out of the product tree</td></tr>
 </table>
 
 <p>
-<code>E2EWorkflowTests.sh</code> runs as the first step of the CI job, before the
-suite it validates. Documentation drift about how to run E2E is itself a failure
-condition here, which is unusual and worth respecting when editing those files.
+The shell contract suite runs before the unit suite it validates. Documentation
+drift about how to run E2E is itself a failure condition here, which is unusual
+and worth respecting when editing those files.
 </p>
 
 <h2>The workflow AGENTS.md mandates</h2>

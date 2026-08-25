@@ -4,13 +4,12 @@ import Foundation
 
 // Real macOS Spaces as the backing store for stages.
 //
-// Everything here was validated by measurement on macOS 26.5.2 arm64 with SIP enabled
-// (`Tools/space-probe*.swift`). Two findings shape the design:
+// Everything here was validated by measurement on macOS 26.5.2 arm64 with SIP enabled.
+// Two findings shape the design:
 //
-//   1. Every private *write* API that reassigns a window's Space no-ops across process
-//      boundaries — SLSMoveWindowsToManagedSpace, CGSAddWindowsToSpaces and
-//      SLSSetWindowListWorkspace all move our own windows and refuse foreign ones. So the
-//      only reads below are private; the writes go through gestures the user could perform.
+//   1. The ordinary private *write* APIs that reassign a window's Space no-op across process
+//      boundaries. Window reassignment therefore goes through BridgedWindowManagement; the
+//      private symbols in this file are reads, while desktop switching uses Dock gestures.
 //
 //   2. Space *creation* is gated too. SLSSpaceCreate returns an id that no display manages,
 //      which is why stages map onto desktops the user made in Mission Control rather than
@@ -33,11 +32,11 @@ private func skyLightSymbol<T>(_ name: String) -> T? {
     dlsym(skyLight, name).map { unsafeBitCast($0, to: T.self) }
 }
 
-nonisolated(unsafe) private let cgsMainConnectionID: (@convention(c) () -> CGSConnectionID)? =
+private let cgsMainConnectionID: (@convention(c) () -> CGSConnectionID)? =
     skyLightSymbol("CGSMainConnectionID")
-nonisolated(unsafe) private let cgsCopyManagedDisplaySpaces: (@convention(c) (CGSConnectionID, CFString?) -> Unmanaged<CFArray>?)? =
+private let cgsCopyManagedDisplaySpaces: (@convention(c) (CGSConnectionID, CFString?) -> Unmanaged<CFArray>?)? =
     skyLightSymbol("CGSCopyManagedDisplaySpaces")
-nonisolated(unsafe) private let slsCopySpacesForWindows: (@convention(c) (CGSConnectionID, Int32, CFArray) -> Unmanaged<CFArray>?)? =
+private let slsCopySpacesForWindows: (@convention(c) (CGSConnectionID, Int32, CFArray) -> Unmanaged<CFArray>?)? =
     skyLightSymbol("SLSCopySpacesForWindows")
 
 /// Selector for `SLSCopySpacesForWindows` meaning "all spaces the window belongs to".
@@ -384,7 +383,7 @@ public extension SpaceSwitching {
 }
 
 /// Reads and changes which macOS Space is showing, and which Space a window lives on.
-public final class SpaceService: SpaceSwitching {
+public final class SpaceService: SpaceSwitching, @unchecked Sendable {
 
     /// How long one desktop of travel takes. Clamped here rather than only at the slider,
     /// because a settings file edited by hand could otherwise schedule samples into the past.
@@ -568,16 +567,6 @@ public final class SpaceService: SpaceSwitching {
 
     static func index(of space: CGSSpaceID, in desktops: [CGSSpaceID]) -> Int? {
         desktops.firstIndex(of: space)
-    }
-
-    /// The desktop index a window sits on, but only when it sits on exactly one.
-    ///
-    /// A window assigned to every Space — Finder is, on some systems — would otherwise
-    /// resolve to "the first one" and then fight the user each time a stage moved it.
-    static func soleIndex(of spaces: [CGSSpaceID], in desktops: [CGSSpaceID]) -> Int? {
-        let known = spaces.compactMap { index(of: $0, in: desktops) }
-        guard known.count == 1 else { return nil }
-        return known[0]
     }
 
     // MARK: Switching
