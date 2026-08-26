@@ -851,28 +851,22 @@ struct PlateMotionTests {
         #expect(route(CGPoint(x: 250, y: 200)) == .none)
     }
 
-    /// The stack can extend beyond the screen, so scrolling must keep working above and below
-    /// the rendered plates without taking over the bare desktop beside the widest plate.
-    @Test("The scrollable area uses the full height and widest plate")
-    func stageScrollAreaUsesFullHeightAndWidestPlate() {
-        let frames = [
-            0: CGRect(x: 150, y: 100, width: 200, height: 60),
-            1: CGRect(x: 100, y: 200, width: 300, height: 80),
-        ]
+    /// Stage scrolling is an overlay-wide gesture, including the bare desktop around the plates.
+    @Test("The scrollable area fills the overlay")
+    func stageScrollAreaFillsOverlay() {
         let inArea: (CGFloat, CGFloat) -> Bool = {
             PlateInteraction.isInStageScrollArea(
                 CGPoint(x: $0, y: $1),
-                plateFrames: frames,
                 containerSize: CGSize(width: 500, height: 600)
             )
         }
 
-        #expect(inArea(250, 0))
-        #expect(inArea(250, 599))
-        #expect(inArea(100, 50))
-        #expect(inArea(399, 500))
-        #expect(!inArea(99, 300))
-        #expect(!inArea(400, 300))
+        #expect(inArea(0, 0))
+        #expect(inArea(499, 599))
+        #expect(inArea(10, 300))
+        #expect(inArea(490, 300))
+        #expect(!inArea(-1, 300))
+        #expect(!inArea(500, 300))
         #expect(!inArea(250, -1))
         #expect(!inArea(250, 600))
     }
