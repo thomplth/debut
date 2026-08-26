@@ -851,26 +851,30 @@ struct PlateMotionTests {
         #expect(route(CGPoint(x: 250, y: 200)) == .none)
     }
 
-    /// A gap between two plates is still the stack as far as the pointer is concerned. A scroll
-    /// that died whenever the pointer sat between plates would read as the feature not working.
-    @Test("The scrollable area spans the plates and the gaps between them")
-    func stageScrollAreaSpansTheGaps() {
+    /// The stack can extend beyond the screen, so scrolling must keep working above and below
+    /// the rendered plates without taking over the bare desktop beside the widest plate.
+    @Test("The scrollable area uses the full height and widest plate")
+    func stageScrollAreaUsesFullHeightAndWidestPlate() {
         let frames = [
             0: CGRect(x: 150, y: 100, width: 200, height: 60),
             1: CGRect(x: 100, y: 200, width: 300, height: 80),
         ]
         let inArea: (CGFloat, CGFloat) -> Bool = {
-            PlateInteraction.isInStageScrollArea(CGPoint(x: $0, y: $1), plateFrames: frames)
+            PlateInteraction.isInStageScrollArea(
+                CGPoint(x: $0, y: $1),
+                plateFrames: frames,
+                containerSize: CGSize(width: 500, height: 600)
+            )
         }
 
-        #expect(inArea(250, 130))
-        #expect(inArea(250, 240))
-        #expect(inArea(250, 180))
-
-        // The gap is a taper between two differently sized plates, not a full-width band.
-        #expect(!inArea(120, 165))
-        #expect(inArea(120, 195))
-        #expect(!inArea(250, 400))
+        #expect(inArea(250, 0))
+        #expect(inArea(250, 599))
+        #expect(inArea(100, 50))
+        #expect(inArea(399, 500))
+        #expect(!inArea(99, 300))
+        #expect(!inArea(400, 300))
+        #expect(!inArea(250, -1))
+        #expect(!inArea(250, 600))
     }
 
     /// A wheel reports whole notches and a trackpad a stream of points. The leftover has to
