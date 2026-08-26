@@ -542,23 +542,23 @@ enum PlateInteraction {
         isDesktopArea(location, plateFrames: plateFrames) ? .desktop : .none
     }
 
-    /// The gaps between plates belong to the stack as far as the pointer is concerned. A scroll
-    /// that died whenever the pointer sat between two plates would read as the feature not
-    /// working, so a gap counts as long as the pointer is within the taper joining the two.
-    static func isInStageScrollArea(_ location: CGPoint, plateFrames: [Int: CGRect]) -> Bool {
-        let frames = plateFrames.values
-        if frames.contains(where: { $0.contains(location) }) { return true }
+    /// Scrolling remains available for the overlay's full height while staying horizontally
+    /// bounded to the widest rendered plate, so the bare desktop beside the stack is unaffected.
+    static func isInStageScrollArea(
+        _ location: CGPoint,
+        plateFrames: [Int: CGRect],
+        containerSize: CGSize
+    ) -> Bool {
+        guard containerSize.height > 0,
+              let widestPlate = plateFrames.values.max(by: { $0.width < $1.width })
+        else { return false }
 
-        let ordered = frames.sorted { $0.minY < $1.minY }
-        for (upper, lower) in zip(ordered, ordered.dropFirst()) {
-            let gap = lower.minY - upper.maxY
-            guard gap > 0, location.y >= upper.maxY, location.y <= lower.minY else { continue }
-            let progress = (location.y - upper.maxY) / gap
-            let halfWidth = upper.width / 2 + (lower.width / 2 - upper.width / 2) * progress
-            let centerX = upper.midX + (lower.midX - upper.midX) * progress
-            if abs(location.x - centerX) <= halfWidth { return true }
-        }
-        return false
+        return CGRect(
+            x: widestPlate.minX,
+            y: 0,
+            width: widestPlate.width,
+            height: containerSize.height
+        ).contains(location)
     }
 
     /// Scrolling stops at the ends rather than wrapping, so a long flick cannot land somewhere
@@ -1189,7 +1189,7 @@ public struct OverlaySwiftUIView: View {
                     }
             )
             .onChange(of: scrollRelay?.latest) { _, event in
-                if let event { handleStageScroll(event) }
+                if let event { handleStageScroll(event, containerSize: geo.size) }
             }
             .onPreferenceChange(PlateFramePreferenceKey.self) { frames in
                 plateFrames = frames
@@ -1332,10 +1332,14 @@ public struct OverlaySwiftUIView: View {
 
     /// Reported at every stage, because a scroll that changes nothing is otherwise
     /// indistinguishable from a scroll the window never received.
-    private func handleStageScroll(_ event: OverlayScrollEvent) {
+    private func handleStageScroll(_ event: OverlayScrollEvent, containerSize: CGSize) {
         if event.isGestureStart { scrollAccumulator.reset() }
         let inArea = windowDrag == nil
-            && PlateInteraction.isInStageScrollArea(event.location, plateFrames: plateFrames)
+            && PlateInteraction.isInStageScrollArea(
+                event.location,
+                plateFrames: plateFrames,
+                containerSize: containerSize
+            )
         let steps = inArea
             ? scrollAccumulator.steps(deltaY: event.deltaY, isPrecise: event.isPrecise)
             : 0
