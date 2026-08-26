@@ -542,23 +542,14 @@ enum PlateInteraction {
         isDesktopArea(location, plateFrames: plateFrames) ? .desktop : .none
     }
 
-    /// Scrolling remains available for the overlay's full height while staying horizontally
-    /// bounded to the widest rendered plate, so the bare desktop beside the stack is unaffected.
+    /// Stage scrolling is available across the entire overlay, including the bare desktop around
+    /// the rendered plates.
     static func isInStageScrollArea(
         _ location: CGPoint,
-        plateFrames: [Int: CGRect],
         containerSize: CGSize
     ) -> Bool {
-        guard containerSize.height > 0,
-              let widestPlate = plateFrames.values.max(by: { $0.width < $1.width })
-        else { return false }
-
-        return CGRect(
-            x: widestPlate.minX,
-            y: 0,
-            width: widestPlate.width,
-            height: containerSize.height
-        ).contains(location)
+        guard containerSize.width > 0, containerSize.height > 0 else { return false }
+        return CGRect(origin: .zero, size: containerSize).contains(location)
     }
 
     /// Scrolling stops at the ends rather than wrapping, so a long flick cannot land somewhere
@@ -1337,7 +1328,6 @@ public struct OverlaySwiftUIView: View {
         let inArea = windowDrag == nil
             && PlateInteraction.isInStageScrollArea(
                 event.location,
-                plateFrames: plateFrames,
                 containerSize: containerSize
             )
         let steps = inArea
