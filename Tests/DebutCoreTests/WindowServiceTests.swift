@@ -60,6 +60,38 @@ struct WindowServiceTests {
         #expect(WindowImageStatistics.hasVariedLuminance(varied))
     }
 
+    /// A terminal sitting at a prompt puts content on well under 1% of its pixels. Validation
+    /// runs on the downscaled capture, so it has to survive the downscale rather than rely on
+    /// landing a sample on one of those pixels.
+    @Test("Sparse window content survives preview validation", arguments: [
+        (background: UInt8(255), ink: UInt8(0)),
+        (background: UInt8(0), ink: UInt8(255)),
+    ])
+    func sparseContentSurvivesPreviewValidation(background: UInt8, ink: UInt8) throws {
+        let sparse = try #require(makeSparseContentImage(
+            width: 356,
+            height: 640,
+            background: background,
+            ink: ink,
+            inkRows: 2
+        ))
+
+        #expect(WindowImageStatistics.hasVariedLuminance(sparse))
+    }
+
+    @Test("A capture with no content at all is still rejected", arguments: [UInt8(0), 127, 255])
+    func flatCaptureIsRejected(value: UInt8) throws {
+        let flat = try #require(makeSparseContentImage(
+            width: 356,
+            height: 640,
+            background: value,
+            ink: value,
+            inkRows: 0
+        ))
+
+        #expect(!WindowImageStatistics.hasVariedLuminance(flat))
+    }
+
     @Test("List running apps")
     func listApps() {
         let svc = MockWindowService()
@@ -204,6 +236,42 @@ private func makeImage(bytes: [UInt8]) -> CGImage? {
         bitsPerPixel: 8,
         bytesPerRow: bytes.count,
         space: colorSpace,
+        bitmapInfo: CGBitmapInfo(rawValue: 0),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent
+    )
+}
+
+/// A flat background carrying `inkRows` rows of thin, evenly spaced marks, standing in for
+/// text near the top of an otherwise empty window.
+private func makeSparseContentImage(
+    width: Int,
+    height: Int,
+    background: UInt8,
+    ink: UInt8,
+    inkRows: Int
+) -> CGImage? {
+    var pixels = [UInt8](repeating: background, count: width * height)
+    for row in 0..<inkRows {
+        let top = 8 + row * 20
+        for y in top..<min(top + 11, height) {
+            for x in stride(from: 10, to: min(300, width), by: 9) {
+                for glyphColumn in x..<min(x + 4, width) {
+                    pixels[y * width + glyphColumn] = ink
+                }
+            }
+        }
+    }
+    guard let provider = CGDataProvider(data: Data(pixels) as CFData) else { return nil }
+    return CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 8,
+        bytesPerRow: width,
+        space: CGColorSpaceCreateDeviceGray(),
         bitmapInfo: CGBitmapInfo(rawValue: 0),
         provider: provider,
         decode: nil,

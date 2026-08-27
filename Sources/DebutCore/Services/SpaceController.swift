@@ -1140,7 +1140,19 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 // A non-nil image is not proof that ScreenCaptureKit returned window content.
                 // Keep the last good bitmap and its original timestamp when validation fails,
                 // so an expired entry remains visible and eligible for another refresh.
-                guard hasVariedLuminance else { return }
+                guard hasVariedLuminance else {
+                    // Durable: discarding a capture the window server did return is the one
+                    // outcome no other event records, so an unreported drop is unfalsifiable
+                    // afterwards. A silent one hid every sparse window being thrown away
+                    // behind a `preview_capture_completed` that looked like a clean run.
+                    DiagnosticReporter.shared.report("preview_capture_discarded", details: [
+                        "height": "\(capture.image.height)",
+                        "reason": "uniform_luminance",
+                        "width": "\(capture.image.width)",
+                        "windowID": "\(capture.windowID)",
+                    ])
+                    return
+                }
                 let capturedAt = clock()
                 DispatchQueue.main.async { [weak self] in
                     guard let self,
