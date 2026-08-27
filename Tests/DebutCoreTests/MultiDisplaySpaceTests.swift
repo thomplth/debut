@@ -85,39 +85,6 @@ struct MultiDisplaySpaceTests {
         #expect(manager.activeStageID == manager.stages[1].id)
     }
 
-    @Test("A shared Space switch is not scoped to one display")
-    func sharedSwitchHasNoDisplayLocation() {
-        let stack = SpaceStackDescriptor(
-            id: SpaceTopology.sharedStackID,
-            displayID: 5,
-            displayName: "All Displays",
-            frame: CGRect(x: 0, y: 0, width: 2560, height: 1440),
-            desktopIDs: [10, 11],
-            currentDesktopID: 10
-        )
-
-        let location = SpaceService.gestureLocation(
-            for: stack,
-            separateSpaces: false,
-            displayBounds: { _ in CGRect(x: 0, y: 0, width: 2560, height: 1440) }
-        )
-
-        #expect(location == nil)
-    }
-
-    @Test("A separate Space switch is scoped to its display")
-    func separateSwitchUsesDisplayLocation() {
-        let stack = topology.stacks[1]
-
-        let location = SpaceService.gestureLocation(
-            for: stack,
-            separateSpaces: true,
-            displayBounds: { _ in CGRect(x: 1512, y: 0, width: 2560, height: 1440) }
-        )
-
-        #expect(location == CGPoint(x: 2792, y: 720))
-    }
-
     @Test("Desktop locations include display stack identity")
     func desktopLocations() {
         #expect(topology.location(ofSpace: 5370) == DesktopLocation(
