@@ -12,8 +12,8 @@ public final class AppIconCache: @unchecked Sendable {
 
     /// The sizes the overlay draws icons at, and therefore the set worth warming.
     public static let overlayIconSizes: [CGFloat] = [
-        PlateConstants.previewPlaceholderIconSize,
-        PlateConstants.badgeSize,
+        PlateMetrics.standard.previewPlaceholderIconSize,
+        PlateMetrics.standard.badgeSize,
     ]
 
     private struct Key: Hashable {

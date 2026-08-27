@@ -47,32 +47,47 @@ struct OverlayViewModelTests {
         #expect(plate.index == 0)
     }
 
-    @Test("Plate content has matching top and bottom padding")
-    func plateVerticalPadding() {
-        #expect(PlateConstants.topPadding == PlateConstants.bottomPadding)
-    }
-
-    @Test("Each plate width fits its own window cards exactly")
-    func perPlateContentWidths() {
-        let widths = PlateConstants.plateWidths(
-            forWindowCounts: [1, 3, 2],
-            thumbnailWidth: 160
+    @Test("Each stage wraps independently against the same available width")
+    func perStagePlateLayouts() {
+        let metrics = PlateMetrics.standard
+        // 1200pt leaves room for five cards once both margins and both paddings are taken out.
+        let layouts = PlateConstants.plateLayouts(
+            forWindowCounts: [1, 5, 8],
+            screenWidth: 1_200,
+            metrics: metrics
         )
 
-        #expect(widths == [228, 612, 420])
+        #expect(layouts.map(\.rowSizes) == [[1], [5], [4, 4]])
+        #expect(layouts[0].plateSize.width == metrics.minPlateWidth)
+        #expect(layouts[2].plateSize.height
+            == metrics.cardHeight * 2 + metrics.rowSpacing
+                + metrics.topPadding + metrics.bottomPadding)
+        #expect(layouts.allSatisfy {
+            $0.plateSize.width <= PlateConstants.availablePlateWidth(screenWidth: 1_200)
+        })
     }
 
-    @Test("Thumbnail sizing includes the full window card width")
-    func thumbnailSizingIncludesWindowCardChrome() {
-        let size = PlateConstants.thumbnailSize(forWindowCount: 6, screenWidth: 1_200)
-        let plateWidth = PlateConstants.plateWidth(forWindowCount: 6, thumbnailWidth: size.width)
+    @Test("A window card is drawn where the overlay-external hit test expects it")
+    func windowCardCenterMatchesGrid() {
+        let metrics = PlateMetrics.standard
+        let container = CGSize(width: 1_200, height: 800)
+        let stride = metrics.cardWidth + metrics.windowSpacing
 
-        #expect(plateWidth == 1_040)
-    }
+        let first = PlateConstants.windowCardCenter(
+            stageIndex: 0, windowIndex: 0, windowCounts: [3],
+            activeStageIndex: 0, inactiveScale: 0.8, containerSize: container
+        )
+        let last = PlateConstants.windowCardCenter(
+            stageIndex: 0, windowIndex: 2, windowCounts: [3],
+            activeStageIndex: 0, inactiveScale: 0.8, containerSize: container
+        )
 
-    @Test("Empty plates retain a useful placeholder width")
-    func emptyPlateWidth() {
-        #expect(PlateConstants.plateWidth(forWindowCount: 0, thumbnailWidth: 160) == 300)
+        #expect(first == CGPoint(x: 600 - stride, y: 400))
+        #expect(last == CGPoint(x: 600 + stride, y: 400))
+        #expect(PlateConstants.windowCardCenter(
+            stageIndex: 0, windowIndex: 3, windowCounts: [3],
+            activeStageIndex: 0, inactiveScale: 0.8, containerSize: container
+        ) == nil)
     }
 
     @Test("Selected window")
