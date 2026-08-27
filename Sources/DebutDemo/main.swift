@@ -76,14 +76,14 @@ func readState() -> [String: String] {
     return state
 }
 
-func stageWindowCounts() -> [Int] {
-    (readState()["windowCountsByStage"] ?? "").split(separator: ",").compactMap { Int($0) }
+func spaceWindowCounts() -> [Int] {
+    (readState()["windowCountsBySpace"] ?? "").split(separator: ",").compactMap { Int($0) }
 }
 
 func describeState(_ label: String) {
     let state = readState()
-    log("\(label): stages=\(state["stageCount"] ?? "?") counts=\(state["windowCountsByStage"] ?? "?") "
-        + "active=\(state["activeStageIndex"] ?? "?") selected=\(state["selectedWindowIndex"] ?? "?")")
+    log("\(label): spaces=\(state["spaceCount"] ?? "?") counts=\(state["windowCountsBySpace"] ?? "?") "
+        + "active=\(state["activeSpaceIndex"] ?? "?") selected=\(state["selectedWindowIndex"] ?? "?")")
 }
 
 func describeWindows(_ label: String) {
@@ -202,34 +202,34 @@ func clip(_ name: String, seconds: Int, _ body: () -> Void) {
     log(exists ? "clip \(name).mov" : "clip \(name) FAILED (no file)")
 }
 
-// MARK: - Stage arrangement
+// MARK: - Space arrangement
 
-/// Splits the single startup stage into three, driving Debut's own overlay commands rather
+/// Splits the single startup space into three, driving Debut's own overlay commands rather
 /// than writing state.json, because window IDs are ephemeral and would not survive a write.
-func arrangeStages(windowsPerStage: Int) {
+func arrangeSpaces(windowsPerSpace: Int) {
     describeState("before arrange")
     describeWindows("before arrange")
 
     // Every in-overlay command carries only the held activation modifier. Adding Option
-    // turns Tab into stage cycling and stops N and the digits matching at all.
+    // turns Tab into space cycling and stops N and the digits matching at all.
     let held: CGEventFlags = .maskCommand
     holding(held) {
         postTap(Key.tab, flags: held)
         wait(0.8)
-        // N creates a stage below the active one and makes it active, so two taps leave
-        // the startup stage at index 0 with two empty stages under it.
+        // N creates a space below the active one and makes it active, so two taps leave
+        // the startup space at index 0 with two empty spaces under it.
         postTap(Key.n, flags: held)
         wait(0.6)
-        describeState("  after first new stage")
+        describeState("  after first new space")
         postTap(Key.n, flags: held)
         wait(0.6)
-        describeState("  after second new stage")
-        describeWindows("  after second new stage")
+        describeState("  after second new space")
+        describeWindows("  after second new space")
 
-        // A moved window drags the selection with it, so reaching stage 2 is two hops and
-        // every hop starts by jumping back to stage 1.
-        let plan = Array(repeating: 1, count: windowsPerStage)
-            + Array(repeating: 2, count: windowsPerStage)
+        // A moved window drags the selection with it, so reaching space 2 is two hops and
+        // every hop starts by jumping back to space 1.
+        let plan = Array(repeating: 1, count: windowsPerSpace)
+            + Array(repeating: 2, count: windowsPerSpace)
         for hops in plan {
             postTap(Key.digits[0], flags: held)
             wait(0.4)
@@ -246,16 +246,16 @@ func arrangeStages(windowsPerStage: Int) {
 
     describeState("after arrange")
     describeWindows("after arrange")
-    let counts = stageWindowCounts()
+    let counts = spaceWindowCounts()
     if counts.count != 3 || counts.contains(0) {
-        log("WARNING: expected three non-empty stages, got \(counts)")
+        log("WARNING: expected three non-empty spaces, got \(counts)")
     }
 }
 
 // MARK: - Clips
 
-func recordStageSwitch() {
-    clip("stage-switch", seconds: 11) {
+func recordSpaceSwitch() {
+    clip("space-switch", seconds: 11) {
         holding([.maskCommand, .maskAlternate]) {
             postTap(Key.tab, flags: [.maskCommand, .maskAlternate])
             wait(1.6)
@@ -332,7 +332,7 @@ guard CGPreflightScreenCaptureAccess() else {
 log("output: \(outputDirectory.path)")
 selectDisplayMode(value(after: "--display"))
 
-arrangeStages(windowsPerStage: Int(value(after: "--windows-per-stage") ?? "") ?? 3)
+arrangeSpaces(windowsPerSpace: Int(value(after: "--windows-per-space") ?? "") ?? 3)
 wait(1.0)
 
 // After the arrangement, not before: Debut's login-item banner arrives on its first launch and
@@ -341,7 +341,7 @@ clearNotifications()
 
 captureStills()
 wait(1.0)
-recordStageSwitch()
+recordSpaceSwitch()
 wait(1.0)
 recordWindowCycle()
 wait(1.0)

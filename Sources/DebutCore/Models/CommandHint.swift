@@ -3,7 +3,7 @@ import Foundation
 public enum CommandHintPlacement: Equatable, Sendable {
     case stageLeading
     case nextWindow
-    case plateFooter
+    case stageFooter
 }
 
 public struct CommandHintPresentation: Identifiable, Equatable, Sendable {
@@ -19,15 +19,15 @@ public struct CommandHintPresentation: Identifiable, Equatable, Sendable {
 }
 
 public enum CommandHintCatalog {
-    public static func stageNumberHint(
-        stageIndex: Int,
+    public static func spaceNumberHint(
+        spaceIndex: Int,
         settings: AppSettings
     ) -> CommandHintPresentation? {
-        guard let jumpAction = KeyAction.jumpAction(forStageIndex: stageIndex) else {
+        guard let jumpAction = KeyAction.jumpAction(forSpaceIndex: spaceIndex) else {
             return nil
         }
         return hint(
-            label: "Jump to stage",
+            label: "Jump to space",
             actions: [jumpAction],
             placement: .stageLeading,
             iconSystemName: nil,
@@ -35,8 +35,8 @@ public enum CommandHintCatalog {
         )
     }
 
-    public static func plateFooterHints(
-        stageIndex: Int,
+    public static func stageFooterHints(
+        spaceIndex: Int,
         isActive: Bool,
         hasSelectedWindow: Bool,
         settings: AppSettings
@@ -44,7 +44,7 @@ public enum CommandHintCatalog {
         guard isActive else { return [] }
 
         var groups: [(String, [KeyAction], String)] = [
-            ("Select stage", [.nextStage, .previousStage], "rectangle.stack"),
+            ("Select space", [.nextSpace, .previousSpace], "rectangle.stack"),
         ]
         if hasSelectedWindow {
             groups.append(("Move window", [.moveWindowUp, .moveWindowDown], "arrow.up.and.down"))
@@ -63,7 +63,7 @@ public enum CommandHintCatalog {
             hint(
                 label: label,
                 actions: actions,
-                placement: .plateFooter,
+                placement: .stageFooter,
                 iconSystemName: iconSystemName,
                 settings: settings
             )

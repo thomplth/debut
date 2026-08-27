@@ -38,8 +38,8 @@ struct DebutGlyphTests {
         #expect(DebutGlyph.image(size: DebutGlyph.menuBarSize).isTemplate)
     }
 
-    @Test("The active stage is opaque and its neighbours are dimmer")
-    func activeStageReadsAsSelected() {
+    @Test("The active space is opaque and its neighbours are dimmer")
+    func activeSpaceReadsAsSelected() {
         let mark = DebutGlyph.image(size: 64)
         let active = alpha(mark, x: 0.5, y: 0.5)
         let above = alpha(mark, x: 0.5, y: 0.234)
@@ -50,15 +50,15 @@ struct DebutGlyphTests {
         #expect(abs(above - below) < 0.05)
     }
 
-    @Test("The active stage is wider than its neighbours")
-    func activeStageIsWider() {
+    @Test("The active space is wider than its neighbours")
+    func activeSpaceIsWider() {
         let mark = DebutGlyph.image(size: 64)
         #expect(alpha(mark, x: 0.1, y: 0.5) > 0.9)
         #expect(alpha(mark, x: 0.1, y: 0.234) < 0.05)
     }
 
-    @Test("The stages are separated rather than fused into one block")
-    func stagesAreSeparated() {
+    @Test("The spaces are separated rather than fused into one block")
+    func spacesAreSeparated() {
         #expect(alpha(DebutGlyph.image(size: 64), x: 0.5, y: 0.36) < 0.05)
     }
 

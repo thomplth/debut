@@ -88,8 +88,8 @@ if [[ -f "$e2e_source" ]]; then
         "E2E must isolate assertions that need live preview capture"
     expect_contains "$e2e_source" 'Live preview capture is disabled' \
         "E2E must explain skips caused by disabled preview capture"
-    expect_not_contains "$e2e_source" 'stage_reordered_by_drag' \
-        "E2E must not assert against stage reordering, which Debut no longer does"
+    expect_not_contains "$e2e_source" 'space_reordered_by_drag' \
+        "E2E must not assert against space reordering, which Debut no longer does"
 fi
 
 if [[ -f "$tart_guest" ]]; then

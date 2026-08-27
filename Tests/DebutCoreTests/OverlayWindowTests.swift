@@ -7,7 +7,7 @@ import Testing
 struct OverlayWindowTests {
     @Test("The overlay is allowed into another app's fullscreen Space")
     func overlayJoinsFullscreenSpaces() {
-        // Unlike the desktop surface, the plates have to reach the Space the user is actually
+        // Unlike the desktop surface, the stages have to reach the Space the user is actually
         // looking at, and a fullscreen app owns a Space of its own.
         let window = OverlayWindow()
 
@@ -22,9 +22,9 @@ struct OverlayWindowTests {
         let window = OverlayWindow()
         window.setFrame(.zero, display: false)
 
-        let created = window.update(viewModel: OverlayViewModel(
-            stageManager: StageManager(),
-            activeStageIndex: 0,
+        let created = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
             selectedWindowIndex: 0
         ))
 
@@ -35,47 +35,47 @@ struct OverlayWindowTests {
     @Test("Removing a window preserves motion then rebases the rendered tree")
     func windowRemovalRebasesRenderedTreeAfterMotion() async throws {
         let window = OverlayWindow()
-        var stageManager = StageManager()
-        let stageID = stageManager.activeStageID
-        stageManager.addWindow(
-            StageWindow(
+        var spaceManager = SpaceManager()
+        let spaceID = spaceManager.activeSpaceID
+        spaceManager.addWindow(
+            SpaceWindow(
                 windowID: 101,
                 ownerBundleID: "com.example.One",
                 ownerName: "One",
                 windowTitle: "One"
             ),
-            toStageID: stageID
+            toSpaceID: spaceID
         )
-        stageManager.addWindow(
-            StageWindow(
+        spaceManager.addWindow(
+            SpaceWindow(
                 windowID: 202,
                 ownerBundleID: "com.example.Two",
                 ownerName: "Two",
                 windowTitle: "Two"
             ),
-            toStageID: stageID
+            toSpaceID: spaceID
         )
-        let createdInitialTree = window.update(viewModel: OverlayViewModel(
-            stageManager: stageManager,
-            activeStageIndex: 0,
+        let createdInitialTree = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: spaceManager,
+            activeSpaceIndex: 0,
             selectedWindowIndex: 1
         ))
-        let reusedTree = window.update(viewModel: OverlayViewModel(
-            stageManager: stageManager,
-            activeStageIndex: 0,
+        let reusedTree = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: spaceManager,
+            activeSpaceIndex: 0,
             selectedWindowIndex: 0
         ))
         let initialHostingView = try #require(window.contentView?.subviews.first)
 
-        stageManager.removeWindow(windowID: 202, fromStageID: stageID)
-        let reusedTreeForRemoval = window.update(viewModel: OverlayViewModel(
-            stageManager: stageManager,
-            activeStageIndex: 0,
+        spaceManager.removeWindow(windowID: 202, fromSpaceID: spaceID)
+        let reusedTreeForRemoval = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: spaceManager,
+            activeSpaceIndex: 0,
             selectedWindowIndex: 0
         ))
-        let reusedTreeForLifecycleRefresh = window.update(viewModel: OverlayViewModel(
-            stageManager: stageManager,
-            activeStageIndex: 0,
+        let reusedTreeForLifecycleRefresh = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: spaceManager,
+            activeSpaceIndex: 0,
             selectedWindowIndex: 0
         ))
 
@@ -101,9 +101,9 @@ struct OverlayWindowTests {
         let window = OverlayWindow()
         window.targetScreenFrame = target
 
-        _ = window.update(viewModel: OverlayViewModel(
-            stageManager: StageManager(),
-            activeStageIndex: 0,
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
             selectedWindowIndex: 0
         ))
         #expect(window.frame == target)
@@ -123,16 +123,16 @@ struct OverlayWindowTests {
         let screen = try #require(NSScreen.main ?? NSScreen.screens.first)
         let window = OverlayWindow()
         window.targetScreenFrame = screen.frame.insetBy(dx: 120, dy: 120)
-        _ = window.update(viewModel: OverlayViewModel(
-            stageManager: StageManager(),
-            activeStageIndex: 0,
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
             selectedWindowIndex: 0
         ))
 
         window.targetScreenFrame = nil
-        _ = window.update(viewModel: OverlayViewModel(
-            stageManager: StageManager(),
-            activeStageIndex: 0,
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
             selectedWindowIndex: 0
         ))
 
@@ -142,9 +142,9 @@ struct OverlayWindowTests {
     @Test("Reveal completion is delivered after ordering and rendering")
     func revealCompletion() async {
         let window = OverlayWindow()
-        _ = window.update(viewModel: OverlayViewModel(
-            stageManager: StageManager(),
-            activeStageIndex: 0,
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
             selectedWindowIndex: 0
         ))
 
@@ -165,9 +165,9 @@ struct OverlayWindowTests {
         // is shown. A borderless window cannot become key, so asking for key
         // status buys nothing and leaves ordering subject to app activation.
         let window = OverlayWindow()
-        _ = window.update(viewModel: OverlayViewModel(
-            stageManager: StageManager(),
-            activeStageIndex: 0,
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
             selectedWindowIndex: 0
         ))
 

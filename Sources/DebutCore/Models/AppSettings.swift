@@ -69,7 +69,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Paces held cycling independently of the user's key-repeat rate.
     public static let defaultHeldCycleMinimumInterval: TimeInterval = 0.06
 
-    /// How long one desktop's worth of slide takes when switching stages.
+    /// How long one desktop's worth of slide takes when switching spaces.
     ///
     /// This replaced a velocity scalar, which was not a duration and did not behave like
     /// one: the Dock ignores progress and skips the transition outright above roughly 80,
@@ -88,19 +88,19 @@ public struct AppSettings: Codable, Sendable, Equatable {
 
     // Appearance
     /// Window thumbnails at the original size were too small to read what was on the captured
-    /// screen. The wrapping added in KHA-491 is what makes a larger card safe: a stage that no
+    /// screen. The wrapping added in KHA-491 is what makes a larger card safe: a space that no
     /// longer fits across the display spills onto another row instead of over the edge.
-    public static let defaultPlateScale: Double = 1.5
-    /// The floor doubles as the floor the automatic viewport fit may shrink to, so a stage
+    public static let defaultStageScale: Double = 1.5
+    /// The floor doubles as the floor the automatic viewport fit may shrink to, so a space
     /// holding more windows than the display can show at any readable size still fits.
-    public static let minimumPlateScale: Double = 0.5
-    public static let maximumPlateScale: Double = 2.5
-    public static let plateScaleStep: Double = 0.05
+    public static let minimumStageScale: Double = 0.5
+    public static let maximumStageScale: Double = 2.5
+    public static let stageScaleStep: Double = 0.05
 
     public var glassStyle: GlassStyle
-    public var plateCornerRadius: Double
-    public var inactivePlateScale: Double
-    public var plateScale: Double
+    public var stageCornerRadius: Double
+    public var inactiveStageScale: Double
+    public var stageScale: Double
 
     // Keyboard
     public var overlayPresentationDelay: TimeInterval
@@ -110,7 +110,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var quickSwitchModifiers: ShortcutModifiers
     public var quickSwitchSameApplicationModifiers: ShortcutModifiers
 
-    // Stage switching
+    // Space switching
     public var spaceSwitchDuration: TimeInterval
 
     // Window previews
@@ -127,9 +127,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.shareAnonymousTelemetry = true
 
         self.glassStyle = .clear
-        self.plateCornerRadius = 40
-        self.inactivePlateScale = 0.7
-        self.plateScale = Self.defaultPlateScale
+        self.stageCornerRadius = 40
+        self.inactiveStageScale = 0.7
+        self.stageScale = Self.defaultStageScale
 
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
         self.heldCycleMinimumInterval = Self.defaultHeldCycleMinimumInterval
@@ -156,12 +156,12 @@ public struct AppSettings: Codable, Sendable, Equatable {
             forKey: .shareAnonymousTelemetry
         ) ?? true
         glassStyle = try container.decode(GlassStyle.self, forKey: .glassStyle)
-        plateCornerRadius = try container.decode(Double.self, forKey: .plateCornerRadius)
-        inactivePlateScale = try container.decode(Double.self, forKey: .inactivePlateScale)
-        plateScale = try container.decodeIfPresent(
+        stageCornerRadius = try container.decode(Double.self, forKey: .stageCornerRadius)
+        inactiveStageScale = try container.decode(Double.self, forKey: .inactiveStageScale)
+        stageScale = try container.decodeIfPresent(
             Double.self,
-            forKey: .plateScale
-        ) ?? Self.defaultPlateScale
+            forKey: .stageScale
+        ) ?? Self.defaultStageScale
         overlayPresentationDelay = try container.decodeIfPresent(
             TimeInterval.self,
             forKey: .overlayPresentationDelay

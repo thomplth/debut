@@ -18,7 +18,7 @@
     <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
     <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
     <li><a class="current" href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
-    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="04-spaces.html"><span class="num">04</span>Spaces &amp; switching</a></li>
     <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
     <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
     <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
@@ -34,7 +34,7 @@
 <p class="eyebrow">Chapter 03</p>
 <h1>Window discovery and tracking</h1>
 <p class="lede">
-Everything upstream of the stage model. How Debut learns that a window exists,
+Everything upstream of the space model. How Debut learns that a window exists,
 decides whether it is real, keeps a handle on it, and — the hard part — learns
 that it has gone away.
 </p>
@@ -127,11 +127,11 @@ not modal.
 </div>
 
 <p>
-The consequence for the stage model is a rule stated in <code>AGENTS.md</code>
+The consequence for the space model is a rule stated in <code>AGENTS.md</code>
 and enforced here: an untrackable classification makes an assignment
 <strong>dormant</strong>, never deleted. Deleting turns a momentary misreport into
 permanent layout loss — it once stranded a browser's four windows, which then
-reappeared as brand-new windows and collapsed into the active stage.
+reappeared as brand-new windows and collapsed into the active space.
 </p>
 
 <h3>The snapshot that can say "I don't know"</h3>
@@ -223,7 +223,7 @@ not in the installer.
 <p>
 It moves whenever <code>NSWorkspace.didActivateApplicationNotification</code>
 fires. One observer, always on the app you are using. This is what makes MRU
-ordering and "new window joins the active stage" work without polling.
+ordering and "new window joins the active space" work without polling.
 </p>
 
 <h3>The lifecycle observers — one per PID, registered per window</h3>
@@ -349,7 +349,7 @@ assignments to dormant rather than deleting them.
 
 <p>
 There are exactly three ways a window enters the model, and all three must
-register tracking. Missing any one produces a "ghost": a window on a plate that
+register tracking. Missing any one produces a "ghost": a window on a stage that
 Debut can never learn has closed.
 </p>
 
@@ -379,7 +379,7 @@ Debut can never learn has closed.
 returns early with a <code>windows_reconcile_skipped</code> diagnostic when the
 live window list comes back empty while persisted windows and running
 applications both exist. As the comment puts it, treating that snapshot as
-authoritative would erase every saved stage assignment. This is the same
+authoritative would erase every saved space assignment. This is the same
 principle as the tri-state classification: an absence of evidence is not
 evidence.
 </p>
@@ -394,7 +394,7 @@ callback order is asserted by test as
 <code>["app:&lt;bundleID&gt;", "snapshot", "focus"]</code>&nbsp;<span class="src">WindowDiscoveryServiceTests.swift:77</span>:
 reconciliation must be published before focus, which is precisely what lets the
 reconciler see a replacement window as still unassigned and match it to the right
-stage.
+space.
 </p>
 
 <h2>The runtime tables</h2>
@@ -434,7 +434,7 @@ element dictionaries are not exported — they hold live
 
 <h2>The data types</h2>
 
-<pre><code>struct StageWindow: Codable, Identifiable, Equatable, Sendable {
+<pre><code>struct SpaceWindow: Codable, Identifiable, Equatable, Sendable {
     let id: UUID            // generated at init, never a stable disk key
     var windowID: CGWindowID
     let ownerBundleID: String
@@ -442,30 +442,30 @@ element dictionaries are not exported — they hold live
     var windowTitle: String
     var ownerPID: pid_t?
 }</code></pre>
-<p><span class="srcline">Models/StageWindow.swift:4</span></p>
+<p><span class="srcline">Models/SpaceWindow.swift:4</span></p>
 
 <div class="warn">
   <span class="label">Equality is identity, not content</span>
   <p>
-  <code>==</code> on <code>StageWindow</code> compares <strong>only
+  <code>==</code> on <code>SpaceWindow</code> compares <strong>only
   <code>windowID</code></strong>. A title change does not make two values unequal,
   and two different windows with the same ID are the same value. Code that needs
   to distinguish entries — the reconciler in particular — keys its sets by
   <code>window.id</code>, not by the value. The same shortcut applies to
-  <code>Stage</code>, whose <code>==</code> compares only its <code>id</code>.
+  <code>Space</code>, whose <code>==</code> compares only its <code>id</code>.
   </p>
 </div>
 
 <p>
-<code>DormantWindowAssignment</code> is a <code>StageWindow</code> plus the
-<code>stageID</code> and the <code>windowIndex</code> it should return to. It
+<code>DormantWindowAssignment</code> is a <code>SpaceWindow</code> plus the
+<code>spaceID</code> and the <code>windowIndex</code> it should return to. It
 forwards its <code>id</code> to the wrapped window's. Chapter 7 covers how it is
 decoded, pruned, and restored.
 </p>
 
 <div class="pager">
   <a href="02-architecture.html"><span class="dir">Previous</span>&larr; 02 · Architecture</a>
-  <a href="04-stages.html"><span class="dir">Next</span>04 · Stages &amp; switching &rarr;</a>
+  <a href="04-spaces.html"><span class="dir">Next</span>04 · Spaces &amp; switching &rarr;</a>
 </div>
 
 </main>

@@ -29,12 +29,12 @@ window uses the native macOS settings visual style.
 Individual controls, their ranges, and their default values are defined in
 `SettingsWindow.swift` and `AppSettings` and are deliberately not restated here.
 
-**Appearance** — glass style, plate geometry, and the window preview refresh
+**Appearance** — glass style, stage geometry, and the window preview refresh
 policy. Selection has no controls of its own: the overlay indicates it by
 magnifying the selected window rather than tinting or outlining it.
 
 **Excluded Apps** — a picker over running regular apps and the resulting
-exclusion list. Adding an app removes it from every stage and filters it out of
+exclusion list. Adding an app removes it from every space and filters it out of
 discovery immediately.
 
 **App** — launch at login, registered through `SMAppService`. Overlay animation
@@ -53,7 +53,7 @@ diagnostics are unaffected either way; see [../docs/privacy.md](../docs/privacy.
 clicking a row and pressing the combination. Conflicts are detected inline and
 require explicit replacement. The section also carries the overlay hold delay,
 the command-hint controls, and quick-switch exclusions. Quick switching exposes
-separate modifier settings for direct stage switching and for switching while
+separate modifier settings for direct space switching and for switching while
 keeping the current app; both apply to digits 1–9.
 
 Command hints annotate the overlay's available commands. `Automatic` retires each

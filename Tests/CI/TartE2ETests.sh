@@ -49,7 +49,7 @@ if [[ -f "$host_runner" ]]; then
     expect_contains "$host_runner" 'ssh .*admin@' \
         "the E2E input driver must be launched by the image-authorized SSH service"
     expect_contains "$host_runner" 'DebutE2E' \
-        "Tart E2E must stage the release E2E executable"
+        "Tart E2E must space the release E2E executable"
     expect_contains "$host_runner" 'ARTIFACT_ID' \
         "warm-guest artifacts must use cache-busting names"
     expect_contains "$host_runner" 'app\.zip' \
@@ -87,7 +87,7 @@ if [[ -f "$guest_runner" ]]; then
         "guest readiness must require the app-ready diagnostic event"
     expect_contains "$guest_runner" 'state\.eventTapRunning' \
         "guest readiness must require the keyboard event tap"
-    expect_contains "$guest_runner" 'state\.windowsInActiveStage' \
+    expect_contains "$guest_runner" 'state\.windowsInActiveSpace' \
         "guest readiness must require discovered fixture windows"
     expect_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS="\$' \
         "the drag flag must be a scalar; bash 3.2 rejects empty array expansion under set -u"

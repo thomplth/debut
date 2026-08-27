@@ -18,15 +18,15 @@ struct StateStoreTests {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let store = StateStore(directory: dir)
-        var sm = StageManager()
-        sm.createStage(position: .below)
-        sm.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toStageID: sm.stages[1].id)
+        var sm = SpaceManager()
+        sm.createSpace(position: .below)
+        sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toSpaceID: sm.spaces[1].id)
 
         try store.save(sm)
         let loaded = try store.load()
 
-        #expect(loaded.stages.count == 2)
-        #expect(loaded.stages[1].windows.count == 1)
+        #expect(loaded.spaces.count == 2)
+        #expect(loaded.spaces[1].windows.count == 1)
     }
 
     @Test("Load returns default when no file exists")
@@ -36,7 +36,7 @@ struct StateStoreTests {
 
         let store = StateStore(directory: dir)
         let result = try store.load()
-        #expect(result.stages.count == 1)
+        #expect(result.spaces.count == 1)
     }
 
     @Test("Creates directory if missing")
@@ -46,11 +46,11 @@ struct StateStoreTests {
         defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
 
         let store = StateStore(directory: dir)
-        var sm = StageManager()
-        sm.createStage(position: .below)
+        var sm = SpaceManager()
+        sm.createSpace(position: .below)
         try store.save(sm)
         let loaded = try store.load()
-        #expect(loaded.stages.count == 2)
+        #expect(loaded.spaces.count == 2)
     }
 
     @Test("Settings round-trip")
@@ -61,7 +61,7 @@ struct StateStoreTests {
         let store = StateStore(directory: dir)
         var settings = AppSettings()
         settings.launchAtLogin = true
-        settings.plateCornerRadius = 30
+        settings.stageCornerRadius = 30
         settings.overlayPresentationDelay = 0.25
         settings.quickSwitchExcludedBundleIDs = ["com.tinyspeck.slackmacgap"]
         settings.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
@@ -72,7 +72,7 @@ struct StateStoreTests {
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
         #expect(loaded.launchAtLogin == true)
-        #expect(loaded.plateCornerRadius == 30)
+        #expect(loaded.stageCornerRadius == 30)
         #expect(loaded.overlayPresentationDelay == 0.25)
         #expect(loaded.quickSwitchExcludedBundleIDs == ["com.tinyspeck.slackmacgap"])
         #expect(loaded.quickSwitchModifiers == ShortcutModifiers(control: true, option: true))
@@ -89,7 +89,7 @@ struct StateStoreTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any]
         )
         var counts = try #require(object["commandUsageCounts"] as? [Any])
-        counts.append("swapStageUp")
+        counts.append("swapSpaceUp")
         counts.append(7)
         object["commandUsageCounts"] = counts
 
@@ -217,19 +217,19 @@ struct StateStoreTests {
         #expect(decoded.commandUsageCounts.isEmpty)
     }
 
-    @Test("Settings written before the plate scale existed take the larger new default")
-    func legacySettingsDefaultPlateScale() throws {
+    @Test("Settings written before the stage scale existed take the larger new default")
+    func legacySettingsDefaultStageScale() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
-        object.removeValue(forKey: "plateScale")
+        object.removeValue(forKey: "stageScale")
         let legacyData = try JSONSerialization.data(withJSONObject: object)
 
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
-        #expect(decoded.plateScale == AppSettings.defaultPlateScale)
-        #expect(AppSettings.defaultPlateScale == 1.5)
+        #expect(decoded.stageScale == AppSettings.defaultStageScale)
+        #expect(AppSettings.defaultStageScale == 1.5)
     }
 
     @Test("Settings files written before the option audit still load")
@@ -239,15 +239,15 @@ struct StateStoreTests {
 
         var settings = AppSettings()
         settings.launchAtLogin = true
-        settings.plateCornerRadius = 12
+        settings.stageCornerRadius = 12
         let encoded = try JSONEncoder().encode(settings)
         var object = try #require(
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
         for removed in [
             "showInMenuBar",
-            "newStagePlacement",
-            "confirmStageDeletion",
+            "newSpacePlacement",
+            "confirmSpaceDeletion",
             "animationsEnabled",
             "selectionOpacity",
             "selectionBorderWidth",
@@ -261,7 +261,7 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.launchAtLogin == true)
-        #expect(decoded.plateCornerRadius == 12)
+        #expect(decoded.stageCornerRadius == 12)
     }
 
     @Test("Settings defaults when no file")

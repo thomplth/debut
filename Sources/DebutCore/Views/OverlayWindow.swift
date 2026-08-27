@@ -12,8 +12,8 @@ struct OverlayScrollEvent: Equatable {
 }
 
 /// SwiftUI has no scroll-wheel modifier, and only the window sits low enough in the responder
-/// chain to see a scroll the plates did not consume. The relay carries it back into the view,
-/// which is the only place that knows where the plates currently are.
+/// chain to see a scroll the stages did not consume. The relay carries it back into the view,
+/// which is the only place that knows where the stages currently are.
 @Observable
 final class OverlayScrollRelay {
     var latest: OverlayScrollEvent?
@@ -21,9 +21,9 @@ final class OverlayScrollRelay {
 
 @Observable
 private final class OverlayContentState {
-    var rootView: OverlaySwiftUIView
+    var rootView: StageOverlayView
 
-    init(rootView: OverlaySwiftUIView) {
+    init(rootView: StageOverlayView) {
         self.rootView = rootView
     }
 }
@@ -44,8 +44,8 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     private let scrollRelay = OverlayScrollRelay()
     private var scrollSequence = 0
     private var scrollMonitor: Any?
-    public var onStageScrollSelected: ((Int) -> Void)?
-    var onStageScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
+    public var onSpaceScrollSelected: ((Int) -> Void)?
+    var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     public var onWindowSelected: ((Int, Int) -> Void)?
     public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
@@ -75,10 +75,10 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     }
 
     @discardableResult
-    public func update(viewModel: OverlayViewModel) -> Bool {
+    public func update(viewModel: StageOverlayViewModel) -> Bool {
         synchronizeFrameToTargetScreen(display: false)
         let nextWindowIDs = Set(
-            viewModel.stageManager.allStages.flatMap { $0.windows.map(\.windowID) }
+            viewModel.spaceManager.allSpaces.flatMap { $0.windows.map(\.windowID) }
         )
         let removedWindowIDs = renderedWindowIDs.subtracting(nextWindowIDs)
         renderedWindowIDs = nextWindowIDs
@@ -86,7 +86,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
             renderGeneration += 1
         }
         let generation = renderGeneration
-        var view = OverlaySwiftUIView(
+        var view = StageOverlayView(
             viewModel: viewModel,
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
@@ -96,15 +96,15 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         view.onOverlayTapRouted = onOverlayTapRouted
         view.onOverlayPointerRegionChanged = onOverlayPointerRegionChanged
         view.scrollRelay = scrollRelay
-        view.onStageScrollSelected = onStageScrollSelected
-        view.onStageScrollRouted = onStageScrollRouted
+        view.onSpaceScrollSelected = onSpaceScrollSelected
+        view.onSpaceScrollRouted = onSpaceScrollRouted
         if let hostingView, let contentState {
             // Mutating observable content preserves the SwiftUI tree, so removals run the
             // card transition and animate the surviving cards into their new positions.
             if removedWindowIDs.isEmpty {
                 contentState.rootView = view
             } else {
-                let transition = PlateMotion.windowRemovalTransition(
+                let transition = StageMotion.windowRemovalTransition(
                     reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
                 )
                 withAnimation(transition.animation) {
@@ -190,7 +190,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     }
 
     /// A trackpad flick keeps sending events after the fingers lift. Letting momentum through
-    /// would sail past whichever stage the user was aiming at.
+    /// would sail past whichever space the user was aiming at.
     private func relayScroll(_ event: NSEvent) {
         guard event.momentumPhase == [], event.window === self, let contentView else { return }
         let inWindow = event.locationInWindow

@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// What the overlay needs to know about the frontmost app's focused window: where it sits, so
-/// the plates can open on that display, and whether it is fullscreen.
+/// the stages can open on that display, and whether it is fullscreen.
 ///
 /// The frame is in Quartz global coordinates, matching `CGDisplayBounds` and the Accessibility
 /// API it is read from.

@@ -2,19 +2,19 @@
 
 Debut measures work only when an existing event occurs. It adds no polling or recurring timer. `diagnostic.json` is the offline source of truth; Instruments signposts, deterministic benchmark JSON, Tart artifacts, and anonymous summaries use the same `PerformanceOperation` names and millisecond units.
 
-Plate presentation uses `overlay_end_to_end_visible` as its primary user-facing latency. The span begins when the event tap recognizes a non-repeating activation and ends when the overlay's reveal animation completes. `diagnostic.json.overlayPresentation` retains the latest 20 correlated traces, including main-actor delivery, fullscreen probing, intentional presentation delay, deadline overshoot, preparation, window ordering, render submission, reveal completion, preview capture, and wallpaper completion. Rejected and cancelled attempts remain local diagnostic traces but never enter the successful latency summary.
+Stage presentation uses `overlay_end_to_end_visible` as its primary user-facing latency. The span begins when the event tap recognizes a non-repeating activation and ends when the overlay's reveal animation completes. `diagnostic.json.overlayPresentation` retains the latest 20 correlated traces, including main-actor delivery, fullscreen probing, intentional presentation delay, deadline overshoot, preparation, window ordering, render submission, reveal completion, preview capture, and wallpaper completion. Rejected and cancelled attempts remain local diagnostic traces but never enter the successful latency summary.
 
 `overlay_render_submission` replaces the old `overlay_first_frame` name. It means AppKit drew pending content and Core Animation was flushed; it is not evidence that WindowServer displayed a physical frame. Installed-app performance validation may compare that marker and reveal completion against ScreenCaptureKit pixel observations.
 
 ## Workloads and measurement phases
 
-| Profile | Stages | Windows | Processes |
+| Profile | Spaces | Windows | Processes |
 | --- | ---: | ---: | ---: |
 | typical | 4 | 12 | 4 |
 | busy | 7 | 21 | 7 |
 | stress | 10 | 50 | 10 |
 
-Report cold launch, first use, and warm operation runs separately. Overlay traces retain orthogonal process-use, preview-cache, wallpaper, hosting-view, process-age, and workload dimensions. Every observation carries a random in-memory span ID plus an optional in-memory trace ID and geometric workload counts (stages, windows, dormant windows, processes, captures). IDs never leave local diagnostics and traces.
+Report cold launch, first use, and warm operation runs separately. Overlay traces retain orthogonal process-use, preview-cache, wallpaper, hosting-view, process-age, and workload dimensions. Every observation carries a random in-memory span ID plus an optional in-memory trace ID and geometric workload counts (spaces, windows, dormant windows, processes, captures). IDs never leave local diagnostics and traces.
 
 ## Local schema and budgets
 

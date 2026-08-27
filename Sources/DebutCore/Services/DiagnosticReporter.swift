@@ -12,7 +12,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     public static let diagnosticFile: URL = defaultDirectory.appendingPathComponent("diagnostic.json")
 
     private static let defaultDirectory: URL = {
-        // Suites that exercise StageController report through `shared`. Writing
+        // Suites that exercise SpaceController report through `shared`. Writing
         // those events into the real support directory corrupts the log a live
         // session is diagnosed from, and has already produced false evidence.
         let dir: URL

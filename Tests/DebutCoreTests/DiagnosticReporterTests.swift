@@ -91,7 +91,7 @@ struct DiagnosticReporterTests {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let reporter = DiagnosticReporter(directory: dir)
-        reporter.setStateProvider { ["stageCount": "3"] }
+        reporter.setStateProvider { ["spaceCount": "3"] }
         reporter.report("app_launched", level: .lifecycle)
         reporter.flush()
 
@@ -100,7 +100,7 @@ struct DiagnosticReporterTests {
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
 
         let state = try #require(object["state"] as? [String: String])
-        #expect(state["stageCount"] == "3")
+        #expect(state["spaceCount"] == "3")
         let events = try #require(object["events"] as? [[String: String]])
         #expect(events.last?["event"] == "app_launched")
         #expect(object["updatedAt"] as? String != nil)
@@ -116,7 +116,7 @@ struct DiagnosticReporterTests {
             now: { 1_000_000 }
         )
         let reporter = DiagnosticReporter(directory: dir, performanceRecorder: recorder)
-        let correlation = recorder.begin(.overlayPreparation, workload: .init(stages: 4, windows: 12))
+        let correlation = recorder.begin(.overlayPreparation, workload: .init(spaces: 4, windows: 12))
         _ = recorder.end(correlation)
 
         reporter.report("overlay_shown", level: .transient)
@@ -163,7 +163,7 @@ struct DiagnosticReporterTests {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("Debut")
 
-        // Suites that exercise StageController report through the shared
+        // Suites that exercise SpaceController report through the shared
         // instance. Without redirection those events corrupt the very log a
         // real session gets diagnosed from.
         #expect(!DiagnosticReporter.diagnosticFile.path.hasPrefix(appSupport.path))
@@ -296,7 +296,7 @@ struct DiagnosticReporterTests {
 
         await MainActor.run {
             selection.value = "7"
-            reporter.report("stage_switched", level: .lifecycle)
+            reporter.report("space_switched", level: .lifecycle)
         }
         reporter.flush()
 

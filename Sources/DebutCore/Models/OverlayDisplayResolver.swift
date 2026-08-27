@@ -1,6 +1,6 @@
 import CoreGraphics
 
-/// Picks the single display the overlay belongs on. Plates describe where the user's attention
+/// Picks the single display the overlay belongs on. Stages describe where the user's attention
 /// already is, so they follow the focused window rather than covering every screen.
 public enum OverlayDisplayResolver {
     /// Returns the distance from the top of the full display to unobstructed content. The

@@ -2,13 +2,13 @@ import AppKit
 import DebutInputDriver
 import Foundation
 
-/// Drives the stage-cycling gesture the overlay jank report is about: Command and
+/// Drives the space-cycling gesture the overlay jank report is about: Command and
 /// Option held down while Tab is tapped. `InputDriver` never exercised this, so the
 /// VM suite measured window cycling instead.
-private enum PlateCycleDriver {
+private enum StageCycleDriver {
     static func run() {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let outputIndex = arguments.firstIndex(of: "--drive-plate-cycle"),
+        guard let outputIndex = arguments.firstIndex(of: "--drive-stage-cycle"),
               arguments.indices.contains(outputIndex + 1)
         else { return }
         let outputURL = URL(fileURLWithPath: arguments[outputIndex + 1])
@@ -19,13 +19,13 @@ private enum PlateCycleDriver {
 
         var records: [String] = []
         for pass in 1...max(1, passes) {
-            let events = PlateCycleSequence.events(forward: forward, backward: backward)
+            let events = StageCycleSequence.events(forward: forward, backward: backward)
             let started = DispatchTime.now().uptimeNanoseconds
             for event in events {
                 post(event)
                 // Only pace the Tab release; modifier transitions belong to the
                 // same instant as the tap they bracket.
-                if case .key(PlateCycleKey.tab, down: false) = event.kind {
+                if case .key(StageCycleKey.tab, down: false) = event.kind {
                     Thread.sleep(forTimeInterval: tapInterval)
                 } else {
                     Thread.sleep(forTimeInterval: 0.01)
@@ -34,7 +34,7 @@ private enum PlateCycleDriver {
             let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
             let steps = forward + backward
             records.append(
-                "{\"scenario\":\"plate-cycle-input\",\"iteration\":\(pass),"
+                "{\"scenario\":\"stage-cycle-input\",\"iteration\":\(pass),"
                 + "\"steps\":\(steps),\"durationMilliseconds\":\(elapsed),"
                 + "\"millisecondsPerStep\":\(elapsed / Double(max(steps, 1)))}"
             )
@@ -84,7 +84,7 @@ private enum InputDriver {
         for iteration in 1...100 {
             let started = DispatchTime.now().uptimeNanoseconds
             controlDigit(iteration.isMultiple(of: 2) ? 19 : 18)
-            records.append(record(scenario: "stage-switch-input", iteration: iteration, started: started))
+            records.append(record(scenario: "space-switch-input", iteration: iteration, started: started))
             Thread.sleep(forTimeInterval: 0.01)
         }
 
@@ -221,8 +221,8 @@ private final class FixtureDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-if ProcessInfo.processInfo.arguments.contains("--drive-plate-cycle") {
-    PlateCycleDriver.run()
+if ProcessInfo.processInfo.arguments.contains("--drive-stage-cycle") {
+    StageCycleDriver.run()
     exit(EXIT_SUCCESS)
 }
 

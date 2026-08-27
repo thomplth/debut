@@ -166,20 +166,20 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdTabHold, .nextWindow, .cmdRelease])
     }
 
-    @Test("Stage navigation events")
-    func stageNavigation() {
+    @Test("Space navigation events")
+    func spaceNavigation() {
         let svc = MockKeyboardService()
         let delegate = TestKeyboardDelegate()
         _ = svc.start(delegate: delegate)
 
         svc.simulateEvent(.cmdOptionTabHold)
-        svc.simulateEvent(.nextStage)
-        svc.simulateEvent(.previousStage)
-        svc.simulateEvent(.jumpToStage(3))
+        svc.simulateEvent(.nextSpace)
+        svc.simulateEvent(.previousSpace)
+        svc.simulateEvent(.jumpToSpace(3))
         svc.simulateEvent(.cmdRelease)
 
         #expect(delegate.receivedEvents == [
-            .cmdOptionTabHold, .nextStage, .previousStage, .jumpToStage(3), .cmdRelease
+            .cmdOptionTabHold, .nextSpace, .previousSpace, .jumpToSpace(3), .cmdRelease
         ])
     }
 
@@ -209,13 +209,13 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents.last == .nextDisplayStack)
     }
 
-    @Test("Overlay 9 targets the last stage and 0 has no default binding")
-    func lastStageKeyMapping() {
+    @Test("Overlay 9 targets the last space and 0 has no default binding")
+    func lastSpaceKeyMapping() {
         let bindings = KeyBindings()
 
-        #expect(KeyAction.jumpToStage9.displayName == "Jump to last stage")
-        #expect(KeyAction.jumpToStage9.toKeyEvent() == .jumpToLastStage)
-        #expect(bindings.action(for: KeyCombo(keyCode: kVK_ANSI_9)) == .jumpToStage9)
+        #expect(KeyAction.jumpToSpace9.displayName == "Jump to last space")
+        #expect(KeyAction.jumpToSpace9.toKeyEvent() == .jumpToLastSpace)
+        #expect(bindings.action(for: KeyCombo(keyCode: kVK_ANSI_9)) == .jumpToSpace9)
         #expect(bindings.action(for: KeyCombo(keyCode: kVK_ANSI_0)) == nil)
     }
 
@@ -226,13 +226,13 @@ struct KeyboardServiceTests {
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
 
-        let stageModeEvent = CGEvent(
+        let spaceModeEvent = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_Tab),
             keyDown: true
         )!
-        stageModeEvent.flags = [.maskCommand, .maskAlternate]
-        #expect(service.handleCGEvent(type: .keyDown, event: stageModeEvent) == nil)
+        spaceModeEvent.flags = [.maskCommand, .maskAlternate]
+        #expect(service.handleCGEvent(type: .keyDown, event: spaceModeEvent) == nil)
         service.overlayVisible = true
 
         let nineEvent = CGEvent(
@@ -251,7 +251,7 @@ struct KeyboardServiceTests {
         zeroEvent.flags = .maskCommand
         #expect(service.handleCGEvent(type: .keyDown, event: zeroEvent) == nil)
 
-        #expect(delegate.receivedEvents == [.cmdOptionTabHold, .jumpToLastStage])
+        #expect(delegate.receivedEvents == [.cmdOptionTabHold, .jumpToLastSpace])
     }
 
     @Test("Quick switch events")
@@ -260,15 +260,15 @@ struct KeyboardServiceTests {
         let delegate = TestKeyboardDelegate()
         _ = svc.start(delegate: delegate)
 
-        svc.simulateEvent(.switchToStage(1))
-        svc.simulateEvent(.switchToStageKeepingCurrentApplication(5))
+        svc.simulateEvent(.switchToSpace(1))
+        svc.simulateEvent(.switchToSpaceKeepingCurrentApplication(5))
 
         #expect(delegate.receivedEvents == [
-            .switchToStage(1), .switchToStageKeepingCurrentApplication(5),
+            .switchToSpace(1), .switchToSpaceKeepingCurrentApplication(5),
         ])
     }
 
-    @Test("Quick switch digit shortcuts map only 1-9 to stages 1-9")
+    @Test("Quick switch digit shortcuts map only 1-9 to spaces 1-9")
     func quickSwitchKeyMapping() {
         let mappings = [
             (kVK_ANSI_1, 1), (kVK_ANSI_2, 2), (kVK_ANSI_3, 3),
@@ -277,12 +277,12 @@ struct KeyboardServiceTests {
         ]
 
         for (keyCode, expectedPosition) in mappings {
-            #expect(EventTapKeyboardService.quickSwitchStagePosition(
+            #expect(EventTapKeyboardService.quickSwitchSpacePosition(
                 keyCode: Int64(keyCode),
                 flags: .maskControl
             ) == expectedPosition)
         }
-        #expect(EventTapKeyboardService.quickSwitchStagePosition(
+        #expect(EventTapKeyboardService.quickSwitchSpacePosition(
             keyCode: Int64(kVK_ANSI_0),
             flags: .maskControl
         ) == nil)
@@ -290,19 +290,19 @@ struct KeyboardServiceTests {
 
     @Test("Quick switch requires Ctrl without Command, Option, or Shift")
     func quickSwitchKeyModifiers() {
-        #expect(EventTapKeyboardService.quickSwitchStagePosition(
+        #expect(EventTapKeyboardService.quickSwitchSpacePosition(
             keyCode: Int64(kVK_ANSI_1),
             flags: []
         ) == nil)
-        #expect(EventTapKeyboardService.quickSwitchStagePosition(
+        #expect(EventTapKeyboardService.quickSwitchSpacePosition(
             keyCode: Int64(kVK_ANSI_1),
             flags: [.maskControl, .maskAlternate]
         ) == nil)
-        #expect(EventTapKeyboardService.quickSwitchStagePosition(
+        #expect(EventTapKeyboardService.quickSwitchSpacePosition(
             keyCode: Int64(kVK_ANSI_1),
             flags: [.maskControl, .maskShift]
         ) == nil)
-        #expect(EventTapKeyboardService.quickSwitchStagePosition(
+        #expect(EventTapKeyboardService.quickSwitchSpacePosition(
             keyCode: Int64(kVK_ANSI_1),
             flags: [.maskControl, .maskCommand]
         ) == nil)
@@ -332,7 +332,7 @@ struct KeyboardServiceTests {
 
         #expect(service.handleCGEvent(type: .keyDown, event: configured) == nil)
         #expect(service.handleCGEvent(type: .keyDown, event: oldDefault) === oldDefault)
-        #expect(delegate.receivedEvents == [.switchToStage(4)])
+        #expect(delegate.receivedEvents == [.switchToSpace(4)])
     }
 
     @Test("Same-app quick switch uses its own configured modifier chord")
@@ -355,7 +355,7 @@ struct KeyboardServiceTests {
         sameApp.flags = [.maskControl, .maskAlternate]
 
         #expect(service.handleCGEvent(type: .keyDown, event: sameApp) == nil)
-        #expect(delegate.receivedEvents == [.switchToStageKeepingCurrentApplication(4)])
+        #expect(delegate.receivedEvents == [.switchToSpaceKeepingCurrentApplication(4)])
     }
 
     @Test("Digit zero is not captured by either quick-switch shortcut")
@@ -692,23 +692,23 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdTabHold, .cmdTabHold])
     }
 
-    @Test("Held stage cycling is paced on the same budget as window cycling")
-    func heldStageCycleRateLimit() {
+    @Test("Held space cycling is paced on the same budget as window cycling")
+    func heldSpaceCycleRateLimit() {
         let clock = TestMonotonicClock()
         let service = makeThrottledService(clock: clock, interval: 0.1)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
 
-        let stageFlags: CGEventFlags = [.maskCommand, .maskAlternate]
+        let spaceFlags: CGEventFlags = [.maskCommand, .maskAlternate]
         #expect(service.handleCGEvent(
             type: .keyDown,
-            event: tabEvent(autoRepeat: false, flags: stageFlags)
+            event: tabEvent(autoRepeat: false, flags: spaceFlags)
         ) == nil)
         clock.advance(milliseconds: 5)
         #expect(service.handleCGEvent(
             type: .keyDown,
-            event: tabEvent(autoRepeat: true, flags: stageFlags)
+            event: tabEvent(autoRepeat: true, flags: spaceFlags)
         ) == nil)
 
         #expect(delegate.receivedEvents == [.cmdOptionTabHold])
@@ -763,7 +763,7 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdOptionTabHold])
     }
 
-    @Test("Cmd+Option+backtick opens the previous-stage direction")
+    @Test("Cmd+Option+backtick opens the previous-space direction")
     func cmdOptionBacktick() {
         let service = EventTapKeyboardService()
         let delegate = TestKeyboardDelegate()
@@ -979,8 +979,8 @@ struct KeyboardServiceTests {
     func eventEquality() {
         #expect(DebutKeyEvent.cmdTabTap == .cmdTabTap)
         #expect(DebutKeyEvent.cmdOptionTabHold == .cmdOptionTabHold)
-        #expect(DebutKeyEvent.jumpToStage(5) == .jumpToStage(5))
-        #expect(DebutKeyEvent.jumpToStage(5) != .jumpToStage(3))
+        #expect(DebutKeyEvent.jumpToSpace(5) == .jumpToSpace(5))
+        #expect(DebutKeyEvent.jumpToSpace(5) != .jumpToSpace(3))
         #expect(DebutKeyEvent.nextWindow != .previousWindow)
     }
 }

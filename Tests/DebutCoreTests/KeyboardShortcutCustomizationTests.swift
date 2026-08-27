@@ -6,22 +6,22 @@ import Testing
 
 @Suite("Keyboard shortcut customization", .serialized)
 struct KeyboardShortcutCustomizationTests {
-    @Test("Command-Option-backtick is the alternate previous-stage shortcut")
-    func previousStageAlternateDefault() {
+    @Test("Command-Option-backtick is the alternate previous-space shortcut")
+    func previousSpaceAlternateDefault() {
         let bindings = KeyBindings()
 
-        #expect(bindings.combo(for: .activatePreviousStageAlternate) == KeyCombo(
+        #expect(bindings.combo(for: .activatePreviousSpaceAlternate) == KeyCombo(
             keyCode: kVK_ANSI_Grave,
             command: true,
             option: true
         ))
         #expect(
-            KeyAction.activatePreviousStageAlternate.toKeyEvent()
+            KeyAction.activatePreviousSpaceAlternate.toKeyEvent()
                 == .cmdOptionShiftTabHold
         )
     }
 
-    @Test("Defaults include every global and Stage Manager shortcut")
+    @Test("Defaults include every global and Space Manager shortcut")
     func completeDefaults() {
         let bindings = KeyBindings()
 
@@ -36,7 +36,7 @@ struct KeyboardShortcutCustomizationTests {
         ))
         #expect(bindings.combo(for: .dismissOverlay) == KeyCombo(keyCode: kVK_Escape))
         // The Command modifier that opened the session is implicit here, so Return means
-        // physical Command-Return while the plates are visible.
+        // physical Command-Return while the stages are visible.
         #expect(bindings.combo(for: .nextDisplayStack) == KeyCombo(keyCode: kVK_Return))
         #expect(KeyAction.allCases.allSatisfy { bindings.combo(for: $0) != nil })
     }
@@ -56,15 +56,15 @@ struct KeyboardShortcutCustomizationTests {
 
         #expect(decoded.combo(for: .moveWindowLeft) == KeyCombo(keyCode: kVK_ANSI_B))
         #expect(decoded.combo(for: .activateNextWindow)?.command == true)
-        #expect(decoded.combo(for: .quickSwitchStage1)?.control == true)
+        #expect(decoded.combo(for: .quickSwitchSpace1)?.control == true)
         #expect(decoded.combo(for: .dismissOverlay)?.keyCode == kVK_Escape)
     }
 
-    @Test("Stage reordering is no longer a command")
-    func stageReorderActionsAreRetired() {
-        #expect(KeyAction(rawValue: "swapStageUp") == nil)
-        #expect(KeyAction(rawValue: "swapStageDown") == nil)
-        #expect(!KeyAction.allCases.contains { $0.rawValue.hasPrefix("swapStage") })
+    @Test("Space reordering is no longer a command")
+    func spaceReorderActionsAreRetired() {
+        #expect(KeyAction(rawValue: "swapSpaceUp") == nil)
+        #expect(KeyAction(rawValue: "swapSpaceDown") == nil)
+        #expect(!KeyAction.allCases.contains { $0.rawValue.hasPrefix("swapSpace") })
     }
 
     @Test("Retired saved actions are ignored")
@@ -75,8 +75,8 @@ struct KeyboardShortcutCustomizationTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any]
         )
         var encodedBindings = try #require(object["bindings"] as? [Any])
-        // A settings.json written before stage reordering was removed still carries its combo.
-        encodedBindings.append("swapStageUp")
+        // A settings.json written before space reordering was removed still carries its combo.
+        encodedBindings.append("swapSpaceUp")
         encodedBindings.append(["keyCode": kVK_Space])
         object["bindings"] = encodedBindings
 
@@ -142,7 +142,7 @@ struct KeyboardShortcutCustomizationTests {
         let service = EventTapKeyboardService()
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
-        bindings.bindings[.quickSwitchStage1] = KeyCombo(
+        bindings.bindings[.quickSwitchSpace1] = KeyCombo(
             keyCode: kVK_ANSI_B,
             option: true
         )
@@ -155,7 +155,7 @@ struct KeyboardShortcutCustomizationTests {
 
         let optionB = keyEvent(keyCode: kVK_ANSI_B, flags: .maskAlternate)
         #expect(service.handleCGEvent(type: .keyDown, event: optionB) === optionB)
-        #expect(delegate.receivedEvents == [.switchToStage(1)])
+        #expect(delegate.receivedEvents == [.switchToSpace(1)])
     }
 
     @Test("Conflicts are limited to shortcuts in the same context")

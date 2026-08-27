@@ -18,7 +18,7 @@
     <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
     <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
     <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
-    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="04-spaces.html"><span class="num">04</span>Spaces &amp; switching</a></li>
     <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
     <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
     <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
@@ -58,7 +58,7 @@ bundle-only matching as a fallback because titles are not stable either
 minimised, and ordered-out windows disappear from both AX and
 <code>CGWindowListCopyWindowInfo</code>. Only
 <code>kAXUIElementDestroyedNotification</code>, explicit exclusion or reset, or
-stage deletion may remove a live assignment. This rule has its own test —
+space deletion may remove a live assignment. This rule has its own test —
 <em>"CG absence never removes a window without a lifecycle event"</em>.
 </p>
 </div>
@@ -70,7 +70,7 @@ warming up can report a standard window as a dialog or a panel. An untrackable
 classification must make an assignment <em>dormant</em>, never delete it. Deleting
 turned a momentary misreport into permanent layout loss: it stranded a browser's
 four windows, which returned as <code>reason: new</code> and collapsed into the
-active stage. Dormancy makes the same misreport self-healing on the next snapshot.
+active space. Dormancy makes the same misreport self-healing on the next snapshot.
 </p>
 </div>
 
@@ -89,7 +89,7 @@ active stage. Dormancy makes the same misreport self-healing on the next snapsho
 <strong>The desktop surface, restated.</strong> Since windows can be neither moved
 off screen nor made transparent, Debut occludes them: a Debut-owned full-screen
 <code>NSWindow</code> at <code>.normal</code> level, ordered between the active
-stage's windows and everything else. Order the surface to front, then AX-raise the
+space's windows and everything else. Order the surface to front, then AX-raise the
 active windows above it. No position or minimise manipulation is involved at all.
 </p>
 <p>
@@ -233,7 +233,7 @@ consumes 50 %+ CPU indefinitely. Remove the hosting view in
 
 <table>
   <tr><th>Pattern</th><th>Where and why</th></tr>
-  <tr><td><code>@unchecked Sendable</code> + <code>MainActor.assumeIsolated</code></td><td><code>StageController</code>, <code>PerformanceRecorder</code>, <code>DiagnosticReporter</code>. Callbacks arrive from C APIs that carry no isolation information.</td></tr>
+  <tr><td><code>@unchecked Sendable</code> + <code>MainActor.assumeIsolated</code></td><td><code>SpaceController</code>, <code>PerformanceRecorder</code>, <code>DiagnosticReporter</code>. Callbacks arrive from C APIs that carry no isolation information.</td></tr>
   <tr><td><code>NSLock</code> rather than an actor</td><td>Anything the event-tap thread touches. An actor hop on the input path is exactly what must not happen.</td></tr>
   <tr><td>Separate locks for separate concerns</td><td><code>DiagnosticReporter</code> guards its state provider with a lock distinct from its write queue, so reading state never waits on file I/O.</td></tr>
   <tr><td><code>nonisolated(unsafe)</code></td><td>Used sparingly, always with a comment naming the queue that actually serialises the access.</td></tr>
@@ -244,7 +244,7 @@ consumes 50 %+ CPU indefinitely. Remove the hosting view in
 
 <dl>
   <dt>Assignment</dt>
-  <dd>The record that a particular window belongs to a particular stage at a
+  <dd>The record that a particular window belongs to a particular space at a
   particular index. Either <em>live</em> (the window exists now) or <em>dormant</em>.</dd>
 
   <dt>AX / Accessibility API</dt>
@@ -256,12 +256,12 @@ consumes 50 %+ CPU indefinitely. Remove the hosting view in
   actually happened when the session ends. Escape discards a tentative selection.</dd>
 
   <dt>Desktop surface</dt>
-  <dd>The full-screen Debut-owned window used to occlude inactive stages. Not a
+  <dd>The full-screen Debut-owned window used to occlude inactive spaces. Not a
   wallpaper — it renders the captured wallpaper image so that occlusion looks like
   an empty desktop.</dd>
 
   <dt>Dormant assignment</dt>
-  <dd>A stage placement retained for a window that no longer exists — because its
+  <dd>A space placement retained for a window that no longer exists — because its
   app quit, exited, or briefly misreported its AX role. Persistent, with no
   expiry.</dd>
 
@@ -274,9 +274,9 @@ consumes 50 %+ CPU indefinitely. Remove the hosting view in
   no timestamps. Index 0 is the current window, so index 1 is the default
   selection: one Tab press means "the previous window".</dd>
 
-  <dt>Plate</dt>
-  <dd>The visual representation of a stage in the overlay. Stages are the model;
-  plates are the render.</dd>
+  <dt>Stage</dt>
+  <dd>The visual representation of a space in the overlay. Spaces are the model;
+  stages are the render.</dd>
 
   <dt>Provisional window ID</dt>
   <dd>An ID recorded during reconciliation as possibly-replaced, carried forward so
@@ -291,9 +291,9 @@ consumes 50 %+ CPU indefinitely. Remove the hosting view in
   <dd>The interval during which the activation modifier is held. Separate from
   overlay visibility.</dd>
 
-  <dt>Stage</dt>
+  <dt>Space</dt>
   <dd>A workspace. Has no name — its label is its 1-based position in the array, so
-  a change in the stage list needs no bookkeeping.</dd>
+  a change in the space list needs no bookkeeping.</dd>
 
   <dt>Trackable</dt>
   <dd>An AX classification: a standard window Debut may manage. The classification
@@ -314,12 +314,12 @@ Documented here so they are not mistaken for intent. Check the spec before
 </p>
 
 <ul>
-  <li><strong><code>deleteStage</code> index arithmetic.</strong>
-  <code>min(overflowIndex, stages.count - 1)</code> mixes a pre-removal index with a
+  <li><strong><code>deleteSpace</code> index arithmetic.</strong>
+  <code>min(overflowIndex, spaces.count - 1)</code> mixes a pre-removal index with a
   post-removal count, and has no test coverage (chapter 4).</li>
   <li><strong>Deployment-target mismatch.</strong> <code>Package.swift</code> says
   macOS 26, <code>Info.plist</code> says 14.0 (chapter 10).</li>
-  <li><strong>Duplicated <code>plateCenterY</code> maths</strong> in the overlay,
+  <li><strong>Duplicated <code>stageCenterY</code> maths</strong> in the overlay,
   deliberately retained as a cross-check rather than factored out (chapter 6).</li>
 </ul>
 

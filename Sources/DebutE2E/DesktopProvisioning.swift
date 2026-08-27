@@ -4,7 +4,7 @@ import DebutCore
 
 /// Adds user desktops to a disposable host until it has `target` of them.
 ///
-/// Stages are desktops, so a host with one desktop cannot exercise a stage switch, a cross-stage
+/// Spaces are desktops, so a host with one desktop cannot exercise a space switch, a cross-space
 /// window move, or the switch duration — the entire subject of this architecture. Hosted CI
 /// runners and freshly cloned VMs all log in with exactly one, which is why those checks used to
 /// be skips rather than results.
@@ -12,7 +12,7 @@ import DebutCore
 /// The desktop has to come from Mission Control's own button. Seeding the Dock's
 /// `com.apple.spaces` plist looks like it works — the entry survives a reboot and the window
 /// server does report a second Space — but every seeded desktop comes back carrying the *first*
-/// desktop's `id64`, so `SpaceService.index(of:in:)` maps them all to stage 0. A duplicate
+/// desktop's `id64`, so `SpaceService.index(of:in:)` maps them all to space 0. A duplicate
 /// identity is worse than no second desktop, because the suite goes green against a broken map.
 enum DesktopProvisioning {
 

@@ -19,13 +19,13 @@ public final class StateStore: Sendable {
         }
     }
 
-    // MARK: - Stage state
+    // MARK: - Space state
 
-    public func save(_ manager: StageManager) throws {
+    public func save(_ manager: SpaceManager) throws {
         let performanceID = PerformanceRecorder.shared.begin(
             .statePersistence,
             workload: .init(
-                stages: manager.stages.count,
+                spaces: manager.spaces.count,
                 windows: manager.liveWindowCount,
                 dormantWindows: manager.dormantWindowAssignments.count
             )
@@ -38,21 +38,21 @@ public final class StateStore: Sendable {
         try data.write(to: stateFileURL, options: .atomic)
     }
 
-    public func load() throws -> StageManager {
+    public func load() throws -> SpaceManager {
         guard FileManager.default.fileExists(atPath: stateFileURL.path) else {
-            return StageManager()
+            return SpaceManager()
         }
         let data = try Data(contentsOf: stateFileURL)
 
         // Try new format first
-        if let manager = try? JSONDecoder().decode(StageManager.self, from: data) {
+        if let manager = try? JSONDecoder().decode(SpaceManager.self, from: data) {
             return manager
         }
 
-        // Legacy format had StageApp with bundleID — window IDs are ephemeral,
-        // so we preserve stage names/structure but clear window lists.
+        // Legacy format had SpaceApp with bundleID — window IDs are ephemeral,
+        // so we preserve space names/structure but clear window lists.
         // Windows will be rediscovered on launch via WindowDiscoveryService.
-        return StageManager()
+        return SpaceManager()
     }
 
     // MARK: - Settings

@@ -24,8 +24,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onDesktopsChanged: ((RuntimeWindowSnapshot) -> Void)?
     public var onAppTerminated: ((pid_t) -> Void)?
     public var excludedBundleIDs: Set<String> = []
-    /// Stages are desktops, so every snapshot carries the desktop macOS reports for each
-    /// window. Without it the reconciler falls back to guessing from the active stage.
+    /// Spaces are desktops, so every snapshot carries the desktop macOS reports for each
+    /// window. Without it the reconciler falls back to guessing from the active space.
     public var spaceSwitcher: (any SpaceSwitching)?
 
     private let focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)?
@@ -115,9 +115,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         super.init()
     }
 
-    public func discoverRunningWindows() -> [StageWindow] {
+    public func discoverRunningWindows() -> [SpaceWindow] {
         windowService.listWindows().filter { !excludedBundleIDs.contains($0.ownerBundleID) }.map { info in
-            StageWindow(
+            SpaceWindow(
                 windowID: info.windowID,
                 ownerBundleID: info.ownerBundleID,
                 ownerName: info.ownerName,
@@ -127,18 +127,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
     }
 
-    public func populateDefaultStage(_ stageManager: inout StageManager) {
+    public func populateDefaultSpace(_ spaceManager: inout SpaceManager) {
         let windows = discoverRunningWindows()
         let desktopLocations = spaceSwitcher?
             .desktopLocations(forWindows: windows.map(\.windowID)) ?? [:]
 
         for window in windows {
             // This path never reaches the reconciler, so the desktop rule is applied here
-            // too — otherwise a first run collapses every desktop onto stage 1.
-            let desktopStageID = desktopLocations[window.windowID].flatMap {
-                stageManager.stageID(stackID: $0.stackID, at: $0.index)
+            // too — otherwise a first run collapses every desktop onto space 1.
+            let desktopSpaceID = desktopLocations[window.windowID].flatMap {
+                spaceManager.spaceID(stackID: $0.stackID, at: $0.index)
             }
-            stageManager.addWindow(window, toStageID: desktopStageID ?? stageManager.stages[0].id)
+            spaceManager.addWindow(window, toSpaceID: desktopSpaceID ?? spaceManager.spaces[0].id)
             trackAndRegister(windowID: window.windowID, pid: window.ownerPID ?? 0)
         }
 
@@ -147,11 +147,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         ])
     }
 
-    /// Reconcile persisted stage windows against live windows.
+    /// Reconcile persisted space windows against live windows.
     /// CGWindowIDs and PIDs are ephemeral — match by (bundleID, title).
     /// Assignments from stopped processes become dormant rather than being deleted.
-    /// Unmatched live windows go to the first stage.
-    public func reconcileWindows(_ stageManager: inout StageManager) {
+    /// Unmatched live windows go to the first space.
+    public func reconcileWindows(_ spaceManager: inout SpaceManager) {
         let discoveryID = PerformanceRecorder.shared.begin(.windowDiscovery)
         let liveWindows = windowService.listWindows().filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
@@ -170,15 +170,15 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             workload: .init(windows: liveWindows.count)
         )
         var untrackableDormantCount = 0
-        for stage in stageManager.allStages {
-            for windowID in stage.windowIDs where untrackableWindowIDs.contains(windowID) {
-                guard let assignment = stageManager.makeWindowDormant(windowID: windowID) else { continue }
+        for space in spaceManager.allSpaces {
+            for windowID in space.windowIDs where untrackableWindowIDs.contains(windowID) {
+                guard let assignment = spaceManager.makeWindowDormant(windowID: windowID) else { continue }
                 untrackableDormantCount += 1
                 diag.report("window_made_dormant", details: [
                     "windowID": "\(windowID)",
                     "bundleID": assignment.window.ownerBundleID,
                     "windowTitle": assignment.window.windowTitle,
-                    "fromStage": "\(stageManager.stageIndex(id: assignment.stageID) ?? -1)",
+                    "fromSpace": "\(spaceManager.spaceIndex(id: assignment.spaceID) ?? -1)",
                     "reason": "untrackable",
                 ])
             }
@@ -187,8 +187,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         // An empty snapshot while regular apps are running usually means AX window
         // enumeration failed. Treating it as authoritative would erase every saved
-        // stage assignment, so leave persisted state intact for runtime PID cleanup.
-        let persistedWindowCount = stageManager.liveWindowCount
+        // space assignment, so leave persisted state intact for runtime PID cleanup.
+        let persistedWindowCount = spaceManager.liveWindowCount
         if liveWindows.isEmpty,
            persistedWindowCount > 0,
            !runningApps.isEmpty {
@@ -201,7 +201,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         let runningPIDs = Set(runningApps.map(\.pid))
         let runningBundleIDs = Set(runningApps.map(\.bundleID))
-        let stoppedPIDs: Set<pid_t> = Set(stageManager.allStages.flatMap(\.windows).compactMap { window -> pid_t? in
+        let stoppedPIDs: Set<pid_t> = Set(spaceManager.allSpaces.flatMap(\.windows).compactMap { window -> pid_t? in
             guard let ownerPID = window.ownerPID,
                   !runningPIDs.contains(ownerPID),
                   !runningBundleIDs.contains(window.ownerBundleID)
@@ -209,10 +209,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             return ownerPID
         })
         for ownerPID in stoppedPIDs {
-            _ = stageManager.makeWindowsDormant(forOwnerPID: ownerPID)
+            _ = spaceManager.makeWindowsDormant(forOwnerPID: ownerPID)
         }
 
-        let firstStageID = stageManager.stages[0].id
+        let firstSpaceID = spaceManager.spaces[0].id
         var reconciler = RuntimeWindowReconciler()
         let result = reconciler.reconcile(
             RuntimeWindowSnapshot(
@@ -221,8 +221,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 desktopIndexes: desktopIndexes(for: liveWindows),
                 desktopLocations: desktopLocations(for: liveWindows)
             ),
-            stageManager: &stageManager,
-            newWindowStageID: firstStageID
+            spaceManager: &spaceManager,
+            newWindowSpaceID: firstSpaceID
         )
         for info in liveWindows {
             trackAndRegister(windowID: info.windowID, pid: info.ownerPID)
@@ -232,7 +232,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             "liveCount": "\(liveWindows.count)",
             "added": "\(result.addedCount)",
             "reassigned": "\(result.reassignedCount)",
-            "dormant": "\(stageManager.dormantWindowAssignments.count)",
+            "dormant": "\(spaceManager.dormantWindowAssignments.count)",
             "untrackable": "\(untrackableDormantCount)",
         ])
         for event in result.events {
@@ -291,7 +291,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         trackWindow(windowID: windowID, pid: pid)
     }
 
-    /// Public entry point for external callers (e.g., StageController adding new windows)
+    /// Public entry point for external callers (e.g., SpaceController adding new windows)
     public func registerTracking(windowID: CGWindowID, pid: pid_t) {
         trackAndRegister(windowID: windowID, pid: pid)
     }
@@ -577,7 +577,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Re-reads which desktop every window is on.
     ///
     /// Activation was the only thing that asked, so a window the user dragged to another
-    /// desktop kept its old stage until they clicked it — the move was invisible in Debut
+    /// desktop kept its old space until they clicked it — the move was invisible in Debut
     /// until then. Deliberately carries no focused window and registers no AX observers:
     /// nothing was activated, and the only question being asked is where things are now.
     public func refreshDesktopAssignments() {

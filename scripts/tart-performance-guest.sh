@@ -79,30 +79,30 @@ sleep 8
 diagnostic="$console_home/Library/Application Support/Debut/diagnostic.json"
 as_console "$FIXTURE" --drive "$RESULTS/input-$PROFILE.jsonl"
 
-# Stage cycling is profiled on its own: it is the interaction the jank report is
+# Space cycling is profiled on its own: it is the interaction the jank report is
 # about, and the Cmd+Tab driver above never performs it.
 debut_pid="$(pgrep -f '/Applications/Debut.app/Contents/MacOS/Debut' | head -1)"
 if [[ -n "$debut_pid" ]]; then
     # The Ctrl+digit driver above leaves a main-queue backlog whose frames are
-    # indistinguishable from stage cycling in the profile. Let it drain first, or the
-    # sample attributes quickSwitchToStage work to the plate-cycle gesture.
+    # indistinguishable from space cycling in the profile. Let it drain first, or the
+    # sample attributes quickSwitchToSpace work to the stage-cycle gesture.
     sleep 10
-    sample "$debut_pid" 10 1 -file "$RESULTS/sample-plate-cycle-$PROFILE.txt" >/dev/null 2>&1 &
+    sample "$debut_pid" 10 1 -file "$RESULTS/sample-stage-cycle-$PROFILE.txt" >/dev/null 2>&1 &
     sample_pid=$!
-    as_console "$FIXTURE" --drive-plate-cycle "$RESULTS/plate-cycle-$PROFILE.jsonl" \
+    as_console "$FIXTURE" --drive-stage-cycle "$RESULTS/stage-cycle-$PROFILE.jsonl" \
         --passes 6 --forward 8 --backward 4 --tap-interval 0.09
     wait "$sample_pid" 2>/dev/null || true
     # Undelivered input is indistinguishable from a fast app: both produce an idle
     # profile. Fail instead of publishing a clean-looking result.
     if ! jq -e '[.events[] | select(.event == "key_event")] | length > 0' "$diagnostic" >/dev/null 2>&1; then
-        echo "Plate-cycle input was never delivered to Debut; profile is meaningless" >&2
+        echo "Stage-cycle input was never delivered to Debut; profile is meaningless" >&2
         exit 1
     fi
 else
-    echo "Debut is not running; skipping plate-cycle profile" >&2
+    echo "Debut is not running; skipping stage-cycle profile" >&2
 fi
 
-for scenario in launch-restore overlay-end-to-end-visible overlay-render-submission first-preview all-previews preview-1 preview-5 preview-10 preview-21 preview-50 selection-cycle stage-switch hidden-idle-45s cycles-100 process-exit title-change ax-timeout wallpaper-capture wallpaper-cancellation; do
+for scenario in launch-restore overlay-end-to-end-visible overlay-render-submission first-preview all-previews preview-1 preview-5 preview-10 preview-21 preview-50 selection-cycle space-switch hidden-idle-45s cycles-100 process-exit title-change ax-timeout wallpaper-capture wallpaper-cancellation; do
     start="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
     case "$scenario" in
         title-change)

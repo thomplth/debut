@@ -3,48 +3,48 @@ import CoreGraphics
 
 struct WindowDragState: Equatable {
     let windowID: CGWindowID
-    let sourceStageIndex: Int
+    let sourceSpaceIndex: Int
     let sourceWindowIndex: Int
     var location: CGPoint
     var dropTarget: WindowDropTarget?
 }
 
 struct WindowDropTarget: Equatable {
-    let stageIndex: Int
+    let spaceIndex: Int
     let windowIndex: Int
 }
 
 struct WindowMoveRequest: Equatable {
     let windowID: CGWindowID
-    let fromStageIndex: Int
+    let fromSpaceIndex: Int
     let fromWindowIndex: Int
-    let toStageIndex: Int
+    let toSpaceIndex: Int
     let toWindowIndex: Int
 }
 
 struct WindowDropSettlingState {
     let request: WindowMoveRequest
-    let window: PlateWindowData
+    let window: StageWindowData
     let destination: CGPoint
 }
 
 struct WindowLayoutKey: Equatable {
-    let stageWindowIDs: [[CGWindowID]]
+    let spaceWindowIDs: [[CGWindowID]]
 }
 
 struct PointerSelection: Equatable {
-    let stageIndex: Int
+    let spaceIndex: Int
     let windowIndex: Int
 }
 
-struct PlateFramePreferenceKey: PreferenceKey {
+struct StageFramePreferenceKey: PreferenceKey {
     nonisolated(unsafe) static var defaultValue: [Int: CGRect] = [:]
     static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { $1 })
     }
 }
 
-struct PlateSurfaceFramePreferenceKey: PreferenceKey {
+struct StageSurfaceFramePreferenceKey: PreferenceKey {
     nonisolated(unsafe) static var defaultValue: [Int: CGRect] = [:]
     static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { $1 })
@@ -52,7 +52,7 @@ struct PlateSurfaceFramePreferenceKey: PreferenceKey {
 }
 
 struct WindowFrameID: Hashable {
-    let stageIndex: Int
+    let spaceIndex: Int
     let windowIndex: Int
 }
 

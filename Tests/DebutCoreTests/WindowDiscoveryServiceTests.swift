@@ -80,8 +80,8 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshotFocusedWindowID == 4)
     }
 
-    // The reconciler decides stage membership from the snapshot alone, so a snapshot that
-    // omits desktops silently reverts it to guessing from the active stage.
+    // The reconciler decides space membership from the snapshot alone, so a snapshot that
+    // omits desktops silently reverts it to guessing from the active space.
     @Test("Activation snapshots carry the desktop macOS reports for each window")
     func activationSnapshotCarriesDesktops() {
         let windowService = MockWindowService()
@@ -126,7 +126,7 @@ struct WindowDiscoveryServiceTests {
 
         #expect(snapshot?.desktopIndexes == [1: 0, 2: 2])
         #expect(snapshot?.liveWindows.map(\.windowID) == [1, 2])
-        // Nothing was activated, so naming a focused window would reorder a stage on a
+        // Nothing was activated, so naming a focused window would reorder a space on a
         // refresh that is only meant to answer "where is everything now".
         #expect(snapshot?.focusedWindowID == nil)
     }
@@ -144,19 +144,19 @@ struct WindowDiscoveryServiceTests {
             processExitMonitor: MockProcessExitMonitor()
         )
         service.spaceSwitcher = spaces
-        var manager = StageManager()
-        StageController.reconcileStages(&manager, desktopCount: 3)
+        var manager = SpaceManager()
+        SpaceController.reconcileSpaces(&manager, desktopCount: 3)
 
         service.reconcileWindows(&manager)
 
-        #expect(manager.stageContainingWindow(windowID: 1) == manager.stages[2].id)
-        #expect(manager.stageContainingWindow(windowID: 2) == manager.stages[1].id)
+        #expect(manager.spaceContainingWindow(windowID: 1) == manager.spaces[2].id)
+        #expect(manager.spaceContainingWindow(windowID: 2) == manager.spaces[1].id)
     }
 
     // The first-run path bypasses the reconciler entirely, so it needs the desktop rule
-    // spelled out separately or a fresh install collapses every desktop onto stage 1.
-    @Test("First-run population places windows by desktop rather than all on stage 1")
-    func defaultStagePopulationPlacesByDesktop() {
+    // spelled out separately or a fresh install collapses every desktop onto space 1.
+    @Test("First-run population places windows by desktop rather than all on space 1")
+    func defaultSpacePopulationPlacesByDesktop() {
         let windowService = MockWindowService()
         windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
         windowService.windowList = [liveWindow(1), liveWindow(2)]
@@ -167,13 +167,13 @@ struct WindowDiscoveryServiceTests {
             processExitMonitor: MockProcessExitMonitor()
         )
         service.spaceSwitcher = spaces
-        var manager = StageManager()
-        StageController.reconcileStages(&manager, desktopCount: 2)
+        var manager = SpaceManager()
+        SpaceController.reconcileSpaces(&manager, desktopCount: 2)
 
-        service.populateDefaultStage(&manager)
+        service.populateDefaultSpace(&manager)
 
-        #expect(manager.stageContainingWindow(windowID: 1) == manager.stages[1].id)
-        #expect(manager.stageContainingWindow(windowID: 2) == manager.stages[0].id)
+        #expect(manager.spaceContainingWindow(windowID: 1) == manager.spaces[1].id)
+        #expect(manager.spaceContainingWindow(windowID: 2) == manager.spaces[0].id)
     }
 
     @Test("Launch publishes its complete window batch before focused-window activation")
@@ -273,18 +273,18 @@ struct WindowDiscoveryServiceTests {
             AppInfo(bundleID: "com.a", name: "A", pid: 10, isHidden: false),
         ]
 
-        var stageManager = StageManager()
-        stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Saved", ownerPID: 10),
-            toStageID: stageManager.activeStageID
+        var spaceManager = SpaceManager()
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Saved", ownerPID: 10),
+            toSpaceID: spaceManager.activeSpaceID
         )
 
         WindowDiscoveryService(
             windowService: windowService,
             processExitMonitor: MockProcessExitMonitor()
-        ).reconcileWindows(&stageManager)
+        ).reconcileWindows(&spaceManager)
 
-        #expect(stageManager.activeStage.windows.map(\.windowID) == [101])
+        #expect(spaceManager.activeSpace.windows.map(\.windowID) == [101])
     }
 
     @Test("Startup reconciliation makes explicitly untrackable AX windows dormant")
@@ -304,52 +304,52 @@ struct WindowDiscoveryServiceTests {
         )]
         windowService.untrackableWindowIDList = [99]
 
-        var stageManager = StageManager()
-        let stageID = stageManager.activeStageID
-        stageManager.addWindow(
-            StageWindow(windowID: 1, ownerBundleID: "com.google.Chrome", ownerName: "Chrome", windowTitle: "Tab", ownerPID: 10),
-            toStageID: stageID
+        var spaceManager = SpaceManager()
+        let spaceID = spaceManager.activeSpaceID
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 1, ownerBundleID: "com.google.Chrome", ownerName: "Chrome", windowTitle: "Tab", ownerPID: 10),
+            toSpaceID: spaceID
         )
-        stageManager.addWindow(
-            StageWindow(windowID: 99, ownerBundleID: "com.google.Chrome", ownerName: "Chrome", windowTitle: "Recent Download History", ownerPID: 10),
-            toStageID: stageID
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 99, ownerBundleID: "com.google.Chrome", ownerName: "Chrome", windowTitle: "Recent Download History", ownerPID: 10),
+            toSpaceID: spaceID
         )
 
         WindowDiscoveryService(
             windowService: windowService,
             processExitMonitor: MockProcessExitMonitor()
-        ).reconcileWindows(&stageManager)
+        ).reconcileWindows(&spaceManager)
 
-        #expect(stageManager.activeStage.windows.map(\.windowID) == [1])
+        #expect(spaceManager.activeSpace.windows.map(\.windowID) == [1])
         // A misreported classification must stay recoverable. Deleting the
         // assignment discards the only record of where the window belonged.
-        #expect(stageManager.dormantWindowAssignments.map(\.window.windowID) == [99])
-        #expect(stageManager.dormantWindowAssignments.first?.stageID == stageID)
+        #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [99])
+        #expect(spaceManager.dormantWindowAssignments.first?.spaceID == spaceID)
     }
 
-    @Test("A window misreported as untrackable returns to its own stage, not the active one")
-    func untrackableWindowReturnsToItsOriginalStage() {
+    @Test("A window misreported as untrackable returns to its own space, not the active one")
+    func untrackableWindowReturnsToItsOriginalSpace() {
         let windowService = MockWindowService()
         windowService.apps = [
             AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 10, isHidden: false),
         ]
         windowService.untrackableWindowIDList = [22357]
 
-        var stageManager = StageManager()
-        stageManager.createStage(position: .below)
-        stageManager.createStage(position: .below)
-        let originalStageID = stageManager.stages[2].id
-        stageManager.addWindow(
-            StageWindow(windowID: 22357, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Leisure", ownerPID: 10),
-            toStageID: originalStageID
+        var spaceManager = SpaceManager()
+        spaceManager.createSpace(position: .below)
+        spaceManager.createSpace(position: .below)
+        let originalSpaceID = spaceManager.spaces[2].id
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 22357, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Leisure", ownerPID: 10),
+            toSpaceID: originalSpaceID
         )
 
         let service = WindowDiscoveryService(
             windowService: windowService,
             processExitMonitor: MockProcessExitMonitor()
         )
-        service.reconcileWindows(&stageManager)
-        #expect(stageManager.dormantWindowAssignments.count == 1)
+        service.reconcileWindows(&spaceManager)
+        #expect(spaceManager.dormantWindowAssignments.count == 1)
 
         // The classification recovers, and the browser has retitled the window
         // in the meantime — the case that defeats exact-title matching.
@@ -363,11 +363,11 @@ struct WindowDiscoveryServiceTests {
             bounds: .zero,
             isOnScreen: true
         )]
-        service.reconcileWindows(&stageManager)
+        service.reconcileWindows(&spaceManager)
 
-        #expect(stageManager.dormantWindowAssignments.isEmpty)
-        #expect(stageManager.stages[0].windows.isEmpty)
-        #expect(stageManager.stages[2].windows.map(\.windowID) == [22357])
+        #expect(spaceManager.dormantWindowAssignments.isEmpty)
+        #expect(spaceManager.spaces[0].windows.isEmpty)
+        #expect(spaceManager.spaces[2].windows.map(\.windowID) == [22357])
     }
 
     @Test("Untrackable dormancy is reported with the placement it set aside")
@@ -383,11 +383,11 @@ struct WindowDiscoveryServiceTests {
         ]
         windowService.untrackableWindowIDList = [22357]
 
-        var stageManager = StageManager()
-        stageManager.createStage(position: .below)
-        stageManager.addWindow(
-            StageWindow(windowID: 22357, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Leisure", ownerPID: 10),
-            toStageID: stageManager.stages[1].id
+        var spaceManager = SpaceManager()
+        spaceManager.createSpace(position: .below)
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 22357, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Leisure", ownerPID: 10),
+            toSpaceID: spaceManager.spaces[1].id
         )
 
         let reporter = DiagnosticReporter(directory: directory)
@@ -395,7 +395,7 @@ struct WindowDiscoveryServiceTests {
             windowService: windowService,
             processExitMonitor: MockProcessExitMonitor(),
             diagnosticReporter: reporter
-        ).reconcileWindows(&stageManager)
+        ).reconcileWindows(&spaceManager)
         reporter.flush()
 
         let lines = try String(contentsOf: directory.appendingPathComponent("diagnostic.jsonl"), encoding: .utf8)
@@ -406,7 +406,7 @@ struct WindowDiscoveryServiceTests {
         #expect(dormancy["windowID"] == "22357")
         #expect(dormancy["bundleID"] == "company.thebrowser.dia")
         #expect(dormancy["windowTitle"] == "Leisure")
-        #expect(dormancy["fromStage"] == "1")
+        #expect(dormancy["fromSpace"] == "1")
 
         let summary = try #require(lines.first { $0["event"] == "windows_reconciled" })
         #expect(summary["untrackable"] == "1")
@@ -415,32 +415,32 @@ struct WindowDiscoveryServiceTests {
     @Test("Empty window snapshot makes stopped-app assignments dormant")
     func emptySnapshotMakesStoppedWindowsDormant() {
         let windowService = MockWindowService()
-        var stageManager = StageManager()
-        stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Saved", ownerPID: 10),
-            toStageID: stageManager.activeStageID
+        var spaceManager = SpaceManager()
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Saved", ownerPID: 10),
+            toSpaceID: spaceManager.activeSpaceID
         )
 
         WindowDiscoveryService(
             windowService: windowService,
             processExitMonitor: MockProcessExitMonitor()
-        ).reconcileWindows(&stageManager)
+        ).reconcileWindows(&spaceManager)
 
-        #expect(stageManager.activeStage.windows.isEmpty)
-        #expect(stageManager.dormantWindowAssignments.map(\.window.windowID) == [101])
+        #expect(spaceManager.activeSpace.windows.isEmpty)
+        #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [101])
     }
 
     @Test("Startup reconciliation restores a dormant window after relaunch")
     func startupRestoresDormantWindowAfterRelaunch() {
         let windowService = MockWindowService()
-        var stageManager = StageManager()
-        let originalStageID = stageManager.activeStageID
-        stageManager.createStage(position: .below)
-        stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Saved", ownerPID: 10),
-            toStageID: originalStageID
+        var spaceManager = SpaceManager()
+        let originalSpaceID = spaceManager.activeSpaceID
+        spaceManager.createSpace(position: .below)
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Saved", ownerPID: 10),
+            toSpaceID: originalSpaceID
         )
-        _ = stageManager.makeWindowsDormant(forOwnerPID: 10)
+        _ = spaceManager.makeWindowsDormant(forOwnerPID: 10)
         windowService.apps = [AppInfo(bundleID: "com.a", name: "A", pid: 20, isHidden: false)]
         windowService.windowList = [WindowInfo(
             windowID: 201,
@@ -456,13 +456,13 @@ struct WindowDiscoveryServiceTests {
         WindowDiscoveryService(
             windowService: windowService,
             processExitMonitor: MockProcessExitMonitor()
-        ).reconcileWindows(&stageManager)
+        ).reconcileWindows(&spaceManager)
 
-        #expect(stageManager.dormantWindowAssignments.isEmpty)
-        #expect(stageManager.stageContainingWindow(windowID: 201) == originalStageID)
+        #expect(spaceManager.dormantWindowAssignments.isEmpty)
+        #expect(spaceManager.spaceContainingWindow(windowID: 201) == originalSpaceID)
     }
 
-    @Test("Startup partial snapshot preserves omitted windows and their stages")
+    @Test("Startup partial snapshot preserves omitted windows and their spaces")
     func startupPartialSnapshotPreservesAssignments() {
         let windowService = MockWindowService()
         windowService.apps = [
@@ -470,33 +470,33 @@ struct WindowDiscoveryServiceTests {
         ]
         windowService.windowList = [liveWindow(1)]
 
-        var stageManager = StageManager()
-        let stage1 = stageManager.stages[0].id
-        stageManager.createStage(position: .below)
-        let stage2 = stageManager.stages[1].id
-        stageManager.addWindow(
-            StageWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Window 1", ownerPID: 10),
-            toStageID: stage1
+        var spaceManager = SpaceManager()
+        let space1 = spaceManager.spaces[0].id
+        spaceManager.createSpace(position: .below)
+        let space2 = spaceManager.spaces[1].id
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Window 1", ownerPID: 10),
+            toSpaceID: space1
         )
-        stageManager.addWindow(
-            StageWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Window 2", ownerPID: 10),
-            toStageID: stage2
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Window 2", ownerPID: 10),
+            toSpaceID: space2
         )
 
         let discovery = WindowDiscoveryService(
             windowService: windowService,
             processExitMonitor: MockProcessExitMonitor()
         )
-        discovery.reconcileWindows(&stageManager)
+        discovery.reconcileWindows(&spaceManager)
 
-        #expect(stageManager.stageContainingWindow(windowID: 1) == stage1)
-        #expect(stageManager.stageContainingWindow(windowID: 2) == stage2)
+        #expect(spaceManager.spaceContainingWindow(windowID: 1) == space1)
+        #expect(spaceManager.spaceContainingWindow(windowID: 2) == space2)
 
         windowService.windowList = [liveWindow(1), liveWindow(2)]
-        discovery.reconcileWindows(&stageManager)
+        discovery.reconcileWindows(&spaceManager)
 
-        #expect(stageManager.stageContainingWindow(windowID: 1) == stage1)
-        #expect(stageManager.stageContainingWindow(windowID: 2) == stage2)
+        #expect(spaceManager.spaceContainingWindow(windowID: 1) == space1)
+        #expect(spaceManager.spaceContainingWindow(windowID: 2) == space2)
     }
 
     @Test("Tracking a window also monitors its process even when AX registration fails")
@@ -588,26 +588,26 @@ struct WindowDiscoveryServiceTests {
             launchDiscoveryDelay: 0,
             processExitMonitor: processExitMonitor
         )
-        var stageManager = StageManager()
-        let originalStageID = stageManager.activeStageID
-        stageManager.addWindow(
-            StageWindow(
+        var spaceManager = SpaceManager()
+        let originalSpaceID = spaceManager.activeSpaceID
+        spaceManager.addWindow(
+            SpaceWindow(
                 windowID: 101,
                 ownerBundleID: "com.a",
                 ownerName: "A",
                 windowTitle: "Document",
                 ownerPID: oldPID
             ),
-            toStageID: originalStageID
+            toSpaceID: originalSpaceID
         )
         service.onAppTerminated = { pid in
-            _ = stageManager.makeWindowsDormant(forOwnerPID: pid)
+            _ = spaceManager.makeWindowsDormant(forOwnerPID: pid)
         }
         service.onWindowsDiscovered = { windows in
             var reconciler = RuntimeWindowReconciler()
             _ = reconciler.reconcile(
                 RuntimeWindowSnapshot(liveWindows: windows, allWindowIDs: nil),
-                stageManager: &stageManager
+                spaceManager: &spaceManager
             )
         }
         service.registerTracking(windowID: 101, pid: oldPID)
@@ -626,9 +626,9 @@ struct WindowDiscoveryServiceTests {
             AppInfo(bundleID: "com.a", name: "A", pid: newPID, isHidden: false)
         )
 
-        #expect(stageManager.dormantWindowAssignments.isEmpty)
-        #expect(stageManager.stageContainingWindow(windowID: 201) == originalStageID)
-        #expect(stageManager.stages.flatMap(\.windows).map(\.windowID) == [201])
+        #expect(spaceManager.dormantWindowAssignments.isEmpty)
+        #expect(spaceManager.spaceContainingWindow(windowID: 201) == originalSpaceID)
+        #expect(spaceManager.spaces.flatMap(\.windows).map(\.windowID) == [201])
         #expect(processExitMonitor.monitoredPIDs == [newPID])
     }
 

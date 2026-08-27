@@ -18,7 +18,7 @@
     <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
     <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
     <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
-    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="04-spaces.html"><span class="num">04</span>Spaces &amp; switching</a></li>
     <li><a class="current" href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
     <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
     <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
@@ -147,7 +147,7 @@ is the single easiest way to break Debut subtly.
          overlay activation  -> begin session, open a presentation trace, consume
          same-app cycling    -> only while the overlay is hidden, consume
 
-  8. guard stageManagerActive else ................... pass through
+  8. guard spaceManagerActive else ................... pass through
   9. guard overlayVisible    else ................... pass through
          (session alive but overlay closed after Escape: only the global
           activation shortcuts in step 7 can reopen it)
@@ -198,14 +198,14 @@ keyboard events leak to the active app."
 
 <blockquote>
 Keep the standard app-quit shortcut available unless the user explicitly assigns
-that physical key combination to a Stage Manager command.
+that physical key combination to a Space Manager command.
 <cite>EventTapKeyboardService.swift:348</cite>
 </blockquote>
 
 <h2>The session state machine</h2>
 
 <p>
-Three fields hold the whole thing: <code>stageManagerActive</code>,
+Three fields hold the whole thing: <code>spaceManagerActive</code>,
 <code>sessionPrimaryModifier</code>, and <code>sessionTriggerKeyCode</code>. They
 are deliberately <em>not</em> lock-protected, because only the tap thread ever
 touches them.
@@ -236,25 +236,25 @@ Cmd is physically held down.
 
 <p>
 Overlay visibility is a separately locked mirror pushed in by the controller.
-Escape closes the overlay and restores the pre-overlay stage but leaves
-<code>stageManagerActive</code> true — the session continues until the modifier is
-released, and same-app cycling stays stage-isolated because it is intercepted at
+Escape closes the overlay and restores the pre-overlay space but leaves
+<code>spaceManagerActive</code> true — the session continues until the modifier is
+released, and same-app cycling stays space-isolated because it is intercepted at
 step 7, above the overlay gate.
 </p>
 
 <h2>Quick switch</h2>
 
 <p>
-Two independently configurable modifier sets — direct stage switching (default
+Two independently configurable modifier sets — direct space switching (default
 Control) and same-app switching (default Control+Option) — are both evaluated on
-every keyDown by <code>quickSwitchStagePosition(keyCode:flags:modifiers:)</code>&nbsp;<span class="src">EventTapKeyboardService.swift:460</span>.
+every keyDown by <code>quickSwitchSpacePosition(keyCode:flags:modifiers:)</code>&nbsp;<span class="src">EventTapKeyboardService.swift:460</span>.
 </p>
 
 <p>
 The match is <strong>exact equality</strong> after masking to the four modifier
 flags, so Ctrl+Shift+1 does not fire Ctrl+1. The event becomes the same-app
 variant whenever the same-app set matched&nbsp;<span class="src">EventTapKeyboardService.swift:282</span>
-— the same-app chord wins outright if both sets somehow match, and the stage
+— the same-app chord wins outright if both sets somehow match, and the space
 position is then taken from whichever set produced one. Digits map
 explicitly from 1 to 9; <code>0</code> falls through to the default case and there
 is no action for it. Repeat presses are swallowed by an insert-if-new set, so
@@ -289,11 +289,11 @@ string-backed <code>CaseIterable</code> enum in four groups:
   <tr><th>Group</th><th>Scope</th><th>Cases</th></tr>
   <tr>
     <td>Activation</td><td>global</td>
-    <td><code>activateNextWindow</code>, <code>activatePreviousWindow</code>, <code>activateNextStage</code>, <code>activatePreviousStage</code>, <code>activatePreviousStageAlternate</code></td>
+    <td><code>activateNextWindow</code>, <code>activatePreviousWindow</code>, <code>activateNextSpace</code>, <code>activatePreviousSpace</code>, <code>activatePreviousSpaceAlternate</code></td>
   </tr>
   <tr>
     <td>Quick switch</td><td>global</td>
-    <td><code>quickSwitchStage1</code> … <code>quickSwitchStage9</code></td>
+    <td><code>quickSwitchSpace1</code> … <code>quickSwitchSpace9</code></td>
   </tr>
   <tr>
     <td>Same-app cycling</td><td>global</td>
@@ -301,7 +301,7 @@ string-backed <code>CaseIterable</code> enum in four groups:
   </tr>
   <tr>
     <td>Session</td><td>session</td>
-    <td><code>nextWindow</code>, <code>previousWindow</code>, <code>previousWindowAlternate</code>, <code>nextStage</code>, <code>previousStage</code>, <code>jumpToStage1</code>…<code>9</code>, <code>moveWindowUp</code>/<code>Down</code>, <code>moveWindowLeft</code>/<code>Right</code>, <code>dismissOverlay</code></td>
+    <td><code>nextWindow</code>, <code>previousWindow</code>, <code>previousWindowAlternate</code>, <code>nextSpace</code>, <code>previousSpace</code>, <code>jumpToSpace1</code>…<code>9</code>, <code>moveWindowUp</code>/<code>Down</code>, <code>moveWindowLeft</code>/<code>Right</code>, <code>dismissOverlay</code></td>
   </tr>
 </table>
 
@@ -311,8 +311,8 @@ Derived properties on the enum carry the semantics the raw cases cannot:
 <code>quickSwitchPosition</code>, <code>isSameAppCycle</code>, and
 <code>toKeyEvent()</code>. Alternates collapse in <code>toKeyEvent()</code> —
 <code>previousWindowAlternate</code> becomes <code>previousWindow</code> and
-<code>jumpToStage9</code> becomes <code>jumpToLastStage</code>, because the ninth
-slot targets the <em>last</em> stage rather than literally stage 9.
+<code>jumpToSpace9</code> becomes <code>jumpToLastSpace</code>, because the ninth
+slot targets the <em>last</em> space rather than literally space 9.
 </p>
 
 <p>
@@ -430,7 +430,7 @@ waited weeks, so the wrong interpretation discards itself.
 </ul>
 
 <div class="pager">
-  <a href="04-stages.html"><span class="dir">Previous</span>&larr; 04 · Stages &amp; switching</a>
+  <a href="04-spaces.html"><span class="dir">Previous</span>&larr; 04 · Spaces &amp; switching</a>
   <a href="06-overlay.html"><span class="dir">Next</span>06 · The overlay &rarr;</a>
 </div>
 

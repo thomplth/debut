@@ -27,38 +27,38 @@ struct MultiDisplaySpaceTests {
         ]
     )
 
-    @Test("Separate Spaces creates one independently active stage stack per display")
+    @Test("Separate Spaces creates one independently active space stack per display")
     func separateStacks() {
-        var manager = StageManager()
-        manager.reconcileStageStacks(with: topology)
+        var manager = SpaceManager()
+        manager.reconcileSpaceStacks(with: topology)
 
-        #expect(manager.stageStacks.count == 2)
-        #expect(manager.selectedStageStackID == "display-a")
-        #expect(manager.stages.count == 2)
-        #expect(manager.activeStageID == manager.stages[1].id)
+        #expect(manager.spaceStacks.count == 2)
+        #expect(manager.selectedSpaceStackID == "display-a")
+        #expect(manager.spaces.count == 2)
+        #expect(manager.activeSpaceID == manager.spaces[1].id)
 
-        manager.selectStageStack(id: "display-b")
-        #expect(manager.stages.count == 3)
-        #expect(manager.activeStageID == manager.stages[0].id)
+        manager.selectSpaceStack(id: "display-b")
+        #expect(manager.spaces.count == 3)
+        #expect(manager.activeSpaceID == manager.spaces[0].id)
     }
 
-    @Test("Cycling wraps through display stacks and preserves each active stage")
+    @Test("Cycling wraps through display stacks and preserves each active space")
     func cyclesStacks() {
-        var manager = StageManager()
-        manager.reconcileStageStacks(with: topology)
-        let activeOnA = manager.activeStageID
+        var manager = SpaceManager()
+        manager.reconcileSpaceStacks(with: topology)
+        let activeOnA = manager.activeSpaceID
 
-        manager.selectNextStageStack()
-        let stageOnB = manager.stages[2].id
-        manager.activateStage(id: stageOnB)
-        #expect(manager.selectedStageStackID == "display-b")
+        manager.selectNextSpaceStack()
+        let spaceOnB = manager.spaces[2].id
+        manager.activateSpace(id: spaceOnB)
+        #expect(manager.selectedSpaceStackID == "display-b")
 
-        manager.selectNextStageStack()
-        #expect(manager.selectedStageStackID == "display-a")
-        #expect(manager.activeStageID == activeOnA)
+        manager.selectNextSpaceStack()
+        #expect(manager.selectedSpaceStackID == "display-a")
+        #expect(manager.activeSpaceID == activeOnA)
 
-        manager.selectNextStageStack()
-        #expect(manager.activeStageID == stageOnB)
+        manager.selectNextSpaceStack()
+        #expect(manager.activeSpaceID == spaceOnB)
     }
 
     @Test("Shared Spaces exposes one stack for the whole display wall")
@@ -76,13 +76,13 @@ struct MultiDisplaySpaceTests {
                 ),
             ]
         )
-        var manager = StageManager()
-        manager.reconcileStageStacks(with: shared)
+        var manager = SpaceManager()
+        manager.reconcileSpaceStacks(with: shared)
 
-        #expect(manager.stageStacks.count == 1)
-        #expect(manager.selectedStageStackID == SpaceTopology.sharedStackID)
-        #expect(manager.stages.count == 3)
-        #expect(manager.activeStageID == manager.stages[1].id)
+        #expect(manager.spaceStacks.count == 1)
+        #expect(manager.selectedSpaceStackID == SpaceTopology.sharedStackID)
+        #expect(manager.spaces.count == 3)
+        #expect(manager.activeSpaceID == manager.spaces[1].id)
     }
 
     @Test("Desktop locations include display stack identity")
@@ -98,31 +98,31 @@ struct MultiDisplaySpaceTests {
 
     @Test("Enabling separate Spaces preserves the existing shared stack on the first display")
     func sharedToSeparateMigration() {
-        var manager = StageManager()
-        manager.createStage(position: .below)
+        var manager = SpaceManager()
+        manager.createSpace(position: .below)
         manager.addWindow(
-            StageWindow(windowID: 70, ownerBundleID: "com.example", ownerName: "Example", windowTitle: "Example"),
-            toStageID: manager.stages[1].id
+            SpaceWindow(windowID: 70, ownerBundleID: "com.example", ownerName: "Example", windowTitle: "Example"),
+            toSpaceID: manager.spaces[1].id
         )
 
-        manager.reconcileStageStacks(with: topology)
+        manager.reconcileSpaceStacks(with: topology)
 
-        #expect(manager.stageStacks.count == 2)
-        #expect(manager.stageStacks[0].id == "display-a")
-        #expect(manager.stageStacks[0].stages[1].windowIDs == [70])
+        #expect(manager.spaceStacks.count == 2)
+        #expect(manager.spaceStacks[0].id == "display-a")
+        #expect(manager.spaceStacks[0].spaces[1].windowIDs == [70])
     }
 
     @Test("Disabling separate Spaces merges display stacks into the shared stack")
     func separateToSharedMigration() {
-        var manager = StageManager()
-        manager.reconcileStageStacks(with: topology)
+        var manager = SpaceManager()
+        manager.reconcileSpaceStacks(with: topology)
         manager.addWindow(
-            StageWindow(windowID: 70, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A"),
-            toStageID: manager.stageID(stackID: "display-a", at: 1)!
+            SpaceWindow(windowID: 70, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A"),
+            toSpaceID: manager.spaceID(stackID: "display-a", at: 1)!
         )
         manager.addWindow(
-            StageWindow(windowID: 80, ownerBundleID: "com.b", ownerName: "B", windowTitle: "B"),
-            toStageID: manager.stageID(stackID: "display-b", at: 1)!
+            SpaceWindow(windowID: 80, ownerBundleID: "com.b", ownerName: "B", windowTitle: "B"),
+            toSpaceID: manager.spaceID(stackID: "display-b", at: 1)!
         )
         let shared = SpaceTopology(separateSpaces: false, stacks: [
             SpaceStackDescriptor(
@@ -135,9 +135,9 @@ struct MultiDisplaySpaceTests {
             ),
         ])
 
-        manager.reconcileStageStacks(with: shared)
+        manager.reconcileSpaceStacks(with: shared)
 
-        #expect(manager.stageStacks.count == 1)
-        #expect(Set(manager.stages[1].windowIDs) == [70, 80])
+        #expect(manager.spaceStacks.count == 1)
+        #expect(Set(manager.spaces[1].windowIDs) == [70, 80])
     }
 }

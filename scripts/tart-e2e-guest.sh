@@ -116,7 +116,7 @@ wait_for_debut_ready() {
         if [[ -f "$diagnostic_path" ]]; then
             events_json="$(/usr/bin/plutil -extract events json -o - "$diagnostic_path" 2>/dev/null || true)"
             event_tap_running="$(/usr/bin/plutil -extract state.eventTapRunning raw -o - "$diagnostic_path" 2>/dev/null || true)"
-            window_count="$(/usr/bin/plutil -extract state.windowsInActiveStage raw -o - "$diagnostic_path" 2>/dev/null || true)"
+            window_count="$(/usr/bin/plutil -extract state.windowsInActiveSpace raw -o - "$diagnostic_path" 2>/dev/null || true)"
 
             if grep -Eq '"event"[[:space:]]*:[[:space:]]*"app_ready"' <<< "$events_json" \
                 && [[ "$event_tap_running" == "true" ]] \
@@ -182,10 +182,10 @@ as_console open -na TextEdit "$FIXTURE_DIR/one.txt"
 as_console open -na TextEdit "$FIXTURE_DIR/two.txt"
 wait_for_fixture_apps
 
-# A freshly cloned VM logs in with one desktop, and a stage is a desktop, so without this the
-# suite cannot switch a stage or move a window between two. Debut builds its stage list at
+# A freshly cloned VM logs in with one desktop, and a space is a desktop, so without this the
+# suite cannot switch a space or move a window between two. Debut builds its space list at
 # launch, so the desktops have to exist first.
-echo "Provisioning desktops so stages have somewhere to be..."
+echo "Provisioning desktops so spaces have somewhere to be..."
 as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 3
 
 echo "Launching Debut in the guest Aqua session..."
