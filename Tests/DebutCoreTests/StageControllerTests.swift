@@ -680,6 +680,41 @@ struct StageControllerTests {
         return (controller, windowService, keyboardService, delegate)
     }
 
+    @Test("Hidden startup prewarm fills the cold preview cache")
+    func hiddenStartupPrewarmFillsColdCache() throws {
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
+        let firstStageID = controller.stageManager.stages[0].id
+        controller.stageManager.createStage(position: .below)
+        let secondStageID = controller.stageManager.stages[1].id
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toStageID: firstStageID
+        )
+        controller.stageManager.addWindow(
+            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toStageID: secondStageID
+        )
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
+
+        controller.prewarmWindowPreviews()
+
+        #expect(waitUntil { controller.windowPreviews.count == 2 })
+        #expect(Set(try #require(windowSvc.captureRequests.first)) == [101, 202])
+        #expect(!controller.isStageManagerVisible)
+        #expect(delegate.overlayOpened.wait(timeout: .now()) == .timedOut)
+        #expect(delegate.overlayUpdated.wait(timeout: .now()) == .timedOut)
+
+        let activeWindowID = try #require(
+            controller.stageManager.activeStage.windows.first?.windowID
+        )
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
+        #expect(Set(try #require(windowSvc.captureRequests.last)) == [activeWindowID],
+                "The first overlay should reuse every prewarmed preview except the active window")
+        keyboardSvc.simulateEvent(.escape)
+    }
+
     @Test("Cached previews are served without re-capturing")
     func cachedPreviewsSkipCapture() throws {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
