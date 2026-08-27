@@ -17,6 +17,7 @@ public struct SettingsViewModel: Sendable {
     public var onSettingsChanged: (@Sendable (AppSettings) -> Void)?
     public var onResetWindowCache: (@Sendable () -> Void)?
     public var onExportDiagnosticData: (@Sendable () -> Void)?
+    public var onCheckForUpdates: (@Sendable () -> Void)?
 
     public init(settings: AppSettings = AppSettings(), spaceManager: SpaceManager = SpaceManager()) {
         self.settings = settings
@@ -29,6 +30,10 @@ public struct SettingsViewModel: Sendable {
 
     public func exportDiagnosticData() {
         onExportDiagnosticData?()
+    }
+
+    public func checkForUpdates() {
+        onCheckForUpdates?()
     }
 
     public let telemetryExcludedData = "Never shared: window titles, app names or bundle IDs, PIDs, window IDs, paths, screenshots, raw diagnostics, free-form errors, or persistent identifiers."

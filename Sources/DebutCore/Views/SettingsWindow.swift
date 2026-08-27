@@ -613,6 +613,10 @@ public struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Button("Check for Updates…") {
+                viewModel.checkForUpdates()
+            }
         }
     }
 

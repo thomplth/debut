@@ -14,11 +14,20 @@ let package = Package(
         .executable(name: "DebutDemo", targets: ["DebutDemo"]),
         .library(name: "DebutCore", targets: ["DebutCore"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"),
+    ],
     targets: [
         .executableTarget(
             name: "DebutApp",
-            dependencies: ["DebutCore"],
-            path: "Sources/DebutApp"
+            dependencies: [
+                "DebutCore",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
+            path: "Sources/DebutApp",
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
+            ]
         ),
         .target(
             name: "DebutCore",

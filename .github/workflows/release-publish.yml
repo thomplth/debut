@@ -5,6 +5,10 @@ name: Publish Release
 on:
   workflow_call:
     inputs:
+      channel:
+        description: Daily prerelease or manually promoted stable release
+        required: true
+        type: string
       version:
         description: The version to release, without the leading v
         required: true
@@ -26,6 +30,7 @@ jobs:
   publish:
     runs-on: macos-26
     timeout-minutes: 30
+    environment: ${{ inputs.channel == 'stable' && 'stable-release' || 'daily-release' }}
 
     steps:
       - name: Check out the commit the gates tested
@@ -38,6 +43,13 @@ jobs:
         env:
           SHA: ${{ inputs.sha }}
         run: ./scripts/verify-release-commit.sh "$SHA"
+
+      - name: Enforce automatic update channel policy
+        id: update_policy
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ inputs.version }}
+        run: ./scripts/stable-update-eligibility.sh "$CHANNEL" "$VERSION" | tee -a "$GITHUB_OUTPUT"
 
       - name: Select the macOS 26 toolchain
         run: |
@@ -57,6 +69,23 @@ jobs:
           PREVIOUS_TAG: ${{ inputs.previous_tag }}
         run: ./scripts/release-notes.sh "$PREVIOUS_TAG" "v$VERSION" | tee "$RUNNER_TEMP/notes.md"
 
+      - name: Import the stable Developer ID identity
+        if: inputs.channel == 'stable'
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        run: |
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          keychain="$RUNNER_TEMP/debut-signing.keychain-db"
+          keychain_password="$(uuidgen)$(uuidgen)"
+          printf '%s' "$CERTIFICATE_BASE64" | /usr/bin/base64 -D > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+
       - name: Tag the tested commit
         env:
           VERSION: ${{ inputs.version }}
@@ -67,7 +96,37 @@ jobs:
           echo "TAG=v$VERSION" >> "$GITHUB_ENV"
 
       - name: Build the disk image
+        env:
+          DEBUT_DISTRIBUTION_SIGNING: ${{ inputs.channel == 'stable' && '1' || '0' }}
+          DEBUT_SIGNING_IDENTITY: ${{ inputs.channel == 'stable' && vars.DEVELOPER_IDENTITY || '' }}
         run: ./scripts/package-dmg.sh
+
+      - name: Notarize and staple the stable disk image
+        if: inputs.channel == 'stable'
+        env:
+          NOTARY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          key="$RUNNER_TEMP/notary-api-key.p8"
+          printf '%s' "$NOTARY_KEY" > "$key"
+          xcrun notarytool submit .build/Debut.dmg \
+            --key "$key" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --wait
+          xcrun stapler staple .build/Debut.dmg
+          xcrun stapler validate .build/Debut.dmg
+
+      - name: Sign and generate the stable appcast
+        if: steps.update_policy.outputs.eligible == 'true'
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          private_key="$RUNNER_TEMP/sparkle-eddsa.key"
+          printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$private_key"
+          ./scripts/generate-appcast.sh "$VERSION" .build/Debut.dmg "$private_key" .build/appcast.xml
 
       # Last, so a build or packaging failure leaves no tag behind claiming a release happened.
       - name: Push the tag
@@ -78,7 +137,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
         run: |
+          flags=()
+          assets=(.build/Debut.dmg)
+          if [[ "${{ inputs.channel }}" == "daily" ]]; then
+              flags+=(--prerelease)
+          else
+              assets+=(.build/appcast.xml)
+          fi
           gh release create "v$VERSION" \
             --title "Debut v$VERSION" \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            .build/Debut.dmg
+            "${flags[@]}" \
+            "${assets[@]}"

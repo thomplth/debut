@@ -27,7 +27,8 @@ fi
 
 # The archive carries its own name, so a rename on the host cannot leave the guest installing,
 # permitting and launching three different apps.
-app_name="$(/usr/bin/unzip -Z1 "$APP_ARCHIVE" | awk -F/ '$1 ~ /\.app$/ { print $1; exit }')"
+app_name="$(/usr/bin/unzip -Z1 "$APP_ARCHIVE" \
+    | awk -F/ '$1 ~ /\.app$/ && !seen[$1]++ { print $1 }')"
 if [[ -z "$app_name" ]]; then
     echo "The staged archive does not contain an app bundle." >&2
     exit 1

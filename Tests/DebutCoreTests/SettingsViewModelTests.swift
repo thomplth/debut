@@ -71,4 +71,16 @@ struct SettingsViewModelTests {
         #expect(calls.reset == 1)
         #expect(calls.export == 1)
     }
+
+    @Test("Update checks are forwarded to the app")
+    func updateChecks() {
+        final class Calls: @unchecked Sendable { var checks = 0 }
+        let calls = Calls()
+        var vm = SettingsViewModel()
+        vm.onCheckForUpdates = { calls.checks += 1 }
+
+        vm.checkForUpdates()
+
+        #expect(calls.checks == 1)
+    }
 }
