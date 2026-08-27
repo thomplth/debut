@@ -793,6 +793,60 @@ public struct PlateConstants {
         screenWidth - screenMargin * 2
     }
 
+    /// The height a plate may occupy before the overlay gives scale back to fit it.
+    public static func availablePlateHeight(screenHeight: CGFloat) -> CGFloat {
+        screenHeight - screenMargin * 2
+    }
+
+    /// The largest requested scale at which every plate still fits the display.
+    ///
+    /// Scale, column capacity and row count are circular — a bigger card fits fewer per row, and
+    /// more rows make a taller plate — so the fit is searched for rather than solved. Plate height
+    /// only ever grows with scale, so walking the slider's own steps downward finds the largest
+    /// scale that fits, and staying on those steps keeps the setting and the drawn size in step.
+    public static func fittedPlateScale(
+        requested: CGFloat,
+        windowCounts: [Int],
+        containerSize: CGSize,
+        metrics: PlateMetrics = .standard
+    ) -> CGFloat {
+        let floor = CGFloat(AppSettings.minimumPlateScale)
+        let ceiling = CGFloat(AppSettings.maximumPlateScale)
+        let step = CGFloat(AppSettings.plateScaleStep)
+        let clamped = min(ceiling, max(floor, requested))
+        let availableWidth = availablePlateWidth(screenWidth: containerSize.width)
+        let availableHeight = availablePlateHeight(screenHeight: containerSize.height)
+
+        let steps = Int((((clamped - floor) / step)).rounded())
+        for candidateStep in stride(from: steps, through: 0, by: -1) {
+            let candidate = floor + CGFloat(candidateStep) * step
+            let fits = plateLayouts(
+                forWindowCounts: windowCounts,
+                screenWidth: containerSize.width,
+                metrics: metrics.scaled(by: candidate)
+            ).allSatisfy {
+                $0.plateSize.width <= availableWidth && $0.plateSize.height <= availableHeight
+            }
+            if fits { return candidate }
+        }
+        return floor
+    }
+
+    /// The metrics the overlay actually draws at. E2E aims at real screen coordinates, so a
+    /// second derivation of the scale there would put its clicks somewhere the overlay never
+    /// drew without either side failing.
+    public static func drawnMetrics(
+        plateScale: CGFloat,
+        windowCounts: [Int],
+        containerSize: CGSize
+    ) -> PlateMetrics {
+        PlateMetrics.standard.scaled(by: fittedPlateScale(
+            requested: plateScale,
+            windowCounts: windowCounts,
+            containerSize: containerSize
+        ))
+    }
+
     public static func plateLayouts(
         forWindowCounts counts: [Int],
         screenWidth: CGFloat,
@@ -980,7 +1034,14 @@ public struct OverlaySwiftUIView: View {
         } ?? []
 
         GeometryReader { geo in
-            let metrics = PlateMetrics.standard
+            // Fitted against the resting window counts, not the displaced ones: a drag that
+            // moves a card between stages must not resize every other card while it is in
+            // flight.
+            let metrics = PlateConstants.drawnMetrics(
+                plateScale: CGFloat(viewModel.appearance.plateScale),
+                windowCounts: plates.map(\.windows.count),
+                containerSize: geo.size
+            )
             // Two grids per stage: the one its own cards rest in, and the one the drag would
             // give it. A card's drag offset is the delta between them.
             let displayedLayouts = PlateConstants.plateLayouts(
@@ -1667,15 +1728,18 @@ struct WindowPreviewView: View {
                         Image(decorative: cgImage, scale: 1.0)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .clipShape(RoundedRectangle(cornerRadius: metrics.thumbnailCornerRadius))
                     } else {
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: metrics.thumbnailCornerRadius)
                             .fill(.quaternary.opacity(0.3))
                             .overlay {
+                                // Rasterized at a scale-independent size and framed at the
+                                // drawn one, so moving the plate scale never invalidates the
+                                // warmed icons.
                                 AppIconImage(
                                     bundleID: window.ownerBundleID,
                                     name: window.ownerName,
-                                    iconSize: metrics.previewPlaceholderIconSize
+                                    iconSize: AppIconCache.placeholderIconRasterSize
                                 )
                                 .frame(
                                     width: metrics.previewPlaceholderIconSize,
@@ -1692,7 +1756,11 @@ struct WindowPreviewView: View {
                     }
                 }
 
-                AppIconImage(bundleID: window.ownerBundleID, name: window.ownerName, iconSize: metrics.badgeSize)
+                AppIconImage(
+                    bundleID: window.ownerBundleID,
+                    name: window.ownerName,
+                    iconSize: AppIconCache.badgeRasterSize
+                )
                     .frame(width: metrics.badgeSize, height: metrics.badgeSize)
                     .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                     .offset(x: -4, y: -4)
@@ -1783,14 +1851,21 @@ struct AppIconImage: NSViewRepresentable {
         if let icon = AppIconCache.shared.cachedOrRasterize(bundleID: bundleID, size: iconSize) {
             return icon
         }
+        // Proportional to the requested size, which is a raster size rather than the drawn one
+        // and so is not a number this can assume.
         let size = iconSize
+        let inset = size * 0.2
         let img = NSImage(size: NSSize(width: size, height: size))
         img.lockFocus()
         NSColor.white.withAlphaComponent(0.06).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 8, y: 8, width: size - 16, height: size - 16), xRadius: 20, yRadius: 20).fill()
+        NSBezierPath(
+            roundedRect: NSRect(x: inset, y: inset, width: size - inset * 2, height: size - inset * 2),
+            xRadius: size * 0.25,
+            yRadius: size * 0.25
+        ).fill()
         let label = String(name.prefix(2)).uppercased()
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 40, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: size * 0.34, weight: .semibold),
             .foregroundColor: NSColor.white.withAlphaComponent(0.3),
         ]
         let sz = (label as NSString).size(withAttributes: attrs)
