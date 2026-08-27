@@ -18,6 +18,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
     private let diag = DiagnosticReporter.shared
     private let onboardingPermissionClient = SystemOnboardingPermissionClient()
     private let launchAtLogin = LaunchAtLoginCoordinator()
+    private let applicationUpdater: any ApplicationUpdating
 
     private var windowService: AccessibilityWindowService?
     private var keyboardService: EventTapKeyboardService?
@@ -41,7 +42,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         ])
     }
 
-    public override init() {
+    public init(applicationUpdater: any ApplicationUpdating = DisabledApplicationUpdater()) {
+        self.applicationUpdater = applicationUpdater
         super.init()
     }
 
@@ -62,6 +64,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
 
         overlayWindow = OverlayWindow()
         setupMenuBar()
+        if DebutCore.version != "0.0.0-dev" {
+            applicationUpdater.start()
+        }
 
         let forceOnboarding = ProcessInfo.processInfo.arguments.contains("--show-onboarding")
         let shouldShowOnboarding = OnboardingLaunchPolicy.shouldPresent(force: forceOnboarding)
@@ -773,6 +778,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Tutorial...", action: #selector(openTutorial), keyEquivalent: ""))
+        let updateItem = NSMenuItem(
+            title: "Check for Updates...",
+            action: #selector(checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        menu.addItem(updateItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Debut", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
@@ -785,6 +797,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
 
     @objc private func openTutorial() {
         showOnboarding()
+    }
+
+    @objc private func checkForUpdates(_ sender: Any?) {
+        applicationUpdater.checkForUpdates()
     }
 
     private func showOnboarding() {
@@ -923,6 +939,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         vm.onExportDiagnosticData = { [weak self] in
             DispatchQueue.main.async {
                 self?.exportDiagnosticData()
+            }
+        }
+        vm.onCheckForUpdates = { [weak self] in
+            DispatchQueue.main.async {
+                self?.applicationUpdater.checkForUpdates()
             }
         }
         let view = SettingsView(

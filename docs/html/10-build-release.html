@@ -271,11 +271,14 @@ Worth knowing before you look for it:
 </p>
 
 <ul>
-  <li><strong>No notarisation or Developer ID signing.</strong> Automated releases
-  publish a self-signed DMG; there is no Apple notarisation step.</li>
+  <li><strong>Stable distribution is signed and notarised.</strong> A manually promoted
+  major or minor <code>.0</code> release uses the protected <code>stable-release</code>
+  environment, Developer ID signing, Apple notarisation and a Sparkle EdDSA-signed appcast.
+  Daily patch builds are prereleases and never enter that appcast.</li>
   <li><strong>No bespoke icon.</strong> The build derives an icon from the system's
   generic application icon.</li>
-  <li><strong>No dependency management</strong>, because there are no dependencies.</li>
+  <li><strong>Sparkle is the only external runtime dependency.</strong> It is pinned through
+  Swift Package Manager and embedded explicitly by the custom app-bundle build.</li>
 </ul>
 
 <div class="pager">
