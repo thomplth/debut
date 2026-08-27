@@ -33,6 +33,28 @@ struct OverlayViewModelTests {
         return StageOverlayViewModel(spaceManager: sm, activeSpaceIndex: 0, selectedWindowIndex: 0)
     }
 
+    // macOS withholds `kCGWindowName` without Screen Recording permission, so an empty title is
+    // routine rather than exceptional. The card label and whatever a diagnostic reports about a
+    // card have to resolve it the same way, or an observer looking for a card by name searches
+    // for a string the card never showed.
+    @Test("An empty window title resolves to the owner name for every consumer of the label")
+    func emptyTitleFallsBackToOwnerName() {
+        var sm = SpaceManager()
+        sm.addWindow(
+            SpaceWindow(windowID: 301, ownerBundleID: "com.apple.TextEdit", ownerName: "TextEdit", windowTitle: ""),
+            toSpaceID: sm.spaces[0].id
+        )
+        sm.addWindow(
+            SpaceWindow(windowID: 302, ownerBundleID: "com.apple.TextEdit", ownerName: "TextEdit", windowTitle: "two.txt"),
+            toSpaceID: sm.spaces[0].id
+        )
+        let vm = StageOverlayViewModel(spaceManager: sm, activeSpaceIndex: 0, selectedWindowIndex: 0)
+
+        #expect(sm.spaces[0].windows.map(\.displayTitle) == ["TextEdit", "two.txt"])
+        #expect(vm.stages[0].windows.map(\.displayTitle) == ["TextEdit", "two.txt"])
+        #expect(vm.selectedWindow?.displayTitle == "TextEdit")
+    }
+
     @Test("Stage data reflects spaces")
     func stageData() {
         let vm = makeViewModel()

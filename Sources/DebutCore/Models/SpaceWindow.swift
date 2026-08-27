@@ -21,4 +21,17 @@ public struct SpaceWindow: Codable, Identifiable, Equatable, Sendable {
     public static func == (lhs: SpaceWindow, rhs: SpaceWindow) -> Bool {
         lhs.windowID == rhs.windowID
     }
+
+    public var displayTitle: String {
+        Self.displayTitle(windowTitle: windowTitle, ownerName: ownerName)
+    }
+
+    /// The label anything presenting this window puts on it. `windowTitle` is empty whenever
+    /// macOS withholds `kCGWindowName`, which it does for every window until Debut holds Screen
+    /// Recording permission — so the fallback is routine, not an edge case. Every consumer
+    /// resolves the label here, so a card and a diagnostic describing that card cannot disagree
+    /// about what it is called.
+    public static func displayTitle(windowTitle: String, ownerName: String) -> String {
+        windowTitle.isEmpty ? ownerName : windowTitle
+    }
 }

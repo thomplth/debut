@@ -8,6 +8,10 @@ public struct StageWindowData: Sendable, Identifiable {
     public let ownerName: String
     public let windowTitle: String
     public let previewImage: CGImage?
+
+    public var displayTitle: String {
+        SpaceWindow.displayTitle(windowTitle: windowTitle, ownerName: ownerName)
+    }
 }
 
 public struct StageData: Sendable, Identifiable {
