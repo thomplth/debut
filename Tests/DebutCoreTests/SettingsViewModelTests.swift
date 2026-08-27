@@ -12,7 +12,7 @@ struct SettingsViewModelTests {
         #expect(vm.settings.glassStyle == .clear)
         #expect(vm.settings.stageCornerRadius == 40)
         #expect(vm.settings.inactiveStageScale == 0.7)
-        #expect(vm.settings.stageScale == 1.5)
+        #expect(vm.settings.stageScale == 1.0)
         // Must stay on the hold-delay slider's 25ms step grid, or the first drag moves it.
         #expect(vm.settings.overlayPresentationDelay == 0.075)
         #expect(vm.settings.quickSwitchExcludedBundleIDs.isEmpty)

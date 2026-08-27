@@ -305,6 +305,7 @@ struct ScreenshotTests {
     func stageScaleEnlargesRenderedCards() throws {
         let size = NSSize(width: 1600, height: 1000)
         let counts = [4]
+        let enlargedScale = 1.5
 
         func cardSize(stageScale: Double) -> CGSize {
             var settings = AppSettings()
@@ -320,15 +321,15 @@ struct ScreenshotTests {
         }
 
         let unscaled = cardSize(stageScale: 1)
-        let enlarged = cardSize(stageScale: AppSettings.defaultStageScale)
+        let enlarged = cardSize(stageScale: enlargedScale)
 
-        #expect(abs(enlarged.width - unscaled.width * 1.5) < 0.5)
-        #expect(abs(enlarged.height - unscaled.height * 1.5) < 0.5)
+        #expect(abs(enlarged.width - unscaled.width * enlargedScale) < 0.5)
+        #expect(abs(enlarged.height - unscaled.height * enlargedScale) < 0.5)
 
         // E2E clicks screen coordinates it derives from drawnMetrics, so a card drawn at any
         // other size sends those clicks somewhere the overlay never drew.
         let expected = StageConstants.drawnMetrics(
-            stageScale: CGFloat(AppSettings.defaultStageScale),
+            stageScale: enlargedScale,
             windowCounts: counts,
             containerSize: size
         )
@@ -336,10 +337,10 @@ struct ScreenshotTests {
         #expect(abs(enlarged.height - expected.cardHeight) < 0.5)
     }
 
-    @Test("The default stage scale is a proportional rendering of the original UI")
-    func defaultStageScalePreservesRenderedProportions() throws {
+    @Test("A 150 percent stage scale is a proportional rendering of the original UI")
+    func enlargedStageScalePreservesRenderedProportions() throws {
         let originalSize = NSSize(width: 1_200, height: 600)
-        let scale = CGFloat(AppSettings.defaultStageScale)
+        let scale: CGFloat = 1.5
         let enlargedSize = NSSize(
             width: originalSize.width * scale,
             height: originalSize.height * scale
@@ -356,11 +357,14 @@ struct ScreenshotTests {
             )),
             size: originalSize
         ))
+        var enlargedAppearance = AppSettings()
+        enlargedAppearance.stageScale = Double(scale)
         let enlarged = try #require(renderSwiftUI(
             StageOverlayView(viewModel: makeSampleViewModel(
                 spaceCount: 3,
                 windowsPerSpace: [3, 4, 2],
-                activeIndex: 1
+                activeIndex: 1,
+                appearance: enlargedAppearance
             )),
             size: enlargedSize
         ))
@@ -370,7 +374,7 @@ struct ScreenshotTests {
         let normalizedImage = NSImage(size: originalSize)
         normalizedImage.addRepresentation(normalizedEnlarged)
         try saveImage(original, name: "06_proportional_scale_original")
-        try saveImage(normalizedImage, name: "06_proportional_scale_normalized_default")
+        try saveImage(normalizedImage, name: "06_proportional_scale_normalized_150_percent")
 
         let difference = screenshotDifference(originalBitmap, normalizedEnlarged)
         #expect(difference.comparedPixelCount > 10_000)
