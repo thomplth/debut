@@ -356,16 +356,14 @@ func plateCenter(
     else { return nil }
 
     let screen = CGDisplayBounds(CGMainDisplayID())
-    let thumbnail = PlateConstants.thumbnailSize(
-        forWindowCount: windowCounts.max() ?? 0,
+    let plateHeights = PlateConstants.plateLayouts(
+        forWindowCounts: windowCounts,
         screenWidth: screen.width
-    )
-    let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
+    ).map(\.plateSize.height)
     guard let visualCenterY = PlateConstants.plateCenterY(
         stageIndex: stageIndex,
-        stageCount: windowCounts.count,
+        plateHeights: plateHeights,
         activeStageIndex: activeStageIndex,
-        plateHeight: plateHeight,
         inactiveScale: inactiveScale,
         containerHeight: screen.height
     ) else { return nil }
@@ -382,79 +380,30 @@ func windowCenter(
     activeStageIndex: Int,
     inactiveScale: CGFloat
 ) -> CGPoint? {
-    guard windowCounts.indices.contains(stageIndex),
-          windowCounts.indices.contains(activeStageIndex),
-          (0..<windowCounts[stageIndex]).contains(windowIndex)
-    else { return nil }
-
-    let screen = CGDisplayBounds(CGMainDisplayID())
-    let thumbnail = PlateConstants.thumbnailSize(
-        forWindowCount: windowCounts.max() ?? 0,
-        screenWidth: screen.width
-    )
-    let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
-    let layoutScale: (Int) -> CGFloat = { $0 == activeStageIndex ? 1 : inactiveScale }
-    let topWithinLayout: (Int) -> CGFloat = { index in
-        (0..<index).reduce(0) { partial, precedingIndex in
-            partial + plateHeight * layoutScale(precedingIndex) + PlateConstants.stageSpacing
-        }
-    }
-    let layoutOffset = screen.midY
-        - topWithinLayout(activeStageIndex)
-        - plateHeight / 2
     // Window hit testing is expressed in the overlay window's screen space,
     // unlike drag destinations, which use the named SwiftUI coordinate space.
-    let center = CGPoint(
-        x: screen.midX,
-        y: layoutOffset
-            + topWithinLayout(stageIndex)
-            + plateHeight * layoutScale(stageIndex) / 2
-    )
-    let plateWidth = PlateConstants.plateWidth(
-        forWindowCount: windowCounts[stageIndex],
-        thumbnailWidth: thumbnail.width
-    )
-    let scale: CGFloat = stageIndex == activeStageIndex ? 1 : inactiveScale
-    let windowStride = thumbnail.width
-        + PlateConstants.windowCardExtraWidth
-        + PlateConstants.windowSpacing
-    let unscaledX = PlateConstants.padding
-        + PlateConstants.windowCardPadding
-        + thumbnail.width / 2
-        + CGFloat(windowIndex) * windowStride
-    let unscaledY = PlateConstants.topPadding
-        + PlateConstants.windowCardPadding
-        + thumbnail.height / 2
-    return CGPoint(
-        x: center.x + (unscaledX - plateWidth / 2) * scale,
-        y: center.y + (unscaledY - plateHeight / 2) * scale
+    PlateConstants.windowCardCenter(
+        stageIndex: stageIndex,
+        windowIndex: windowIndex,
+        windowCounts: windowCounts,
+        activeStageIndex: activeStageIndex,
+        inactiveScale: inactiveScale,
+        containerSize: CGDisplayBounds(CGMainDisplayID()).size
     )
 }
 
 func firstWindowCenter(in state: [String: String]) -> CGPoint? {
-    guard let maxWindows = Int(state["maxWindowsInStage"] ?? ""), maxWindows > 0,
-          let activeWindows = Int(state["windowsInActiveStage"] ?? ""), activeWindows > 0
+    guard let activeWindows = Int(state["windowsInActiveStage"] ?? ""), activeWindows > 0
     else { return nil }
 
-    let screen = CGDisplayBounds(CGMainDisplayID())
-    let thumbnail = PlateConstants.thumbnailSize(
-        forWindowCount: maxWindows,
-        screenWidth: screen.width
+    return PlateConstants.windowCardCenter(
+        stageIndex: 0,
+        windowIndex: 0,
+        windowCounts: [activeWindows],
+        activeStageIndex: 0,
+        inactiveScale: 1,
+        containerSize: CGDisplayBounds(CGMainDisplayID()).size
     )
-    let plateHeight = PlateConstants.plateHeight(thumbnailHeight: thumbnail.height)
-    let plateWidth = PlateConstants.plateWidth(
-        forWindowCount: activeWindows,
-        thumbnailWidth: thumbnail.width
-    )
-    let cardCenterX = screen.midX - plateWidth / 2
-        + PlateConstants.padding
-        + PlateConstants.windowCardPadding
-        + thumbnail.width / 2
-    let thumbnailCenterY = screen.midY - plateHeight / 2
-        + PlateConstants.topPadding
-        + PlateConstants.windowCardPadding
-        + thumbnail.height / 2
-    return CGPoint(x: cardCenterX, y: thumbnailCenterY)
 }
 
 final class LockedApplicationResult: @unchecked Sendable {
@@ -1637,10 +1586,7 @@ let dismissalStateBefore = readState()
 let windowsBeforeDismissal = Int(dismissalStateBefore["windowsInActiveStage"] ?? "0") ?? 0
 let selectedCardCenter = firstWindowCenter(in: dismissalStateBefore)
 let dismissalScreen = CGDisplayBounds(CGMainDisplayID())
-let dismissalThumbnail = PlateConstants.thumbnailSize(
-    forWindowCount: Int(dismissalStateBefore["maxWindowsInStage"] ?? "0") ?? 0,
-    screenWidth: dismissalScreen.width
-)
+let dismissalMetrics = PlateMetrics.standard
 postMouseMove(to: CGPoint(x: dismissalScreen.maxX - 20, y: dismissalScreen.maxY - 20))
 let beforeDismissalScreenshot = takeScreenshot("14_selected_window_before_dismissal")
 let windowTitlesBeforeDismissal = windowDisplayTitlesByID()
@@ -1656,8 +1602,8 @@ let dismissalMotionChangedPixelRatio = selectedCardCenter.flatMap { center in
         to: motionScreenshot,
         centeredAt: center,
         cropSizeInPoints: CGSize(
-            width: dismissalThumbnail.width + PlateConstants.windowCardExtraWidth,
-            height: dismissalThumbnail.height + 40
+            width: dismissalMetrics.cardWidth,
+            height: dismissalMetrics.cardHeight
         )
     )
 }
@@ -1673,7 +1619,7 @@ let dismissalMotionRemainingPixelRatio = selectedCardCenter.flatMap { center in
         centeredAt: CGPoint(x: dismissalScreen.midX, y: center.y),
         cropSizeInPoints: CGSize(
             width: dismissalScreen.width * 0.8,
-            height: dismissalThumbnail.height + 70
+            height: dismissalMetrics.cardHeight + 40
         )
     )
 }
