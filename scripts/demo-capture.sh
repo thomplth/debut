@@ -111,7 +111,7 @@ echo "Converting..."
 mkdir -p "$MEDIA_DIR"
 # The guest captures at the full 2880x1800 backing scale, which is a 4.7 MB PNG for something
 # the README displays at 820 points. JPEG at twice the display width is 277 KB and, on a
-# screenshot this photographic, indistinguishable — the plates are translucent glass over a
+# screenshot this photographic, indistinguishable — the stages are translucent glass over a
 # wallpaper, not flat UI that would ring.
 for still in "$RAW_DIR"/*.png; do
     [[ -e "$still" ]] || continue
@@ -121,9 +121,9 @@ for still in "$RAW_DIR"/*.png; do
     echo "  $name.jpg $(du -h "$MEDIA_DIR/$name.jpg" | cut -f1)"
 done
 
-# One shared palette per clip: the plates are translucent over a photographic wallpaper, and
+# One shared palette per clip: the stages are translucent over a photographic wallpaper, and
 # a per-frame palette makes that gradient crawl. `stats_mode=diff` spends that palette on the
-# moving plates rather than the static desktop behind them, and ordered dithering keeps the
+# moving stages rather than the static desktop behind them, and ordered dithering keeps the
 # still regions byte-identical between frames — error diffusion sprays them with noise that no
 # GIF encoder can delta away, which is what made the first cut of these 14 MB.
 for clip in "$RAW_DIR"/*.mov; do

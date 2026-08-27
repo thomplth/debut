@@ -15,7 +15,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private var runLoopSource: CFRunLoopSource?
     private var eventTapRunLoop: CFRunLoop?
     private var eventTapThread: Thread?
-    private var stageManagerActive: Bool = false
+    private var spaceManagerActive: Bool = false
     private var sessionPrimaryModifier: CGEventFlags?
     private var sessionTriggerKeyCode: Int64?
     private var quickSwitchKeysDown: Set<Int64> = []
@@ -270,21 +270,21 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             return nil
         }
         if type == .keyUp,
-           stageManagerActive,
+           spaceManagerActive,
            sessionPrimaryModifier == nil,
            sessionTriggerKeyCode == keyCode {
-            stageManagerActive = false
+            spaceManagerActive = false
             sessionTriggerKeyCode = nil
             deliver(.cmdRelease, asynchronously: deliverAsynchronously)
             return nil
         }
 
-        // A Stage Manager session commits when its activation modifier is released.
+        // A Space Manager session commits when its activation modifier is released.
         if type == .flagsChanged {
-            if stageManagerActive,
+            if spaceManagerActive,
                let primaryModifier = sessionPrimaryModifier,
                !flags.contains(primaryModifier) {
-                stageManagerActive = false
+                spaceManagerActive = false
                 sessionPrimaryModifier = nil
                 sessionTriggerKeyCode = nil
                 deliver(.cmdRelease, asynchronously: deliverAsynchronously)
@@ -302,17 +302,17 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                     cachedFrontmostAppBundleIdentifier
                 )
             }
-            let stagePosition = Self.quickSwitchStagePosition(
+            let spacePosition = Self.quickSwitchSpacePosition(
                 keyCode: keyCode,
                 flags: flags,
                 modifiers: quickSwitchConfiguration.0
             )
-            let sameApplicationStagePosition = Self.quickSwitchStagePosition(
+            let sameApplicationSpacePosition = Self.quickSwitchSpacePosition(
                 keyCode: keyCode,
                 flags: flags,
                 modifiers: quickSwitchConfiguration.1
             )
-            if let stagePosition = stagePosition ?? sameApplicationStagePosition {
+            if let spacePosition = spacePosition ?? sameApplicationSpacePosition {
                 if quickSwitchKeysDown.contains(keyCode) { return nil }
                 if !quickSwitchConfiguration.2.isEmpty,
                    let bundleID = quickSwitchConfiguration.3,
@@ -320,9 +320,9 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                     return event
                 }
                 if quickSwitchKeysDown.insert(keyCode).inserted {
-                    let keyEvent: DebutKeyEvent = sameApplicationStagePosition != nil
-                        ? .switchToStageKeepingCurrentApplication(stagePosition)
-                        : .switchToStage(stagePosition)
+                    let keyEvent: DebutKeyEvent = sameApplicationSpacePosition != nil
+                        ? .switchToSpaceKeepingCurrentApplication(spacePosition)
+                        : .switchToSpace(spacePosition)
                     deliver(keyEvent, asynchronously: deliverAsynchronously)
                 }
                 return nil
@@ -376,7 +376,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             }
         }
 
-        guard stageManagerActive else {
+        guard spaceManagerActive else {
             return event
         }
 
@@ -389,7 +389,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         let sessionAction = configuredSessionAction(keyCode: keyCode, flags: flags)
 
         // Keep the standard app quit/close shortcuts available unless the user explicitly
-        // assigns that physical key combination to a Stage Manager command.
+        // assigns that physical key combination to a Space Manager command.
         let shortcutFlags = flags.intersection([
             .maskCommand, .maskAlternate, .maskControl, .maskShift,
         ])
@@ -419,10 +419,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     }
 
     private func beginSession(using action: KeyAction) {
-        guard !stageManagerActive,
+        guard !spaceManagerActive,
               let combo = keyBindings.combo(for: action)
         else { return }
-        stageManagerActive = true
+        spaceManagerActive = true
         sessionPrimaryModifier = Self.primaryModifier(for: combo)
         sessionTriggerKeyCode = sessionPrimaryModifier == nil ? Int64(combo.keyCode) : nil
     }
@@ -505,8 +505,8 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         }
     }
 
-    /// Maps an exact configured-modifier + number-row shortcut to stage positions 1-9.
-    static func quickSwitchStagePosition(
+    /// Maps an exact configured-modifier + number-row shortcut to space positions 1-9.
+    static func quickSwitchSpacePosition(
         keyCode: Int64,
         flags: CGEventFlags,
         modifiers: ShortcutModifiers = .control

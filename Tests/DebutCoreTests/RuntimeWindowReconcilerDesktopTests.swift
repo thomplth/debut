@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import DebutCore
 
-/// Stages are desktops, so macOS — not Debut's own bookkeeping — decides which stage a
+/// Spaces are desktops, so macOS — not Debut's own bookkeeping — decides which space a
 /// window belongs to. These cover the cases where the two disagree.
 @Suite("RuntimeWindowReconciler desktop truth")
 struct RuntimeWindowReconcilerDesktopTests {
@@ -25,19 +25,19 @@ struct RuntimeWindowReconcilerDesktopTests {
         )
     }
 
-    private func threeStages() -> StageManager {
-        var manager = StageManager()
-        manager.createStage(position: .below)
-        manager.createStage(position: .below)
+    private func threeSpaces() -> SpaceManager {
+        var manager = SpaceManager()
+        manager.createSpace(position: .below)
+        manager.createSpace(position: .below)
         return manager
     }
 
     // Launching an app while standing on desktop 3 puts its window on desktop 3. Adding it
-    // to the active stage is the same answer only by coincidence; asking macOS is the answer.
-    @Test("A newly discovered window joins the stage matching its desktop")
+    // to the active space is the same answer only by coincidence; asking macOS is the answer.
+    @Test("A newly discovered window joins the space matching its desktop")
     func newWindowJoinsItsDesktop() {
-        var manager = threeStages()
-        manager.activateStage(id: manager.stages[0].id)
+        var manager = threeSpaces()
+        manager.activateSpace(id: manager.spaces[0].id)
         var reconciler = RuntimeWindowReconciler()
 
         let result = reconciler.reconcile(
@@ -46,21 +46,21 @@ struct RuntimeWindowReconcilerDesktopTests {
                 allWindowIDs: [7],
                 desktopIndexes: [7: 2]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.addedCount == 1)
-        #expect(manager.stageContainingWindow(windowID: 7) == manager.stages[2].id)
+        #expect(manager.spaceContainingWindow(windowID: 7) == manager.spaces[2].id)
     }
 
     // The whole point of the Spaces architecture: the user drags a window to another desktop
     // with Mission Control, and Debut has to follow rather than fight.
-    @Test("A window dragged to another desktop is reassigned to that stage")
+    @Test("A window dragged to another desktop is reassigned to that space")
     func draggedWindowFollowsItsDesktop() {
-        var manager = threeStages()
+        var manager = threeSpaces()
         manager.addWindow(
-            StageWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Window", ownerPID: 10),
-            toStageID: manager.stages[0].id
+            SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Window", ownerPID: 10),
+            toSpaceID: manager.spaces[0].id
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -70,22 +70,22 @@ struct RuntimeWindowReconcilerDesktopTests {
                 allWindowIDs: [7],
                 desktopIndexes: [7: 1]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 7) == manager.stages[1].id)
+        #expect(manager.spaceContainingWindow(windowID: 7) == manager.spaces[1].id)
         #expect(result.reassignedCount == 1)
         #expect(result.events.contains {
-            $0.windowID == 7 && $0.reason == .desktopChanged && $0.toStage == 1
+            $0.windowID == 7 && $0.reason == .desktopChanged && $0.toSpace == 1
         })
     }
 
     @Test("Reassigning across desktops preserves the window's identity")
     func reassignmentPreservesWindowIdentity() {
-        var manager = threeStages()
+        var manager = threeSpaces()
         manager.addWindow(
-            StageWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Draft", ownerPID: 42),
-            toStageID: manager.stages[0].id
+            SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Draft", ownerPID: 42),
+            toSpaceID: manager.spaces[0].id
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -95,24 +95,24 @@ struct RuntimeWindowReconcilerDesktopTests {
                 allWindowIDs: [7],
                 desktopIndexes: [7: 2]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        let moved = manager.stages[2].windows.first { $0.windowID == 7 }
+        let moved = manager.spaces[2].windows.first { $0.windowID == 7 }
         #expect(moved?.windowTitle == "Draft")
         #expect(moved?.ownerPID == 42)
-        #expect(manager.stages[0].windows.isEmpty)
+        #expect(manager.spaces[0].windows.isEmpty)
     }
 
     // Windows assigned to every Space, and windows on a fullscreen Space, have no single
     // desktop. `SpaceService.desktopIndex(forWindow:)` returns nil for them, and a nil must
-    // never be read as "desktop 0" — that would sweep Finder onto the first stage.
-    @Test("A window with no reported desktop keeps its existing stage")
+    // never be read as "desktop 0" — that would sweep Finder onto the first space.
+    @Test("A window with no reported desktop keeps its existing space")
     func unreportedDesktopLeavesAssignmentAlone() {
-        var manager = threeStages()
+        var manager = threeSpaces()
         manager.addWindow(
-            StageWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Window", ownerPID: 10),
-            toStageID: manager.stages[1].id
+            SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Window", ownerPID: 10),
+            toSpaceID: manager.spaces[1].id
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -122,21 +122,21 @@ struct RuntimeWindowReconcilerDesktopTests {
                 allWindowIDs: [7],
                 desktopIndexes: [:]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 7) == manager.stages[1].id)
+        #expect(manager.spaceContainingWindow(windowID: 7) == manager.spaces[1].id)
         #expect(!result.didMutate)
     }
 
-    // Desktop enumeration and the stage list are reconciled separately, so a snapshot can
-    // name a desktop the stage list has not grown to yet. Dropping the window would lose it.
-    @Test("A desktop index with no matching stage leaves the assignment alone")
+    // Desktop enumeration and the space list are reconciled separately, so a snapshot can
+    // name a desktop the space list has not grown to yet. Dropping the window would lose it.
+    @Test("A desktop index with no matching space leaves the assignment alone")
     func outOfRangeDesktopLeavesAssignmentAlone() {
-        var manager = threeStages()
+        var manager = threeSpaces()
         manager.addWindow(
-            StageWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Window", ownerPID: 10),
-            toStageID: manager.stages[1].id
+            SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Window", ownerPID: 10),
+            toSpaceID: manager.spaces[1].id
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -146,18 +146,18 @@ struct RuntimeWindowReconcilerDesktopTests {
                 allWindowIDs: [7],
                 desktopIndexes: [7: 9]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 7) == manager.stages[1].id)
+        #expect(manager.spaceContainingWindow(windowID: 7) == manager.spaces[1].id)
     }
 
     @Test("A window already on its reported desktop is not reassigned")
     func matchingDesktopIsNoOp() {
-        var manager = threeStages()
+        var manager = threeSpaces()
         manager.addWindow(
-            StageWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Window", ownerPID: 10),
-            toStageID: manager.stages[1].id
+            SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Window", ownerPID: 10),
+            toSpaceID: manager.spaces[1].id
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -167,22 +167,22 @@ struct RuntimeWindowReconcilerDesktopTests {
                 allWindowIDs: [7],
                 desktopIndexes: [7: 1]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(!result.didMutate)
     }
 
-    // A desktop answer is a fact, not the guess `strandedStageIDs` exists to hedge. Leaving
+    // A desktop answer is a fact, not the guess `strandedSpaceIDs` exists to hedge. Leaving
     // the window provisional would let a later bundle-only match drag it off its real desktop.
-    @Test("A desktop-placed window outranks the stranded-stage guess")
-    func desktopOutranksStrandedStage() {
-        var manager = threeStages()
-        // Stage 0 holds an assignment whose window ID has vanished, which normally claims
-        // the replacement for stage 0.
+    @Test("A desktop-placed window outranks the stranded-space guess")
+    func desktopOutranksStrandedSpace() {
+        var manager = threeSpaces()
+        // Space 0 holds an assignment whose window ID has vanished, which normally claims
+        // the replacement for space 0.
         manager.addWindow(
-            StageWindow(windowID: 99, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Old", ownerPID: 10),
-            toStageID: manager.stages[0].id
+            SpaceWindow(windowID: 99, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Old", ownerPID: 10),
+            toSpaceID: manager.spaces[0].id
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -192,10 +192,10 @@ struct RuntimeWindowReconcilerDesktopTests {
                 allWindowIDs: [7],
                 desktopIndexes: [7: 2]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 7) == manager.stages[2].id)
+        #expect(manager.spaceContainingWindow(windowID: 7) == manager.spaces[2].id)
     }
 
     @Test("The same desktop index on another display maps to another stack")
@@ -210,17 +210,17 @@ struct RuntimeWindowReconcilerDesktopTests {
                 desktopIDs: [20, 21], currentDesktopID: 20
             ),
         ])
-        var manager = StageManager()
-        manager.reconcileStageStacks(with: topology)
+        var manager = SpaceManager()
+        manager.reconcileSpaceStacks(with: topology)
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 7,
                 ownerBundleID: "com.a",
                 ownerName: "A",
                 windowTitle: "Window",
                 ownerPID: 10
             ),
-            toStageID: manager.stageID(stackID: "a", at: 1)!
+            toSpaceID: manager.spaceID(stackID: "a", at: 1)!
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -232,10 +232,10 @@ struct RuntimeWindowReconcilerDesktopTests {
                     7: DesktopLocation(stackID: "b", desktopID: 21, index: 1),
                 ]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 7) == manager.stageID(stackID: "b", at: 1))
+        #expect(manager.spaceContainingWindow(windowID: 7) == manager.spaceID(stackID: "b", at: 1))
     }
 
     // App windows are discovered one desktop at a time after a relaunch. A bundle-only
@@ -243,26 +243,26 @@ struct RuntimeWindowReconcilerDesktopTests {
     // identifies which dormant assignment this replacement belongs to.
     @Test("A partial relaunch restores a dynamic-title window by its reported desktop")
     func partialRelaunchRestoresByDesktop() {
-        var manager = threeStages()
+        var manager = threeSpaces()
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 101,
                 ownerBundleID: "com.mitchellh.ghostty",
                 ownerName: "Ghostty",
                 windowTitle: "old title",
                 ownerPID: 10
             ),
-            toStageID: manager.stages[0].id
+            toSpaceID: manager.spaces[0].id
         )
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 102,
                 ownerBundleID: "com.mitchellh.ghostty",
                 ownerName: "Ghostty",
                 windowTitle: "another old title",
                 ownerPID: 10
             ),
-            toStageID: manager.stages[1].id
+            toSpaceID: manager.spaces[1].id
         )
         _ = manager.makeWindowsDormant(forOwnerPID: 10)
         var reconciler = RuntimeWindowReconciler()
@@ -279,12 +279,12 @@ struct RuntimeWindowReconcilerDesktopTests {
                 allWindowIDs: [201],
                 desktopIndexes: [201: 1]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.addedCount == 0)
         #expect(result.reassignedCount == 1)
         #expect(manager.dormantWindowAssignments.count == 1)
-        #expect(manager.stageContainingWindow(windowID: 201) == manager.stages[1].id)
+        #expect(manager.spaceContainingWindow(windowID: 201) == manager.spaces[1].id)
     }
 }

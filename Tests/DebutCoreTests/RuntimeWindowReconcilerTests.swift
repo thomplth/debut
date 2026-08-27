@@ -25,13 +25,13 @@ struct RuntimeWindowReconcilerTests {
 
     @Test("Adds missing live windows without moving existing assignments")
     func addsMissingLiveWindows() {
-        var manager = StageManager()
-        let stage1 = manager.stages[0].id
-        manager.createStage(position: .below)
-        let stage2 = manager.stages[1].id
-        manager.activateStage(id: stage2)
-        manager.addWindow(StageWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toStageID: stage1)
-        manager.addWindow(StageWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Two", ownerPID: 10), toStageID: stage2)
+        var manager = SpaceManager()
+        let space1 = manager.spaces[0].id
+        manager.createSpace(position: .below)
+        let space2 = manager.spaces[1].id
+        manager.activateSpace(id: space2)
+        manager.addWindow(SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toSpaceID: space1)
+        manager.addWindow(SpaceWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Two", ownerPID: 10), toSpaceID: space2)
 
         var reconciler = RuntimeWindowReconciler()
         let result = reconciler.reconcile(
@@ -39,26 +39,26 @@ struct RuntimeWindowReconcilerTests {
                 liveWindows: [liveWindow(1), liveWindow(2), liveWindow(3, title: "Missing")],
                 allWindowIDs: [1, 2, 3]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.addedCount == 1)
-        #expect(manager.stageContainingWindow(windowID: 1) == stage1)
-        #expect(manager.stageContainingWindow(windowID: 2) == stage2)
-        #expect(manager.stageContainingWindow(windowID: 3) == stage2)
+        #expect(manager.spaceContainingWindow(windowID: 1) == space1)
+        #expect(manager.spaceContainingWindow(windowID: 2) == space2)
+        #expect(manager.spaceContainingWindow(windowID: 3) == space2)
     }
 
     @Test("Promotes only the focused newly discovered window to MRU")
     func focusedNewWindowBecomesMRU() {
-        var manager = StageManager()
-        let stageID = manager.activeStageID
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
         manager.addWindow(
-            StageWindow(windowID: 1, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Current", ownerPID: 10),
-            toStageID: stageID
+            SpaceWindow(windowID: 1, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Current", ownerPID: 10),
+            toSpaceID: spaceID
         )
         manager.addWindow(
-            StageWindow(windowID: 2, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Older", ownerPID: 20),
-            toStageID: stageID
+            SpaceWindow(windowID: 2, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Older", ownerPID: 20),
+            toSpaceID: spaceID
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -73,19 +73,19 @@ struct RuntimeWindowReconcilerTests {
                 allWindowIDs: [1, 2, 3, 4],
                 focusedWindowID: 4
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.addedCount == 2)
-        #expect(manager.activeStage.windows.map(\.windowID) == [4, 1, 2, 3])
+        #expect(manager.activeSpace.windows.map(\.windowID) == [4, 1, 2, 3])
     }
 
     @Test("CG absence never removes a window without a lifecycle event")
     func preservesMissingWindowForRunningProcess() {
-        var manager = StageManager()
-        let stageID = manager.activeStageID
-        manager.addWindow(StageWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Live", ownerPID: 10), toStageID: stageID)
-        manager.addWindow(StageWindow(windowID: 99, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Transient", ownerPID: 10), toStageID: stageID)
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(SpaceWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Live", ownerPID: 10), toSpaceID: spaceID)
+        manager.addWindow(SpaceWindow(windowID: 99, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Transient", ownerPID: 10), toSpaceID: spaceID)
         let snapshot = RuntimeWindowSnapshot(
             liveWindows: [liveWindow(1, bundleID: "company.thebrowser.dia", ownerName: "Dia")],
             allWindowIDs: [1]
@@ -93,55 +93,55 @@ struct RuntimeWindowReconcilerTests {
         var reconciler = RuntimeWindowReconciler()
 
         for _ in 0..<10 {
-            _ = reconciler.reconcile(snapshot, stageManager: &manager)
+            _ = reconciler.reconcile(snapshot, spaceManager: &manager)
         }
-        #expect(manager.stageContainingWindow(windowID: 99) == stageID)
+        #expect(manager.spaceContainingWindow(windowID: 99) == spaceID)
     }
 
     @Test("Failed and authoritative snapshots both preserve absent windows")
     func snapshotsPreserveAbsentWindows() {
-        var manager = StageManager()
-        manager.addWindow(StageWindow(windowID: 99, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Window", ownerPID: 10), toStageID: manager.activeStageID)
+        var manager = SpaceManager()
+        manager.addWindow(SpaceWindow(windowID: 99, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Window", ownerPID: 10), toSpaceID: manager.activeSpaceID)
         let failedSnapshot = RuntimeWindowSnapshot(liveWindows: [], allWindowIDs: nil)
         let authoritativeMiss = RuntimeWindowSnapshot(liveWindows: [liveWindow(1)], allWindowIDs: [1])
         var reconciler = RuntimeWindowReconciler()
 
-        _ = reconciler.reconcile(failedSnapshot, stageManager: &manager)
-        _ = reconciler.reconcile(failedSnapshot, stageManager: &manager)
-        _ = reconciler.reconcile(authoritativeMiss, stageManager: &manager)
+        _ = reconciler.reconcile(failedSnapshot, spaceManager: &manager)
+        _ = reconciler.reconcile(failedSnapshot, spaceManager: &manager)
+        _ = reconciler.reconcile(authoritativeMiss, spaceManager: &manager)
 
-        #expect(manager.stageContainingWindow(windowID: 99) != nil)
+        #expect(manager.spaceContainingWindow(windowID: 99) != nil)
     }
 
     @Test("A window snapshot never substitutes for a termination event")
     func snapshotDoesNotInferProcessTermination() {
-        var manager = StageManager()
-        manager.addWindow(StageWindow(windowID: 1, ownerBundleID: "com.live", ownerName: "Live", windowTitle: "Live", ownerPID: 10), toStageID: manager.activeStageID)
-        manager.addWindow(StageWindow(windowID: 99, ownerBundleID: "com.dead", ownerName: "Dead", windowTitle: "Dead", ownerPID: 20), toStageID: manager.activeStageID)
+        var manager = SpaceManager()
+        manager.addWindow(SpaceWindow(windowID: 1, ownerBundleID: "com.live", ownerName: "Live", windowTitle: "Live", ownerPID: 10), toSpaceID: manager.activeSpaceID)
+        manager.addWindow(SpaceWindow(windowID: 99, ownerBundleID: "com.dead", ownerName: "Dead", windowTitle: "Dead", ownerPID: 20), toSpaceID: manager.activeSpaceID)
         var reconciler = RuntimeWindowReconciler()
 
         _ = reconciler.reconcile(
             RuntimeWindowSnapshot(liveWindows: [], allWindowIDs: nil),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 1) != nil)
-        #expect(manager.stageContainingWindow(windowID: 99) != nil)
+        #expect(manager.spaceContainingWindow(windowID: 1) != nil)
+        #expect(manager.spaceContainingWindow(windowID: 99) != nil)
     }
 
     @Test("Missing windows remain assigned without hidden-state information")
     func missingWindowsDoNotNeedHiddenState() {
-        var manager = StageManager()
-        let stageID = manager.activeStageID
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 99,
                 ownerBundleID: "company.thebrowser.dia",
                 ownerName: "Dia",
                 windowTitle: "Work",
                 ownerPID: 10
             ),
-            toStageID: stageID
+            toSpaceID: spaceID
         )
         var reconciler = RuntimeWindowReconciler()
         let visibleMiss = RuntimeWindowSnapshot(
@@ -149,17 +149,17 @@ struct RuntimeWindowReconcilerTests {
             allWindowIDs: []
         )
         for _ in 0..<10 {
-            _ = reconciler.reconcile(visibleMiss, stageManager: &manager)
-            #expect(manager.stageContainingWindow(windowID: 99) == stageID)
+            _ = reconciler.reconcile(visibleMiss, spaceManager: &manager)
+            #expect(manager.spaceContainingWindow(windowID: 99) == spaceID)
         }
     }
 
     @Test("A non-empty partial AX snapshot preserves omitted windows")
     func partialSnapshotPreservesOmittedWindows() {
-        var manager = StageManager()
-        let stageID = manager.activeStageID
-        manager.addWindow(StageWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toStageID: stageID)
-        manager.addWindow(StageWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Two", ownerPID: 10), toStageID: stageID)
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toSpaceID: spaceID)
+        manager.addWindow(SpaceWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Two", ownerPID: 10), toSpaceID: spaceID)
         var reconciler = RuntimeWindowReconciler()
 
         _ = reconciler.reconcile(
@@ -167,66 +167,66 @@ struct RuntimeWindowReconcilerTests {
                 liveWindows: [liveWindow(1)],
                 allWindowIDs: [1, 2]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 2) == stageID)
+        #expect(manager.spaceContainingWindow(windowID: 2) == spaceID)
     }
 
     @Test("Repeated non-empty partial AX snapshots preserve omitted windows")
     func repeatedPartialSnapshotsPreserveOmittedWindows() {
-        var manager = StageManager()
-        let stageID = manager.activeStageID
-        manager.addWindow(StageWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toStageID: stageID)
-        manager.addWindow(StageWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Two", ownerPID: 10), toStageID: stageID)
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toSpaceID: spaceID)
+        manager.addWindow(SpaceWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Two", ownerPID: 10), toSpaceID: spaceID)
         let partialSnapshot = RuntimeWindowSnapshot(
             liveWindows: [liveWindow(1)],
             allWindowIDs: [1, 2]
         )
         var reconciler = RuntimeWindowReconciler()
 
-        _ = reconciler.reconcile(partialSnapshot, stageManager: &manager)
-        _ = reconciler.reconcile(partialSnapshot, stageManager: &manager)
+        _ = reconciler.reconcile(partialSnapshot, spaceManager: &manager)
+        _ = reconciler.reconcile(partialSnapshot, spaceManager: &manager)
 
-        #expect(manager.stageContainingWindow(windowID: 2) == stageID)
+        #expect(manager.spaceContainingWindow(windowID: 2) == spaceID)
     }
 
-    @Test("Recovery from partial AX snapshots preserves original stage ownership")
-    func recoveryPreservesOriginalStageOwnership() {
-        var manager = StageManager()
-        let stage1 = manager.stages[0].id
-        manager.createStage(position: .below)
-        let stage2 = manager.stages[1].id
-        manager.activateStage(id: stage2)
-        manager.addWindow(StageWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toStageID: stage1)
-        manager.addWindow(StageWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Two", ownerPID: 10), toStageID: stage2)
+    @Test("Recovery from partial AX snapshots preserves original space ownership")
+    func recoveryPreservesOriginalSpaceOwnership() {
+        var manager = SpaceManager()
+        let space1 = manager.spaces[0].id
+        manager.createSpace(position: .below)
+        let space2 = manager.spaces[1].id
+        manager.activateSpace(id: space2)
+        manager.addWindow(SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toSpaceID: space1)
+        manager.addWindow(SpaceWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Two", ownerPID: 10), toSpaceID: space2)
         let partialSnapshot = RuntimeWindowSnapshot(
             liveWindows: [liveWindow(2)],
             allWindowIDs: [1, 2]
         )
         var reconciler = RuntimeWindowReconciler()
 
-        _ = reconciler.reconcile(partialSnapshot, stageManager: &manager)
-        _ = reconciler.reconcile(partialSnapshot, stageManager: &manager)
+        _ = reconciler.reconcile(partialSnapshot, spaceManager: &manager)
+        _ = reconciler.reconcile(partialSnapshot, spaceManager: &manager)
         let recovered = reconciler.reconcile(
             RuntimeWindowSnapshot(
                 liveWindows: [liveWindow(1), liveWindow(2)],
                 allWindowIDs: [1, 2]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(recovered.addedCount == 0)
-        #expect(manager.stageContainingWindow(windowID: 1) == stage1)
-        #expect(manager.stageContainingWindow(windowID: 2) == stage2)
+        #expect(manager.spaceContainingWindow(windowID: 1) == space1)
+        #expect(manager.spaceContainingWindow(windowID: 2) == space2)
     }
 
     @Test("A failed CG snapshot preserves AX omissions")
     func failedCGSnapshotPreservesAXOmissions() {
-        var manager = StageManager()
-        let stageID = manager.activeStageID
-        manager.addWindow(StageWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toStageID: stageID)
-        manager.addWindow(StageWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Two", ownerPID: 10), toStageID: stageID)
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toSpaceID: spaceID)
+        manager.addWindow(SpaceWindow(windowID: 2, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Two", ownerPID: 10), toSpaceID: spaceID)
         var reconciler = RuntimeWindowReconciler()
 
         _ = reconciler.reconcile(
@@ -234,27 +234,27 @@ struct RuntimeWindowReconcilerTests {
                 liveWindows: [liveWindow(1)],
                 allWindowIDs: nil
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 2) == stageID)
+        #expect(manager.spaceContainingWindow(windowID: 2) == spaceID)
     }
 
-    @Test("A recreated window keeps its stage when its stable identity matches")
-    func recreatedWindowKeepsStageByStableIdentity() {
-        var manager = StageManager()
-        let originalStageID = manager.activeStageID
-        manager.createStage(position: .below)
-        let activeStageID = manager.activeStageID
+    @Test("A recreated window keeps its space when its stable identity matches")
+    func recreatedWindowKeepsSpaceByStableIdentity() {
+        var manager = SpaceManager()
+        let originalSpaceID = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let activeSpaceID = manager.activeSpaceID
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 1,
                 ownerBundleID: "company.thebrowser.dia",
                 ownerName: "Dia",
                 windowTitle: "Work",
                 ownerPID: 10
             ),
-            toStageID: originalStageID
+            toSpaceID: originalSpaceID
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -271,39 +271,39 @@ struct RuntimeWindowReconcilerTests {
                 ],
                 allWindowIDs: [101]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.reassignedCount == 1)
-        #expect(manager.stageContainingWindow(windowID: 101) == originalStageID)
-        #expect(manager.stages.first(where: { $0.id == activeStageID })?.windows.isEmpty == true)
+        #expect(manager.spaceContainingWindow(windowID: 101) == originalSpaceID)
+        #expect(manager.spaces.first(where: { $0.id == activeSpaceID })?.windows.isEmpty == true)
     }
 
     @Test("Reconciliation does not reclaim an already assigned duplicate title")
     func assignedDuplicateTitleIsNotReclaimed() {
-        var manager = StageManager()
-        let originalStageID = manager.activeStageID
-        manager.createStage(position: .below)
-        let activeStageID = manager.activeStageID
+        var manager = SpaceManager()
+        let originalSpaceID = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let activeSpaceID = manager.activeSpaceID
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 1,
                 ownerBundleID: "company.thebrowser.dia",
                 ownerName: "Dia",
                 windowTitle: "Work",
                 ownerPID: 10
             ),
-            toStageID: originalStageID
+            toSpaceID: originalSpaceID
         )
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 101,
                 ownerBundleID: "company.thebrowser.dia",
                 ownerName: "Dia",
                 windowTitle: "Work",
                 ownerPID: 10
             ),
-            toStageID: activeStageID
+            toSpaceID: activeSpaceID
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -321,29 +321,29 @@ struct RuntimeWindowReconcilerTests {
                 allWindowIDs: [101],
                 focusedWindowID: 101
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.reassignedCount == 0)
-        #expect(manager.stageContainingWindow(windowID: 101) == activeStageID)
-        #expect(manager.stages.first(where: { $0.id == originalStageID })?.windows.map(\.windowID) == [1])
+        #expect(manager.spaceContainingWindow(windowID: 101) == activeSpaceID)
+        #expect(manager.spaces.first(where: { $0.id == originalSpaceID })?.windows.map(\.windowID) == [1])
     }
 
     @Test("A later replacement reclaims the retained assignment without a timeout")
     func laterReplacementReclaimsRetainedAssignment() {
-        var manager = StageManager()
-        let originalStageID = manager.activeStageID
-        manager.createStage(position: .below)
-        let activeStageID = manager.activeStageID
+        var manager = SpaceManager()
+        let originalSpaceID = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let activeSpaceID = manager.activeSpaceID
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 1,
                 ownerBundleID: "company.thebrowser.dia",
                 ownerName: "Dia",
                 windowTitle: "Work",
                 ownerPID: 10
             ),
-            toStageID: originalStageID
+            toSpaceID: originalSpaceID
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -352,7 +352,7 @@ struct RuntimeWindowReconcilerTests {
                 liveWindows: [],
                 allWindowIDs: []
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
         let result = reconciler.reconcile(
             RuntimeWindowSnapshot(
@@ -367,29 +367,29 @@ struct RuntimeWindowReconcilerTests {
                 ],
                 allWindowIDs: [101]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.reassignedCount == 1)
-        #expect(manager.stageContainingWindow(windowID: 101) == originalStageID)
-        #expect(manager.stages.first(where: { $0.id == activeStageID })?.windows.isEmpty == true)
+        #expect(manager.spaceContainingWindow(windowID: 101) == originalSpaceID)
+        #expect(manager.spaces.first(where: { $0.id == activeSpaceID })?.windows.isEmpty == true)
     }
 
-    @Test("A complete bundle recreation falls back one-to-one to the original stages")
-    func recreatedWindowsKeepStagesByBundleFallback() {
-        var manager = StageManager()
-        let stage1 = manager.activeStageID
-        manager.createStage(position: .below)
-        let stage2 = manager.activeStageID
-        manager.createStage(position: .below)
-        let activeStage = manager.activeStageID
+    @Test("A complete bundle recreation falls back one-to-one to the original spaces")
+    func recreatedWindowsKeepSpacesByBundleFallback() {
+        var manager = SpaceManager()
+        let space1 = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let space2 = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let activeSpace = manager.activeSpaceID
         manager.addWindow(
-            StageWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old A", ownerPID: 10),
-            toStageID: stage1
+            SpaceWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old A", ownerPID: 10),
+            toSpaceID: space1
         )
         manager.addWindow(
-            StageWindow(windowID: 2, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old B", ownerPID: 10),
-            toStageID: stage2
+            SpaceWindow(windowID: 2, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old B", ownerPID: 10),
+            toSpaceID: space2
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -401,30 +401,30 @@ struct RuntimeWindowReconcilerTests {
                 ],
                 allWindowIDs: [101, 102]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.reassignedCount == 2)
-        #expect(manager.stageContainingWindow(windowID: 101) == stage1)
-        #expect(manager.stageContainingWindow(windowID: 102) == stage2)
-        #expect(manager.stages.first(where: { $0.id == activeStage })?.windows.isEmpty == true)
+        #expect(manager.spaceContainingWindow(windowID: 101) == space1)
+        #expect(manager.spaceContainingWindow(windowID: 102) == space2)
+        #expect(manager.spaces.first(where: { $0.id == activeSpace })?.windows.isEmpty == true)
     }
 
     @Test("A relaunched window reclaims its dormant assignment")
     func relaunchedWindowReclaimsDormantAssignment() {
-        var manager = StageManager()
-        let originalStageID = manager.activeStageID
-        manager.createStage(position: .below)
-        let activeStageID = manager.activeStageID
+        var manager = SpaceManager()
+        let originalSpaceID = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let activeSpaceID = manager.activeSpaceID
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 1,
                 ownerBundleID: "company.thebrowser.dia",
                 ownerName: "Dia",
                 windowTitle: "Work",
                 ownerPID: 10
             ),
-            toStageID: originalStageID
+            toSpaceID: originalSpaceID
         )
         #expect(manager.makeWindowsDormant(forOwnerPID: 10) == 1)
         var reconciler = RuntimeWindowReconciler()
@@ -442,31 +442,31 @@ struct RuntimeWindowReconcilerTests {
                 ],
                 allWindowIDs: [101]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.reassignedCount == 1)
         #expect(result.addedCount == 0)
         #expect(manager.dormantWindowAssignments.isEmpty)
-        #expect(manager.stageContainingWindow(windowID: 101) == originalStageID)
-        #expect(manager.stages.first(where: { $0.id == activeStageID })?.windows.isEmpty == true)
+        #expect(manager.spaceContainingWindow(windowID: 101) == originalSpaceID)
+        #expect(manager.spaces.first(where: { $0.id == activeSpaceID })?.windows.isEmpty == true)
     }
 
     @Test("A complete relaunched bundle restores dormant windows one-to-one")
     func relaunchedBundleRestoresDormantWindows() {
-        var manager = StageManager()
-        let stage1 = manager.activeStageID
-        manager.createStage(position: .below)
-        let stage2 = manager.activeStageID
-        manager.createStage(position: .below)
-        let activeStage = manager.activeStageID
+        var manager = SpaceManager()
+        let space1 = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let space2 = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let activeSpace = manager.activeSpaceID
         manager.addWindow(
-            StageWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old A", ownerPID: 10),
-            toStageID: stage1
+            SpaceWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old A", ownerPID: 10),
+            toSpaceID: space1
         )
         manager.addWindow(
-            StageWindow(windowID: 2, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old B", ownerPID: 10),
-            toStageID: stage2
+            SpaceWindow(windowID: 2, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old B", ownerPID: 10),
+            toSpaceID: space2
         )
         #expect(manager.makeWindowsDormant(forOwnerPID: 10) == 2)
         var reconciler = RuntimeWindowReconciler()
@@ -479,32 +479,32 @@ struct RuntimeWindowReconcilerTests {
                 ],
                 allWindowIDs: [101, 102]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.reassignedCount == 2)
         #expect(result.addedCount == 0)
         #expect(manager.dormantWindowAssignments.isEmpty)
-        #expect(manager.stageContainingWindow(windowID: 101) == stage1)
-        #expect(manager.stageContainingWindow(windowID: 102) == stage2)
-        #expect(manager.stages.first(where: { $0.id == activeStage })?.windows.isEmpty == true)
+        #expect(manager.spaceContainingWindow(windowID: 101) == space1)
+        #expect(manager.spaceContainingWindow(windowID: 102) == space2)
+        #expect(manager.spaces.first(where: { $0.id == activeSpace })?.windows.isEmpty == true)
     }
 
     @Test("A complete launch batch reclaims a window seen during partial activation")
     func completeLaunchBatchReclaimsPartiallyDiscoveredWindow() {
-        var manager = StageManager()
-        let stage1 = manager.activeStageID
-        manager.createStage(position: .below)
-        let stage2 = manager.activeStageID
-        manager.createStage(position: .below)
-        let activeStage = manager.activeStageID
+        var manager = SpaceManager()
+        let space1 = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let space2 = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let activeSpace = manager.activeSpaceID
         manager.addWindow(
-            StageWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old A", ownerPID: 10),
-            toStageID: stage1
+            SpaceWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old A", ownerPID: 10),
+            toSpaceID: space1
         )
         manager.addWindow(
-            StageWindow(windowID: 2, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old B", ownerPID: 10),
-            toStageID: stage2
+            SpaceWindow(windowID: 2, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old B", ownerPID: 10),
+            toSpaceID: space2
         )
         _ = manager.makeWindowsDormant(forOwnerPID: 10)
         var reconciler = RuntimeWindowReconciler()
@@ -516,10 +516,10 @@ struct RuntimeWindowReconcilerTests {
                 ],
                 allWindowIDs: [101]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
         #expect(partial.addedCount == 1)
-        #expect(manager.stageContainingWindow(windowID: 101) == activeStage)
+        #expect(manager.spaceContainingWindow(windowID: 101) == activeSpace)
 
         let complete = reconciler.reconcile(
             RuntimeWindowSnapshot(
@@ -529,30 +529,30 @@ struct RuntimeWindowReconcilerTests {
                 ],
                 allWindowIDs: [101, 102]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(complete.reassignedCount == 2)
         #expect(manager.dormantWindowAssignments.isEmpty)
-        #expect(manager.stageContainingWindow(windowID: 101) == stage1)
-        #expect(manager.stageContainingWindow(windowID: 102) == stage2)
-        #expect(manager.stages.first(where: { $0.id == activeStage })?.windows.isEmpty == true)
+        #expect(manager.spaceContainingWindow(windowID: 101) == space1)
+        #expect(manager.spaceContainingWindow(windowID: 102) == space2)
+        #expect(manager.spaces.first(where: { $0.id == activeSpace })?.windows.isEmpty == true)
     }
 
     @Test("Dormant recovery does not steal an established assigned window")
     func dormantRecoveryDoesNotStealEstablishedWindow() {
-        var manager = StageManager()
-        let originalStage = manager.activeStageID
-        manager.createStage(position: .below)
-        let activeStage = manager.activeStageID
+        var manager = SpaceManager()
+        let originalSpace = manager.activeSpaceID
+        manager.createSpace(position: .below)
+        let activeSpace = manager.activeSpaceID
         manager.addWindow(
-            StageWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Work", ownerPID: 10),
-            toStageID: originalStage
+            SpaceWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Work", ownerPID: 10),
+            toSpaceID: originalSpace
         )
         _ = manager.makeWindowsDormant(forOwnerPID: 10)
         manager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Work", ownerPID: 20),
-            toStageID: activeStage
+            SpaceWindow(windowID: 101, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Work", ownerPID: 20),
+            toSpaceID: activeSpace
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -563,21 +563,21 @@ struct RuntimeWindowReconcilerTests {
                 ],
                 allWindowIDs: [101]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.reassignedCount == 0)
         #expect(manager.dormantWindowAssignments.count == 1)
-        #expect(manager.stageContainingWindow(windowID: 101) == activeStage)
+        #expect(manager.spaceContainingWindow(windowID: 101) == activeSpace)
     }
 
     // MARK: - Assignment events
 
-    @Test("Adding a new window reports which window landed in which stage")
+    @Test("Adding a new window reports which window landed in which space")
     func reportsAddedWindowEvent() {
-        var manager = StageManager()
-        manager.createStage(position: .below)
-        manager.activateStage(id: manager.stages[1].id)
+        var manager = SpaceManager()
+        manager.createSpace(position: .below)
+        manager.activateSpace(id: manager.spaces[1].id)
         var reconciler = RuntimeWindowReconciler()
 
         let result = reconciler.reconcile(
@@ -585,7 +585,7 @@ struct RuntimeWindowReconcilerTests {
                 liveWindows: [liveWindow(7, bundleID: "company.thebrowser.dia", ownerName: "Dia", title: "Develop: repo")],
                 allWindowIDs: [7]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.events.count == 1)
@@ -594,19 +594,19 @@ struct RuntimeWindowReconcilerTests {
         #expect(event.windowID == 7)
         #expect(event.bundleID == "company.thebrowser.dia")
         #expect(event.windowTitle == "Develop: repo")
-        #expect(event.toStage == 1)
-        #expect(event.fromStage == nil)
+        #expect(event.toSpace == 1)
+        #expect(event.fromSpace == nil)
         #expect(event.reason == .new)
     }
 
-    @Test("Recovering a replaced window reports the stage it was restored into")
+    @Test("Recovering a replaced window reports the space it was restored into")
     func reportsRecoveredWindowEvent() {
-        var manager = StageManager()
-        manager.createStage(position: .below)
-        let secondStage = manager.stages[1].id
+        var manager = SpaceManager()
+        manager.createSpace(position: .below)
+        let secondSpace = manager.spaces[1].id
         manager.addWindow(
-            StageWindow(windowID: 22359, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Develop: repo", ownerPID: 10),
-            toStageID: secondStage
+            SpaceWindow(windowID: 22359, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Develop: repo", ownerPID: 10),
+            toSpaceID: secondSpace
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -615,22 +615,22 @@ struct RuntimeWindowReconcilerTests {
                 liveWindows: [liveWindow(61000, bundleID: "company.thebrowser.dia", ownerName: "Dia", title: "Develop: repo")],
                 allWindowIDs: [61000]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         let recovered = result.events.filter { $0.reason == .recoveredExact }
         #expect(recovered.count == 1)
         #expect(recovered.first?.windowID == 61000)
-        #expect(recovered.first?.toStage == 1)
+        #expect(recovered.first?.toSpace == 1)
         #expect(result.events.contains { $0.reason == .new } == false)
     }
 
     @Test("Bundle-only recovery is reported with its own reason")
     func reportsBundleRecoveryReason() {
-        var manager = StageManager()
+        var manager = SpaceManager()
         manager.addWindow(
-            StageWindow(windowID: 22359, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Develop: old tab", ownerPID: 10),
-            toStageID: manager.activeStageID
+            SpaceWindow(windowID: 22359, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Develop: old tab", ownerPID: 10),
+            toSpaceID: manager.activeSpaceID
         )
         var reconciler = RuntimeWindowReconciler()
 
@@ -639,7 +639,7 @@ struct RuntimeWindowReconcilerTests {
                 liveWindows: [liveWindow(61000, bundleID: "company.thebrowser.dia", ownerName: "Dia", title: "Develop: new tab")],
                 allWindowIDs: [61000]
             ),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
         #expect(result.events.map(\.reason) == [.recoveredBundle])
@@ -661,8 +661,8 @@ struct RuntimeWindowReconcilerTests {
         liveWindow(windowID, bundleID: Dia.bundleID, ownerName: "Dia", ownerPID: Dia.pid, title: title)
     }
 
-    private func diaAssignment(_ windowID: CGWindowID, _ title: String) -> StageWindow {
-        StageWindow(
+    private func diaAssignment(_ windowID: CGWindowID, _ title: String) -> SpaceWindow {
+        SpaceWindow(
             windowID: windowID,
             ownerBundleID: Dia.bundleID,
             ownerName: "Dia",
@@ -671,27 +671,27 @@ struct RuntimeWindowReconcilerTests {
         )
     }
 
-    /// Three stages holding the incident's assignments, active stage 0.
-    private func makeDiaIncidentState() -> (StageManager, [UUID]) {
-        var manager = StageManager()
-        manager.createStage(position: .below)
-        manager.createStage(position: .below)
-        let ids = manager.stages.map(\.id)
+    /// Three spaces holding the incident's assignments, active space 0.
+    private func makeDiaIncidentState() -> (SpaceManager, [UUID]) {
+        var manager = SpaceManager()
+        manager.createSpace(position: .below)
+        manager.createSpace(position: .below)
+        let ids = manager.spaces.map(\.id)
 
-        manager.addWindow(diaAssignment(22358, "Goodnotes: Goodnotes"), toStageID: ids[1])
-        manager.addWindow(diaAssignment(57414, "Develop: (1) thompson (@…"), toStageID: ids[1])
-        manager.addWindow(diaAssignment(22357, "Leisure: 「劇場版 魔法少女…"), toStageID: ids[2])
+        manager.addWindow(diaAssignment(22358, "Goodnotes: Goodnotes"), toSpaceID: ids[1])
+        manager.addWindow(diaAssignment(57414, "Develop: (1) thompson (@…"), toSpaceID: ids[1])
+        manager.addWindow(diaAssignment(22357, "Leisure: 「劇場版 魔法少女…"), toSpaceID: ids[2])
         // Closed without a destroy notification; no live window will ever match.
-        manager.addWindow(diaAssignment(60760, "Goodnotes: New Tab"), toStageID: ids[2])
-        manager.addWindow(diaAssignment(22359, "Develop: nexu-io/open-de…"), toStageID: ids[2])
+        manager.addWindow(diaAssignment(60760, "Goodnotes: New Tab"), toSpaceID: ids[2])
+        manager.addWindow(diaAssignment(22359, "Develop: nexu-io/open-de…"), toSpaceID: ids[2])
 
-        manager.activateStage(id: ids[0])
+        manager.activateSpace(id: ids[0])
         return (manager, ids)
     }
 
-    @Test("A replaced Dia window returns to its own stage, not the active stage")
-    func replacedDiaWindowKeepsItsStage() {
-        var (manager, stageIDs) = makeDiaIncidentState()
+    @Test("A replaced Dia window returns to its own space, not the active space")
+    func replacedDiaWindowKeepsItsSpace() {
+        var (manager, spaceIDs) = makeDiaIncidentState()
         var reconciler = RuntimeWindowReconciler()
 
         // 22359 is recreated as 61000 with a drifted title, as Dia does on
@@ -705,16 +705,16 @@ struct RuntimeWindowReconcilerTests {
 
         _ = reconciler.reconcile(
             RuntimeWindowSnapshot(liveWindows: live, allWindowIDs: [22358, 57414, 22357, 61000]),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 61000) == stageIDs[2])
-        #expect(manager.stageContainingWindow(windowID: 61000) != stageIDs[0])
+        #expect(manager.spaceContainingWindow(windowID: 61000) == spaceIDs[2])
+        #expect(manager.spaceContainingWindow(windowID: 61000) != spaceIDs[0])
     }
 
-    @Test("Repeated reconciles never drift a settled Dia window between stages")
+    @Test("Repeated reconciles never drift a settled Dia window between spaces")
     func settledDiaWindowDoesNotFlap() {
-        var (manager, stageIDs) = makeDiaIncidentState()
+        var (manager, spaceIDs) = makeDiaIncidentState()
         var reconciler = RuntimeWindowReconciler()
 
         let live = [
@@ -728,19 +728,19 @@ struct RuntimeWindowReconcilerTests {
             allWindowIDs: [22358, 57414, 22357, 61000]
         )
 
-        _ = reconciler.reconcile(snapshot, stageManager: &manager)
-        let settled = manager.stageContainingWindow(windowID: 61000)
+        _ = reconciler.reconcile(snapshot, spaceManager: &manager)
+        let settled = manager.spaceContainingWindow(windowID: 61000)
 
         for _ in 0..<5 {
-            _ = reconciler.reconcile(snapshot, stageManager: &manager)
-            #expect(manager.stageContainingWindow(windowID: 61000) == settled)
+            _ = reconciler.reconcile(snapshot, spaceManager: &manager)
+            #expect(manager.spaceContainingWindow(windowID: 61000) == settled)
         }
-        #expect(settled == stageIDs[2])
+        #expect(settled == spaceIDs[2])
     }
 
-    @Test("A stale assignment does not strand every other Dia window in the active stage")
+    @Test("A stale assignment does not strand every other Dia window in the active space")
     func staleAssignmentDoesNotCollapseRemainingWindows() {
-        var (manager, stageIDs) = makeDiaIncidentState()
+        var (manager, spaceIDs) = makeDiaIncidentState()
         var reconciler = RuntimeWindowReconciler()
 
         // Every window keeps its identity except the one that was already
@@ -754,23 +754,23 @@ struct RuntimeWindowReconcilerTests {
 
         _ = reconciler.reconcile(
             RuntimeWindowSnapshot(liveWindows: live, allWindowIDs: [22358, 57414, 22357, 22359]),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 22358) == stageIDs[1])
-        #expect(manager.stageContainingWindow(windowID: 57414) == stageIDs[1])
-        #expect(manager.stageContainingWindow(windowID: 22357) == stageIDs[2])
-        #expect(manager.stageContainingWindow(windowID: 22359) == stageIDs[2])
+        #expect(manager.spaceContainingWindow(windowID: 22358) == spaceIDs[1])
+        #expect(manager.spaceContainingWindow(windowID: 57414) == spaceIDs[1])
+        #expect(manager.spaceContainingWindow(windowID: 22357) == spaceIDs[2])
+        #expect(manager.spaceContainingWindow(windowID: 22359) == spaceIDs[2])
     }
 
     @Test("An ambiguously placed window is reclaimed once the stale assignment goes")
     func ambiguousPlacementIsReclaimedAfterStaleAssignmentRemoved() {
-        var (manager, stageIDs) = makeDiaIncidentState()
+        var (manager, spaceIDs) = makeDiaIncidentState()
         var reconciler = RuntimeWindowReconciler()
 
-        // Stranded assignments in two different stages: 60760 in stage 2 and
-        // 57414 in stage 1. Neither stage can claim the replacement, so it
-        // falls back to the active stage.
+        // Stranded assignments in two different spaces: 60760 in space 2 and
+        // 57414 in space 1. Neither space can claim the replacement, so it
+        // falls back to the active space.
         let live = [
             diaWindow(22358, "Goodnotes: drifted"),
             diaWindow(22357, "Leisure: drifted"),
@@ -781,19 +781,19 @@ struct RuntimeWindowReconcilerTests {
 
         _ = reconciler.reconcile(
             RuntimeWindowSnapshot(liveWindows: live, allWindowIDs: ids),
-            stageManager: &manager
+            spaceManager: &manager
         )
-        #expect(manager.stageContainingWindow(windowID: 61000) == stageIDs[0])
+        #expect(manager.spaceContainingWindow(windowID: 61000) == spaceIDs[0])
 
         // The closed window finally emits its destroy notification, leaving a
-        // single stranded assignment. 61000 must now be claimed by stage 1.
-        manager.removeWindow(windowID: 60760, fromStageID: stageIDs[2])
+        // single stranded assignment. 61000 must now be claimed by space 1.
+        manager.removeWindow(windowID: 60760, fromSpaceID: spaceIDs[2])
 
         _ = reconciler.reconcile(
             RuntimeWindowSnapshot(liveWindows: live, allWindowIDs: ids),
-            stageManager: &manager
+            spaceManager: &manager
         )
 
-        #expect(manager.stageContainingWindow(windowID: 61000) == stageIDs[1])
+        #expect(manager.spaceContainingWindow(windowID: 61000) == spaceIDs[1])
     }
 }

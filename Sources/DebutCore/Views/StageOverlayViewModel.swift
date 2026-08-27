@@ -1,7 +1,7 @@
 import Foundation
 import CoreGraphics
 
-public struct PlateWindowData: Sendable, Identifiable {
+public struct StageWindowData: Sendable, Identifiable {
     public let id: CGWindowID
     public let windowID: CGWindowID
     public let ownerBundleID: String
@@ -10,16 +10,16 @@ public struct PlateWindowData: Sendable, Identifiable {
     public let previewImage: CGImage?
 }
 
-public struct PlateData: Sendable, Identifiable {
+public struct StageData: Sendable, Identifiable {
     public let id: UUID
-    public let windows: [PlateWindowData]
+    public let windows: [StageWindowData]
     public let isActive: Bool
     public let index: Int
 }
 
-public struct OverlayViewModel: Sendable {
-    public let stageManager: StageManager
-    public var activeStageIndex: Int
+public struct StageOverlayViewModel: Sendable {
+    public let spaceManager: SpaceManager
+    public var activeSpaceIndex: Int
     public var selectedWindowIndex: Int
     public let windowPreviews: [CGWindowID: CGImage]
     public var appearance: AppSettings
@@ -32,17 +32,17 @@ public struct OverlayViewModel: Sendable {
     public var forceDisplayStackIndicator: Bool
 
     public var displayStackName: String {
-        stageManager.selectedStageStack?.displayName ?? "Display"
+        spaceManager.selectedSpaceStack?.displayName ?? "Display"
     }
 
     public var displayStackPosition: Int {
-        (stageManager.connectedStageStacks.firstIndex {
-            $0.id == stageManager.selectedStageStackID
+        (spaceManager.connectedSpaceStacks.firstIndex {
+            $0.id == spaceManager.selectedSpaceStackID
         } ?? 0) + 1
     }
 
     public var displayStackCount: Int {
-        max(stageManager.connectedStageStacks.count, forceDisplayStackIndicator ? 2 : 0)
+        max(spaceManager.connectedSpaceStacks.count, forceDisplayStackIndicator ? 2 : 0)
     }
 
     public var shouldShowDisplayStackIndicator: Bool { displayStackCount > 1 }
@@ -60,9 +60,9 @@ public struct OverlayViewModel: Sendable {
         max(0, displayTopContentInset) + 18
     }
 
-    public init(stageManager: StageManager, activeStageIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, displayTopContentInset: CGFloat = 0, forceDisplayStackIndicator: Bool = false) {
-        self.stageManager = stageManager
-        self.activeStageIndex = activeStageIndex
+    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, displayTopContentInset: CGFloat = 0, forceDisplayStackIndicator: Bool = false) {
+        self.spaceManager = spaceManager
+        self.activeSpaceIndex = activeSpaceIndex
         self.selectedWindowIndex = selectedWindowIndex
         self.windowPreviews = windowPreviews
         self.appearance = appearance
@@ -71,12 +71,12 @@ public struct OverlayViewModel: Sendable {
         self.forceDisplayStackIndicator = forceDisplayStackIndicator
     }
 
-    public var plates: [PlateData] {
-        stageManager.stages.enumerated().map { index, stage in
-            PlateData(
-                id: stage.id,
-                windows: stage.windows.map { window in
-                    PlateWindowData(
+    public var stages: [StageData] {
+        spaceManager.spaces.enumerated().map { index, space in
+            StageData(
+                id: space.id,
+                windows: space.windows.map { window in
+                    StageWindowData(
                         id: window.windowID,
                         windowID: window.windowID,
                         ownerBundleID: window.ownerBundleID,
@@ -85,18 +85,18 @@ public struct OverlayViewModel: Sendable {
                         previewImage: windowPreviews[window.windowID]
                     )
                 },
-                isActive: index == activeStageIndex,
+                isActive: index == activeSpaceIndex,
                 index: index
             )
         }
     }
 
-    public var selectedWindow: PlateWindowData? {
-        guard stageManager.stages.indices.contains(activeStageIndex) else { return nil }
-        let stage = stageManager.stages[activeStageIndex]
-        guard stage.windows.indices.contains(selectedWindowIndex) else { return nil }
-        let window = stage.windows[selectedWindowIndex]
-        return PlateWindowData(
+    public var selectedWindow: StageWindowData? {
+        guard spaceManager.spaces.indices.contains(activeSpaceIndex) else { return nil }
+        let space = spaceManager.spaces[activeSpaceIndex]
+        guard space.windows.indices.contains(selectedWindowIndex) else { return nil }
+        let window = space.windows[selectedWindowIndex]
+        return StageWindowData(
             id: window.windowID,
             windowID: window.windowID,
             ownerBundleID: window.ownerBundleID,
@@ -106,7 +106,7 @@ public struct OverlayViewModel: Sendable {
         )
     }
 
-    public func isSelected(stageIndex: Int, windowIndex: Int) -> Bool {
-        stageIndex == activeStageIndex && windowIndex == selectedWindowIndex
+    public func isSelected(spaceIndex: Int, windowIndex: Int) -> Bool {
+        spaceIndex == activeSpaceIndex && windowIndex == selectedWindowIndex
     }
 }

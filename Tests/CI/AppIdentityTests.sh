@@ -36,7 +36,7 @@ fi
 expect_contains "Sources/DebutCore/DebutCore.swift" 'applicationSupportDirectory' \
     "DebutCore must publish the Application Support directory"
 
-# The host stages whatever build-app.sh produced, rather than a second copy of its name.
+# The host spaces whatever build-app.sh produced, rather than a second copy of its name.
 expect_not_contains "scripts/tart-e2e.sh" '\.build/[A-Za-z-]+\.app' \
     "Tart E2E must not hardcode the app bundle name the build script chose"
 

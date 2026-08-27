@@ -83,10 +83,10 @@ open -na TextEdit "$fixture_dir/one.txt"
 open -na TextEdit "$fixture_dir/two.txt"
 sleep 2
 
-# A runner logs in with one desktop, and a stage is a desktop, so without this the suite cannot
-# switch a stage or move a window between two. Debut builds its stage list at launch, so the
+# A runner logs in with one desktop, and a space is a desktop, so without this the suite cannot
+# switch a space or move a window between two. Debut builds its space list at launch, so the
 # desktops have to exist first.
-echo "Provisioning desktops so stages have somewhere to be..."
+echo "Provisioning desktops so spaces have somewhere to be..."
 "$e2e_path" provision-desktops 3
 
 echo "Launching Debut..."

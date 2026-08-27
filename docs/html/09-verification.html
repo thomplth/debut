@@ -18,7 +18,7 @@
     <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
     <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
     <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
-    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="04-spaces.html"><span class="num">04</span>Spaces &amp; switching</a></li>
     <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
     <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
     <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
@@ -53,7 +53,7 @@ layered, and each layer exists because the one below it cannot see something.
 <p>
 AGENTS.md decides <em>when</em> each layer runs. E2E is for high-risk changes only
 — global keyboard handling, Accessibility integration, window discovery or
-lifecycle, stage switching, overlay presentation, persistence reconciliation, app
+lifecycle, space switching, overlay presentation, persistence reconciliation, app
 installation, code signing. Routine model, settings, copy, and styling changes use
 unit and screenshot tests. Running E2E on a copy change is not thoroughness, it is
 a 10-minute detour.
@@ -86,7 +86,7 @@ Three suites are marked <code>.serialized</code>:
 </p>
 
 <ul>
-  <li><code>@Suite("StageController", .serialized)</code>&nbsp;<span class="src">StageControllerTests.swift:151</span></li>
+  <li><code>@Suite("SpaceController", .serialized)</code>&nbsp;<span class="src">SpaceControllerTests.swift:151</span></li>
   <li><code>@Suite("Overlay window", .serialized)</code>&nbsp;<span class="src">OverlayWindowTests.swift:5</span></li>
   <li><code>@Suite("Keyboard shortcut customization", .serialized)</code>&nbsp;<span class="src">KeyboardShortcutCustomizationTests.swift:7</span></li>
 </ul>
@@ -150,9 +150,9 @@ which exist because something once went wrong:
   <li><code>"Repeated non-empty partial AX snapshots preserve omitted windows"</code>&nbsp;<span class="src">:176</span></li>
   <li><code>"A later replacement reclaims the retained assignment without a timeout"</code>&nbsp;<span class="src">:332</span></li>
   <li><code>"Dormant recovery does not steal an established assigned window"</code>&nbsp;<span class="src">:542</span></li>
-  <li><code>"A replaced Dia window returns to its own stage, not the active stage"</code>&nbsp;<span class="src">:692</span></li>
-  <li><code>"Repeated reconciles never drift a settled Dia window between stages"</code>&nbsp;<span class="src">:715</span></li>
-  <li><code>"A stale assignment does not strand every other Dia window in the active stage"</code>&nbsp;<span class="src">:741</span></li>
+  <li><code>"A replaced Dia window returns to its own space, not the active space"</code>&nbsp;<span class="src">:692</span></li>
+  <li><code>"Repeated reconciles never drift a settled Dia window between spaces"</code>&nbsp;<span class="src">:715</span></li>
+  <li><code>"A stale assignment does not strand every other Dia window in the active space"</code>&nbsp;<span class="src">:741</span></li>
 </ul>
 
 <p>
@@ -166,7 +166,7 @@ sequence does not.
 <div class="note">
 <p>
 When fixing a reconciliation bug, write the test at the level of the invariant
-that was violated, not the line that was wrong. "Does not drift between stages
+that was violated, not the line that was wrong. "Does not drift between spaces
 across repeated reconciles" survives a rewrite of the matching tiers; "phase 2
 returns index 3" does not.
 </p>
@@ -197,14 +197,14 @@ geometry. Three private helpers extract layout facts from a render:
 
 <table>
   <tr><th>Helper</th><th>Returns</th><th>Used for</th></tr>
-  <tr><td><code>renderPlateFrames</code>&nbsp;<span class="srcline">:33</span></td><td><code>[Int: CGRect]</code> keyed by plate index</td><td>Plate stack position and scale</td></tr>
+  <tr><td><code>renderStageFrames</code>&nbsp;<span class="srcline">:33</span></td><td><code>[Int: CGRect]</code> keyed by stage index</td><td>Stage stack position and scale</td></tr>
   <tr><td><code>renderWindowFrames</code>&nbsp;<span class="srcline">:44</span></td><td><code>[WindowFrameID: CGRect]</code></td><td>Drag-slot anchor stability</td></tr>
-  <tr><td><code>renderPlateSurfaceFrames</code>&nbsp;<span class="srcline">:55</span></td><td><code>[Int: CGRect]</code></td><td>The rendered plate surface, distinct from its layout frame</td></tr>
+  <tr><td><code>renderStageSurfaceFrames</code>&nbsp;<span class="srcline">:55</span></td><td><code>[Int: CGRect]</code></td><td>The rendered stage surface, distinct from its layout frame</td></tr>
 </table>
 
 <p>
 These are what make claims like <code>"Dragging a window preview does not shift the
-plate stack"</code>&nbsp;<span class="src">:151</span> and <code>"Window frame
+stage stack"</code>&nbsp;<span class="src">:151</span> and <code>"Window frame
 preferences remain stable drag-slot anchors"</code>&nbsp;<span class="src">:174</span>
 checkable. Both encode the double-layout anchoring trick from chapter 6: the
 stack's baseline geometry must not move when the visual focus does. A golden-image
@@ -213,8 +213,8 @@ assertion does the opposite, which is the right way round.
 </p>
 
 <p>
-The suite also covers the depth gradient at nine plates, selection state,
-cross-stage drag growth and surface resizing, and the three onboarding screens —
+The suite also covers the depth gradient at nine stages, selection state,
+cross-space drag growth and surface resizing, and the three onboarding screens —
 with a <code>MockOnboardingPermissionClient</code>&nbsp;<span class="src">:325</span>
 standing in for the real TCC prompts.
 </p>
@@ -254,16 +254,16 @@ known state:
 </p>
 
 <div class="diagram">reachability     App is reachable via diagnostics / Event tap is running / Windows discovered
-desktop surface  wallpaper refresh; visible during stage management;
+desktop surface  wallpaper refresh; visible during space management;
                  yields to Mission Control and App Expose, and returns after each
 overlay          visible; previews contain non-uniform pixels; selection moves and
                  moves back; command hint usage follows real dispatch; overlay closes
 tab semantics    held Tab remains on the last window; a fresh Tab press wraps to first
-stage mode       overlay visible in stage mode; closes after stage commit
+space mode       overlay visible in space mode; closes after space commit
 pointer          stationary pointer does not select or magnify;
                  movement enables hover selection; click commits
-drag             window drop across stages; immediate reverse drag;
-                 cleanup restores original stages
+drag             window drop across spaces; immediate reverse drag;
+                 cleanup restores original spaces
 settings         a persisted custom shortcut replaces Command-Tab activation;
                  command hints use contextual placements and purpose icons
 windows          forced first launch presents onboarding; relaunch is normal;
@@ -277,9 +277,9 @@ than one distinct luminance value.
 </p>
 
 <p>
-Note also the cleanup scenarios — <code>"E2E prepared an empty destination stage
+Note also the cleanup scenarios — <code>"E2E prepared an empty destination space
 without losing source windows"</code>&nbsp;<span class="src">:879</span>,
-<code>"Window-drop E2E cleanup restores the original stages"</code>&nbsp;<span class="src">:1091</span>,
+<code>"Window-drop E2E cleanup restores the original spaces"</code>&nbsp;<span class="src">:1091</span>,
 and the two <code>"Debut relaunches normally after …"</code> checks. The suite runs
 against the developer's or the VM's real session, so it is responsible for putting
 the session back.
@@ -292,8 +292,8 @@ Two scenarios are named in a set at the top of the file&nbsp;<span class="src">:
 </p>
 
 <pre><code>let hostedDragTests: Set&lt;String&gt; = [
-    "Dropping a window updates the source and destination stage models",
-    "The refreshed destination plate supports an immediate reverse drag",
+    "Dropping a window updates the source and destination space models",
+    "The refreshed destination stage supports an immediate reverse drag",
 ]</code></pre>
 
 <p>

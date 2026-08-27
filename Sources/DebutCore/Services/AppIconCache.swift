@@ -6,20 +6,20 @@ import Foundation
 /// `NSWorkspace.icon(forFile:)` hands back an `NSImage` backed by a lazy IconServices
 /// representation. Assigning it is free; rasterizing it is a synchronous XPC round-trip to the
 /// icon daemon, and it happens at draw time — on the main thread, inside the Core Animation
-/// commit, once per plate. With a cold IconServices cache that measured ~250ms (KHA-481).
+/// commit, once per stage. With a cold IconServices cache that measured ~250ms (KHA-481).
 public final class AppIconCache: @unchecked Sendable {
     public static let shared = AppIconCache()
 
     /// The sizes the overlay rasterizes icons at, and therefore the set worth warming.
     ///
-    /// Fixed at the largest plate scale rather than following the current one: the cache is keyed
+    /// Fixed at the largest stage scale rather than following the current one: the cache is keyed
     /// by size, so tracking the scale would throw the whole warmed set away every time the slider
     /// moved and put the rasterize back on the main thread. An image view downsamples the
     /// oversized bitmap for free.
-    public static let placeholderIconRasterSize = PlateMetrics.standard
-        .scaled(by: CGFloat(AppSettings.maximumPlateScale)).previewPlaceholderIconSize
-    public static let badgeRasterSize = PlateMetrics.standard
-        .scaled(by: CGFloat(AppSettings.maximumPlateScale)).badgeSize
+    public static let placeholderIconRasterSize = StageMetrics.standard
+        .scaled(by: CGFloat(AppSettings.maximumStageScale)).previewPlaceholderIconSize
+    public static let badgeRasterSize = StageMetrics.standard
+        .scaled(by: CGFloat(AppSettings.maximumStageScale)).badgeSize
 
     public static let overlayIconSizes: [CGFloat] = [
         placeholderIconRasterSize,

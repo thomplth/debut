@@ -169,7 +169,7 @@ struct OverlayPresentationTelemetryTests {
             wallpaperState: .ready,
             hostingView: .created,
             processAge: .underMinute,
-            workload: .init(stages: 4, windows: 8, captures: 8),
+            workload: .init(spaces: 4, windows: 8, captures: 8),
             cachedPreviewCount: 8
         )
         #expect(environment.processUse == .firstAttempt)

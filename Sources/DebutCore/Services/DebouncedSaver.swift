@@ -11,7 +11,7 @@ public final class DebouncedSaver: @unchecked Sendable {
         self.delay = delay
     }
 
-    public func scheduleSave(_ manager: StageManager) {
+    public func scheduleSave(_ manager: SpaceManager) {
         workItem?.cancel()
         let item = DispatchWorkItem { [store] in
             try? store.save(manager)
@@ -20,7 +20,7 @@ public final class DebouncedSaver: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + delay, execute: item)
     }
 
-    public func flushNow(_ manager: StageManager) {
+    public func flushNow(_ manager: SpaceManager) {
         workItem?.cancel()
         workItem = nil
         queue.sync { [store] in

@@ -61,7 +61,7 @@ struct TelemetryTests {
         let transport = RecordingTelemetryClient()
         let queue = InMemoryTelemetryQueue()
         let exporter = TelemetryExporter(client: transport, queue: queue, enabled: true, dailyEventLimit: 10)
-        try await exporter.enqueue(.anomaly(operation: .stageSwitch, latency: .milliseconds100To250, workload: .typical))
+        try await exporter.enqueue(.anomaly(operation: .spaceSwitch, latency: .milliseconds100To250, workload: .typical))
         #expect(await exporter.status().queued == 1)
 
         await exporter.setEnabled(false)
@@ -69,7 +69,7 @@ struct TelemetryTests {
         try await exporter.flush()
         #expect(await transport.payloads.isEmpty)
 
-        try await exporter.enqueue(.anomaly(operation: .stageSwitch, latency: .milliseconds100To250, workload: .typical))
+        try await exporter.enqueue(.anomaly(operation: .spaceSwitch, latency: .milliseconds100To250, workload: .typical))
         #expect(await exporter.status().queued == 0)
     }
 
@@ -195,7 +195,7 @@ struct TelemetryTests {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("DebutTelemetry-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let firstClient = RecordingTelemetryClient()
-        let payload = TelemetryPayload.anomaly(operation: .stageSwitch, latency: .milliseconds100To250, workload: .typical)
+        let payload = TelemetryPayload.anomaly(operation: .spaceSwitch, latency: .milliseconds100To250, workload: .typical)
         let first = TelemetryExporter(client: firstClient, queue: DiskTelemetryQueue(file: file), enabled: true, dailyEventLimit: 1)
         try await first.enqueue(payload)
         try await first.flush()

@@ -18,7 +18,7 @@
     <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
     <li><a class="current" href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
     <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
-    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="04-spaces.html"><span class="num">04</span>Spaces &amp; switching</a></li>
     <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
     <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
     <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
@@ -136,22 +136,22 @@ This is the interesting half, and its order encodes several constraints:
 
   <li>Apply the exclusion list before anything is discovered.</li>
 
-  <li>Reconcile the persisted stage manager against live windows, inside a
+  <li>Reconcile the persisted space manager against live windows, inside a
   <code>windowReconciliation</code> performance span.</li>
 
-  <li>Remove excluded bundles, prune empty stages, and populate a default stage
+  <li>Remove excluded bundles, prune empty spaces, and populate a default space
   <em>only</em> if everything is empty <strong>and</strong> there are no dormant
   assignments. A user who has quit every tracked app still has a layout worth
   keeping.</li>
 
-  <li>Determine the starting stage from the currently focused window rather than
-  defaulting to stage 1.</li>
+  <li>Determine the starting space from the currently focused window rather than
+  defaulting to space 1.</li>
 
   <li>Create the <code>DesktopSurfaceCoordinator</code> and order it to front
-  <em>before</em> the controller exists, so the controller's first stage switch
+  <em>before</em> the controller exists, so the controller's first space switch
   can raise windows above a surface that is already in place.</li>
 
-  <li>Construct <code>StageController</code>. Its initialiser starts the event tap
+  <li>Construct <code>SpaceController</code>. Its initialiser starts the event tap
   and installs the diagnostic state provider.</li>
 
   <li>Attach the discovery callbacks and call <code>startObserving()</code>.</li>
@@ -160,16 +160,16 @@ This is the interesting half, and its order encodes several constraints:
 <h2>The dependency graph</h2>
 
 <div class="diagram">                    AppDelegate            @MainActor
-                    (composition root, StageControllerDelegate)
+                    (composition root, SpaceControllerDelegate)
                           |
      owns ----------------+----------------------------- owns
       |         |            |             |               |
       v         v            v             v               v
-  StateStore  WindowDis-  Overlay      DesktopSurface   StageController
+  StateStore  WindowDis-  Overlay      DesktopSurface   SpaceController
   + Debounced covery      Window       Coordinator          |
     Saver     Service                                       | owns
                  |                                          v
-                 | closures                            StageManager
+                 | closures                            SpaceManager
                  | (onAppLaunched, onWindowClosed,     (pure value type)
                  |  onFrontmostAppChanged, ...)             |
                  v                                          | uses
@@ -182,11 +182,11 @@ This is the interesting half, and its order encodes several constraints:
 
 <p>
 Two things to notice. <code>WindowDiscoveryService</code> never talks to
-<code>StageController</code> directly — it exposes closures that
+<code>SpaceController</code> directly — it exposes closures that
 <code>AppDelegate</code> attaches, so policy decisions about what a discovery
-event <em>means</em> live in one place. And <code>StageController</code> reaches
+event <em>means</em> live in one place. And <code>SpaceController</code> reaches
 the user interface only through a weak
-<code>StageControllerDelegate</code>&nbsp;<span class="src">StageController.swift:119</span>,
+<code>SpaceControllerDelegate</code>&nbsp;<span class="src">SpaceController.swift:119</span>,
 implemented by <code>AppDelegate</code>; it never imports a view.
 </p>
 
@@ -201,7 +201,7 @@ graph. The mechanisms, in the order you will meet them:
   <tr><th>Direction</th><th>Mechanism</th></tr>
   <tr>
     <td>Keyboard → controller</td>
-    <td><code>StageController</code> <em>is</em> the <code>KeyboardEventDelegate</code>. The tap delivers a <code>DebutKeyEvent</code> enum value into one large switch.</td>
+    <td><code>SpaceController</code> <em>is</em> the <code>KeyboardEventDelegate</code>. The tap delivers a <code>DebutKeyEvent</code> enum value into one large switch.</td>
   </tr>
   <tr>
     <td>Discovery → policy</td>
@@ -225,7 +225,7 @@ graph. The mechanisms, in the order you will meet them:
   <span class="label">Why push instead of observation</span>
   <p>
   <code>OverlayViewModel</code> is a plain <code>Sendable</code> struct whose
-  <code>plates</code> property is computed on access. Rebuilding and reassigning
+  <code>stages</code> property is computed on access. Rebuilding and reassigning
   it is a single diff for SwiftUI, and it makes overlay refreshes explicit and
   countable — which matters because the overlay's presentation latency is
   measured phase by phase (chapter 8). An observation graph would scatter those
@@ -290,9 +290,9 @@ exceptions".
   run concurrently in a task group, and preview luminance analysis is pushed off
   the main queue to keep the render path free.</li>
 
-  <li><code>StageController</code> is <code>@unchecked Sendable</code> rather than
+  <li><code>SpaceController</code> is <code>@unchecked Sendable</code> rather than
   <code>@MainActor</code>, and uses <code>MainActor.assumeIsolated</code> at the
-  three points where it touches the desktop surface&nbsp;<span class="src">StageController.swift:267, 648, 655</span>.</li>
+  three points where it touches the desktop surface&nbsp;<span class="src">SpaceController.swift:267, 648, 655</span>.</li>
 </ul>
 
 <div class="warn">
@@ -309,7 +309,7 @@ exceptions".
 <h2>A keypress, end to end</h2>
 
 <p>
-The path below is the spine of the runtime. Each stage is covered in detail in a
+The path below is the spine of the runtime. Each space is covered in detail in a
 later chapter.
 </p>
 
@@ -322,7 +322,7 @@ later chapter.
             │ DebutKeyEvent
             ▼
  ┌─────────────────────┐   main queue
- │ StageController     │   session state, selection, stage mutation
+ │ SpaceController     │   session state, selection, space mutation
  │ .handleKeyEvent     │   probes the focused window's frame and Space
  └──────────┬──────────┘
             │ delegate call
@@ -367,11 +367,11 @@ later chapter.
 <h2>Where to start reading the code</h2>
 
 <ol class="tight">
-  <li><code>Models/StageManager.swift</code> — the entire domain model, pure, ~318 lines. Read this first.</li>
+  <li><code>Models/SpaceManager.swift</code> — the entire domain model, pure, ~318 lines. Read this first.</li>
   <li><code>AppDelegate.swift:44</code> — launch order and wiring.</li>
-  <li><code>Services/StageController.swift:399</code> — <code>handleKeyEvent</code>, the switch every interaction passes through.</li>
+  <li><code>Services/SpaceController.swift:399</code> — <code>handleKeyEvent</code>, the switch every interaction passes through.</li>
   <li><code>Services/EventTapKeyboardService.swift:188</code> — the tap decision tree.</li>
-  <li><code>Views/PlateView.swift</code> — the overlay. Large; start at the layout maths, not the top.</li>
+  <li><code>Views/StageView.swift</code> — the overlay. Large; start at the layout maths, not the top.</li>
 </ol>
 
 <div class="pager">

@@ -18,7 +18,7 @@
     <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
     <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
     <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
-    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="04-spaces.html"><span class="num">04</span>Spaces &amp; switching</a></li>
     <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
     <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
     <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
@@ -69,7 +69,7 @@ of times per second, so only lifecycle events earn durable storage.
 </blockquote>
 
 <p>
-So <code>.lifecycle</code> events (stage switches, window discovery, reconciliation,
+So <code>.lifecycle</code> events (space switches, window discovery, reconciliation,
 app launches and exits, assignment changes) append to the durable log.
 <code>.transient</code> events (a held Tab stepping the selection, pointer hover,
 per-frame work) land in the in-memory ring and the live snapshot only. Both
@@ -114,7 +114,7 @@ Allocating a formatter per event is measurable on the input path. Only touched o
 
 <p>
 <code>DiagnosticReporter.shared</code> is a singleton, and test suites that exercise
-<code>StageController</code> report through it. If those reports landed in the real
+<code>SpaceController</code> report through it. If those reports landed in the real
 Application Support directory they would pollute the log that a live session is
 diagnosed from. So the default directory branches on a positive identification of
 the shipped app&nbsp;<span class="src">DiagnosticReporter.swift:32-34</span>:
@@ -246,7 +246,7 @@ signposts, sample buffers, the diagnostic snapshot, the budget file, and telemet
   <tr><td>Overlay</td><td><code>overlay_preparation</code>, <code>overlay_render_submission</code>, <code>overlay_end_to_end_visible</code></td></tr>
   <tr><td>Previews</td><td><code>preview_enumeration</code>, <code>preview_first</code>, <code>preview_all</code>, <code>preview_capture</code></td></tr>
   <tr><td>Windows</td><td><code>window_discovery</code>, <code>window_classification</code>, <code>window_reconciliation</code></td></tr>
-  <tr><td>Stages</td><td><code>stage_switch</code>, <code>stage_raise</code></td></tr>
+  <tr><td>Spaces</td><td><code>space_switch</code>, <code>space_raise</code></td></tr>
   <tr><td>Other</td><td><code>wallpaper_capture</code>, <code>state_persistence</code>, <code>hidden_idle</code></td></tr>
 </table>
 
@@ -329,7 +329,7 @@ records a trace of 14 named phases&nbsp;<span class="src">:11</span>, in causal 
 <div class="diagram">activation_recognized      keystroke classified in the tap callback
 main_actor_dequeued        handoff to main completed
 focus_probe_completed      where is the focused window, and is it fullscreen?
-controller_accepted        StageController agreed to present
+controller_accepted        SpaceController agreed to present
 presentation_scheduled     deferred presentation armed
 presentation_deadline_fired
 preparation_began

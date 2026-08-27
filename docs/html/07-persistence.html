@@ -18,7 +18,7 @@
     <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
     <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
     <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
-    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="04-spaces.html"><span class="num">04</span>Spaces &amp; switching</a></li>
     <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
     <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
     <li><a class="current" href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
@@ -47,7 +47,7 @@ Everything lives in <code>~/Library/Application Support/Debut/</code>:
 
 <table>
   <tr><th>File</th><th>Contents</th><th>Written by</th></tr>
-  <tr><td><code>state.json</code></td><td>The encoded <code>StageManager</code>: stages, their order, window assignments, dormant assignments, active stage ID</td><td>Debounced on mutation; flushed on terminate</td></tr>
+  <tr><td><code>state.json</code></td><td>The encoded <code>SpaceManager</code>: spaces, their order, window assignments, dormant assignments, active space ID</td><td>Debounced on mutation; flushed on terminate</td></tr>
   <tr><td><code>settings.json</code></td><td>The encoded <code>AppSettings</code>: appearance, bindings, exclusions, delays, hint counts</td><td>Immediately on any settings change</td></tr>
   <tr><td><code>diagnostic.json</code></td><td>Live snapshot: state block, recent events, performance, presentation traces</td><td>Chapter 8</td></tr>
   <tr><td><code>diagnostic.jsonl</code> (+ <code>.1</code>)</td><td>Append-only lifecycle event log with one rotated generation</td><td>Chapter 8</td></tr>
@@ -71,9 +71,9 @@ operations gated by a budget.
 <h3>Asymmetric error handling</h3>
 
 <p>
-<code>load()</code> returns a fresh empty <code>StageManager</code> if the file is
+<code>load()</code> returns a fresh empty <code>SpaceManager</code> if the file is
 missing <em>or</em> if decoding fails — deliberately, and with a comment recalling
-a legacy format where stages held applications rather than windows. A user with an
+a legacy format where spaces held applications rather than windows. A user with an
 unreadable state file gets a working app with a lost layout, not a launch failure.
 </p>
 
@@ -95,7 +95,7 @@ queue — that synchronous barrier is what makes
 </p>
 
 <p>
-It coalesces whole <code>StageManager</code> <em>values</em>, not deltas, so a
+It coalesces whole <code>SpaceManager</code> <em>values</em>, not deltas, so a
 save always writes the latest snapshot handed to it. Dropping intermediate states
 is the entire point.
 </p>
@@ -109,13 +109,13 @@ present since the beginning are required; everything added later is optional wit
 a default.</strong>
 </p>
 
-<pre><code>// StageManager.init(from:)
-stages                   = try decode(...)                    // required
-activeStageID            = try decode(...)                    // required
+<pre><code>// SpaceManager.init(from:)
+spaces                   = try decode(...)                    // required
+activeSpaceID            = try decode(...)                    // required
 dormantWindowAssignments = try decodeIfPresent(...) ?? []     // added later
 
-// then: drop any dormant assignment whose stageID no longer exists</code></pre>
-<p><span class="srcline">Models/StageManager.swift:32</span></p>
+// then: drop any dormant assignment whose spaceID no longer exists</code></pre>
+<p><span class="srcline">Models/SpaceManager.swift:32</span></p>
 
 <p>
 <code>AppSettings.init(from:)</code> follows the same shape across a long list of
@@ -125,7 +125,7 @@ quick-switch modifier sets, preview policy and TTL, hint visibility, usage count
 
 <p>
 Unknown keys are simply ignored by <code>JSONDecoder</code>, which is what made
-removing <code>Stage.name</code> and the default-stage-name setting safe without
+removing <code>Space.name</code> and the default-space-name setting safe without
 touching anyone's existing files: the leftover keys are read and discarded. Key
 bindings go further — the decoder drops unrecognised action names and merges what
 remains over the shipped defaults, so a file from an older build gains new actions
@@ -189,14 +189,14 @@ bundle form a complete one-to-one set, avoiding arbitrary partial reassignment.
 <p>
 That completeness condition is the whole safety argument for tier B. Three saved
 assignments and three live windows for one bundle: the pairing may be wrong in
-detail, but every window ends up in a stage that genuinely belonged to that
+detail, but every window ends up in a space that genuinely belonged to that
 application. Three saved and one live: refuse, because any pairing is a coin flip
 that could drag a window into the wrong project. Bundles are iterated in sorted
 order so the outcome is deterministic.
 </p>
 
 <p>
-A match rewrites the assignment's IDs in place, preserving both the stage
+A match rewrites the assignment's IDs in place, preserving both the space
 <em>and</em> the MRU index.
 </p>
 
@@ -204,8 +204,8 @@ A match rewrites the assignment's IDs in place, preserving both the stage
 
 <p>
 The same two-tier matcher runs again, this time over the dormant assignments,
-sorted by (stage index, window index) so restoration order is stable. Each
-restored window is reinserted at its recorded index within its stage rather than
+sorted by (space index, window index) so restoration order is stable. Each
+restored window is reinserted at its recorded index within its space rather than
 appended, so a relaunched app comes back in the same order it left.
 </p>
 
@@ -213,8 +213,8 @@ appended, so a relaunched app comes back in the same order it left.
 
 <p>
 Live windows that matched nothing and are assigned nowhere have to go somewhere.
-The default is the target stage — the active one at startup. But before that, the
-reconciler looks for a <em>stranded stage</em>: if exactly one stage still holds an
+The default is the target space — the active one at startup. But before that, the
+reconciler looks for a <em>stranded space</em>: if exactly one space still holds an
 unrecovered assignment for that bundle, the new window goes there instead.
 </p>
 
@@ -228,7 +228,7 @@ already makes.
 When a bundle has stranded or dormant assignments, the newly placed window is also
 marked <strong>provisional</strong>, so a later reconcile — once the app finishes
 opening its remaining windows — may legitimately steal it back into a better
-match. Rebinding a provisional window removes it from all stages first, so it can
+match. Rebinding a provisional window removes it from all spaces first, so it can
 never end up assigned twice.
 </p>
 
@@ -257,7 +257,7 @@ sweep, no "clean up old entries" pass, and adding one would be a bug.
 <p>
 Every placement decision records why it happened —
 <code>recoveredExact</code>, <code>recoveredBundle</code>,
-<code>dormantRestored</code>, <code>strandedStageRecovered</code>,
+<code>dormantRestored</code>, <code>strandedSpaceRecovered</code>,
 <code>new</code>. These reach the diagnostic log, and they are how a
 misplacement is diagnosed afterwards. A window that reappears as
 <code>reason: new</code> when it should have been recovered is the signature of
@@ -271,7 +271,7 @@ the class of bug this whole module exists to prevent.
   :766) build the same fixture from a real incident, with real window IDs and
   titles, including a window annotated "closed without a destroy notification; no
   live window will ever match". They are the most readable specification of the
-  stranded-stage and provisional machinery that exists. One of them asserts the
+  stranded-space and provisional machinery that exists. One of them asserts the
   reconciler <em>does not flap</em>: repeated identical snapshots must converge,
   not oscillate.
   </p>
@@ -279,7 +279,7 @@ the class of bug this whole module exists to prevent.
 
 <h2>Startup, end to end</h2>
 
-<div class="diagram">load state.json  ──►  StageManager (or a fresh one on failure)
+<div class="diagram">load state.json  ──►  SpaceManager (or a fresh one on failure)
         │
         ▼
 apply exclusion list           excluded bundles are removed outright
@@ -289,32 +289,32 @@ reconcile against live windows  ◄── phases 1–3 above
         │                           (skipped entirely if the live list is
         │                            empty while apps and assignments exist)
         ▼
-removeEmptyStages()             keeps stages holding dormant assignments
+removeEmptySpaces()             keeps spaces holding dormant assignments
         │
         ▼
-populate a default stage        ONLY if every stage is empty AND there are
-        │                       no dormant assignments (there is always >=1 stage)
+populate a default space        ONLY if every space is empty AND there are
+        │                       no dormant assignments (there is always >=1 space)
         ▼
-choose the starting stage       the one owning the currently focused window,
+choose the starting space       the one owning the currently focused window,
         │                       else the first
         ▼
-activate it                     the first real stage switch of the session</div>
+activate it                     the first real space switch of the session</div>
 
 <h2>Dormancy, in code</h2>
 
 <p>
-A <code>DormantWindowAssignment</code> is a <code>StageWindow</code> plus the
-<code>stageID</code> and <code>windowIndex</code> to return to. The lifecycle:
+A <code>DormantWindowAssignment</code> is a <code>SpaceWindow</code> plus the
+<code>spaceID</code> and <code>windowIndex</code> to return to. The lifecycle:
 </p>
 
 <table>
   <tr><th>Event</th><th>Effect</th></tr>
-  <tr><td>Process exits (kernel source, or workspace notification as backup)</td><td>Its windows leave the live stage view and become dormant assignments at their current positions</td></tr>
+  <tr><td>Process exits (kernel source, or workspace notification as backup)</td><td>Its windows leave the live space view and become dormant assignments at their current positions</td></tr>
   <tr><td>Window reports an untrackable Accessibility classification</td><td>Same — dormant, never deleted</td></tr>
   <tr><td>App launches again</td><td>Phase 2 restores by exact match, then by complete one-to-one bundle match</td></tr>
   <tr><td><code>kAXUIElementDestroyedNotification</code></td><td>The assignment is genuinely removed</td></tr>
   <tr><td>App is excluded, or the cache is reset</td><td>Purged</td></tr>
-  <tr><td>Containing stage is deleted</td><td>Purged — and on decode, any dormant assignment pointing at a missing stage is pruned as a safety net</td></tr>
+  <tr><td>Containing space is deleted</td><td>Purged — and on decode, any dormant assignment pointing at a missing space is pruned as a safety net</td></tr>
   <tr><td>Time passes</td><td><strong>Nothing.</strong> There is no expiry.</td></tr>
 </table>
 
@@ -331,7 +331,7 @@ formats — see chapter 8.
 <h2>Diagnosing persistence problems</h2>
 
 <ol>
-  <li>Read <code>state.json</code>. Sorted keys make it diffable; the stage array
+  <li>Read <code>state.json</code>. Sorted keys make it diffable; the space array
   order is the label order.</li>
   <li>Grep <code>diagnostic.jsonl</code> for reason codes. A cluster of
   <code>reason: new</code> after a restart means recovery failed, not that windows

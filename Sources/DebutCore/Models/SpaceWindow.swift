@@ -1,7 +1,7 @@
 import Foundation
 import CoreGraphics
 
-public struct StageWindow: Codable, Identifiable, Equatable, Sendable {
+public struct SpaceWindow: Codable, Identifiable, Equatable, Sendable {
     public let id: UUID
     public var windowID: CGWindowID
     public let ownerBundleID: String
@@ -18,7 +18,7 @@ public struct StageWindow: Codable, Identifiable, Equatable, Sendable {
         self.ownerPID = ownerPID
     }
 
-    public static func == (lhs: StageWindow, rhs: StageWindow) -> Bool {
+    public static func == (lhs: SpaceWindow, rhs: SpaceWindow) -> Bool {
         lhs.windowID == rhs.windowID
     }
 }

@@ -51,7 +51,7 @@ prepare_vm() {
     tart get "$VM_NAME"
 }
 
-stage_build() {
+space_build() {
     local ARTIFACT_ID
     local old_artifacts=()
     local build_log app_bundle
@@ -138,7 +138,7 @@ run_e2e() {
         exit 1
     fi
 
-    stage_build
+    space_build
     start_vm
     prepare_ssh
 

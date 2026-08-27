@@ -1,12 +1,12 @@
 import CoreGraphics
 import Foundation
 
-/// Stages plate-stack edits without touching the persisted model or the window server.
+/// Spaces stage-stack edits without touching the persisted model or the window server.
 ///
 /// Every move shown by the overlay passes through this transaction. The controller is the
 /// only owner of the commit boundary, so an input handler cannot accidentally turn a preview
 /// gesture into an immediate assignment change.
-struct PlateStackTransaction: Sendable {
+struct StageStackTransaction: Sendable {
     enum Source: Sendable, Equatable {
         case keyboard
         case pointer
@@ -14,8 +14,8 @@ struct PlateStackTransaction: Sendable {
 
     struct Relocation: Sendable, Equatable {
         let windowID: CGWindowID
-        let fromStageIndex: Int
-        let toStageIndex: Int
+        let fromSpaceIndex: Int
+        let toSpaceIndex: Int
     }
 
     struct Commit: Sendable {
@@ -27,31 +27,31 @@ struct PlateStackTransaction: Sendable {
 
     private struct Move: Sendable {
         let windowID: CGWindowID
-        let fromStageID: UUID
-        let toStageID: UUID
+        let fromSpaceID: UUID
+        let toSpaceID: UUID
         let windowIndex: Int
         let source: Source
     }
 
     private var moves: [Move] = []
 
-    func preview(applyingTo stageManager: StageManager) -> StageManager {
-        var preview = stageManager
+    func preview(applyingTo spaceManager: SpaceManager) -> SpaceManager {
+        var preview = spaceManager
         applyMoves(to: &preview)
         return preview
     }
 
-    mutating func stageMove(
+    mutating func spaceMove(
         windowID: CGWindowID,
-        fromStageID: UUID,
-        toStageID: UUID,
+        fromSpaceID: UUID,
+        toSpaceID: UUID,
         windowIndex: Int,
         source: Source
     ) {
         moves.append(Move(
             windowID: windowID,
-            fromStageID: fromStageID,
-            toStageID: toStageID,
+            fromSpaceID: fromSpaceID,
+            toSpaceID: toSpaceID,
             windowIndex: windowIndex,
             source: source
         ))
@@ -61,31 +61,31 @@ struct PlateStackTransaction: Sendable {
         moves.removeAll { $0.windowID == windowID }
     }
 
-    mutating func commit(to stageManager: inout StageManager) -> Commit {
-        let before = stageManager
+    mutating func commit(to spaceManager: inout SpaceManager) -> Commit {
+        let before = spaceManager
         let affectedWindowIDs = Set(moves.map(\.windowID))
         let keyboardWindowIDs = Set(moves.lazy.filter { $0.source == .keyboard }.map(\.windowID))
         let pointerWindowIDs = Set(moves.lazy.filter { $0.source == .pointer }.map(\.windowID))
-        applyMoves(to: &stageManager)
+        applyMoves(to: &spaceManager)
 
         let relocations = affectedWindowIDs.compactMap { windowID -> Relocation? in
-            guard let fromStageID = before.stageContainingWindow(windowID: windowID),
-                  let toStageID = stageManager.stageContainingWindow(windowID: windowID),
-                  fromStageID != toStageID,
-                  let fromStageIndex = before.stages.firstIndex(where: { $0.id == fromStageID }),
-                  let toStageIndex = stageManager.stages.firstIndex(where: { $0.id == toStageID })
+            guard let fromSpaceID = before.spaceContainingWindow(windowID: windowID),
+                  let toSpaceID = spaceManager.spaceContainingWindow(windowID: windowID),
+                  fromSpaceID != toSpaceID,
+                  let fromSpaceIndex = before.spaces.firstIndex(where: { $0.id == fromSpaceID }),
+                  let toSpaceIndex = spaceManager.spaces.firstIndex(where: { $0.id == toSpaceID })
             else { return nil }
             return Relocation(
                 windowID: windowID,
-                fromStageIndex: fromStageIndex,
-                toStageIndex: toStageIndex
+                fromSpaceIndex: fromSpaceIndex,
+                toSpaceIndex: toSpaceIndex
             )
         }
         .sorted { $0.windowID < $1.windowID }
 
-        let didMutate = before.stages.count != stageManager.stages.count
-            || zip(before.stages, stageManager.stages).contains { beforeStage, afterStage in
-                beforeStage.id != afterStage.id || beforeStage.windows != afterStage.windows
+        let didMutate = before.spaces.count != spaceManager.spaces.count
+            || zip(before.spaces, spaceManager.spaces).contains { beforeSpace, afterSpace in
+                beforeSpace.id != afterSpace.id || beforeSpace.windows != afterSpace.windows
             }
         moves.removeAll()
         return Commit(
@@ -100,12 +100,12 @@ struct PlateStackTransaction: Sendable {
         moves.removeAll()
     }
 
-    private func applyMoves(to stageManager: inout StageManager) {
+    private func applyMoves(to spaceManager: inout SpaceManager) {
         for move in moves {
-            stageManager.moveWindow(
+            spaceManager.moveWindow(
                 windowID: move.windowID,
-                fromStageID: move.fromStageID,
-                toStageID: move.toStageID,
+                fromSpaceID: move.fromSpaceID,
+                toSpaceID: move.toSpaceID,
                 at: move.windowIndex
             )
         }

@@ -11,8 +11,8 @@ struct PerformanceObservabilityTests {
             "overlay_end_to_end_visible",
             "preview_enumeration",
             "preview_first", "preview_all", "preview_capture", "window_discovery",
-            "window_classification", "window_reconciliation", "stage_switch",
-            "stage_raise", "wallpaper_capture", "state_persistence", "hidden_idle",
+            "window_classification", "window_reconciliation", "space_switch",
+            "space_raise", "wallpaper_capture", "state_persistence", "hidden_idle",
         ])
     }
 
@@ -95,7 +95,7 @@ struct PerformanceObservabilityTests {
         let recorder = PerformanceRecorder(resourceReader: reader, now: { 1 })
 
         let preparation = recorder.end(recorder.begin(.overlayPreparation))
-        let switched = recorder.end(recorder.begin(.stageSwitch))
+        let switched = recorder.end(recorder.begin(.spaceSwitch))
 
         #expect(preparation?.resourceDelta?.cpuPercent == 50)
         #expect(preparation?.resourceDelta?.pageIns == 7)
@@ -135,11 +135,11 @@ struct PerformanceObservabilityTests {
         let box = Box()
         let recorder = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader(), now: { 1 })
         recorder.setObservationHandler { box.observation = $0 }
-        let id = recorder.begin(.stageSwitch, workload: .init(stages: 4, windows: 12))
+        let id = recorder.begin(.spaceSwitch, workload: .init(spaces: 4, windows: 12))
         _ = recorder.end(id)
 
         #expect(box.observation?.correlationID == id)
-        #expect(box.observation?.operation == .stageSwitch)
+        #expect(box.observation?.operation == .spaceSwitch)
     }
 
     @Test("High-frequency event taps cannot evict recent evidence for other operations")

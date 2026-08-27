@@ -1,9 +1,9 @@
 import Foundation
 import CoreGraphics
 
-public struct Stage: Codable, Identifiable, Equatable, Sendable {
+public struct Space: Codable, Identifiable, Equatable, Sendable {
     public let id: UUID
-    public private(set) var windows: [StageWindow]
+    public private(set) var windows: [SpaceWindow]
 
     public init() {
         self.id = UUID()
@@ -14,12 +14,12 @@ public struct Stage: Codable, Identifiable, Equatable, Sendable {
         Set(windows.map(\.windowID))
     }
 
-    public mutating func addWindow(_ window: StageWindow) {
+    public mutating func addWindow(_ window: SpaceWindow) {
         guard !windows.contains(where: { $0.windowID == window.windowID }) else { return }
         windows.append(window)
     }
 
-    public mutating func insertWindow(_ window: StageWindow, at index: Int) {
+    public mutating func insertWindow(_ window: SpaceWindow, at index: Int) {
         guard !windows.contains(where: { $0.windowID == window.windowID }) else { return }
         windows.insert(window, at: min(max(index, 0), windows.count))
     }
@@ -57,7 +57,7 @@ public struct Stage: Codable, Identifiable, Equatable, Sendable {
         windows.insert(window, at: 0)
     }
 
-    public static func == (lhs: Stage, rhs: Stage) -> Bool {
+    public static func == (lhs: Space, rhs: Space) -> Bool {
         lhs.id == rhs.id
     }
 }

@@ -4,8 +4,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor
-public final class AppDelegate: NSObject, NSApplicationDelegate, StageControllerDelegate {
-    private var stageController: StageController?
+public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceControllerDelegate {
+    private var spaceController: SpaceController?
     private var overlayWindow: OverlayWindow?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
@@ -23,7 +23,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private var keyboardService: EventTapKeyboardService?
     private var spaceService: SpaceService?
     private var currentSettings: AppSettings = AppSettings()
-    private var pendingStageManager: StageManager?
+    private var pendingSpaceManager: SpaceManager?
     private var debouncedSaver: DebouncedSaver?
     private var runtimeWindowReconciler = RuntimeWindowReconciler()
     private var telemetryExporter: TelemetryExporter?
@@ -52,7 +52,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         let store = StateStore()
         stateStore = store
         debouncedSaver = DebouncedSaver(store: store)
-        pendingStageManager = (try? store.load()) ?? StageManager()
+        pendingSpaceManager = (try? store.load()) ?? SpaceManager()
         currentSettings = (try? store.loadSettings()) ?? AppSettings()
         launchAtLogin.apply(enabled: currentSettings.launchAtLogin)
         setupTelemetry()
@@ -93,10 +93,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     private func setupController() {
         guard let windowService, let keyboardService else { return }
-        guard stageController == nil else { return }
+        guard spaceController == nil else { return }
 
-        var stageManager = pendingStageManager ?? StageManager()
-        pendingStageManager = nil
+        var spaceManager = pendingSpaceManager ?? SpaceManager()
+        pendingSpaceManager = nil
 
         let discovery = WindowDiscoveryService(windowService: windowService)
         self.windowDiscovery = discovery
@@ -113,68 +113,68 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         self.spaceService = spaceService
         discovery.spaceSwitcher = spaceService
 
-        // Windows are placed by the desktop they are on, so the stage list has to cover
+        // Windows are placed by the desktop they are on, so the space list has to cover
         // every desktop before the first reconcile. Growing it afterwards would leave the
-        // tail desktops' answers out of range, and those windows would land on stage 1.
+        // tail desktops' answers out of range, and those windows would land on space 1.
         let launchTopology = spaceService.spaceTopology()
-        let launchStagesBefore = stageManager.allStages.count
-        stageManager.reconcileStageStacks(with: launchTopology)
-        diag.report("stages_reconciled", details: [
+        let launchSpacesBefore = spaceManager.allSpaces.count
+        spaceManager.reconcileSpaceStacks(with: launchTopology)
+        diag.report("spaces_reconciled", details: [
             "separateSpaces": "\(launchTopology.separateSpaces)",
             "stackCount": "\(launchTopology.stacks.count)",
-            "stagesBefore": "\(launchStagesBefore)",
-            "stagesAfter": "\(stageManager.allStages.count)",
+            "spacesBefore": "\(launchSpacesBefore)",
+            "spacesAfter": "\(spaceManager.allSpaces.count)",
         ])
 
         // Remove stale window IDs, remap live window IDs from snapshot
         let reconcileID = PerformanceRecorder.shared.begin(
             .windowReconciliation,
             workload: .init(
-                stages: stageManager.stages.count,
-                windows: stageManager.liveWindowCount,
-                dormantWindows: stageManager.dormantWindowAssignments.count
+                spaces: spaceManager.spaces.count,
+                windows: spaceManager.liveWindowCount,
+                dormantWindows: spaceManager.dormantWindowAssignments.count
             )
         )
-        discovery.reconcileWindows(&stageManager)
+        discovery.reconcileWindows(&spaceManager)
         _ = PerformanceRecorder.shared.end(reconcileID)
 
-        // Remove excluded apps' windows from all stages
+        // Remove excluded apps' windows from all spaces
         for bundleID in currentSettings.excludedBundleIDs {
-            stageManager.removeAllWindows(forBundleID: bundleID)
+            spaceManager.removeAllWindows(forBundleID: bundleID)
         }
 
-        // Empty stages are deliberately kept: a desktop with nothing on it is still a
-        // desktop, and pruning it would shift every later stage off the desktop it maps to.
+        // Empty spaces are deliberately kept: a desktop with nothing on it is still a
+        // desktop, and pruning it would shift every later space off the desktop it maps to.
 
-        if stageManager.allStages.allSatisfy({ $0.windows.isEmpty }) &&
-            stageManager.dormantWindowAssignments.isEmpty {
-            discovery.populateDefaultStage(&stageManager)
+        if spaceManager.allSpaces.allSatisfy({ $0.windows.isEmpty }) &&
+            spaceManager.dormantWindowAssignments.isEmpty {
+            discovery.populateDefaultSpace(&spaceManager)
         }
 
-        // Activate the stage containing the currently focused window, or fall back to first stage
-        let startStageID: UUID
+        // Activate the space containing the currently focused window, or fall back to first space
+        let startSpaceID: UUID
         if let frontApp = NSWorkspace.shared.frontmostApplication,
            frontApp.bundleIdentifier != "com.thomplth.Debut",
            let focusedWID = discovery.focusedWindowID(for: frontApp.processIdentifier),
-           let owningStage = stageManager.stageContainingWindow(windowID: focusedWID) {
-            startStageID = owningStage
-            if let stackID = stageManager.stageStackID(containingStageID: owningStage) {
-                stageManager.selectStageStack(id: stackID)
+           let owningSpace = spaceManager.spaceContainingWindow(windowID: focusedWID) {
+            startSpaceID = owningSpace
+            if let stackID = spaceManager.spaceStackID(containingSpaceID: owningSpace) {
+                spaceManager.selectSpaceStack(id: stackID)
             }
         } else {
-            startStageID = stageManager.stages[0].id
+            startSpaceID = spaceManager.spaces[0].id
         }
-        stageManager.activateStage(id: startStageID)
+        spaceManager.activateSpace(id: startSpaceID)
 
         AppIconCache.shared.warm(
-            bundleIDs: stageManager.allWindowOwnerBundleIDs,
+            bundleIDs: spaceManager.allWindowOwnerBundleIDs,
             sizes: AppIconCache.overlayIconSizes
         )
 
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: windowService,
             keyboardService: keyboardService,
-            stageManager: stageManager,
+            spaceManager: spaceManager,
             overlayPresentationDelay: currentSettings.overlayPresentationDelay,
             previewRefreshPolicy: currentSettings.previewRefreshPolicy,
             previewCacheTTL: currentSettings.previewCacheTTL
@@ -192,7 +192,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 self?.diag.report("real_desktop_presented")
             }
         }
-        stageController = controller
+        spaceController = controller
 
         keyboardService.keyBindings = currentSettings.keyBindings
         keyboardService.quickSwitchExcludedBundleIDs = Set(
@@ -203,13 +203,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             currentSettings.quickSwitchSameApplicationModifiers
         keyboardService.heldCycleMinimumInterval = currentSettings.heldCycleMinimumInterval
 
-        // Stages are the user's desktops, so the persisted lists are only a starting guess.
+        // Spaces are the user's desktops, so the persisted lists are only a starting guess.
         // Reconciliation also adopts each display's currently visible desktop without moving it.
-        controller.reconcileStagesWithDesktops()
+        controller.reconcileSpacesWithDesktops()
 
         discovery.onWindowsDiscovered = { [weak self] windows in
             DispatchQueue.main.async {
-                guard let self, let controller = self.stageController else { return }
+                guard let self, let controller = self.spaceController else { return }
                 let result = self.runtimeWindowReconciler.reconcile(
                     RuntimeWindowSnapshot(
                         liveWindows: windows,
@@ -218,7 +218,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                             forWindows: windows.map(\.windowID)
                         ) ?? [:]
                     ),
-                    stageManager: &controller.stageManager
+                    spaceManager: &controller.spaceManager
                 )
                 if result.didMutate {
                     self.diag.report("runtime_windows_reconciled", details: [
@@ -227,18 +227,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                         "trigger": "app_launch",
                     ])
                     self.reportAssignmentEvents(result.events, trigger: "app_launch")
-                    self.debouncedSaver?.scheduleSave(controller.stageManager)
+                    self.debouncedSaver?.scheduleSave(controller.spaceManager)
                 }
             }
         }
         discovery.onWindowClosed = { [weak self] windowID in
             DispatchQueue.main.async {
                 guard let self else { return }
-                let window = self.stageController?.stageManager.allStages
+                let window = self.spaceController?.spaceManager.allSpaces
                     .flatMap(\.windows)
                     .first { $0.windowID == windowID }
-                for stage in self.stageController?.stageManager.allStages ?? [] {
-                    self.stageController?.stageManager.removeWindow(windowID: windowID, fromStageID: stage.id)
+                for space in self.spaceController?.spaceManager.allSpaces ?? [] {
+                    self.spaceController?.spaceManager.removeWindow(windowID: windowID, fromSpaceID: space.id)
                 }
                 self.diag.report("window_retired", details: [
                     "windowID": "\(windowID)",
@@ -246,17 +246,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                     "windowTitle": window?.windowTitle ?? "unknown",
                     "reason": "destroyed",
                 ])
-                if let sm = self.stageController?.stageManager {
+                if let sm = self.spaceController?.spaceManager {
                     self.debouncedSaver?.scheduleSave(sm)
                 }
-                self.stageController?.handleLiveWindowsRemoved()
+                self.spaceController?.handleLiveWindowsRemoved()
             }
         }
         discovery.onWindowTitleChanged = { [weak self] windowID, newTitle in
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.stageController?.stageManager.updateWindowTitle(windowID: windowID, title: newTitle)
-                if let sm = self.stageController?.stageManager {
+                self.spaceController?.spaceManager.updateWindowTitle(windowID: windowID, title: newTitle)
+                if let sm = self.spaceController?.spaceManager {
                     self.debouncedSaver?.scheduleSave(sm)
                 }
             }
@@ -264,23 +264,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         discovery.onWindowActivated = { [weak self] windowID in
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.stageController?.recordWindowActivation(windowID: windowID)
+                self.spaceController?.recordWindowActivation(windowID: windowID)
             }
         }
         discovery.onFrontmostAppChanged = { [weak self, weak keyboardService] bundleID in
             keyboardService?.updateFrontmostApp(bundleIdentifier: bundleID)
             guard let self else { return }
-            self.stageController?.updateFrontmostApp(
+            self.spaceController?.updateFrontmostApp(
                 isExcluded: bundleID.map { self.currentSettings.excludedBundleIDs.contains($0) }
                     ?? false
             )
         }
         discovery.onAppActivated = { [weak self] snapshot in
             DispatchQueue.main.async {
-                guard let self, let controller = self.stageController else { return }
+                guard let self, let controller = self.spaceController else { return }
                 let result = self.runtimeWindowReconciler.reconcile(
                     snapshot,
-                    stageManager: &controller.stageManager
+                    spaceManager: &controller.spaceManager
                 )
                 if result.didMutate {
                     self.diag.report("runtime_windows_reconciled", details: [
@@ -289,16 +289,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                         "trigger": "app_activation",
                     ])
                     self.reportAssignmentEvents(result.events, trigger: "app_activation")
-                    self.debouncedSaver?.scheduleSave(controller.stageManager)
+                    self.debouncedSaver?.scheduleSave(controller.spaceManager)
                 }
             }
         }
         discovery.onDesktopsChanged = { [weak self] snapshot in
             DispatchQueue.main.async {
-                guard let self, let controller = self.stageController else { return }
+                guard let self, let controller = self.spaceController else { return }
                 let result = self.runtimeWindowReconciler.reconcile(
                     snapshot,
-                    stageManager: &controller.stageManager
+                    spaceManager: &controller.spaceManager
                 )
                 guard result.didMutate else { return }
                 self.diag.report("runtime_windows_reconciled", details: [
@@ -307,19 +307,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                     "trigger": "desktop_changed",
                 ])
                 self.reportAssignmentEvents(result.events, trigger: "desktop_changed")
-                self.debouncedSaver?.scheduleSave(controller.stageManager)
+                self.debouncedSaver?.scheduleSave(controller.spaceManager)
             }
         }
         discovery.onAppTerminated = { [weak self] ownerPID in
             DispatchQueue.main.async {
-                guard let self, let controller = self.stageController else { return }
-                let dormantCount = controller.stageManager.makeWindowsDormant(forOwnerPID: ownerPID)
+                guard let self, let controller = self.spaceController else { return }
+                let dormantCount = controller.spaceManager.makeWindowsDormant(forOwnerPID: ownerPID)
                 if dormantCount > 0 {
                     self.diag.report("terminated_app_windows_made_dormant", details: [
                         "count": "\(dormantCount)",
                         "ownerPID": "\(ownerPID)",
                     ])
-                    let sm = controller.stageManager
+                    let sm = controller.spaceManager
                     self.debouncedSaver?.scheduleSave(sm)
                     controller.handleLiveWindowsRemoved()
                 }
@@ -347,7 +347,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         diag.report("controller_setup", details: [
             "eventTapStarted": "\(controller.keyboardServiceStarted)",
             "eventTapRunning": "\(keyboardService.isRunning)",
-            "windowsInDefaultStage": "\(stageManager.stages[0].windows.count)",
+            "windowsInDefaultSpace": "\(spaceManager.spaces[0].windows.count)",
         ])
     }
 
@@ -374,11 +374,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     /// Fires for Debut's own switches as well as the user's. Debut's own switches are the
     /// ones waiting on this to focus their target; a user's switch has nothing pending and
-    /// only needs the active stage adopted.
+    /// only needs the active space adopted.
     @objc private func activeSpaceDidChange(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.stageController?.desktopDidChange()
+            self.spaceController?.desktopDidChange()
             // Moving a window between desktops activates no app, so without this the move is
             // only noticed the next time the user clicks the window.
             self.windowDiscovery?.refreshDesktopAssignments()
@@ -388,7 +388,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     @objc private func screenParametersDidChange(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.stageController?.reconcileStagesWithDesktops()
+            self.spaceController?.reconcileSpacesWithDesktops()
             self.windowDiscovery?.refreshDesktopAssignments()
         }
     }
@@ -414,7 +414,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         source: String
     ) {
         guard state.accessibilityGranted else { return }
-        if stageController == nil {
+        if spaceController == nil {
             diag.report("accessibility_granted", details: ["source": source])
             setupController()
         }
@@ -427,10 +427,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
 
     nonisolated public func applicationWillTerminate(_ notification: Notification) {
         OverlayPresentationRecorder.shared.finalizeAll(outcome: .appTerminated)
-        let stageController = MainActor.assumeIsolated { self.stageController }
+        let spaceController = MainActor.assumeIsolated { self.spaceController }
         let debouncedSaver = MainActor.assumeIsolated { self.debouncedSaver }
-        if let stageController, let debouncedSaver {
-            debouncedSaver.flushNow(stageController.stageManager)
+        if let spaceController, let debouncedSaver {
+            debouncedSaver.flushNow(spaceController.spaceManager)
         }
         let exporter = MainActor.assumeIsolated { self.telemetryExporter }
         let payload = MainActor.assumeIsolated { self.currentTelemetrySummary() }
@@ -444,41 +444,41 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
     }
 
-    // MARK: - StageControllerDelegate
+    // MARK: - SpaceControllerDelegate
 
-    nonisolated public func stageControllerDidOpenOverlay(_ controller: StageController) {
-        stageControllerDidOpenOverlay(controller, overlayPresentation: nil)
+    nonisolated public func spaceControllerDidOpenOverlay(_ controller: SpaceController) {
+        spaceControllerDidOpenOverlay(controller, overlayPresentation: nil)
     }
 
-    nonisolated public func stageControllerDidOpenOverlay(
-        _ controller: StageController,
+    nonisolated public func spaceControllerDidOpenOverlay(
+        _ controller: SpaceController,
         overlayPresentation: OverlayPresentationContext?
     ) {
         DispatchQueue.main.async { [weak self] in
-            self?.showStageManagerOverlay(overlayPresentation: overlayPresentation)
+            self?.showSpaceManagerOverlay(overlayPresentation: overlayPresentation)
         }
     }
 
-    nonisolated public func stageControllerDidCloseOverlay(_ controller: StageController) {
-        stageControllerDidCloseOverlay(controller, overlayPresentation: nil)
+    nonisolated public func spaceControllerDidCloseOverlay(_ controller: SpaceController) {
+        spaceControllerDidCloseOverlay(controller, overlayPresentation: nil)
     }
 
-    nonisolated public func stageControllerDidCloseOverlay(
-        _ controller: StageController,
+    nonisolated public func spaceControllerDidCloseOverlay(
+        _ controller: SpaceController,
         overlayPresentation: OverlayPresentationContext?
     ) {
         DispatchQueue.main.async { [weak self] in
-            self?.hideStageManagerOverlay(overlayPresentation: overlayPresentation)
+            self?.hideSpaceManagerOverlay(overlayPresentation: overlayPresentation)
         }
     }
 
-    nonisolated public func stageControllerDidUpdateSelection(_ controller: StageController) {
+    nonisolated public func spaceControllerDidUpdateSelection(_ controller: SpaceController) {
         DispatchQueue.main.async { [weak self] in
             self?.updateOverlay()
         }
     }
 
-    nonisolated public func stageControllerDidSwitchStage(_ controller: StageController) {}
+    nonisolated public func spaceControllerDidSwitchSpace(_ controller: SpaceController) {}
 
     private func reportAssignmentEvents(_ events: [WindowAssignmentEvent], trigger: String) {
         for event in events {
@@ -488,28 +488,28 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         }
     }
 
-    nonisolated public func stageControllerDidMutateState(_ controller: StageController) {
+    nonisolated public func spaceControllerDidMutateState(_ controller: SpaceController) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.debouncedSaver?.scheduleSave(controller.stageManager)
-            self.diag.report("stage_state_mutated")
+            self.debouncedSaver?.scheduleSave(controller.spaceManager)
+            self.diag.report("space_state_mutated")
         }
     }
 
-    private func showStageManagerOverlay(
+    private func showSpaceManagerOverlay(
         overlayPresentation: OverlayPresentationContext? = nil
     ) {
-        guard let stageController, let overlayWindow else { return }
+        guard let spaceController, let overlayWindow else { return }
         if let hiddenIdlePerformanceID {
             _ = PerformanceRecorder.shared.end(hiddenIdlePerformanceID)
             self.hiddenIdlePerformanceID = nil
         }
         let workload = PerformanceWorkload(
-            stages: stageController.stageManager.stages.count,
-            windows: stageController.stageManager.liveWindowCount
+            spaces: spaceController.spaceManager.spaces.count,
+            windows: spaceController.spaceManager.liveWindowCount
         )
         if let overlayPresentation {
-            stageController.markOverlayPresentation(.preparationBegan, context: overlayPresentation)
+            spaceController.markOverlayPresentation(.preparationBegan, context: overlayPresentation)
         }
         let preparationID = PerformanceRecorder.shared.begin(
             .overlayPreparation,
@@ -517,31 +517,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             traceID: overlayPresentation?.traceID
         )
 
-        overlayWindow.onWindowSelected = { [weak self] stageIndex, windowIndex in
+        overlayWindow.onWindowSelected = { [weak self] spaceIndex, windowIndex in
             self?.diag.report("overlay_window_selected_by_pointer", level: .transient, details: [
-                "stageIndex": "\(stageIndex)",
+                "spaceIndex": "\(spaceIndex)",
                 "windowIndex": "\(windowIndex)",
             ])
-            self?.stageController?.commitOverlaySelection(
-                stageIndex: stageIndex,
+            self?.spaceController?.commitOverlaySelection(
+                spaceIndex: spaceIndex,
                 windowIndex: windowIndex
             )
         }
 
         overlayWindow.onWindowMoved = {
             [weak self] windowID, fromIndex, fromWindowIndex, toIndex, toWindowIndex in
-            guard let self, let ctrl = self.stageController else { return }
+            guard let self, let ctrl = self.spaceController else { return }
             guard ctrl.moveWindowByDrag(
                 windowID: windowID,
-                fromStageIndex: fromIndex,
-                toStageIndex: toIndex,
+                fromSpaceIndex: fromIndex,
+                toSpaceIndex: toIndex,
                 toWindowIndex: toWindowIndex
             ) else { return }
             self.diag.report("window_move_previewed_by_drag", level: .transient, details: [
                 "windowID": "\(windowID)",
-                "fromStageIndex": "\(fromIndex)",
+                "fromSpaceIndex": "\(fromIndex)",
                 "fromWindowIndex": "\(fromWindowIndex)",
-                "toStageIndex": "\(toIndex)",
+                "toSpaceIndex": "\(toIndex)",
                 "toWindowIndex": "\(toWindowIndex)",
             ])
             // Let SwiftUI finish the drag transaction before replacing its root view.
@@ -550,15 +550,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             }
         }
 
-        overlayWindow.onStageScrollSelected = { [weak self] index in
-            guard let self, let ctrl = self.stageController else { return }
-            ctrl.jumpToStage(index: index)
-            self.diag.report("stage_scrolled_from_overlay", details: [
-                "stageIndex": "\(index)",
+        overlayWindow.onSpaceScrollSelected = { [weak self] index in
+            guard let self, let ctrl = self.spaceController else { return }
+            ctrl.jumpToSpace(index: index)
+            self.diag.report("space_scrolled_from_overlay", details: [
+                "spaceIndex": "\(index)",
             ])
         }
 
-        overlayWindow.onStageScrollRouted = { [weak self] scroll in
+        overlayWindow.onSpaceScrollRouted = { [weak self] scroll in
             self?.diag.report("overlay_scroll_routed", level: .transient, details: [
                 "location": formatOverlayPoint(scroll.location),
                 "deltaY": String(format: "%.1f", scroll.deltaY),
@@ -585,27 +585,27 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             ])
         }
 
-        overlayWindow.onPointerSelectionChanged = { [weak self] stageIndex, windowIndex in
+        overlayWindow.onPointerSelectionChanged = { [weak self] spaceIndex, windowIndex in
             self?.diag.report("overlay_pointer_selection_changed", level: .transient, details: [
-                "stageIndex": stageIndex.map(String.init) ?? "none",
+                "spaceIndex": spaceIndex.map(String.init) ?? "none",
                 "windowIndex": windowIndex.map(String.init) ?? "none",
             ])
         }
 
         overlayWindow.onDesktopSelected = { [weak self] in
-            self?.stageController?.revealDesktop()
+            self?.spaceController?.revealDesktop()
         }
 
-        let display = overlayDisplay(focusedWindowFrame: stageController.focusedWindowFrame)
+        let display = overlayDisplay(focusedWindowFrame: spaceController.focusedWindowFrame)
         if let displayID = display?.displayID {
-            stageController.selectStageStack(forDisplayID: displayID)
+            spaceController.selectSpaceStack(forDisplayID: displayID)
         }
         overlayWindow.targetScreenFrame = display?.frame
-        let vm = OverlayViewModel(
-            stageManager: stageController.overlayStageManager,
-            activeStageIndex: stageController.selectedStageIndex,
-            selectedWindowIndex: stageController.selectedWindowIndex,
-            windowPreviews: stageController.windowPreviews,
+        let vm = StageOverlayViewModel(
+            spaceManager: spaceController.overlaySpaceManager,
+            activeSpaceIndex: spaceController.selectedSpaceIndex,
+            selectedWindowIndex: spaceController.selectedWindowIndex,
+            windowPreviews: spaceController.windowPreviews,
             appearance: currentSettings,
             wallpaperLuminance: nil,
             displayTopContentInset: display?.topContentInset ?? 0,
@@ -614,14 +614,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         reportCommandHintLayout(viewModel: vm)
         let createdHostingView = overlayWindow.update(viewModel: vm)
         if let overlayPresentation {
-            stageController.updateOverlayHostingView(
+            spaceController.updateOverlayHostingView(
                 createdHostingView ? .created : .reused,
                 context: overlayPresentation
             )
         }
-        overlayWindow.showOverlay { [weak self, weak stageController] in
-            guard let self, let stageController, let overlayPresentation else { return }
-            stageController.completeOverlayPresentation(
+        overlayWindow.showOverlay { [weak self, weak spaceController] in
+            guard let self, let spaceController, let overlayPresentation else { return }
+            spaceController.completeOverlayPresentation(
                 overlayPresentation,
                 outcome: .presented
             )
@@ -630,11 +630,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             ])
         }
         if let overlayPresentation {
-            stageController.markOverlayPresentation(.windowOrdered, context: overlayPresentation)
+            spaceController.markOverlayPresentation(.windowOrdered, context: overlayPresentation)
         }
         _ = PerformanceRecorder.shared.end(preparationID)
         if let overlayPresentation {
-            stageController.markOverlayPresentation(.preparationCompleted, context: overlayPresentation)
+            spaceController.markOverlayPresentation(.preparationCompleted, context: overlayPresentation)
         }
         let renderSubmissionID = PerformanceRecorder.shared.begin(
             .overlayRenderSubmission,
@@ -644,12 +644,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         // Armed across the enqueue so a queue that is still blocked reports
         // itself, rather than leaving a long duration to be explained afterwards.
         mainQueueWatchdog.arm(traceID: overlayPresentation?.traceID)
-        DispatchQueue.main.async { [weak overlayWindow, weak stageController, watchdog = mainQueueWatchdog] in
+        DispatchQueue.main.async { [weak overlayWindow, weak spaceController, watchdog = mainQueueWatchdog] in
             watchdog.disarm()
             overlayWindow?.contentView?.displayIfNeeded()
             CATransaction.flush()
             if let overlayPresentation {
-                stageController?.markOverlayPresentation(
+                spaceController?.markOverlayPresentation(
                     .renderSubmitted,
                     context: overlayPresentation
                 )
@@ -659,23 +659,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         diag.report("overlay_shown")
     }
 
-    private func reportCommandHintLayout(viewModel: OverlayViewModel) {
-        let leadingHintCount = viewModel.plates.indices.compactMap { index in
-            CommandHintCatalog.stageNumberHint(stageIndex: index, settings: currentSettings)
+    private func reportCommandHintLayout(viewModel: StageOverlayViewModel) {
+        let leadingHintCount = viewModel.stages.indices.compactMap { index in
+            CommandHintCatalog.spaceNumberHint(spaceIndex: index, settings: currentSettings)
         }.count
-        guard viewModel.plates.indices.contains(viewModel.activeStageIndex) else { return }
-        let activePlate = viewModel.plates[viewModel.activeStageIndex]
-        let footerHints = CommandHintCatalog.plateFooterHints(
-            stageIndex: viewModel.activeStageIndex,
+        guard viewModel.stages.indices.contains(viewModel.activeSpaceIndex) else { return }
+        let activeStage = viewModel.stages[viewModel.activeSpaceIndex]
+        let footerHints = CommandHintCatalog.stageFooterHints(
+            spaceIndex: viewModel.activeSpaceIndex,
             isActive: true,
-            hasSelectedWindow: activePlate.windows.indices.contains(viewModel.selectedWindowIndex),
+            hasSelectedWindow: activeStage.windows.indices.contains(viewModel.selectedWindowIndex),
             settings: currentSettings
         )
-        let nextWindowIndex = activePlate.windows.indices.first { index in
+        let nextWindowIndex = activeStage.windows.indices.first { index in
             !CommandHintCatalog.windowHints(
                 windowIndex: index,
                 selectedWindowIndex: viewModel.selectedWindowIndex,
-                windowCount: activePlate.windows.count,
+                windowCount: activeStage.windows.count,
                 settings: currentSettings
             ).isEmpty
         }
@@ -687,11 +687,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         ])
     }
 
-    private func hideStageManagerOverlay(
+    private func hideSpaceManagerOverlay(
         overlayPresentation: OverlayPresentationContext? = nil
     ) {
         if let overlayPresentation {
-            stageController?.completeOverlayPresentation(
+            spaceController?.completeOverlayPresentation(
                 overlayPresentation,
                 outcome: .hiddenBeforeReveal
             )
@@ -704,18 +704,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     }
 
     private func updateOverlay() {
-        guard let stageController, let overlayWindow else { return }
-        let display = overlayDisplay(focusedWindowFrame: stageController.focusedWindowFrame)
+        guard let spaceController, let overlayWindow else { return }
+        let display = overlayDisplay(focusedWindowFrame: spaceController.focusedWindowFrame)
         // Stack cycling deliberately keeps the overlay on its current screen; the header
-        // changes to identify the remote display whose plates are being inspected.
-        if stageController.stageManager.connectedStageStacks.count <= 1 {
+        // changes to identify the remote display whose stages are being inspected.
+        if spaceController.spaceManager.connectedSpaceStacks.count <= 1 {
             overlayWindow.targetScreenFrame = display?.frame
         }
-        let vm = OverlayViewModel(
-            stageManager: stageController.overlayStageManager,
-            activeStageIndex: stageController.selectedStageIndex,
-            selectedWindowIndex: stageController.selectedWindowIndex,
-            windowPreviews: stageController.windowPreviews,
+        let vm = StageOverlayViewModel(
+            spaceManager: spaceController.overlaySpaceManager,
+            activeSpaceIndex: spaceController.selectedSpaceIndex,
+            selectedWindowIndex: spaceController.selectedWindowIndex,
+            windowPreviews: spaceController.windowPreviews,
             appearance: currentSettings,
             wallpaperLuminance: nil,
             displayTopContentInset: display?.topContentInset ?? 0,
@@ -724,7 +724,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         overlayWindow.update(viewModel: vm)
     }
 
-    /// The screen the plates belong on: the one holding the focused window. Accessibility
+    /// The screen the stages belong on: the one holding the focused window. Accessibility
     /// reports that window in Quartz coordinates, so the displays are matched in that space and
     /// only the winner is translated back into Cocoa's.
     private func overlayDisplay(
@@ -757,7 +757,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
         ])
         guard didChange else { return }
         try? stateStore?.saveSettings(currentSettings)
-        if stageController?.isStageManagerVisible == true {
+        if spaceController?.isSpaceManagerVisible == true {
             updateOverlay()
         }
     }
@@ -870,10 +870,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             return
         }
 
-        let currentStageManager = stageController?.stageManager ?? StageManager()
+        let currentSpaceManager = spaceController?.spaceManager ?? SpaceManager()
         var vm = SettingsViewModel(
             settings: settings,
-            stageManager: currentStageManager
+            spaceManager: currentSpaceManager
         )
         vm.onSettingsChanged = { [weak self] newSettings in
             DispatchQueue.main.async {
@@ -884,20 +884,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 try? self.stateStore?.saveSettings(newSettings)
                 self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
                 self.keyboardService?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
-                self.stageController?.updateFrontmostApp(
+                self.spaceController?.updateFrontmostApp(
                     isExcluded: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
                         .map(newSettings.excludedBundleIDs.contains) ?? false
                 )
                 for bundleID in newSettings.excludedBundleIDs {
-                    self.stageController?.stageManager.removeAllWindows(forBundleID: bundleID)
+                    self.spaceController?.spaceManager.removeAllWindows(forBundleID: bundleID)
                 }
-                if let stageManager = self.stageController?.stageManager {
-                    self.debouncedSaver?.scheduleSave(stageManager)
+                if let spaceManager = self.spaceController?.spaceManager {
+                    self.debouncedSaver?.scheduleSave(spaceManager)
                 }
                 self.keyboardService?.keyBindings = newSettings.keyBindings
-                self.stageController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
-                self.stageController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
-                self.stageController?.previewCacheTTL = newSettings.previewCacheTTL
+                self.spaceController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
+                self.spaceController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
+                self.spaceController?.previewCacheTTL = newSettings.previewCacheTTL
                 self.spaceService?.switchDuration = newSettings.spaceSwitchDuration
                 self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
                     newSettings.quickSwitchExcludedBundleIDs
@@ -945,36 +945,36 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     }
 
     private func resetWindowCache() {
-        let previousManager = stageController?.stageManager
-            ?? pendingStageManager
+        let previousManager = spaceController?.spaceManager
+            ?? pendingSpaceManager
             ?? (try? stateStore?.load())
-            ?? StageManager()
+            ?? SpaceManager()
         let previousLiveCount = previousManager.liveWindowCount
         let previousDormantCount = previousManager.dormantWindowAssignments.count
 
         diag.report("window_cache_reset_started", details: [
             "liveAssignments": "\(previousLiveCount)",
             "dormantAssignments": "\(previousDormantCount)",
-            "stageCount": "\(previousManager.stages.count)",
+            "spaceCount": "\(previousManager.spaces.count)",
         ])
 
-        if let controller = stageController, let discovery = windowDiscovery {
+        if let controller = spaceController, let discovery = windowDiscovery {
             controller.rebuildWindowCache(using: discovery)
 
-            // No z-order to rebuild — the windows of the active stage are the windows on
+            // No z-order to rebuild — the windows of the active space are the windows on
             // the current desktop, and macOS is already showing them.
-            if let firstWindow = controller.stageManager.activeStage.windows.first {
+            if let firstWindow = controller.spaceManager.activeSpace.windows.first {
                 _ = controller.windowService.activateApp(bundleID: firstWindow.ownerBundleID)
             }
 
-            debouncedSaver?.flushNow(controller.stageManager)
+            debouncedSaver?.flushNow(controller.spaceManager)
             diag.report("window_cache_reset_completed", details: [
-                "discoveredAssignments": "\(controller.stageManager.activeStage.windows.count)",
+                "discoveredAssignments": "\(controller.spaceManager.activeSpace.windows.count)",
             ])
         } else {
             var resetManager = previousManager
             resetManager.resetWindowCache()
-            pendingStageManager = resetManager
+            pendingSpaceManager = resetManager
             debouncedSaver?.flushNow(resetManager)
             diag.report("window_cache_reset_completed", details: [
                 "discoveredAssignments": "0",
@@ -1003,14 +1003,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     }
 
     private func writeDiagnosticExport(to destination: URL) {
-        let manager = stageController?.stageManager
-            ?? pendingStageManager
+        let manager = spaceController?.spaceManager
+            ?? pendingSpaceManager
             ?? (try? stateStore?.load())
-            ?? StageManager()
+            ?? SpaceManager()
         let liveWindows = windowService?.listWindows() ?? []
         let runningApps = windowService?.listRunningApps() ?? []
         let snapshot = DiagnosticExportSnapshot(
-            stageManager: manager,
+            spaceManager: manager,
             settings: currentSettings,
             liveWindows: liveWindows,
             runningApps: runningApps,
@@ -1108,7 +1108,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
                 latency[operation] = TelemetryLatencyBucket(milliseconds: summary.p95Milliseconds)
             }
         }
-        let windowCount = stageController?.stageManager.liveWindowCount ?? 0
+        let windowCount = spaceController?.spaceManager.liveWindowCount ?? 0
         let workload: TelemetryWorkload = windowCount >= 50 ? .stress : (windowCount >= 21 ? .busy : .typical)
         let anomalyCount = performance.recent.reduce(into: 0) { count, observation in
             if PerformanceAnomalyPolicy.shouldReport(observation) { count += 1 }

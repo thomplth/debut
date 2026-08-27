@@ -12,15 +12,15 @@ public enum SettingsSection: String, CaseIterable, Sendable {
 
 public struct SettingsViewModel: Sendable {
     public var settings: AppSettings
-    public var stageManager: StageManager
+    public var spaceManager: SpaceManager
     public let sections: [SettingsSection] = SettingsSection.allCases
     public var onSettingsChanged: (@Sendable (AppSettings) -> Void)?
     public var onResetWindowCache: (@Sendable () -> Void)?
     public var onExportDiagnosticData: (@Sendable () -> Void)?
 
-    public init(settings: AppSettings = AppSettings(), stageManager: StageManager = StageManager()) {
+    public init(settings: AppSettings = AppSettings(), spaceManager: SpaceManager = SpaceManager()) {
         self.settings = settings
-        self.stageManager = stageManager
+        self.spaceManager = spaceManager
     }
 
     public func resetWindowCache() {
@@ -43,7 +43,7 @@ public struct SettingsViewModel: Sendable {
                 buckets[operation] = TelemetryLatencyBucket(milliseconds: summary.p95Milliseconds)
             }
         }
-        let windowCount = stageManager.liveWindowCount
+        let windowCount = spaceManager.liveWindowCount
         let workload: TelemetryWorkload = windowCount >= 50 ? .stress : (windowCount >= 21 ? .busy : .typical)
         let payload = TelemetryPayload.sessionSummary(
             appVersion: DebutCore.version,
