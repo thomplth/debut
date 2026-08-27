@@ -767,7 +767,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "theatermask.and.paintbrush", accessibilityDescription: "Debut")
+            button.image = DebutGlyph.image(size: DebutGlyph.menuBarSize)
         }
 
         let menu = NSMenu()
