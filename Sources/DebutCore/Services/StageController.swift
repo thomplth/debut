@@ -1075,12 +1075,38 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
+    /// Fills a cold preview cache without presenting the overlay. Startup calls this after live
+    /// assignments have been reconciled, so the first visible presentation can use screenshots
+    /// immediately instead of revealing application-icon placeholders while capture begins.
+    func prewarmWindowPreviews() {
+        guard !isStageManagerVisible else { return }
+        let assignedWindowIDs = stageManager.allStages.flatMap { $0.windows.map(\.windowID) }
+        pruneWindowPreviews(assignedWindowIDs: Set(assignedWindowIDs))
+        let missingWindowIDs = assignedWindowIDs.filter { windowPreviews[$0] == nil }
+        captureWindowPreviews(
+            windowIDs: missingWindowIDs,
+            reason: "startup_prewarm"
+        )
+    }
+
     private func captureDirtyWindowPreviews(
         overlayPresentation: OverlayPresentationContext? = nil
     ) {
         let windowIDs = pendingPreviewCaptureIDs
         pendingPreviewCaptureIDs = []
 
+        captureWindowPreviews(
+            windowIDs: windowIDs,
+            overlayPresentation: overlayPresentation,
+            reason: "overlay_refresh"
+        )
+    }
+
+    private func captureWindowPreviews(
+        windowIDs: [CGWindowID],
+        overlayPresentation: OverlayPresentationContext? = nil,
+        reason: String
+    ) {
         previewCaptureTask?.cancel()
         previewCaptureGeneration &+= 1
         let generation = previewCaptureGeneration
@@ -1094,6 +1120,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             _ = metrics.finish()
             diag.report("preview_capture_skipped", level: .transient, details: [
                 "cached": "\(windowPreviews.count)",
+                "reason": reason,
             ])
             return
         }
@@ -1136,6 +1163,7 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
             DiagnosticReporter.shared.report("preview_capture_completed", level: .transient, details: [
                 "requested": "\(windowIDs.count)",
                 "captured": "\(capturedCount)",
+                "reason": reason,
             ])
 
             DispatchQueue.main.async { [weak self] in

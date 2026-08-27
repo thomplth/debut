@@ -340,6 +340,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, StageController
             object: nil
         )
 
+        // Screenshot previews are process-local. Warm them after startup reconciliation so the
+        // first overlay does not reveal placeholders and then flash as captures arrive.
+        controller.prewarmWindowPreviews()
+
         diag.report("controller_setup", details: [
             "eventTapStarted": "\(controller.keyboardServiceStarted)",
             "eventTapRunning": "\(keyboardService.isRunning)",
