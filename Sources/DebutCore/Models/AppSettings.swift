@@ -87,10 +87,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var shareAnonymousTelemetry: Bool
 
     // Appearance
-    /// Window thumbnails at the original size were too small to read what was on the captured
-    /// screen. The wrapping added in KHA-491 is what makes a larger card safe: a space that no
-    /// longer fits across the display spills onto another row instead of over the edge.
-    public static let defaultStageScale: Double = 1.5
+    /// Keep the original overlay dimensions as the default; users can enlarge the complete,
+    /// proportionally scaled presentation with the appearance setting when they need it.
+    public static let defaultStageScale: Double = 1.0
     /// The floor doubles as the floor the automatic viewport fit may shrink to, so a space
     /// holding more windows than the display can show at any readable size still fits.
     public static let minimumStageScale: Double = 0.5
