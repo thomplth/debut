@@ -581,8 +581,8 @@ public struct SettingsView: View {
                 .font(.title2.bold())
 
             HStack(spacing: 16) {
-                Image(systemName: "theatermask.and.paintbrush")
-                    .font(.system(size: 48))
+                Image(nsImage: DebutGlyph.image(size: 44))
+                    .renderingMode(.template)
                     .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 4) {
