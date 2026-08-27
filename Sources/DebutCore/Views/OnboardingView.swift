@@ -354,8 +354,13 @@ public struct MenuBarCoachmarkView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Debut lives here", systemImage: "theatermask.and.paintbrush")
-                .font(.headline)
+            Label {
+                Text("Debut lives here")
+            } icon: {
+                Image(nsImage: DebutGlyph.image(size: DebutGlyph.menuBarSize))
+                    .renderingMode(.template)
+            }
+            .font(.headline)
             Text("Use the menu bar icon to open Settings, revisit the tutorial, or quit Debut.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
