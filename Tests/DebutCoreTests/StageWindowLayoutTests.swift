@@ -129,14 +129,17 @@ struct StageWindowLayoutTests {
     func rowsStackVertically() {
         let wrapped = layout(5, availableWidth: fourColumnWidth)
         let rowStride = metrics.cardHeight + metrics.rowSpacing
+        let opticalOffset = (metrics.topPadding - metrics.bottomPadding) / 2
 
-        #expect(wrapped.cardOffsetFromCenter(at: 0).height == -rowStride / 2)
-        #expect(wrapped.cardOffsetFromCenter(at: 4).height == rowStride / 2)
+        #expect(wrapped.cardOffsetFromCenter(at: 0).height
+            == -rowStride / 2 + opticalOffset)
+        #expect(wrapped.cardOffsetFromCenter(at: 4).height
+            == rowStride / 2 + opticalOffset)
 
         let threeRows = layout(9, availableWidth: fourColumnWidth)
-        #expect(threeRows.cardOffsetFromCenter(at: 0).height == -rowStride)
-        #expect(threeRows.cardOffsetFromCenter(at: 4).height == 0)
-        #expect(threeRows.cardOffsetFromCenter(at: 8).height == rowStride)
+        #expect(threeRows.cardOffsetFromCenter(at: 0).height == -rowStride + opticalOffset)
+        #expect(threeRows.cardOffsetFromCenter(at: 4).height == opticalOffset)
+        #expect(threeRows.cardOffsetFromCenter(at: 8).height == rowStride + opticalOffset)
     }
 
     @Test("A wrapped stage never grows past the width it was laid out for")
@@ -177,6 +180,23 @@ struct StageWindowLayoutTests {
         #expect(scaled.titleFontSize == metrics.titleFontSize * 1.5)
         #expect(scaled.thumbnailCornerRadius == metrics.thumbnailCornerRadius * 1.5)
         #expect(metrics.scaled(by: 1) == metrics)
+    }
+
+    @Test("The standard single-row stage preserves the original vertical profile")
+    func standardSingleRowVerticalProfile() {
+        let stage = layout(3, availableWidth: fourColumnWidth)
+
+        #expect(stage.stageSize.height == 164)
+        #expect(stage.cardOffsetFromCenter(at: 0).height == 7)
+
+        let enlarged = StageWindowLayout(
+            windowCount: 3,
+            availableWidth: fourColumnWidth * 1.5,
+            metrics: metrics.scaled(by: 1.5)
+        )
+        #expect(enlarged.stageSize.height == stage.stageSize.height * 1.5)
+        #expect(enlarged.cardOffsetFromCenter(at: 0).height
+            == stage.cardOffsetFromCenter(at: 0).height * 1.5)
     }
 
     @Test("A larger scale fits fewer cards across the same display")
