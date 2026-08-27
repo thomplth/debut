@@ -34,7 +34,10 @@ public struct StageMetrics: Equatable, Sendable {
         rowSpacing: 12,
         padding: 24,
         topPadding: 24,
-        bottomPadding: 24,
+        // The original one-row stage was 164 points high. The card itself is 130 points once
+        // its vertical padding is represented explicitly, leaving ten points below the card and
+        // preserving the original seven-point downward optical offset inside the stage.
+        bottomPadding: 10,
         minStageWidth: 300
     )
 
@@ -51,6 +54,10 @@ public struct StageMetrics: Equatable, Sendable {
     }
 
     public var thumbnailCornerRadius: CGFloat { cardPadding }
+
+    /// The visual scale represented by these metrics. Rendering code uses this for the few
+    /// non-layout details that belong to a stage, such as its corner radius and command hints.
+    public var scaleFactor: CGFloat { thumbnailWidth / Self.standard.thumbnailWidth }
 
     /// Every dimension scales together, so a card only ever grows or shrinks — it never changes
     /// shape, and the title stays legible against the thumbnail it labels.

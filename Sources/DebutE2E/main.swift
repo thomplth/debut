@@ -370,17 +370,19 @@ func stageCenter(
     else { return nil }
 
     let screen = CGDisplayBounds(CGMainDisplayID())
+    let metrics = drawnMetrics(windowCounts: windowCounts)
     let stageHeights = StageConstants.stageLayouts(
         forWindowCounts: windowCounts,
         screenWidth: screen.width,
-        metrics: drawnMetrics(windowCounts: windowCounts)
+        metrics: metrics
     ).map(\.stageSize.height)
     guard let visualCenterY = StageConstants.stageCenterY(
         spaceIndex: spaceIndex,
         stageHeights: stageHeights,
         activeSpaceIndex: activeSpaceIndex,
         inactiveScale: inactiveScale,
-        containerHeight: screen.height
+        containerHeight: screen.height,
+        stageScale: metrics.scaleFactor
     ) else { return nil }
     return CGPoint(
         x: screen.midX,
