@@ -5,6 +5,33 @@ import Foundation
 
 @Suite("Plate motion")
 struct PlateMotionTests {
+    /// A plate laid out on a display exactly wide enough for `capacity` cards.
+    private func grid(_ windowCount: Int, capacity: Int) -> PlateWindowLayout {
+        let metrics = PlateMetrics.standard
+        return PlateWindowLayout(
+            windowCount: windowCount,
+            availableWidth: metrics.padding * 2
+                + metrics.cardWidth * CGFloat(capacity)
+                + metrics.windowSpacing * CGFloat(capacity - 1),
+            metrics: metrics
+        )
+    }
+
+    private func uniformStack(
+        _ stageCount: Int,
+        focus: Int,
+        height: CGFloat,
+        spacing: CGFloat,
+        inactiveScale: CGFloat
+    ) -> PlateStackLayout {
+        PlateMotion.stackLayout(
+            plateHeights: Array(repeating: height, count: stageCount),
+            focusIndex: focus,
+            spacing: spacing,
+            inactiveScale: inactiveScale
+        )
+    }
+
     @Test("Deleting the first stage changes the layout animation key")
     func deletingFirstStageTriggersMotion() {
         let first = UUID()
@@ -191,35 +218,62 @@ struct PlateMotionTests {
         #expect(PlateMotion.plateScale(distanceFromFocus: 20, inactiveScale: 0.8) == 0.08)
     }
 
-    @Test("Plates occupy a fixed-height slot and reach their center by offset")
+    @Test("Plates lay out in their own unscaled slot and reach their center by offset")
     func plateSlotOffsetCentersEachPlate() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 3,
-            focusIndex: 1,
-            plateHeight: 180,
-            spacing: 20,
-            inactiveScale: 0.8
-        )
+        let layout = uniformStack(3, focus: 1, height: 180, spacing: 20, inactiveScale: 0.8)
         for index in 0..<3 {
-            let offset = PlateMotion.plateSlotOffset(
-                layout: layout,
-                index: index,
-                plateHeight: 180
-            )
+            let offset = PlateMotion.plateSlotOffset(layout: layout, index: index)
             #expect(abs(offset + 90 - layout.centers[index]) < 0.001)
         }
     }
 
     @Test("Plate slot offset is zero for an out-of-range index")
     func plateSlotOffsetOutOfRange() {
+        let layout = uniformStack(2, focus: 0, height: 180, spacing: 20, inactiveScale: 0.8)
+        #expect(PlateMotion.plateSlotOffset(layout: layout, index: 5) == 0)
+    }
+
+    @Test("Stages of unequal height keep their own scale, spacing, and centers")
+    func variableHeightStack() {
         let layout = PlateMotion.stackLayout(
-            stageCount: 2,
-            focusIndex: 0,
-            plateHeight: 180,
+            plateHeights: [180, 310, 180],
+            focusIndex: 1,
             spacing: 20,
-            inactiveScale: 0.8
+            inactiveScale: 0.5
         )
-        #expect(PlateMotion.plateSlotOffset(layout: layout, index: 5, plateHeight: 180) == 0)
+
+        #expect(layout.baseHeights == [180, 310, 180])
+        #expect(layout.scales == [0.5, 1, 0.5])
+        #expect(layout.heights == [90, 310, 90])
+        #expect(layout.centers == [45, 265, 485])
+        #expect(layout.totalHeight == 530)
+
+        // Each plate reaches its stack center from its own unscaled slot, not a shared one.
+        let firstSlot: CGFloat = 45 - 180 / 2
+        let focusSlot: CGFloat = 265 - 310 / 2
+        #expect(PlateMotion.plateSlotOffset(layout: layout, index: 0) == firstSlot)
+        #expect(PlateMotion.plateSlotOffset(layout: layout, index: 1) == focusSlot)
+    }
+
+    @Test("A taller neighbour does not shift a plate off its own center")
+    func variableHeightPlateFrames() {
+        let layout = PlateMotion.stackLayout(
+            plateHeights: [180, 310],
+            focusIndex: 0,
+            spacing: 20,
+            inactiveScale: 0.5
+        )
+        let frame = PlateMotion.plateFrame(
+            at: 1,
+            containerWidth: 600,
+            stackOffset: 0,
+            plateWidths: [400, 500],
+            layout: layout
+        )
+
+        #expect(frame.midY == layout.centers[1])
+        #expect(frame.height == 155)
+        #expect(frame.width == 250)
     }
 
     @Test("Plate opacity stays solid until scale falls below twenty percent")
@@ -233,20 +287,8 @@ struct PlateMotionTests {
 
     @Test("Hover layout remains packed around its fixed anchor")
     func hoverLayoutUsesFixedAnchorAndSpacing() {
-        let baseline = PlateMotion.stackLayout(
-            stageCount: 5,
-            focusIndex: 1,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let hovered = PlateMotion.stackLayout(
-            stageCount: 5,
-            focusIndex: 3,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
+        let baseline = uniformStack(5, focus: 1, height: 100, spacing: 12, inactiveScale: 0.8)
+        let hovered = uniformStack(5, focus: 3, height: 100, spacing: 12, inactiveScale: 0.8)
         let anchorY = baseline.centers[3]
         let offset = PlateMotion.anchoredOffset(
             layout: hovered,
@@ -264,13 +306,7 @@ struct PlateMotionTests {
 
     @Test("Hover hit testing uses stable baseline slots")
     func stableStageHitTesting() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 3,
-            focusIndex: 1,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
+        let layout = uniformStack(3, focus: 1, height: 100, spacing: 12, inactiveScale: 0.8)
         let widths: [CGFloat] = [200, 300, 200]
 
         #expect(PlateInteraction.stageIndex(
@@ -298,13 +334,7 @@ struct PlateMotionTests {
 
     @Test("Hover focus persists through a transit gap")
     func hoverFocusPersistsThroughTransitGap() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 3,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 20,
-            inactiveScale: 0.8
-        )
+        let layout = uniformStack(3, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
 
         #expect(PlateInteraction.hoveredStageIndex(
             previous: 2,
@@ -326,20 +356,8 @@ struct PlateMotionTests {
 
     @Test("Hover hit testing follows the magnified plate frame")
     func hoverHitTestingFollowsMagnifiedPlateFrame() {
-        let baseline = PlateMotion.stackLayout(
-            stageCount: 4,
-            focusIndex: 3,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
-        let magnified = PlateMotion.stackLayout(
-            stageCount: 4,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 12,
-            inactiveScale: 0.8
-        )
+        let baseline = uniformStack(4, focus: 3, height: 100, spacing: 12, inactiveScale: 0.8)
+        let magnified = uniformStack(4, focus: 0, height: 100, spacing: 12, inactiveScale: 0.8)
         let baselineOffset: CGFloat = 200 - baseline.centers[3]
         let anchorY = baselineOffset + baseline.centers[0]
         let magnifiedOffset = PlateMotion.anchoredOffset(
@@ -368,13 +386,7 @@ struct PlateMotionTests {
 
     @Test("Hover focus clears outside the horizontal transit corridor")
     func hoverFocusClearsBesideTransitGap() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 2,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 20,
-            inactiveScale: 0.8
-        )
+        let layout = uniformStack(2, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
 
         #expect(PlateInteraction.hoveredStageIndex(
             previous: 0,
@@ -388,13 +400,7 @@ struct PlateMotionTests {
 
     @Test("Hover focus clears beyond the vertical stack corridor")
     func hoverFocusClearsAboveAndBelowStack() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 2,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 20,
-            inactiveScale: 0.8
-        )
+        let layout = uniformStack(2, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
         let widths: [CGFloat] = [300, 240]
 
         let top = layout.centers[0] - layout.heights[0] / 2
@@ -420,13 +426,7 @@ struct PlateMotionTests {
 
     @Test("Entering a transit gap without prior focus stays unfocused")
     func transitGapDoesNotCreateFocus() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 2,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 20,
-            inactiveScale: 0.8
-        )
+        let layout = uniformStack(2, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
 
         #expect(PlateInteraction.hoveredStageIndex(
             previous: nil,
@@ -440,13 +440,7 @@ struct PlateMotionTests {
 
     @Test("Transit corridor interpolates between unequal plate widths")
     func unequalWidthTransitCorridor() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 2,
-            focusIndex: 0,
-            plateHeight: 100,
-            spacing: 20,
-            inactiveScale: 0.8
-        )
+        let layout = uniformStack(2, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
         let widths: [CGFloat] = [400, 100]
 
         #expect(PlateInteraction.hoveredStageIndex(
@@ -508,16 +502,16 @@ struct PlateMotionTests {
 
     @Test("A stale focus index leaves the stack laid out rather than empty")
     func staleFocusKeepsStackLayout() {
-        let layout = PlateMotion.stackLayout(
-            stageCount: 3,
-            focusIndex: PlateMotion.focusedStageIndex(
+        let layout = uniformStack(
+            3,
+            focus: PlateMotion.focusedStageIndex(
                 active: 0,
                 hovered: 6,
                 dragTarget: nil,
                 retainedDragTarget: nil,
                 stageCount: 3
             ),
-            plateHeight: 100,
+            height: 100,
             spacing: 12,
             inactiveScale: 0.8
         )
@@ -574,19 +568,18 @@ struct PlateMotionTests {
 
     @Test("Plate centers use the distance-based layout scale")
     func plateCentersFollowDepthLayout() {
+        let plateHeights: [CGFloat] = [164, 164, 164]
         let activeCenter = PlateConstants.plateCenterY(
             stageIndex: 1,
-            stageCount: 3,
+            plateHeights: plateHeights,
             activeStageIndex: 1,
-            plateHeight: 164,
             inactiveScale: 0.8,
             containerHeight: 768
         )
         let precedingCenter = PlateConstants.plateCenterY(
             stageIndex: 0,
-            stageCount: 3,
+            plateHeights: plateHeights,
             activeStageIndex: 1,
-            plateHeight: 164,
             inactiveScale: 0.8,
             containerHeight: 768
         )
@@ -698,8 +691,75 @@ struct PlateMotionTests {
         ) == WindowDropTarget(stageIndex: 1, windowIndex: 1))
     }
 
+    @Test("A wrapped plate resolves the drop row from the pointer's height")
+    func wrappedWindowDropTarget() {
+        // Two rows of three, the second row holding indices 3 and 4 after the dragged card
+        // is excluded.
+        let plateFrames = [0: CGRect(x: 0, y: 0, width: 620, height: 320)]
+        let windowFrames = [
+            WindowFrameID(stageIndex: 0, windowIndex: 1): CGRect(x: 30, y: 30, width: 180, height: 130),
+            WindowFrameID(stageIndex: 0, windowIndex: 2): CGRect(x: 222, y: 30, width: 180, height: 130),
+            WindowFrameID(stageIndex: 0, windowIndex: 3): CGRect(x: 414, y: 30, width: 180, height: 130),
+            WindowFrameID(stageIndex: 0, windowIndex: 4): CGRect(x: 126, y: 172, width: 180, height: 130),
+            WindowFrameID(stageIndex: 0, windowIndex: 5): CGRect(x: 318, y: 172, width: 180, height: 130),
+        ]
+        let target: (CGFloat, CGFloat) -> WindowDropTarget? = { x, y in
+            PlateInteraction.windowDropTarget(
+                at: CGPoint(x: x, y: y),
+                sourceStageIndex: 0,
+                sourceWindowIndex: 0,
+                plateFrames: plateFrames,
+                windowFrames: windowFrames
+            )
+        }
+
+        #expect(target(100, 95) == WindowDropTarget(stageIndex: 0, windowIndex: 0))
+        #expect(target(300, 95) == WindowDropTarget(stageIndex: 0, windowIndex: 1))
+        #expect(target(600, 95) == WindowDropTarget(stageIndex: 0, windowIndex: 3))
+        // The same x lands in different slots depending on which row the pointer is over.
+        #expect(target(300, 237) == WindowDropTarget(stageIndex: 0, windowIndex: 4))
+        #expect(target(600, 237) == WindowDropTarget(stageIndex: 0, windowIndex: 5))
+    }
+
+    @Test("The gap between rows resolves to the nearer row rather than to nothing")
+    func dropTargetBetweenRows() {
+        let plateFrames = [0: CGRect(x: 0, y: 0, width: 620, height: 320)]
+        let windowFrames = [
+            WindowFrameID(stageIndex: 0, windowIndex: 0): CGRect(x: 30, y: 30, width: 180, height: 130),
+            WindowFrameID(stageIndex: 0, windowIndex: 1): CGRect(x: 222, y: 172, width: 180, height: 130),
+        ]
+
+        #expect(PlateInteraction.windowDropTarget(
+            at: CGPoint(x: 300, y: 165),
+            sourceStageIndex: 1,
+            sourceWindowIndex: 0,
+            plateFrames: plateFrames,
+            windowFrames: windowFrames
+        ) == WindowDropTarget(stageIndex: 0, windowIndex: 1))
+        #expect(PlateInteraction.windowDropTarget(
+            at: CGPoint(x: 400, y: 310),
+            sourceStageIndex: 1,
+            sourceWindowIndex: 0,
+            plateFrames: plateFrames,
+            windowFrames: windowFrames
+        ) == WindowDropTarget(stageIndex: 0, windowIndex: 2))
+    }
+
+    @Test("An empty destination plate accepts a drop at its only slot")
+    func dropTargetOnEmptyPlate() {
+        #expect(PlateInteraction.windowDropTarget(
+            at: CGPoint(x: 150, y: 80),
+            sourceStageIndex: 1,
+            sourceWindowIndex: 0,
+            plateFrames: [0: CGRect(x: 0, y: 0, width: 300, height: 178)],
+            windowFrames: [:]
+        ) == WindowDropTarget(stageIndex: 0, windowIndex: 0))
+    }
+
     @Test("Same-stage drag animates windows into their prospective MRU order")
     func sameStageWindowDragOffsets() {
+        let layout = grid(3, capacity: 4)
+        let stride = PlateMetrics.standard.cardWidth + PlateMetrics.standard.windowSpacing
         let drag = WindowDragState(
             windowID: 42,
             sourceStageIndex: 0,
@@ -707,16 +767,18 @@ struct PlateMotionTests {
             location: .zero,
             dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 2)
         )
+        let offset: (Int, WindowDragState) -> CGSize = { index, drag in
+            PlateMotion.windowSlotOffset(
+                stageIndex: 0,
+                windowIndex: index,
+                drag: drag,
+                layout: layout
+            )
+        }
 
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 0, windowIndex: 0, drag: drag, cardStride: 100
-        ) == 200)
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 0, windowIndex: 1, drag: drag, cardStride: 100
-        ) == -100)
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 0, windowIndex: 2, drag: drag, cardStride: 100
-        ) == -100)
+        #expect(offset(0, drag) == CGSize(width: stride * 2, height: 0))
+        #expect(offset(1, drag) == CGSize(width: -stride, height: 0))
+        #expect(offset(2, drag) == CGSize(width: -stride, height: 0))
 
         let reverseDrag = WindowDragState(
             windowID: 42,
@@ -725,16 +787,41 @@ struct PlateMotionTests {
             location: .zero,
             dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 0)
         )
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 0, windowIndex: 0, drag: reverseDrag, cardStride: 100
-        ) == 100)
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 0, windowIndex: 2, drag: reverseDrag, cardStride: 100
-        ) == -200)
+        #expect(offset(0, reverseDrag) == CGSize(width: stride, height: 0))
+        #expect(offset(2, reverseDrag) == CGSize(width: -stride * 2, height: 0))
+    }
+
+    @Test("A drag across a row boundary moves cards in both axes")
+    func wrappedDragOffsetsCrossRows() {
+        let layout = grid(5, capacity: 3)
+        let metrics = PlateMetrics.standard
+        let rowStride = metrics.cardHeight + metrics.rowSpacing
+        #expect(layout.rowSizes == [3, 2])
+
+        // Dragging the first card to the end pushes every other card back one slot, which for
+        // the first card of the second row means up a row and across to the end of the first.
+        let drag = WindowDragState(
+            windowID: 42,
+            sourceStageIndex: 0,
+            sourceWindowIndex: 0,
+            location: .zero,
+            dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 4)
+        )
+        let moved = PlateMotion.windowSlotOffset(
+            stageIndex: 0,
+            windowIndex: 3,
+            drag: drag,
+            layout: layout
+        )
+
+        #expect(moved.height == -rowStride)
+        #expect(moved.width > 0)
     }
 
     @Test("Cross-stage drag opens an insertion gap and closes the source gap")
     func crossStageWindowDragOffsets() {
+        let metrics = PlateMetrics.standard
+        let stride = metrics.cardWidth + metrics.windowSpacing
         let drag = WindowDragState(
             windowID: 42,
             sourceStageIndex: 0,
@@ -744,68 +831,101 @@ struct PlateMotionTests {
         )
 
         #expect(PlateMotion.displayedWindowCounts(actual: [3, 2], drag: drag) == [2, 3])
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 0, windowIndex: 0, drag: drag, cardStride: 100
-        ) == 0)
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 0, windowIndex: 2, drag: drag, cardStride: 100
-        ) == -100)
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 1, windowIndex: 0, drag: drag, cardStride: 100
-        ) == 0)
-        #expect(PlateMotion.windowDragOffset(
-            stageIndex: 1, windowIndex: 1, drag: drag, cardStride: 100
-        ) == 100)
-        #expect(PlateMotion.windowGridCenterOffset(
-            stageIndex: 0, drag: drag, cardStride: 100
-        ) == 50)
-        #expect(PlateMotion.windowGridCenterOffset(
-            stageIndex: 1, drag: drag, cardStride: 100
-        ) == 0)
-        #expect(PlateMotion.windowGridCenterOffset(
-            stageIndex: 2, drag: drag, cardStride: 100
-        ) == 0)
+
+        // The source plate shrinks to two cards, and its survivors close the gap by taking new
+        // anchors in the smaller grid rather than by being nudged within the old one.
+        let sourceGrid = grid(2, capacity: 4)
+        #expect(PlateMotion.windowAnchorIndex(stageIndex: 0, windowIndex: 0, drag: drag) == 0)
+        #expect(PlateMotion.windowAnchorIndex(stageIndex: 0, windowIndex: 2, drag: drag) == 1)
+        #expect(sourceGrid.cardOffsetFromCenter(at: 0).width == -stride / 2)
+        #expect(sourceGrid.cardOffsetFromCenter(at: 1).width == stride / 2)
+        for index in [0, 2] {
+            #expect(PlateMotion.windowSlotOffset(
+                stageIndex: 0,
+                windowIndex: index,
+                drag: drag,
+                layout: sourceGrid
+            ) == .zero)
+        }
+
+        // The target plate has already grown to three, so its cards keep their anchors there
+        // and only the one after the insertion point is nudged, opening the gap.
+        let target: (Int) -> CGSize = { index in
+            PlateMotion.windowSlotOffset(
+                stageIndex: 1,
+                windowIndex: index,
+                drag: drag,
+                layout: self.grid(3, capacity: 4)
+            )
+        }
+        #expect(target(0) == .zero)
+        #expect(target(1) == CGSize(width: stride, height: 0))
+    }
+
+    @Test("A stage untouched by the drag keeps its cards where they rest")
+    func untouchedStageDragOffsets() {
+        let layout = grid(2, capacity: 4)
+        let drag = WindowDragState(
+            windowID: 42,
+            sourceStageIndex: 0,
+            sourceWindowIndex: 1,
+            location: .zero,
+            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 1)
+        )
+
+        #expect(PlateMotion.windowSlotOffset(
+            stageIndex: 2,
+            windowIndex: 0,
+            drag: drag,
+            layout: layout
+        ) == .zero)
     }
 
     @Test("Released preview snaps to same-stage, cross-stage, and empty-stage slots")
     func releasedPreviewDestination() {
-        let frames = [
-            WindowFrameID(stageIndex: 0, windowIndex: 0): CGRect(x: 20, y: 20, width: 80, height: 100),
-            WindowFrameID(stageIndex: 0, windowIndex: 1): CGRect(x: 120, y: 20, width: 80, height: 100),
-            WindowFrameID(stageIndex: 0, windowIndex: 2): CGRect(x: 220, y: 20, width: 80, height: 100),
-            WindowFrameID(stageIndex: 1, windowIndex: 0): CGRect(x: 20, y: 200, width: 80, height: 100),
-            WindowFrameID(stageIndex: 1, windowIndex: 1): CGRect(x: 120, y: 200, width: 80, height: 100),
-        ]
+        let metrics = PlateMetrics.standard
+        let stride = metrics.cardWidth + metrics.windowSpacing
+        // Displayed layouts: stage 0 keeps three cards for a same-stage reorder, stage 1 has
+        // already grown to three for the incoming card, stage 2 is an empty destination.
+        let layouts = [grid(3, capacity: 4), grid(3, capacity: 4), grid(1, capacity: 4)]
         let plates = [
-            0: CGRect(x: 0, y: 0, width: 340, height: 160),
-            1: CGRect(x: 0, y: 180, width: 240, height: 160),
-            2: CGRect(x: 0, y: 360, width: 140, height: 160),
+            0: CGRect(x: 0, y: 0, width: 640, height: 178),
+            1: CGRect(x: 0, y: 200, width: 640, height: 178),
+            2: CGRect(x: 100, y: 400, width: 300, height: 178),
         ]
 
         #expect(PlateMotion.windowDropDestination(
-            sourceStageIndex: 0,
-            sourceWindowIndex: 0,
             target: WindowDropTarget(stageIndex: 0, windowIndex: 2),
-            cardStride: 100,
             plateFrames: plates,
-            windowFrames: frames
-        ) == CGPoint(x: 260, y: 70))
+            layouts: layouts,
+            scales: [1, 1, 1]
+        ) == CGPoint(x: 320 + stride, y: 89))
         #expect(PlateMotion.windowDropDestination(
-            sourceStageIndex: 0,
-            sourceWindowIndex: 0,
             target: WindowDropTarget(stageIndex: 1, windowIndex: 1),
-            cardStride: 100,
             plateFrames: plates,
-            windowFrames: frames
-        ) == CGPoint(x: 160, y: 250))
+            layouts: layouts,
+            scales: [1, 1, 1]
+        ) == CGPoint(x: 320, y: 289))
         #expect(PlateMotion.windowDropDestination(
-            sourceStageIndex: 0,
-            sourceWindowIndex: 0,
             target: WindowDropTarget(stageIndex: 2, windowIndex: 0),
-            cardStride: 100,
             plateFrames: plates,
-            windowFrames: frames
-        ) == CGPoint(x: 70, y: 434))
+            layouts: layouts,
+            scales: [1, 1, 1]
+        ) == CGPoint(x: 250, y: 489))
+    }
+
+    @Test("A scaled destination plate lands the preview on its scaled slot")
+    func releasedPreviewFollowsPlateScale() {
+        let metrics = PlateMetrics.standard
+        let stride = metrics.cardWidth + metrics.windowSpacing
+        let plates = [0: CGRect(x: 0, y: 0, width: 320, height: 89)]
+
+        #expect(PlateMotion.windowDropDestination(
+            target: WindowDropTarget(stageIndex: 0, windowIndex: 2),
+            plateFrames: plates,
+            layouts: [grid(3, capacity: 4)],
+            scales: [0.5]
+        ) == CGPoint(x: 160 + stride / 2, y: 44.5))
     }
 
     @Test("A press without meaningful movement selects instead of starting a drag")
