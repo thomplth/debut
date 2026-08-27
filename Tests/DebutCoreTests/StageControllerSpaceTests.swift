@@ -6,7 +6,6 @@ import CoreGraphics
 final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     var desktops: Int
     var current: Int
-    var separateSpaces: Bool
     private(set) var switchRequests: [Int] = []
     private(set) var moveRequests: [(windowID: CGWindowID, desktop: Int)] = []
     var windowDesktops: [CGWindowID: Int] = [:]
@@ -18,20 +17,18 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     private(set) var spaceDidChangeCount = 0
     private var pendingMoveCompletions: [(@Sendable () -> Void)] = []
 
-    init(desktops: Int = 3, current: Int = 0, separateSpaces: Bool = false) {
+    init(desktops: Int = 3, current: Int = 0) {
         self.desktops = desktops
         self.current = current
-        self.separateSpaces = separateSpaces
     }
 
     func spaceTopology() -> SpaceTopology {
         let desktopIDs = (0..<desktops).map { CGSSpaceID($0 + 100) }
-        let stackID = separateSpaces ? "display-a" : SpaceTopology.sharedStackID
-        return SpaceTopology(separateSpaces: separateSpaces, stacks: [
+        return SpaceTopology(separateSpaces: false, stacks: [
             SpaceStackDescriptor(
-                id: stackID,
-                displayID: separateSpaces ? 1 : nil,
-                displayName: separateSpaces ? "Built-in Display" : "All Displays",
+                id: SpaceTopology.sharedStackID,
+                displayID: nil,
+                displayName: "All Displays",
                 frame: .zero,
                 desktopIDs: desktopIDs,
                 currentDesktopID: desktopIDs.indices.contains(current) ? desktopIDs[current] : nil
@@ -128,41 +125,11 @@ struct StageControllerSpaceTests {
         // switching — otherwise this would ask to switch to the stage already showing.
         controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
 
-        controller.switchToStage(id: controller.stageManager.stages[2].id)
-
-        #expect(spaces.switchRequests == [2])
-    }
-
-    @Test("A switch request does not activate its stage before macOS confirms the desktop")
-    func switchWaitsToActivateStage() {
-        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
-        let (controller, _) = makeController(spaces: spaces)
-        controller.stageManager.createStage(position: .below)
-        let source = controller.stageManager.stages[0].id
-        let target = controller.stageManager.stages[1].id
-        controller.stageManager.activateStage(id: source)
-
+        let target = controller.stageManager.stages[2].id
         controller.switchToStage(id: target)
 
-        #expect(controller.stageManager.activeStageID == source)
-        controller.desktopDidChange()
+        #expect(spaces.switchRequests == [2])
         #expect(controller.stageManager.activeStageID == target)
-    }
-
-    @Test("A shortcut retries when Dock did not land the previous switch request")
-    func droppedSwitchCanBeRetried() {
-        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
-        spaces.switchChangesDesktop = false
-        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
-        controller.stageManager.createStage(position: .below)
-        let source = controller.stageManager.stages[0].id
-        controller.stageManager.activateStage(id: source)
-
-        keyboardService.simulateEvent(.switchToStage(2))
-        keyboardService.simulateEvent(.switchToStage(2))
-
-        #expect(spaces.switchRequests == [1, 1])
-        #expect(controller.stageManager.activeStageID == source)
     }
 
     // Under the surface architecture every window in the target stage had to be AX-raised
@@ -411,7 +378,7 @@ struct StageControllerSpaceTests {
         controller.switchToStage(id: showingStage)
 
         #expect(spaces.switchRequests == [0])
-        #expect(controller.stageManager.activeStageID == settlingStage)
+        #expect(controller.stageManager.activeStageID == showingStage)
     }
 
     @Test("A desktop change advances the switcher before stage reconciliation")

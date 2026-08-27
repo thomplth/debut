@@ -494,30 +494,13 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
 
         let previousID = stageManager.activeStageID
         var desktopIsSettling = false
-        var activatedConfirmedStage = false
 
-        let targetIndex = stageManager.stageIndex(id: targetID)
-        let targetStackID = stageManager.stageStackID(containingStageID: targetID)
-        let topology = spaceSwitcher?.spaceTopology()
-        let targetStack = targetStackID.flatMap { topology?.stack(id: $0) }
-        let targetIsShowing = targetIndex.flatMap { targetStack?.currentDesktopIndex == $0 } ?? false
-        let targetStackIsSettling = targetStackID.flatMap {
-            spaceSwitcher?.isSwitchInFlight(stackID: $0)
-        } ?? false
-
-        if targetIsShowing && !targetStackIsSettling {
-            // The WindowServer is authoritative. This also repairs stale model state without
-            // issuing a redundant Dock gesture.
-            if previousID != targetID {
-                self.previousStageID = previousID
-                stageManager.activateStage(id: targetID)
-                activatedConfirmedStage = true
-            }
-        } else if let index = targetIndex,
-                  let location = targetStack?.location(at: index),
-                  let switcher = spaceSwitcher {
+        if previousID != targetID {
             let fromLabel = stageLabel(forID: previousID)
             let toLabel = stageLabel(forID: targetID)
+
+            self.previousStageID = previousID
+            stageManager.activateStage(id: targetID)
 
             // The stage's windows already live on the target desktop, so macOS reveals all
             // of them in one composited transition. The surface architecture instead covered
@@ -528,19 +511,19 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
                 .stageRaise,
                 workload: .init(windows: targetStage?.windows.count ?? 0)
             )
-            desktopIsSettling = switcher.switchToDesktop(location)
+            if let index = stageManager.stageIndex(id: targetID),
+               let stackID = stageManager.stageStackID(containingStageID: targetID),
+               let location = spaceSwitcher?.spaceTopology().stack(id: stackID)?.location(at: index),
+               let switcher = spaceSwitcher {
+                desktopIsSettling = switcher.switchToDesktop(location)
+            }
             _ = PerformanceRecorder.shared.end(raiseID)
 
-            diag.report(desktopIsSettling ? "stage_switched" : "stage_switch_refused", details: [
+            diag.report("stage_switched", details: [
                 "from": fromLabel,
                 "to": toLabel,
                 "windowsInTarget": "\(targetStage?.windows.count ?? 0)",
             ])
-        } else if spaceSwitcher == nil, previousID != targetID {
-            // Non-Space hosts (including model-only consumers) retain the synchronous behavior.
-            self.previousStageID = previousID
-            stageManager.activateStage(id: targetID)
-            activatedConfirmedStage = true
         }
 
         // Focus the selected window and activate its app (single activation, no flash).
@@ -548,24 +531,17 @@ public final class StageController: KeyboardEventDelegate, @unchecked Sendable {
         if focusesWindow, let focusWindowID = raiseWindowID ?? targetStage?.windows.first?.windowID {
             if desktopIsSettling {
                 pendingStageFocus = (stageID: targetID, windowID: focusWindowID)
-            } else if targetIsShowing || spaceSwitcher == nil {
-                pendingStageFocus = nil
-                focusWindow(focusWindowID, inStageID: targetID)
             } else {
                 pendingStageFocus = nil
+                focusWindow(focusWindowID, inStageID: targetID)
             }
         } else {
-            // A focus queued by an earlier switch would otherwise still fire after this request.
+            // A focus queued by an earlier switch to this same stage would otherwise still fire.
             pendingStageFocus = nil
         }
 
-        if activatedConfirmedStage || (focusesWindow && !desktopIsSettling &&
-                                       (targetIsShowing || spaceSwitcher == nil)) {
-            delegate?.stageControllerDidMutateState(self)
-        }
-        if activatedConfirmedStage {
-            delegate?.stageControllerDidSwitchStage(self)
-        }
+        delegate?.stageControllerDidMutateState(self)
+        delegate?.stageControllerDidSwitchStage(self)
     }
 
     // MARK: - Window ownership
