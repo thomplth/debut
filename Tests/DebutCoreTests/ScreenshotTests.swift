@@ -150,6 +150,47 @@ struct ScreenshotTests {
         #expect(vm.selectedWindowIndex == 2)
     }
 
+    @Test("A plate too wide for the display renders its windows in balanced rows")
+    func widePlateWrapsIntoRows() throws {
+        let metrics = PlateMetrics.standard
+        let vm = makeSampleViewModel(stageCount: 1, windowsPerStage: [8], activeIndex: 0)
+        let size = NSSize(width: 1200, height: 700)
+
+        guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: size) else {
+            throw ScreenshotError.renderFailed
+        }
+        try saveImage(img, name: "06_wrapped_plate_rows")
+
+        let frames = renderWindowFrames(OverlaySwiftUIView(viewModel: vm), size: size)
+        let cards = (0..<8).map { frames[WindowFrameID(stageIndex: 0, windowIndex: $0)]! }
+        let rows = Dictionary(grouping: cards) { ($0.midY * 10).rounded() }
+
+        #expect(rows.count == 2)
+        #expect(rows.values.allSatisfy { $0.count == 4 })
+        #expect(cards.allSatisfy { $0.maxX <= size.width })
+
+        guard let plate = renderPlateSurfaceFrames(
+            OverlaySwiftUIView(viewModel: vm),
+            size: size
+        )[0] else { throw ScreenshotError.renderFailed }
+        #expect(abs(plate.height
+            - (metrics.cardHeight * 2 + metrics.rowSpacing
+                + metrics.topPadding + metrics.bottomPadding)) < 0.5)
+
+        // What is drawn has to be where the geometry says, or drag projection and the E2E hit
+        // tests are aiming at slots the view never used.
+        let layout = PlateWindowLayout(
+            windowCount: 8,
+            availableWidth: PlateConstants.availablePlateWidth(screenWidth: size.width),
+            metrics: metrics
+        )
+        for (index, card) in cards.enumerated() {
+            let expected = layout.cardOffsetFromCenter(at: index)
+            #expect(abs(card.midX - (plate.midX + expected.width)) < 0.5)
+            #expect(abs(card.midY - (plate.midY + expected.height)) < 0.5)
+        }
+    }
+
     @Test("Dragging a window preview does not shift the plate stack")
     func windowDragPreviewDoesNotShiftPlateStack() throws {
         let vm = makeSampleViewModel(stageCount: 3, windowsPerStage: [3, 4, 2], activeIndex: 1)
