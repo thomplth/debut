@@ -86,7 +86,11 @@ enum WindowImageStatistics {
                   )
             else { return false }
 
-            context.interpolationQuality = .none
+            // Area-averaging, so every source pixel reaches a cell. Point sampling read 256
+            // pixels of a capture that holds hundreds of thousands, and a terminal at a prompt
+            // puts content on ~0.3% of them: the samples landed on content less than once on
+            // average, and real windows were discarded as failed captures on a coin flip.
+            context.interpolationQuality = .high
             context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
 
             let bytes = buffer.bindMemory(to: UInt8.self)
