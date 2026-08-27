@@ -217,6 +217,21 @@ struct StateStoreTests {
         #expect(decoded.commandUsageCounts.isEmpty)
     }
 
+    @Test("Settings written before the plate scale existed take the larger new default")
+    func legacySettingsDefaultPlateScale() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "plateScale")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+
+        #expect(decoded.plateScale == AppSettings.defaultPlateScale)
+        #expect(AppSettings.defaultPlateScale == 1.5)
+    }
+
     @Test("Settings files written before the option audit still load")
     func legacySettingsIgnoreRemovedOptions() throws {
         let dir = try makeTempDirectory()

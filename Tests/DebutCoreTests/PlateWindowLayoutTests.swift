@@ -158,4 +158,142 @@ struct PlateWindowLayoutTests {
         #expect(grown.rowSizes == [3, 3])
         #expect(grown.slot(at: 5) == PlateGridSlot(row: 1, column: 2))
     }
+
+    @Test("Scaling multiplies every dimension, so a card keeps its proportions")
+    func scaledMetrics() {
+        let scaled = metrics.scaled(by: 1.5)
+
+        #expect(scaled.thumbnailWidth == metrics.thumbnailWidth * 1.5)
+        #expect(scaled.thumbnailHeight == metrics.thumbnailHeight * 1.5)
+        #expect(scaled.badgeSize == metrics.badgeSize * 1.5)
+        #expect(scaled.previewPlaceholderIconSize == metrics.previewPlaceholderIconSize * 1.5)
+        #expect(scaled.windowSpacing == metrics.windowSpacing * 1.5)
+        #expect(scaled.rowSpacing == metrics.rowSpacing * 1.5)
+        #expect(scaled.padding == metrics.padding * 1.5)
+        #expect(scaled.minPlateWidth == metrics.minPlateWidth * 1.5)
+
+        #expect(scaled.cardWidth == metrics.cardWidth * 1.5)
+        #expect(scaled.cardHeight == metrics.cardHeight * 1.5)
+        #expect(scaled.titleFontSize == metrics.titleFontSize * 1.5)
+        #expect(scaled.thumbnailCornerRadius == metrics.thumbnailCornerRadius * 1.5)
+        #expect(metrics.scaled(by: 1) == metrics)
+    }
+
+    @Test("A larger scale fits fewer cards across the same display")
+    func scaleReducesColumnCapacity() {
+        let width: CGFloat = 1_200
+        let capacities = [1.0, 1.5, 2.0].map { scale in
+            PlateWindowLayout.columnCapacity(
+                availableWidth: width,
+                metrics: metrics.scaled(by: CGFloat(scale))
+            )
+        }
+
+        #expect(capacities == capacities.sorted(by: >))
+        #expect(capacities.first! > capacities.last!)
+    }
+
+    @Test("Plate height never shrinks as the scale grows, which is what makes the fit searchable")
+    func plateHeightIsMonotoneInScale() {
+        // Scale, capacity and row count are circular: a bigger card fits fewer per row, which
+        // adds rows, which adds height. The fitted scale is found by walking candidates down,
+        // and that only finds the largest fitting scale if height never dips on the way up.
+        for windowCount in [1, 5, 8, 17, 30] {
+            let heights = stride(from: 0.5, through: 2.5, by: 0.05).map { scale in
+                PlateWindowLayout(
+                    windowCount: windowCount,
+                    availableWidth: 1_400,
+                    metrics: metrics.scaled(by: CGFloat(scale))
+                ).plateSize.height
+            }
+            #expect(zip(heights, heights.dropFirst()).allSatisfy { $0 <= $1 },
+                    "height dipped as scale grew for \(windowCount) windows")
+        }
+    }
+}
+
+@Suite("Fitted plate scale")
+struct FittedPlateScaleTests {
+
+    private let roomyDisplay = CGSize(width: 2_560, height: 1_440)
+
+    private func fitted(_ requested: Double, windowCounts: [Int], display: CGSize) -> CGFloat {
+        PlateConstants.fittedPlateScale(
+            requested: CGFloat(requested),
+            windowCounts: windowCounts,
+            containerSize: display
+        )
+    }
+
+    @Test("A stack that already fits keeps the scale it asked for")
+    func requestedScaleSurvivesWhenItFits() {
+        #expect(fitted(1.5, windowCounts: [3, 5], display: roomyDisplay) == 1.5)
+        #expect(fitted(1.0, windowCounts: [3, 5], display: roomyDisplay) == 1.0)
+    }
+
+    @Test("The requested scale is clamped to the range the slider offers")
+    func requestedScaleIsClamped() {
+        #expect(fitted(9, windowCounts: [1], display: roomyDisplay)
+            == CGFloat(AppSettings.maximumPlateScale))
+        #expect(fitted(0.01, windowCounts: [1], display: roomyDisplay)
+            == CGFloat(AppSettings.minimumPlateScale))
+    }
+
+    @Test("A plate too tall for the display scales down until it fits")
+    func tallPlateScalesDown() {
+        let display = CGSize(width: 1_440, height: 900)
+        let scale = fitted(1.5, windowCounts: [24], display: display)
+
+        #expect(scale < 1.5)
+        #expect(scale >= CGFloat(AppSettings.minimumPlateScale))
+
+        let fittedHeight = PlateConstants.plateLayouts(
+            forWindowCounts: [24],
+            screenWidth: display.width,
+            metrics: PlateMetrics.standard.scaled(by: scale)
+        )[0].plateSize.height
+        #expect(fittedHeight <= PlateConstants.availablePlateHeight(screenHeight: display.height))
+    }
+
+    @Test("The tallest plate sets the scale for the whole stack")
+    func tallestPlateBinds() {
+        let display = CGSize(width: 1_440, height: 900)
+        let alone = fitted(1.5, windowCounts: [24], display: display)
+        let inStack = fitted(1.5, windowCounts: [1, 24, 2], display: display)
+
+        #expect(inStack == alone)
+    }
+
+    @Test("A display too small at every scale still returns a usable scale")
+    func impossibleFitFallsBackToTheFloor() {
+        let scale = fitted(1.5, windowCounts: [200], display: CGSize(width: 600, height: 400))
+        #expect(scale == CGFloat(AppSettings.minimumPlateScale))
+    }
+
+    @Test("Fitting never leaves a plate wider than the display")
+    func fittedPlatesStayWithinWidth() {
+        for display in [CGSize(width: 1_280, height: 800), CGSize(width: 3_840, height: 2_160)] {
+            for count in [1, 4, 9, 18] {
+                let scale = fitted(2.5, windowCounts: [count], display: display)
+                let width = PlateConstants.plateLayouts(
+                    forWindowCounts: [count],
+                    screenWidth: display.width,
+                    metrics: PlateMetrics.standard.scaled(by: scale)
+                )[0].plateSize.width
+                #expect(width <= PlateConstants.availablePlateWidth(screenWidth: display.width)
+                    || scale == CGFloat(AppSettings.minimumPlateScale))
+            }
+        }
+    }
+
+    @Test("Fitted scales land on the slider's own steps")
+    func fittedScaleStaysOnTheSliderGrid() {
+        let display = CGSize(width: 1_440, height: 900)
+        for count in 1...30 {
+            let scale = fitted(2.5, windowCounts: [count], display: display)
+            let steps = (scale - CGFloat(AppSettings.minimumPlateScale))
+                / CGFloat(AppSettings.plateScaleStep)
+            #expect(abs(steps - steps.rounded()) < 0.0001, "\(scale) is off the step grid")
+        }
+    }
 }

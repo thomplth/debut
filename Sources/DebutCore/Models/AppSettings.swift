@@ -87,9 +87,20 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var shareAnonymousTelemetry: Bool
 
     // Appearance
+    /// Window thumbnails at the original size were too small to read what was on the captured
+    /// screen. The wrapping added in KHA-491 is what makes a larger card safe: a stage that no
+    /// longer fits across the display spills onto another row instead of over the edge.
+    public static let defaultPlateScale: Double = 1.5
+    /// The floor doubles as the floor the automatic viewport fit may shrink to, so a stage
+    /// holding more windows than the display can show at any readable size still fits.
+    public static let minimumPlateScale: Double = 0.5
+    public static let maximumPlateScale: Double = 2.5
+    public static let plateScaleStep: Double = 0.05
+
     public var glassStyle: GlassStyle
     public var plateCornerRadius: Double
     public var inactivePlateScale: Double
+    public var plateScale: Double
 
     // Keyboard
     public var overlayPresentationDelay: TimeInterval
@@ -118,6 +129,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.glassStyle = .clear
         self.plateCornerRadius = 40
         self.inactivePlateScale = 0.7
+        self.plateScale = Self.defaultPlateScale
 
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
         self.heldCycleMinimumInterval = Self.defaultHeldCycleMinimumInterval
@@ -146,6 +158,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
         glassStyle = try container.decode(GlassStyle.self, forKey: .glassStyle)
         plateCornerRadius = try container.decode(Double.self, forKey: .plateCornerRadius)
         inactivePlateScale = try container.decode(Double.self, forKey: .inactivePlateScale)
+        plateScale = try container.decodeIfPresent(
+            Double.self,
+            forKey: .plateScale
+        ) ?? Self.defaultPlateScale
         overlayPresentationDelay = try container.decodeIfPresent(
             TimeInterval.self,
             forKey: .overlayPresentationDelay

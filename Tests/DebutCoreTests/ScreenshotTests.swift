@@ -76,7 +76,12 @@ struct ScreenshotTests {
 
     enum ScreenshotError: Error { case renderFailed }
 
-    private func makeSampleViewModel(stageCount: Int = 3, windowsPerStage: [Int] = [3, 4, 2], activeIndex: Int = 1) -> OverlayViewModel {
+    private func makeSampleViewModel(
+        stageCount: Int = 3,
+        windowsPerStage: [Int] = [3, 4, 2],
+        activeIndex: Int = 1,
+        appearance: AppSettings = AppSettings()
+    ) -> OverlayViewModel {
         var sm = StageManager()
         let windowData: [(String, String, String)] = [
             ("com.apple.mail", "Mail", "Inbox"), ("com.apple.Safari", "Safari", "Google"),
@@ -107,7 +112,12 @@ struct ScreenshotTests {
             }
         }
         sm.activateStage(id: sm.stages[min(activeIndex, sm.stages.count - 1)].id)
-        return OverlayViewModel(stageManager: sm, activeStageIndex: activeIndex, selectedWindowIndex: 1)
+        return OverlayViewModel(
+            stageManager: sm,
+            activeStageIndex: activeIndex,
+            selectedWindowIndex: 1,
+            appearance: appearance
+        )
     }
 
     @Test("Three plates render correctly")
@@ -150,10 +160,23 @@ struct ScreenshotTests {
         #expect(vm.selectedWindowIndex == 2)
     }
 
+    /// Pins the scale so the wrap threshold under test is a property of the width, not of
+    /// whatever the plate-scale default happens to be.
+    private func unscaledAppearance() -> AppSettings {
+        var settings = AppSettings()
+        settings.plateScale = 1
+        return settings
+    }
+
     @Test("A plate too wide for the display renders its windows in balanced rows")
     func widePlateWrapsIntoRows() throws {
         let metrics = PlateMetrics.standard
-        let vm = makeSampleViewModel(stageCount: 1, windowsPerStage: [8], activeIndex: 0)
+        let vm = makeSampleViewModel(
+            stageCount: 1,
+            windowsPerStage: [8],
+            activeIndex: 0,
+            appearance: unscaledAppearance()
+        )
         let size = NSSize(width: 1200, height: 700)
 
         guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: size) else {
@@ -189,6 +212,70 @@ struct ScreenshotTests {
             #expect(abs(card.midX - (plate.midX + expected.width)) < 0.5)
             #expect(abs(card.midY - (plate.midY + expected.height)) < 0.5)
         }
+    }
+
+    @Test("The plate scale setting reaches the cards the overlay actually draws")
+    func plateScaleEnlargesRenderedCards() throws {
+        let size = NSSize(width: 1600, height: 1000)
+        let counts = [4]
+
+        func cardSize(plateScale: Double) -> CGSize {
+            var settings = AppSettings()
+            settings.plateScale = plateScale
+            let vm = makeSampleViewModel(
+                stageCount: 1,
+                windowsPerStage: counts,
+                activeIndex: 0,
+                appearance: settings
+            )
+            let frames = renderWindowFrames(OverlaySwiftUIView(viewModel: vm), size: size)
+            return frames[WindowFrameID(stageIndex: 0, windowIndex: 0)]!.size
+        }
+
+        let unscaled = cardSize(plateScale: 1)
+        let enlarged = cardSize(plateScale: AppSettings.defaultPlateScale)
+
+        #expect(abs(enlarged.width - unscaled.width * 1.5) < 0.5)
+        #expect(abs(enlarged.height - unscaled.height * 1.5) < 0.5)
+
+        // E2E clicks screen coordinates it derives from drawnMetrics, so a card drawn at any
+        // other size sends those clicks somewhere the overlay never drew.
+        let expected = PlateConstants.drawnMetrics(
+            plateScale: CGFloat(AppSettings.defaultPlateScale),
+            windowCounts: counts,
+            containerSize: size
+        )
+        #expect(abs(enlarged.width - expected.cardWidth) < 0.5)
+        #expect(abs(enlarged.height - expected.cardHeight) < 0.5)
+    }
+
+    @Test("The default plate scale still fits the display, and a crowded stage shrinks to fit")
+    func defaultPlateScaleFitsTheDisplay() throws {
+        let size = NSSize(width: 1440, height: 900)
+        let vm = makeSampleViewModel(stageCount: 1, windowsPerStage: [6], activeIndex: 0)
+
+        guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: size) else {
+            throw ScreenshotError.renderFailed
+        }
+        try saveImage(img, name: "06_default_plate_scale")
+
+        guard let plate = renderPlateSurfaceFrames(
+            OverlaySwiftUIView(viewModel: vm),
+            size: size
+        )[0] else { throw ScreenshotError.renderFailed }
+        #expect(plate.width <= PlateConstants.availablePlateWidth(screenWidth: size.width))
+        #expect(plate.height <= PlateConstants.availablePlateHeight(screenHeight: size.height))
+
+        // The same display cannot hold twenty windows at the requested scale, so the overlay
+        // has to give scale back rather than draw a plate off the bottom of the screen.
+        let crowded = makeSampleViewModel(stageCount: 1, windowsPerStage: [20], activeIndex: 0)
+        guard let crowdedPlate = renderPlateSurfaceFrames(
+            OverlaySwiftUIView(viewModel: crowded),
+            size: size
+        )[0] else { throw ScreenshotError.renderFailed }
+
+        #expect(crowdedPlate.width <= PlateConstants.availablePlateWidth(screenWidth: size.width))
+        #expect(crowdedPlate.height <= PlateConstants.availablePlateHeight(screenHeight: size.height))
     }
 
     @Test("Dragging a window preview does not shift the plate stack")

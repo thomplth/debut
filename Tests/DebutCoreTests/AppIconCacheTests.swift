@@ -124,6 +124,17 @@ struct AppIconCacheTests {
         let rep = try #require(lazyIcon.representations.first)
         #expect(!(rep is NSBitmapImageRep))
     }
+
+    @Test("The warmed sizes do not move with the plate scale")
+    func warmedSizesAreScaleIndependent() {
+        // The cache is keyed by size, so following the scale would discard every warmed icon
+        // whenever the slider moved and put the KHA-481 rasterize back on the main thread.
+        let largest = PlateMetrics.standard.scaled(by: CGFloat(AppSettings.maximumPlateScale))
+        #expect(AppIconCache.badgeRasterSize == largest.badgeSize)
+        #expect(AppIconCache.placeholderIconRasterSize == largest.previewPlaceholderIconSize)
+        #expect(AppIconCache.overlayIconSizes
+            == [AppIconCache.placeholderIconRasterSize, AppIconCache.badgeRasterSize])
+    }
 }
 
 private final class Counter: @unchecked Sendable {

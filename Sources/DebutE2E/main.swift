@@ -345,6 +345,20 @@ func stageWindowCounts(in state: [String: String]) -> [Int] {
         .compactMap { Int($0) }
 }
 
+// Read before any geometry helper runs: top-level declarations in main.swift initialize in
+// source order, so the hit tests below cannot reach a setting declared beneath them.
+let interactionSettings = (try? StateStore().loadSettings()) ?? AppSettings()
+
+/// The card metrics the running overlay is drawing at, which depend on both the plate-scale
+/// setting and how many windows the display has to hold.
+func drawnMetrics(windowCounts: [Int]) -> PlateMetrics {
+    PlateConstants.drawnMetrics(
+        plateScale: CGFloat(interactionSettings.plateScale),
+        windowCounts: windowCounts,
+        containerSize: CGDisplayBounds(CGMainDisplayID()).size
+    )
+}
+
 func plateCenter(
     stageIndex: Int,
     windowCounts: [Int],
@@ -358,7 +372,8 @@ func plateCenter(
     let screen = CGDisplayBounds(CGMainDisplayID())
     let plateHeights = PlateConstants.plateLayouts(
         forWindowCounts: windowCounts,
-        screenWidth: screen.width
+        screenWidth: screen.width,
+        metrics: drawnMetrics(windowCounts: windowCounts)
     ).map(\.plateSize.height)
     guard let visualCenterY = PlateConstants.plateCenterY(
         stageIndex: stageIndex,
@@ -388,7 +403,8 @@ func windowCenter(
         windowCounts: windowCounts,
         activeStageIndex: activeStageIndex,
         inactiveScale: inactiveScale,
-        containerSize: CGDisplayBounds(CGMainDisplayID()).size
+        containerSize: CGDisplayBounds(CGMainDisplayID()).size,
+        metrics: drawnMetrics(windowCounts: windowCounts)
     )
 }
 
@@ -402,7 +418,8 @@ func firstWindowCenter(in state: [String: String]) -> CGPoint? {
         windowCounts: [activeWindows],
         activeStageIndex: 0,
         inactiveScale: 1,
-        containerSize: CGDisplayBounds(CGMainDisplayID()).size
+        containerSize: CGDisplayBounds(CGMainDisplayID()).size,
+        metrics: drawnMetrics(windowCounts: [activeWindows])
     )
 }
 
@@ -1094,7 +1111,6 @@ header("10. Window drop refreshes both plates immediately")
 let originalDropState = readState()
 let originalStageCount = Int(originalDropState["stageCount"] ?? "") ?? 0
 let originalWindowCounts = stageWindowCounts(in: originalDropState)
-let interactionSettings = (try? StateStore().loadSettings()) ?? AppSettings()
 let screenBounds = CGDisplayBounds(CGMainDisplayID())
 let neutralPointerLocation = CGPoint(x: screenBounds.maxX - 4, y: screenBounds.maxY - 4)
 
@@ -1586,7 +1602,7 @@ let dismissalStateBefore = readState()
 let windowsBeforeDismissal = Int(dismissalStateBefore["windowsInActiveStage"] ?? "0") ?? 0
 let selectedCardCenter = firstWindowCenter(in: dismissalStateBefore)
 let dismissalScreen = CGDisplayBounds(CGMainDisplayID())
-let dismissalMetrics = PlateMetrics.standard
+let dismissalMetrics = drawnMetrics(windowCounts: [windowsBeforeDismissal])
 postMouseMove(to: CGPoint(x: dismissalScreen.maxX - 20, y: dismissalScreen.maxY - 20))
 let beforeDismissalScreenshot = takeScreenshot("14_selected_window_before_dismissal")
 let windowTitlesBeforeDismissal = windowDisplayTitlesByID()
