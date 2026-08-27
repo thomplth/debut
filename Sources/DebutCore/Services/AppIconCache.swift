@@ -10,10 +10,20 @@ import Foundation
 public final class AppIconCache: @unchecked Sendable {
     public static let shared = AppIconCache()
 
-    /// The sizes the overlay draws icons at, and therefore the set worth warming.
+    /// The sizes the overlay rasterizes icons at, and therefore the set worth warming.
+    ///
+    /// Fixed at the largest plate scale rather than following the current one: the cache is keyed
+    /// by size, so tracking the scale would throw the whole warmed set away every time the slider
+    /// moved and put the rasterize back on the main thread. An image view downsamples the
+    /// oversized bitmap for free.
+    public static let placeholderIconRasterSize = PlateMetrics.standard
+        .scaled(by: CGFloat(AppSettings.maximumPlateScale)).previewPlaceholderIconSize
+    public static let badgeRasterSize = PlateMetrics.standard
+        .scaled(by: CGFloat(AppSettings.maximumPlateScale)).badgeSize
+
     public static let overlayIconSizes: [CGFloat] = [
-        PlateMetrics.standard.previewPlaceholderIconSize,
-        PlateMetrics.standard.badgeSize,
+        placeholderIconRasterSize,
+        badgeRasterSize,
     ]
 
     private struct Key: Hashable {

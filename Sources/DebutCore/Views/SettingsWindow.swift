@@ -149,6 +149,24 @@ public struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
+                    Text("Window size")
+                    Spacer()
+                    Text("\(Int((viewModel.settings.plateScale * 100).rounded()))%")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: $viewModel.settings.plateScale,
+                    in: AppSettings.minimumPlateScale...AppSettings.maximumPlateScale,
+                    step: AppSettings.plateScaleStep
+                )
+                Text("How large window previews are drawn. Larger previews show fewer windows per row, and a stage with too many to fit is scaled back down so its plate stays on screen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
                     Text("Inactive plate scale")
                     Spacer()
                     Text("\(Int((viewModel.settings.inactivePlateScale * 100).rounded()))%")

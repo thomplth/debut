@@ -49,6 +49,29 @@ public struct PlateMetrics: Equatable, Sendable {
     public var titleFontSize: CGFloat {
         max(9, thumbnailWidth * 0.065)
     }
+
+    public var thumbnailCornerRadius: CGFloat { cardPadding }
+
+    /// Every dimension scales together, so a card only ever grows or shrinks — it never changes
+    /// shape, and the title stays legible against the thumbnail it labels.
+    public func scaled(by scale: CGFloat) -> PlateMetrics {
+        PlateMetrics(
+            thumbnailWidth: thumbnailWidth * scale,
+            thumbnailHeight: thumbnailHeight * scale,
+            cardPadding: cardPadding * scale,
+            titleWidthAllowance: titleWidthAllowance * scale,
+            titleSpacing: titleSpacing * scale,
+            titleHeight: titleHeight * scale,
+            badgeSize: badgeSize * scale,
+            previewPlaceholderIconSize: previewPlaceholderIconSize * scale,
+            windowSpacing: windowSpacing * scale,
+            rowSpacing: rowSpacing * scale,
+            padding: padding * scale,
+            topPadding: topPadding * scale,
+            bottomPadding: bottomPadding * scale,
+            minPlateWidth: minPlateWidth * scale
+        )
+    }
 }
 
 public struct PlateGridSlot: Equatable, Sendable {
