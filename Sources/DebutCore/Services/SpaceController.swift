@@ -1600,6 +1600,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         diag.report("close_selected_window", details: [
             "windowID": "\(window.windowID)",
             "bundleID": window.ownerBundleID,
+            "cardLabel": window.displayTitle,
             "requested": "\(requested)",
             "removed": "\(requested)",
         ])

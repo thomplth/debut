@@ -1782,7 +1782,7 @@ struct WindowPreviewView: View {
                     .offset(x: -4 * metrics.scaleFactor, y: -4 * metrics.scaleFactor)
             }
 
-            Text(window.windowTitle.isEmpty ? window.ownerName : window.windowTitle)
+            Text(window.displayTitle)
                 .font(.system(size: metrics.titleFontSize))
                 .foregroundStyle(isWindowSelected ? .primary : .secondary)
                 .lineLimit(1)
