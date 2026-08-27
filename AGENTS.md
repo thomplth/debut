@@ -70,8 +70,10 @@ Before adding a check that needs two desktops, decide what it should do on a hos
 
 Releases are automated in GitHub Actions and are never cut by hand. Both paths gate on the full CI suite (`.github/workflows/ci.yml`) and the full E2E suite before anything is tagged or published.
 
-- **Daily** (`release-daily.yml`) — a scheduled run bumps the patch number and publishes when `main` has moved since the last tag, and skips when it has not.
-- **Manual** (`release-manual.yml`) — human triggered with a `minor` or `major` bump, and never skipped for want of new commits.
+- **Daily** (`release-daily.yml`) — a scheduled run bumps the patch number and publishes a GitHub prerelease when `main` has moved since the last tag, and skips when it has not. Daily releases never generate or modify the stable Sparkle appcast.
+- **Manual** (`release-manual.yml`) — human triggered with a `minor` or `major` bump, and never skipped for want of new commits. The resulting `.0` release is Developer ID-signed, notarized, approved through the protected `stable-release` environment, and published to the stable automatic-update feed.
+
+Automatic-update eligibility is a promotion decision, not a version comparison alone. `scripts/stable-update-eligibility.sh` must accept a release before an appcast is generated. Patch releases and every daily build are ineligible, even if their version is newer. The Sparkle EdDSA private key exists only in the protected `stable-release` environment; never expose it to the daily job.
 
 Every job in a release run is pinned to the commit that triggered it, and `scripts/verify-release-commit.sh` aborts the publish if `main` has moved on since. Landing on `main` while a release is gating therefore does not ship an untested commit — it fails that release, and the next run picks the new commit up. Re-run the release rather than trying to rescue a failed one.
 

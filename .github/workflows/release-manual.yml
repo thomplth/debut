@@ -63,6 +63,7 @@ jobs:
       contents: write
     uses: ./.github/workflows/release-publish.yml
     with:
+      channel: stable
       version: ${{ needs.plan.outputs.version }}
       previous_tag: ${{ needs.plan.outputs.previous_tag }}
       sha: ${{ needs.plan.outputs.sha }}
