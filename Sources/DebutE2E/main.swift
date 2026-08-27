@@ -473,22 +473,6 @@ func visibleWindowTitles(for processIdentifier: pid_t) -> [String] {
     }
 }
 
-func windowDisplayTitlesByID() -> [CGWindowID: String] {
-    guard let rawWindows = CGWindowListCopyWindowInfo(
-        [.optionAll, .excludeDesktopElements],
-        kCGNullWindowID
-    ) as? [[String: Any]] else { return [:] }
-
-    return rawWindows.reduce(into: [:]) { titles, window in
-        guard let rawID = window[kCGWindowNumber as String] as? NSNumber else { return }
-        let title = (window[kCGWindowName as String] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            ?? (window[kCGWindowOwnerName as String] as? String)
-        if let title, !title.isEmpty {
-            titles[CGWindowID(rawID.uint32Value)] = title
-        }
-    }
-}
-
 func accessibilityStrings(for processIdentifier: pid_t) -> [String] {
     let application = AXUIElementCreateApplication(processIdentifier)
     var strings: [String] = []
@@ -1607,7 +1591,6 @@ let dismissalScreen = CGDisplayBounds(CGMainDisplayID())
 let dismissalMetrics = drawnMetrics(windowCounts: [windowsBeforeDismissal])
 postMouseMove(to: CGPoint(x: dismissalScreen.maxX - 20, y: dismissalScreen.maxY - 20))
 let beforeDismissalScreenshot = takeScreenshot("14_selected_window_before_dismissal")
-let windowTitlesBeforeDismissal = windowDisplayTitlesByID()
 let accessibleBeforeDismissal = dismissalPID.map(accessibilityStrings(for:)) ?? []
 
 postKeyDown(keyCode: CGKeyCode(kVK_ANSI_W), flags: [.maskCommand])
@@ -1642,18 +1625,25 @@ let dismissalMotionRemainingPixelRatio = selectedCardCenter.flatMap { center in
     )
 }
 let accessibleAfterDismissal = dismissalPID.map(accessibilityStrings(for:)) ?? []
-let closedWindowID = readEvents().last(where: { $0["event"] == "close_selected_window" })
-    .flatMap { UInt32($0["windowID"] ?? "") }
-let selectedTitle = closedWindowID.flatMap { windowTitlesBeforeDismissal[$0] }
-let selectedTitleCountBefore = selectedTitle.map { title in
-    accessibleBeforeDismissal.filter { $0 == title }.count
+let closeEvent = readEvents().last { $0["event"] == "close_selected_window" }
+let closedWindowID = closeEvent.flatMap { UInt32($0["windowID"] ?? "") }
+// The card is found by the label Debut says it drew, never by the title this harness reads from
+// `kCGWindowName`. That title is gated behind Screen Recording, which the harness always holds and
+// Debut does not on a GitHub-hosted runner — so Debut draws the owner name there while the harness
+// looks up "two.txt", and the search misses however well dismissal worked. Duplicate labels are
+// expected in that case, since both TextEdit cards read "TextEdit"; the count still falls by one.
+let selectedCardLabel = closeEvent?["cardLabel"].flatMap { $0.isEmpty ? nil : $0 }
+let selectedTitleCountBefore = selectedCardLabel.map { label in
+    accessibleBeforeDismissal.filter { $0 == label }.count
 } ?? 0
-let selectedTitleCountAfter = selectedTitle.map { title in
-    accessibleAfterDismissal.filter { $0 == title }.count
+let selectedTitleCountAfter = selectedCardLabel.map { label in
+    accessibleAfterDismissal.filter { $0 == label }.count
 } ?? 0
 info(
     "Selected dismissal fixture: id=\(closedWindowID.map(String.init) ?? "none") "
-        + "title=\(selectedTitle ?? "none") accessibilityCount=\(selectedTitleCountBefore)->\(selectedTitleCountAfter) "
+        + "cardLabel=\(selectedCardLabel ?? "none") "
+        + "accessibilityCount=\(selectedTitleCountBefore)->\(selectedTitleCountAfter) "
+        + "accessibilityStrings=\(accessibleBeforeDismissal.count)->\(accessibleAfterDismissal.count) "
         + "motionChangedPixelRatio=\(dismissalMotionChangedPixelRatio.map { String(format: "%.4f", $0) } ?? "none") "
         + "motionRemainingPixelRatio=\(dismissalMotionRemainingPixelRatio.map { String(format: "%.4f", $0) } ?? "none")"
 )
@@ -1667,7 +1657,7 @@ test("Command-W visibly animates the selected card during dismissal") {
 }
 
 test("Command-W dismisses the selected card before any further selection input") {
-    guard windowsBeforeDismissal >= 2, selectedTitle != nil else { return false }
+    guard windowsBeforeDismissal >= 2, selectedCardLabel != nil else { return false }
     return readState()["overlayVisible"] == "true"
         && readState()["selectedWindowIndex"] == "0"
         && selectedTitleCountBefore > 0
