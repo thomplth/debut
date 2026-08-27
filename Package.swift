@@ -8,11 +8,13 @@ let package = Package(
     platforms: [.macOS(.v26)],
     products: [
         .executable(name: "Debut", targets: ["DebutApp"]),
+        .executable(name: "DebutSpaceSwitchLab", targets: ["DebutSpaceSwitchLab"]),
         .executable(name: "DebutE2E", targets: ["DebutE2E"]),
         .executable(name: "DebutPerformanceFixture", targets: ["DebutPerformanceFixture"]),
         .executable(name: "DebutBenchmarks", targets: ["DebutBenchmarks"]),
         .executable(name: "DebutDemo", targets: ["DebutDemo"]),
         .library(name: "DebutCore", targets: ["DebutCore"]),
+        .library(name: "SpaceSwitchLabCore", targets: ["SpaceSwitchLabCore"]),
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"),
@@ -33,6 +35,15 @@ let package = Package(
             name: "DebutCore",
             dependencies: ["AXPrivate"],
             path: "Sources/DebutCore"
+        ),
+        .target(
+            name: "SpaceSwitchLabCore",
+            path: "Sources/SpaceSwitchLabCore"
+        ),
+        .executableTarget(
+            name: "DebutSpaceSwitchLab",
+            dependencies: ["SpaceSwitchLabCore"],
+            path: "Sources/DebutSpaceSwitchLab"
         ),
         .target(
             name: "AXPrivate",
@@ -73,6 +84,11 @@ let package = Package(
             name: "DebutCoreTests",
             dependencies: ["DebutCore", "DebutInputDriver"],
             path: "Tests/DebutCoreTests"
+        ),
+        .testTarget(
+            name: "SpaceSwitchLabTests",
+            dependencies: ["SpaceSwitchLabCore"],
+            path: "Tests/SpaceSwitchLabTests"
         ),
     ]
 )
