@@ -43,6 +43,9 @@ struct WindowLift: Equatable {
 
 struct PlateStackLayout: Equatable {
     let scales: [CGFloat]
+    /// Each plate's own unscaled height. Plates wrap independently, so this is per stage rather
+    /// than one shared row height.
+    let baseHeights: [CGFloat]
     let heights: [CGFloat]
     let centers: [CGFloat]
     let totalHeight: CGFloat
@@ -174,22 +177,23 @@ enum PlateMotion {
     }
 
     static func stackLayout(
-        stageCount: Int,
+        plateHeights: [CGFloat],
         focusIndex: Int,
-        plateHeight: CGFloat,
         spacing: CGFloat,
         inactiveScale: CGFloat
     ) -> PlateStackLayout {
-        guard stageCount > 0, (0..<stageCount).contains(focusIndex) else {
-            return PlateStackLayout(scales: [], heights: [], centers: [], totalHeight: 0)
+        guard plateHeights.indices.contains(focusIndex) else {
+            return PlateStackLayout(
+                scales: [], baseHeights: [], heights: [], centers: [], totalHeight: 0
+            )
         }
-        let scales = (0..<stageCount).map {
+        let scales = plateHeights.indices.map {
             plateScale(
                 distanceFromFocus: abs($0 - focusIndex),
                 inactiveScale: inactiveScale
             )
         }
-        let heights = scales.map { plateHeight * $0 }
+        let heights = zip(plateHeights, scales).map(*)
         var runningTop: CGFloat = 0
         var centers: [CGFloat] = []
         for height in heights {
@@ -198,21 +202,20 @@ enum PlateMotion {
         }
         return PlateStackLayout(
             scales: scales,
+            baseHeights: plateHeights,
             heights: heights,
             centers: centers,
             totalHeight: runningTop - spacing
         )
     }
 
-    /// Every plate lays out in an identical unscaled slot so the animated scale stays a
-    /// render transform; this shifts the slot so the scaled plate lands on its stack center.
-    static func plateSlotOffset(
-        layout: PlateStackLayout,
-        index: Int,
-        plateHeight: CGFloat
-    ) -> CGFloat {
-        guard layout.centers.indices.contains(index) else { return 0 }
-        return layout.centers[index] - plateHeight / 2
+    /// Every plate lays out at its own unscaled height so the animated scale stays a render
+    /// transform; this shifts the slot so the scaled plate lands on its stack center.
+    static func plateSlotOffset(layout: PlateStackLayout, index: Int) -> CGFloat {
+        guard layout.centers.indices.contains(index),
+              layout.baseHeights.indices.contains(index)
+        else { return 0 }
+        return layout.centers[index] - layout.baseHeights[index] / 2
     }
 
     /// The outer edge of the whole stack: the top of the first plate or the bottom of the last.
@@ -337,92 +340,98 @@ enum PlateMotion {
         return displayed
     }
 
-    static func windowDragOffset(
+    /// The slot a card holds while a drag is in flight, or `nil` if the drag takes it off this
+    /// stage entirely. Insertion is expressed against the order left behind once the dragged
+    /// card is removed, which is the same contract `WindowDropTarget.windowIndex` carries.
+    static func prospectiveWindowIndex(
+        stageIndex: Int,
+        windowIndex: Int,
+        drag: WindowDragState
+    ) -> Int? {
+        guard let target = drag.dropTarget else { return windowIndex }
+
+        if stageIndex == drag.sourceStageIndex, target.stageIndex == stageIndex {
+            if windowIndex == drag.sourceWindowIndex { return target.windowIndex }
+            var slot = windowIndex > drag.sourceWindowIndex ? windowIndex - 1 : windowIndex
+            if slot >= target.windowIndex { slot += 1 }
+            return slot
+        }
+        if stageIndex == drag.sourceStageIndex {
+            guard windowIndex != drag.sourceWindowIndex else { return nil }
+            return windowIndex > drag.sourceWindowIndex ? windowIndex - 1 : windowIndex
+        }
+        if stageIndex == target.stageIndex {
+            return windowIndex >= target.windowIndex ? windowIndex + 1 : windowIndex
+        }
+        return nil
+    }
+
+    /// The slot a card is laid out in, which is not always the slot it is drawn in.
+    ///
+    /// A card leaving this stage takes its later neighbours' slots with it and the plate
+    /// recentres around them, so their anchors have to move. A reorder within one stage must
+    /// leave anchors alone: they are what the drop target is resolved against, and a target
+    /// that moved the cards it was measured from would chase its own feedback.
+    static func windowAnchorIndex(
+        stageIndex: Int,
+        windowIndex: Int,
+        drag: WindowDragState?
+    ) -> Int {
+        guard let drag, let target = drag.dropTarget,
+              stageIndex == drag.sourceStageIndex,
+              target.stageIndex != stageIndex,
+              windowIndex > drag.sourceWindowIndex
+        else { return windowIndex }
+        return windowIndex - 1
+    }
+
+    /// How far a card is drawn from the slot it is laid out in. Balanced rows mean a single
+    /// insertion can push a card onto another row, so this is a delta between two grid
+    /// positions rather than a multiple of one card's width.
+    static func windowSlotOffset(
         stageIndex: Int,
         windowIndex: Int,
         drag: WindowDragState?,
-        cardStride: CGFloat
-    ) -> CGFloat {
-        guard let drag, let target = drag.dropTarget else { return 0 }
+        layout: PlateWindowLayout
+    ) -> CGSize {
+        guard let drag, drag.dropTarget != nil,
+              let slot = prospectiveWindowIndex(
+                  stageIndex: stageIndex,
+                  windowIndex: windowIndex,
+                  drag: drag
+              )
+        else { return .zero }
 
-        if target.stageIndex == drag.sourceStageIndex,
-           stageIndex == drag.sourceStageIndex {
-            if windowIndex == drag.sourceWindowIndex {
-                return CGFloat(target.windowIndex - drag.sourceWindowIndex) * cardStride
-            }
-            if drag.sourceWindowIndex < target.windowIndex,
-               windowIndex > drag.sourceWindowIndex,
-               windowIndex <= target.windowIndex {
-                return -cardStride
-            }
-            if target.windowIndex < drag.sourceWindowIndex,
-               windowIndex >= target.windowIndex,
-               windowIndex < drag.sourceWindowIndex {
-                return cardStride
-            }
-            return 0
-        }
-
-        if stageIndex == drag.sourceStageIndex,
-           windowIndex > drag.sourceWindowIndex {
-            return -cardStride
-        }
-        if stageIndex == target.stageIndex,
-           windowIndex >= target.windowIndex {
-            return cardStride
-        }
-        return 0
-    }
-
-    static func windowGridCenterOffset(
-        stageIndex: Int,
-        drag: WindowDragState?,
-        cardStride: CGFloat
-    ) -> CGFloat {
-        guard let drag,
-              let target = drag.dropTarget,
-              target.stageIndex != drag.sourceStageIndex
-        else { return 0 }
-
-        return stageIndex == drag.sourceStageIndex ? cardStride / 2 : 0
-    }
-
-    static func windowDropDestination(
-        sourceStageIndex: Int,
-        sourceWindowIndex: Int,
-        target: WindowDropTarget,
-        cardStride: CGFloat,
-        plateFrames: [Int: CGRect],
-        windowFrames: [WindowFrameID: CGRect]
-    ) -> CGPoint? {
-        let sourceID = WindowFrameID(
-            stageIndex: sourceStageIndex,
-            windowIndex: sourceWindowIndex
+        let anchor = layout.cardOffsetFromCenter(at: windowAnchorIndex(
+            stageIndex: stageIndex,
+            windowIndex: windowIndex,
+            drag: drag
+        ))
+        let drawn = layout.cardOffsetFromCenter(at: slot)
+        return CGSize(
+            width: drawn.width - anchor.width,
+            height: drawn.height - anchor.height
         )
-        guard let sourceFrame = windowFrames[sourceID] else { return nil }
+    }
 
-        if target.stageIndex == sourceStageIndex {
-            return CGPoint(
-                x: sourceFrame.midX
-                    + CGFloat(target.windowIndex - sourceWindowIndex) * cardStride,
-                y: sourceFrame.midY
-            )
-        }
+    /// Where the released preview settles: the exact slot the destination plate has already
+    /// opened for it, in the overlay's coordinate space.
+    static func windowDropDestination(
+        target: WindowDropTarget,
+        plateFrames: [Int: CGRect],
+        layouts: [PlateWindowLayout],
+        scales: [CGFloat]
+    ) -> CGPoint? {
+        guard let plateFrame = plateFrames[target.stageIndex],
+              layouts.indices.contains(target.stageIndex),
+              scales.indices.contains(target.stageIndex)
+        else { return nil }
 
-        let destinationFrames = windowFrames
-            .filter { $0.key.stageIndex == target.stageIndex }
-            .sorted { $0.key.windowIndex < $1.key.windowIndex }
-        if destinationFrames.indices.contains(target.windowIndex) {
-            let frame = destinationFrames[target.windowIndex].value
-            return CGPoint(x: frame.midX, y: frame.midY)
-        }
-        if let lastFrame = destinationFrames.last?.value {
-            return CGPoint(x: lastFrame.midX + cardStride, y: lastFrame.midY)
-        }
-        guard let plateFrame = plateFrames[target.stageIndex] else { return nil }
+        let scale = scales[target.stageIndex]
+        let offset = layouts[target.stageIndex].cardOffsetFromCenter(at: target.windowIndex)
         return CGPoint(
-            x: plateFrame.midX,
-            y: plateFrame.minY + PlateConstants.topPadding + sourceFrame.height / 2
+            x: plateFrame.midX + offset.width * scale,
+            y: plateFrame.midY + offset.height * scale
         )
     }
 
@@ -520,10 +529,50 @@ enum PlateInteraction {
                     && !(stageIndex == sourceStageIndex && id.windowIndex == sourceWindowIndex)
             }
             .sorted { $0.key.windowIndex < $1.key.windowIndex }
-        let insertionIndex = destinationFrames.firstIndex(where: {
-            location.x < $0.value.midX
-        }) ?? destinationFrames.count
-        return WindowDropTarget(stageIndex: stageIndex, windowIndex: insertionIndex)
+            .map(\.value)
+        let rows = cardRows(destinationFrames)
+
+        guard let rowIndex = rowIndex(at: location.y, rows: rows) else {
+            return WindowDropTarget(stageIndex: stageIndex, windowIndex: 0)
+        }
+        let row = rows[rowIndex]
+        let withinRow = row.firstIndex(where: { location.x < $0.midX }) ?? row.count
+        let precedingCards = rows.prefix(rowIndex).reduce(0) { $0 + $1.count }
+        return WindowDropTarget(
+            stageIndex: stageIndex,
+            windowIndex: precedingCards + withinRow
+        )
+    }
+
+    /// Groups row-major card frames into their rendered rows. A wrapped plate has no other
+    /// record of where its rows fell by the time the pointer needs one.
+    private static func cardRows(_ frames: [CGRect]) -> [[CGRect]] {
+        var rows: [[CGRect]] = []
+        for frame in frames {
+            if let current = rows.last?.first,
+               abs(current.midY - frame.midY) < current.height / 2 {
+                rows[rows.count - 1].append(frame)
+            } else {
+                rows.append([frame])
+            }
+        }
+        return rows
+    }
+
+    /// The row the pointer is over, or the nearest one when it sits in the gap between rows or
+    /// past the last. Space between rows must resolve to a slot, not to nothing.
+    private static func rowIndex(at y: CGFloat, rows: [[CGRect]]) -> Int? {
+        guard !rows.isEmpty else { return nil }
+        if let containing = rows.firstIndex(where: { row in
+            row.contains { $0.minY <= y && y <= $0.maxY }
+        }) {
+            return containing
+        }
+        return rows.indices.min(by: { lhs, rhs in
+            let lhsDistance = rows[lhs].map { abs($0.midY - y) }.min() ?? .greatestFiniteMagnitude
+            let rhsDistance = rows[rhs].map { abs($0.midY - y) }.min() ?? .greatestFiniteMagnitude
+            return lhsDistance < rhsDistance
+        })
     }
 
     /// Whether the pointer is over a plate or over the bare overlay around it. The desktop
@@ -729,19 +778,9 @@ struct PointerMovementGate {
     }
 }
 
+/// Overlay-wide geometry. Everything a single window card is made of lives in `PlateMetrics`.
 public struct PlateConstants {
-    public static let thumbnailWidth: CGFloat = 160
-    public static let thumbnailHeight: CGFloat = 100
-    public static let windowSpacing: CGFloat = 12
-    public static let padding: CGFloat = 24
-    public static let minPlateWidth: CGFloat = 300
-    public static let windowCardPadding: CGFloat = 6
-    public static let windowTitleWidthAllowance: CGFloat = 8
-    public static let topPadding: CGFloat = 24
-    public static let bottomPadding: CGFloat = 24
     public static let screenMargin: CGFloat = 80
-    public static let badgeSize: CGFloat = 40
-    public static let previewPlaceholderIconSize: CGFloat = 32
     public static let compactStageSpacing: CGFloat = 14
     public static let stageSpacing: CGFloat = 34
     public static let commandHintFooterOffset: CGFloat = 24
@@ -749,35 +788,24 @@ public struct PlateConstants {
     public static let edgeScrollMargin: CGFloat = 28
     public static let stageScrollTravelPerStage: CGFloat = 30
 
-    public static func thumbnailSize(forWindowCount count: Int, screenWidth: CGFloat) -> (width: CGFloat, height: CGFloat) {
-        let maxWidth = screenWidth - screenMargin * 2
-        let availableForWindowCards = maxWidth - padding * 2
-        let maxPerWindow = count > 0
-            ? (availableForWindowCards - CGFloat(max(0, count - 1)) * windowSpacing) / CGFloat(count)
-                - windowCardExtraWidth
-            : thumbnailWidth
-        let w = min(thumbnailWidth, max(80, maxPerWindow))
-        let h = w * (thumbnailHeight / thumbnailWidth)
-        return (w, h)
+    /// The width a plate may occupy before its windows wrap onto another row.
+    public static func availablePlateWidth(screenWidth: CGFloat) -> CGFloat {
+        screenWidth - screenMargin * 2
     }
 
-    public static var windowCardExtraWidth: CGFloat {
-        windowTitleWidthAllowance + windowCardPadding * 2
-    }
-
-    public static func plateHeight(thumbnailHeight: CGFloat) -> CGFloat {
-        topPadding + thumbnailHeight + 16 + bottomPadding
-    }
-
-    public static func plateWidth(forWindowCount count: Int, thumbnailWidth: CGFloat) -> CGFloat {
-        guard count > 0 else { return minPlateWidth }
-        let cardsWidth = CGFloat(count) * (thumbnailWidth + windowCardExtraWidth)
-            + CGFloat(count - 1) * windowSpacing
-        return cardsWidth + padding * 2
-    }
-
-    public static func plateWidths(forWindowCounts counts: [Int], thumbnailWidth: CGFloat) -> [CGFloat] {
-        counts.map { plateWidth(forWindowCount: $0, thumbnailWidth: thumbnailWidth) }
+    public static func plateLayouts(
+        forWindowCounts counts: [Int],
+        screenWidth: CGFloat,
+        metrics: PlateMetrics = .standard
+    ) -> [PlateWindowLayout] {
+        let availableWidth = availablePlateWidth(screenWidth: screenWidth)
+        return counts.map {
+            PlateWindowLayout(
+                windowCount: $0,
+                availableWidth: availableWidth,
+                metrics: metrics
+            )
+        }
     }
 
     public static func stageSpacing(hasVisibleFooterHints: Bool) -> CGFloat {
@@ -786,29 +814,63 @@ public struct PlateConstants {
 
     public static func plateCenterY(
         stageIndex: Int,
-        stageCount: Int,
+        plateHeights: [CGFloat],
         activeStageIndex: Int,
-        plateHeight: CGFloat,
         inactiveScale: CGFloat,
         containerHeight: CGFloat
     ) -> CGFloat? {
-        guard (0..<stageCount).contains(stageIndex),
-              (0..<stageCount).contains(activeStageIndex)
+        guard plateHeights.indices.contains(stageIndex),
+              plateHeights.indices.contains(activeStageIndex)
         else { return nil }
 
-        let scale: (Int) -> CGFloat = {
-            PlateMotion.plateScale(
-                distanceFromFocus: abs($0 - activeStageIndex),
-                inactiveScale: inactiveScale
-            )
-        }
-        let top: (Int) -> CGFloat = { index in
-            (0..<index).reduce(0) { partial, precedingIndex in
-                partial + plateHeight * scale(precedingIndex) + stageSpacing
-            }
-        }
-        let yOffset = containerHeight / 2 - top(activeStageIndex) - plateHeight / 2
-        return yOffset + top(stageIndex) + plateHeight * scale(stageIndex) / 2
+        let layout = PlateMotion.stackLayout(
+            plateHeights: plateHeights,
+            focusIndex: activeStageIndex,
+            spacing: stageSpacing,
+            inactiveScale: inactiveScale
+        )
+        return containerHeight / 2
+            - layout.centers[activeStageIndex]
+            + layout.centers[stageIndex]
+    }
+
+    /// Where a window card is drawn, for callers outside the view hierarchy. E2E clicks and drags
+    /// real screen coordinates; a second copy of the grid math there drifts from what the overlay
+    /// draws without either side failing.
+    public static func windowCardCenter(
+        stageIndex: Int,
+        windowIndex: Int,
+        windowCounts: [Int],
+        activeStageIndex: Int,
+        inactiveScale: CGFloat,
+        containerSize: CGSize,
+        metrics: PlateMetrics = .standard
+    ) -> CGPoint? {
+        let layouts = plateLayouts(
+            forWindowCounts: windowCounts,
+            screenWidth: containerSize.width,
+            metrics: metrics
+        )
+        guard layouts.indices.contains(stageIndex),
+              (0..<windowCounts[stageIndex]).contains(windowIndex),
+              let centerY = plateCenterY(
+                  stageIndex: stageIndex,
+                  plateHeights: layouts.map(\.plateSize.height),
+                  activeStageIndex: activeStageIndex,
+                  inactiveScale: inactiveScale,
+                  containerHeight: containerSize.height
+              )
+        else { return nil }
+
+        let scale = PlateMotion.plateScale(
+            distanceFromFocus: abs(stageIndex - activeStageIndex),
+            inactiveScale: inactiveScale
+        )
+        let offset = layouts[stageIndex].cardOffsetFromCenter(at: windowIndex)
+        return CGPoint(
+            x: containerSize.width / 2 + offset.width * scale,
+            y: centerY + offset.height * scale
+        )
     }
 }
 
@@ -902,7 +964,6 @@ public struct OverlaySwiftUIView: View {
             actual: plates.map(\.windows.count),
             drag: layoutWindowDrag
         )
-        let maxWindows = displayedWindowCounts.max() ?? 0
         let activeStageIndex = viewModel.activeStageIndex
         let activePlate = plates[safe: activeStageIndex]
         let activeSelectedWindowIndex = pointerSelection?.stageIndex == activeStageIndex
@@ -919,12 +980,17 @@ public struct OverlaySwiftUIView: View {
         } ?? []
 
         GeometryReader { geo in
-            let tSize = PlateConstants.thumbnailSize(forWindowCount: maxWindows, screenWidth: geo.size.width)
-            let pHeight = PlateConstants.plateHeight(thumbnailHeight: tSize.height)
-            let plateWidths = PlateConstants.plateWidths(
+            let metrics = PlateMetrics.standard
+            // Two grids per stage: the one its own cards rest in, and the one the drag would
+            // give it. A card's drag offset is the delta between them.
+            let displayedLayouts = PlateConstants.plateLayouts(
                 forWindowCounts: displayedWindowCounts,
-                thumbnailWidth: tSize.width
+                screenWidth: geo.size.width,
+                metrics: metrics
             )
+            let plateWidths = displayedLayouts.map(\.plateSize.width)
+            let plateHeights = displayedLayouts.map(\.plateSize.height)
+            let tallestPlateHeight = plateHeights.max() ?? 0
 
             let inactiveScale = CGFloat(viewModel.appearance.inactivePlateScale)
             let spacing = PlateConstants.stageSpacing(
@@ -957,16 +1023,14 @@ public struct OverlaySwiftUIView: View {
                 stageCount: plates.count
             )
             let baselineLayout = PlateMotion.stackLayout(
-                stageCount: plates.count,
+                plateHeights: plateHeights,
                 focusIndex: viewModel.activeStageIndex,
-                plateHeight: pHeight,
                 spacing: spacing,
                 inactiveScale: inactiveScale
             )
             let visualLayout = PlateMotion.stackLayout(
-                stageCount: plates.count,
+                plateHeights: plateHeights,
                 focusIndex: focusedStageIndex,
-                plateHeight: pHeight,
                 spacing: spacing,
                 inactiveScale: inactiveScale
             )
@@ -994,13 +1058,13 @@ public struct OverlaySwiftUIView: View {
                 ZStack(alignment: .top) {
                     ForEach(Array(plates.enumerated()), id: \.element.id) { index, plate in
                         let plateWidth = plateWidths[index]
+                        let plateHeight = plateHeights[index]
                         let isActive = index == viewModel.activeStageIndex
                         let isInteractionTarget = index == focusedStageIndex
                         let scale = visualLayout.scales[index]
                         let slotOffset = PlateMotion.plateSlotOffset(
                             layout: visualLayout,
-                            index: index,
-                            plateHeight: pHeight
+                            index: index
                         )
                         let plateOpacity = PlateMotion.plateOpacity(scale: scale)
                         let lift = PlateMotion.lift(isActive: isInteractionTarget)
@@ -1016,8 +1080,7 @@ public struct OverlaySwiftUIView: View {
                         PlateSwiftUIView(
                             plate: plate,
                             selectedWindowIndex: selectedWindowIndex,
-                            thumbnailWidth: tSize.width,
-                            thumbnailHeight: tSize.height,
+                            layout: displayedLayouts[index],
                             appearance: viewModel.appearance,
                             wallpaperLuminance: viewModel.wallpaperLuminance,
                             stageNumberHint: stageNumberHint,
@@ -1049,17 +1112,16 @@ public struct OverlaySwiftUIView: View {
                                 finishWindowDrop(
                                     request,
                                     transition: windowReorderTransition,
-                                    cardStride: tSize.width
-                                        + PlateConstants.windowCardExtraWidth
-                                        + PlateConstants.windowSpacing
+                                    layouts: displayedLayouts,
+                                    scales: visualLayout.scales
                                 )
                             }
                         )
-                        .frame(width: plateWidth, height: pHeight)
+                        .frame(width: plateWidth, height: plateHeight)
                         .background {
                             PlateSurfaceView(
                                 stageIndex: index,
-                                size: CGSize(width: plateWidth, height: pHeight),
+                                size: CGSize(width: plateWidth, height: plateHeight),
                                 cornerRadius: CGFloat(viewModel.appearance.plateCornerRadius),
                                 appearance: viewModel.appearance
                             )
@@ -1083,7 +1145,7 @@ public struct OverlaySwiftUIView: View {
                         .zIndex(isActive || isInteractionTarget ? 2 : 0)
                     }
                 }
-                .frame(width: geo.size.width, height: pHeight, alignment: .top)
+                .frame(width: geo.size.width, height: tallestPlateHeight, alignment: .top)
                 .offset(y: yOffset)
 
                 if viewModel.shouldShowDisplayStackIndicator {
@@ -1129,8 +1191,7 @@ public struct OverlaySwiftUIView: View {
                         window: settlingWindowDrop.window,
                         isWindowSelected: true,
                         isDragging: true,
-                        thumbnailWidth: tSize.width,
-                        thumbnailHeight: tSize.height,
+                        metrics: metrics,
                         appearance: viewModel.appearance
                     )
                     .opacity(PlateMotion.cursorPreviewOpacity)
@@ -1143,8 +1204,7 @@ public struct OverlaySwiftUIView: View {
                         window: window,
                         isWindowSelected: true,
                         isDragging: true,
-                        thumbnailWidth: tSize.width,
-                        thumbnailHeight: tSize.height,
+                        metrics: metrics,
                         appearance: viewModel.appearance
                     )
                     .opacity(PlateMotion.cursorPreviewOpacity)
@@ -1255,19 +1315,18 @@ public struct OverlaySwiftUIView: View {
     private func finishWindowDrop(
         _ request: WindowMoveRequest,
         transition: PlateFocusTransition,
-        cardStride: CGFloat
+        layouts: [PlateWindowLayout],
+        scales: [CGFloat]
     ) {
         guard let drag = windowDrag,
               let target = drag.dropTarget,
               let plate = viewModel.plates[safe: drag.sourceStageIndex],
               let window = plate.windows[safe: drag.sourceWindowIndex],
               let destination = PlateMotion.windowDropDestination(
-                  sourceStageIndex: drag.sourceStageIndex,
-                  sourceWindowIndex: drag.sourceWindowIndex,
                   target: target,
-                  cardStride: cardStride,
                   plateFrames: plateFrames,
-                  windowFrames: windowFrames
+                  layouts: layouts,
+                  scales: scales
               )
         else {
             commitWindowDrop(request)
@@ -1359,8 +1418,7 @@ public struct OverlaySwiftUIView: View {
 struct PlateSwiftUIView: View {
     let plate: PlateData
     let selectedWindowIndex: Int?
-    let thumbnailWidth: CGFloat
-    let thumbnailHeight: CGFloat
+    let layout: PlateWindowLayout
     let appearance: AppSettings
     let wallpaperLuminance: Double?
     let stageNumberHint: CommandHintPresentation?
@@ -1381,33 +1439,43 @@ struct PlateSwiftUIView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: PlateConstants.windowSpacing) {
+        // Cards are placed, not stacked and nudged: `.offset` is a render transform, so a grid
+        // built from it would report every card at the plate's centre and leave drop targeting
+        // with nothing to aim at.
+        GeometryReader { plateGeo in
+            let plateCenter = CGPoint(
+                x: plateGeo.size.width / 2,
+                y: plateGeo.size.height / 2
+            )
+            ZStack(alignment: .topLeading) {
                 if plate.windows.isEmpty {
                     Text("Empty")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary.opacity(0.5))
-                        .frame(maxWidth: .infinity)
+                        .position(plateCenter)
                 } else {
                     ForEach(Array(plate.windows.enumerated()), id: \.element.id) { index, window in
                         let isDragging = layoutWindowDrag?.sourceStageIndex == stageIndex
                             && layoutWindowDrag?.sourceWindowIndex == index
                         let isSettling = settlingWindowID == window.windowID
-                        let cardStride = thumbnailWidth
-                            + PlateConstants.windowCardExtraWidth
-                            + PlateConstants.windowSpacing
-                        let dragOffset = PlateMotion.windowDragOffset(
+                        let anchorOffset = layout.cardOffsetFromCenter(
+                            at: PlateMotion.windowAnchorIndex(
+                                stageIndex: stageIndex,
+                                windowIndex: index,
+                                drag: layoutWindowDrag
+                            )
+                        )
+                        let dragOffset = PlateMotion.windowSlotOffset(
                             stageIndex: stageIndex,
                             windowIndex: index,
                             drag: layoutWindowDrag,
-                            cardStride: cardStride
+                            layout: layout
                         )
                         WindowPreviewView(
                             window: window,
                             isWindowSelected: selectedWindowIndex == index,
                             isDragging: isDragging,
-                            thumbnailWidth: thumbnailWidth,
-                            thumbnailHeight: thumbnailHeight,
+                            metrics: layout.metrics,
                             appearance: appearance,
                             commandHints: CommandHintCatalog.windowHints(
                                 windowIndex: index,
@@ -1426,7 +1494,10 @@ struct PlateSwiftUIView: View {
                                 transaction.animation = nil
                             }
                         }
-                        .offset(x: dragOffset)
+                        // The drag reflow stays a render transform on purpose, and the frame
+                        // anchor is read outside it: the reported frames are the resting slots
+                        // the drop target is resolved against.
+                        .offset(dragOffset)
                         .background(
                             GeometryReader { windowGeo in
                                 Color.clear.preference(
@@ -1465,26 +1536,17 @@ struct PlateSwiftUIView: View {
                             .scale(scale: PlateMotion.windowRemovalScale)
                                 .combined(with: .opacity)
                         )
+                        .position(
+                            x: plateCenter.x + anchorOffset.width,
+                            y: plateCenter.y + anchorOffset.height
+                        )
                     }
                 }
             }
-            // Keyed on the count, not the IDs: a drag reorder keeps the count and must keep
-            // its own motion, while an arrival or departure is what this animates.
-            .animation(removalTransition.animation, value: plate.windows.count)
-            .padding(.leading, PlateConstants.padding)
-            .padding(.trailing, PlateConstants.padding)
-            .padding(.top, PlateConstants.topPadding)
-            .offset(x: PlateMotion.windowGridCenterOffset(
-                stageIndex: stageIndex,
-                drag: layoutWindowDrag,
-                cardStride: thumbnailWidth
-                    + PlateConstants.windowCardExtraWidth
-                    + PlateConstants.windowSpacing
-            ))
-
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Keyed on the count, not the IDs: a drag reorder keeps the count and must keep
+        // its own motion, while an arrival or departure is what this animates.
+        .animation(removalTransition.animation, value: plate.windows.count)
         .overlay(alignment: .leading) {
             if let stageNumberHint {
                 CommandHintStrip(hints: [stageNumberHint])
@@ -1587,8 +1649,7 @@ struct WindowPreviewView: View {
     let window: PlateWindowData
     let isWindowSelected: Bool
     var isDragging: Bool = false
-    let thumbnailWidth: CGFloat
-    let thumbnailHeight: CGFloat
+    let metrics: PlateMetrics
     let appearance: AppSettings
     var commandHints: [CommandHintPresentation] = []
     @Environment(\.colorScheme) private var colorScheme
@@ -1599,7 +1660,7 @@ struct WindowPreviewView: View {
             isDragging: isDragging,
             isDarkMode: colorScheme == .dark
         )
-        return VStack(spacing: 4) {
+        return VStack(spacing: metrics.titleSpacing) {
             ZStack(alignment: .topLeading) {
                 Group {
                     if let cgImage = window.previewImage {
@@ -1614,16 +1675,16 @@ struct WindowPreviewView: View {
                                 AppIconImage(
                                     bundleID: window.ownerBundleID,
                                     name: window.ownerName,
-                                    iconSize: PlateConstants.previewPlaceholderIconSize
+                                    iconSize: metrics.previewPlaceholderIconSize
                                 )
                                 .frame(
-                                    width: PlateConstants.previewPlaceholderIconSize,
-                                    height: PlateConstants.previewPlaceholderIconSize
+                                    width: metrics.previewPlaceholderIconSize,
+                                    height: metrics.previewPlaceholderIconSize
                                 )
                             }
                     }
                 }
-                .frame(width: thumbnailWidth, height: thumbnailHeight)
+                .frame(width: metrics.thumbnailWidth, height: metrics.thumbnailHeight)
                 .overlay(alignment: .bottomTrailing) {
                     if !commandHints.isEmpty {
                         CommandHintStrip(hints: commandHints)
@@ -1631,19 +1692,19 @@ struct WindowPreviewView: View {
                     }
                 }
 
-                AppIconImage(bundleID: window.ownerBundleID, name: window.ownerName, iconSize: PlateConstants.badgeSize)
-                    .frame(width: PlateConstants.badgeSize, height: PlateConstants.badgeSize)
+                AppIconImage(bundleID: window.ownerBundleID, name: window.ownerName, iconSize: metrics.badgeSize)
+                    .frame(width: metrics.badgeSize, height: metrics.badgeSize)
                     .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                     .offset(x: -4, y: -4)
             }
 
             Text(window.windowTitle.isEmpty ? window.ownerName : window.windowTitle)
-                .font(.system(size: max(9, thumbnailWidth * 0.065)))
+                .font(.system(size: metrics.titleFontSize))
                 .foregroundStyle(isWindowSelected ? .primary : .secondary)
                 .lineLimit(1)
-                .frame(width: thumbnailWidth + PlateConstants.windowTitleWidthAllowance)
+                .frame(width: metrics.thumbnailWidth + metrics.titleWidthAllowance, height: metrics.titleHeight)
         }
-        .padding(PlateConstants.windowCardPadding)
+        .padding(metrics.cardPadding)
         .scaleEffect(PlateMotion.windowScale(isSelected: isWindowSelected, isDragging: isDragging))
         .shadow(
             color: .black.opacity(lift.shadowOpacity),
