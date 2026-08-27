@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-// Real macOS Spaces as the backing store for stages.
+// Real macOS Spaces as the backing store for spaces.
 //
 // Everything here was validated by measurement on macOS 26.5.2 arm64 with SIP enabled.
 // Two findings shape the design:
@@ -12,7 +12,7 @@ import Foundation
 //      private symbols in this file are reads, while desktop switching uses Dock gestures.
 //
 //   2. Space *creation* is gated too. SLSSpaceCreate returns an id that no display manages,
-//      which is why stages map onto desktops the user made in Mission Control rather than
+//      which is why spaces map onto desktops the user made in Mission Control rather than
 //      onto desktops Debut creates.
 
 typealias CGSConnectionID = Int32
@@ -453,7 +453,7 @@ enum DockSwipeEvent {
 
 // MARK: - Service
 
-/// Where stages get their desktops. Kept as a protocol so stage-switching logic can be
+/// Where spaces get their desktops. Kept as a protocol so space-switching logic can be
 /// tested without a window server — nothing else about a Space switch is observable in a
 /// unit test.
 public protocol SpaceSwitching: AnyObject {
@@ -668,7 +668,7 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     /// User desktops on the first stack, retained for compatibility with index-only callers.
     ///
     /// Fullscreen and tiled Spaces are excluded — only `type == 0` entries are desktops a
-    /// stage can map onto.
+    /// space can map onto.
     public func userDesktops() -> [CGSSpaceID] {
         spaceTopology().stacks.first?.desktopIDs ?? []
     }
@@ -691,7 +691,7 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         return result.map { $0.uint64Value }
     }
 
-    /// Which stage a window belongs to, or `nil` when it does not belong to exactly one.
+    /// Which space a window belongs to, or `nil` when it does not belong to exactly one.
     public func desktopIndex(forWindow windowID: CGWindowID) -> Int? {
         desktopLocation(forWindow: windowID)?.index
     }

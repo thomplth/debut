@@ -18,7 +18,7 @@
     <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
     <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
     <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
-    <li><a href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a href="04-spaces.html"><span class="num">04</span>Spaces &amp; switching</a></li>
     <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
     <li><a class="current" href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
     <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
@@ -106,9 +106,9 @@ to the main screen first.
 <p>
 <code>OverlayViewModel</code>&nbsp;<span class="src">Views/OverlayViewModel.swift:20</span>
 is a plain <code>Sendable</code> struct — not <code>@Observable</code>, not
-<code>ObservableObject</code>. Its <code>plates</code> property is computed on
-every access by mapping the stage model into <code>PlateData</code> and
-<code>PlateWindowData</code>. Refresh means: build a whole new value, assign it as
+<code>ObservableObject</code>. Its <code>stages</code> property is computed on
+every access by mapping the space model into <code>StageData</code> and
+<code>StageWindowData</code>. Refresh means: build a whole new value, assign it as
 <code>rootView</code>. The only <code>@Observable</code> type in the UI is the
 onboarding view model, where the reactive ergonomics are worth it and the
 performance is irrelevant.
@@ -117,43 +117,43 @@ performance is irrelevant.
 <h2>Layout mathematics</h2>
 
 <p>
-Static geometry lives in <code>PlateConstants</code>&nbsp;<span class="src">Views/PlateView.swift:615</span>;
-the values governing the stack's depth falloff live in <code>PlateMotion</code>
+Static geometry lives in <code>StageConstants</code>&nbsp;<span class="src">Views/StageView.swift:615</span>;
+the values governing the stack's depth falloff live in <code>StageMotion</code>
 <span class="src">:57</span>. The important ones:
 </p>
 
 <table>
   <tr><th>Constant</th><th>Value</th><th>Role</th></tr>
   <tr><td>thumbnail</td><td>160 × 100</td><td>Maximum preview size; aspect ratio 1.6 is fixed</td></tr>
-  <tr><td><code>windowSpacing</code></td><td>12</td><td>Between previews inside a plate</td></tr>
-  <tr><td><code>padding</code></td><td>24</td><td>Plate inset; top and bottom padding are equal by design</td></tr>
-  <tr><td><code>minPlateWidth</code></td><td>300</td><td>Floor for a nearly empty stage</td></tr>
+  <tr><td><code>windowSpacing</code></td><td>12</td><td>Between previews inside a stage</td></tr>
+  <tr><td><code>padding</code></td><td>24</td><td>Stage inset; top and bottom padding are equal by design</td></tr>
+  <tr><td><code>minStageWidth</code></td><td>300</td><td>Floor for a nearly empty space</td></tr>
   <tr><td><code>badgeSize</code></td><td>40</td><td>App icon badge on each preview</td></tr>
-  <tr><td><code>stageSpacing</code></td><td>34 / 14</td><td>Vertical gap — the larger value only when the active plate shows footer hints</td></tr>
-  <tr><td><code>PlateMotion.minimumPlateScale</code></td><td>0.08</td><td>Floor so distant plates never collapse to nothing</td></tr>
+  <tr><td><code>stageSpacing</code></td><td>34 / 14</td><td>Vertical gap — the larger value only when the active stage shows footer hints</td></tr>
+  <tr><td><code>StageMotion.minimumStageScale</code></td><td>0.08</td><td>Floor so distant stages never collapse to nothing</td></tr>
 </table>
 
-<h3>Horizontal: fitting the widest plate</h3>
+<h3>Horizontal: fitting the widest stage</h3>
 
 <p>
 <code>thumbnailSize(forWindowCount:screenWidth:)</code> divides the available
 width by the window count, subtracts per-card padding and title allowance, and
 clamps the result to 80…160, deriving the height from the fixed aspect ratio. A
-plate's width then exactly fits its own cards; each plate is a different width,
-and that is intentional — plate width communicates how many windows a stage
+stage's width then exactly fits its own cards; each stage is a different width,
+and that is intentional — stage width communicates how many windows a space
 holds.
 </p>
 
 <h3>Vertical: the stack</h3>
 
 <p>
-<code>PlateMotion.stackLayout(stageCount:focusIndex:plateHeight:spacing:inactiveScale:)</code>&nbsp;<span class="src">PlateView.swift:139</span>
+<code>StageMotion.stackLayout(spaceCount:focusIndex:stageHeight:spacing:inactiveScale:)</code>&nbsp;<span class="src">StageView.swift:139</span>
 is a pure function — which is why there are 44 unit tests for the motion maths and
 no need to render anything to check them.
 </p>
 
 <pre><code>scale(i)   = max(pow(inactiveScale, |i - focusIndex|), 0.08)
-height(i)  = plateHeight * scale(i)
+height(i)  = stageHeight * scale(i)
 centers    accumulate top-down with `spacing` between them
 opacity(i) = 1, until scale drops below 0.2, then fades quadratically to 0.12</code></pre>
 
@@ -166,14 +166,14 @@ active/inactive value, which is what gives the stack its depth.
 
 <p>
 The body computes the layout <strong>twice</strong>: a baseline layout focused on
-the <em>active</em> stage, and a visual layout focused on the currently
-<em>focused</em> index (which may be a hovered or drag-targeted plate). It then
-finds where the focused plate sits in the baseline and offsets the visual layout
+the <em>active</em> space, and a visual layout focused on the currently
+<em>focused</em> index (which may be a hovered or drag-targeted stage). It then
+finds where the focused stage sits in the baseline and offsets the visual layout
 so it lands exactly on that anchor.
 </p>
 
 <p>
-The effect: hovering an inactive plate expands it <em>in place</em> instead of
+The effect: hovering an inactive stage expands it <em>in place</em> instead of
 displacing everything else. The focus index itself is a small precedence chain —
 drag target, then retained drag target, then hover, then active.
 </p>
@@ -181,18 +181,18 @@ drag target, then retained drag target, then hover, then active.
 <h2>Animation, and the render-transform rewrite</h2>
 
 <p>
-Stage focus changes animate as <code>.spring(duration: 0.26, bounce: 0.08)</code>;
+Space focus changes animate as <code>.spring(duration: 0.26, bounce: 0.08)</code>;
 window reordering uses a slightly longer, flatter spring. Under Reduce Motion both
 become short fades, and the transition strategy changes wholesale — the subtree
-gets an identity keyed on the active stage index with an opacity transition rather
+gets an identity keyed on the active space index with an opacity transition rather
 than spatial motion.
 </p>
 
 <p>
-A window card arriving at or leaving a plate scales and fades over
+A window card arriving at or leaving a stage scales and fades over
 <code>.spring(duration: 0.28, bounce: 0)</code> — no bounce, because overshoot on a
-departing card reads as the window trying to come back&nbsp;<span class="src">PlateView.swift:94</span>. That animation is keyed on
-the plate's window <em>count</em>, deliberately not on its window IDs: a drag
+departing card reads as the window trying to come back&nbsp;<span class="src">StageView.swift:94</span>. That animation is keyed on
+the stage's window <em>count</em>, deliberately not on its window IDs: a drag
 reorder permutes the IDs while holding the count, so keying on IDs would hijack the
 reorder's own motion.
 </p>
@@ -201,7 +201,7 @@ reorder's own motion.
 Getting the card to leave at all needs a push from outside SwiftUI. Neither the
 window-destroyed nor the process-exit path used to refresh a visible overlay, so a
 quit app's card sat there until some unrelated redraw. Both now call
-<code>StageController.handleLiveWindowsRemoved</code>, which clamps
+<code>SpaceController.handleLiveWindowsRemoved</code>, which clamps
 <code>selectedWindowIndex</code> back into range — it is an index into a list that
 just got shorter — and redraws. Both paths matter: quitting an app usually delivers
 the Accessibility destroyed notification before the process actually exits, so
@@ -211,16 +211,16 @@ whichever lands first has to do the work.
 <div class="why">
   <span class="label">Scaling used to be a layout change</span>
   <p>
-  Originally each plate's <code>.frame</code> was set to
-  <code>plateHeight × scale</code>, and the glass surface size and corner radius
+  Originally each stage's <code>.frame</code> was set to
+  <code>stageHeight × scale</code>, and the glass surface size and corner radius
   were pre-multiplied by scale too. Every interpolated frame of the spring
   therefore changed layout <em>inputs</em>, forcing SwiftUI to re-solve the tree
   on every tick of the animation.
   </p>
   <p>
-  Now every plate lays out in an identical <em>unscaled</em> slot inside a
+  Now every stage lays out in an identical <em>unscaled</em> slot inside a
   top-aligned <code>ZStack</code>, and an offset shifts that slot so the scaled
-  plate lands on its stack centre. Scale is applied as
+  stage lands on its stack centre. Scale is applied as
   <code>.scaleEffect</code> — a render transform the compositor handles, with no
   layout involvement. Measured result: 1.88&nbsp;ms → 1.49&nbsp;ms per layout
   pass, and 1405 versus 1124 frames delivered in the same wall time, with
@@ -232,12 +232,12 @@ whichever lands first has to do the work.
 The modifier order matters and is easy to break:
 </p>
 
-<pre><code>.background(PlateSurfaceView(unscaled size, unscaled radius))
-.background(GeometryReader -> PlateFramePreferenceKey)
+<pre><code>.background(StageSurfaceView(unscaled size, unscaled radius))
+.background(GeometryReader -> StageFramePreferenceKey)
 .scaleEffect(scale)
 .shadow(...)
 .opacity(...)
-.offset(y: plateSlotOffset)</code></pre>
+.offset(y: stageSlotOffset)</code></pre>
 
 <p>
 The geometry reader sits <em>beneath</em> <code>scaleEffect</code>, so the frames
@@ -249,7 +249,7 @@ testing correct for the pointer and the drag targets after the rewrite.
 
 <p>
 Capture itself is chapter 3. What lives here is the caching policy, in
-<code>windowIDsNeedingCapture()</code>&nbsp;<span class="src">Services/StageController.swift:762</span>:
+<code>windowIDsNeedingCapture()</code>&nbsp;<span class="src">Services/SpaceController.swift:762</span>:
 </p>
 
 <p>
@@ -259,7 +259,7 @@ re-captured, and the rules below do not apply. When the policy is active:
 </p>
 
 <ul>
-  <li><strong>Always</strong> re-capture the active stage's front window — the one
+  <li><strong>Always</strong> re-capture the active space's front window — the one
   that was just being used, and therefore the one most likely to look stale.</li>
   <li>Re-capture when the window's title has changed since the cached image.</li>
   <li>Re-capture past the cache TTL (default 60&nbsp;s, configurable 5–600).</li>
@@ -268,7 +268,7 @@ re-captured, and the rules below do not apply. When the policy is active:
 <blockquote>
 Dirty tracking alone goes stale for windows that change without ever being
 activated — video, chat, dashboards.
-<cite>StageController.swift:770</cite>
+<cite>SpaceController.swift:770</cite>
 </blockquote>
 
 <p>
@@ -277,7 +277,7 @@ icon. <code>AppIconImage</code> is an <code>NSViewRepresentable</code> around
 <code>NSImageView</code> that resolves the icon from the bundle identifier and
 falls back to drawing a two-letter monogram. Note that each card can render two
 of these — the badge and the placeholder — and that these representables are
-currently the dominant cost when cycling plates.
+currently the dominant cost when cycling stages.
 </p>
 
 <h2>Pointer interaction</h2>
@@ -296,7 +296,7 @@ as a high-priority gesture.
   <p>
   The overlay appears under wherever the cursor happens to be resting. Without
   care, that immediately hijacks the keyboard selection.
-  <code>PointerMovementGate</code>&nbsp;<span class="src">PlateView.swift:591</span>
+  <code>PointerMovementGate</code>&nbsp;<span class="src">StageView.swift:591</span>
   seeds itself with the mouse location at view construction and swallows hover
   events until the physical mouse actually moves. There is both a unit test and an
   E2E scenario for it.
@@ -305,17 +305,17 @@ as a high-priority gesture.
 
 <p>
 Hover also has hysteresis: focus is retained while the pointer is in the vertical
-gap between two plates and inside a horizontal corridor interpolated between their
-widths, so moving diagonally between plates does not flicker.
+gap between two stages and inside a horizontal corridor interpolated between their
+widths, so moving diagonally between stages does not flicker.
 </p>
 
-<h3>Dragging a window between stages</h3>
+<h3>Dragging a window between spaces</h3>
 
 <p>
-The drop target is the first plate whose frame contains the point; the insertion
+The drop target is the first stage whose frame contains the point; the insertion
 index comes from comparing the pointer's x against each remaining card's midpoint.
-Live feedback is offset-only — gaps open and close, the shrinking source plate
-re-centres, and plate widths pre-adjust to their post-drop window counts — so
+Live feedback is offset-only — gaps open and close, the shrinking source stage
+re-centres, and stage widths pre-adjust to their post-drop window counts — so
 nothing in the model changes until release.
 </p>
 
@@ -332,19 +332,19 @@ asynchronous:
        -> without this the card animates twice, once per representation</div>
 
 <p>
-The target plate stays magnified across that gap via a retained focus index. On
+The target stage stays magnified across that gap via a retained focus index. On
 the delegate side, the overlay rebuild is deliberately deferred by one run-loop
 hop: "let SwiftUI finish the drag transaction before replacing its root view."
 </p>
 
-<h3>Why stages cannot be reordered</h3>
+<h3>Why spaces cannot be reordered</h3>
 
 <p>
-The overlay once let a plate be dragged by a handle to reorder the stack. A stage
-is now the desktop at its index, so reordering stages means reordering desktops —
+The overlay once let a stage be dragged by a handle to reorder the stack. A space
+is now the desktop at its index, so reordering spaces means reordering desktops —
 and while <code>SLSMoveManagedSpaceToDisplayIndex</code> does reorder a desktop
 instantly and with no visible transition, the Dock keeps navigating by its own
-stale copy of the order, which misdirects the forged swipe that switches a stage.
+stale copy of the order, which misdirects the forged swipe that switches a space.
 The new order also does not survive a reboot: three VM trials reverted it, with
 <code>com.apple.spaces</code> never taking it in four minutes of polling and
 <code>killall Dock</code> making no difference. A reorder that is neither
@@ -412,14 +412,14 @@ legacy "has launched before" flag so existing users never see a first-run screen
 <ul>
   <li><strong>Dark mode shadows are not just inverted.</strong> Dark uses 0.5
   opacity / 14 radius / 6 offset against light's 0.24 / 8 / 4, with the comment
-  that "a black shadow over the dark plate behind it needs more density and spread
+  that "a black shadow over the dark stage behind it needs more density and spread
   to read as depth than it does in light mode."</li>
 
-  <li><strong>Stage spacing depends on hint visibility.</strong> Turning command
+  <li><strong>Space spacing depends on hint visibility.</strong> Turning command
   hints off changes the vertical geometry of the whole stack, from 34&nbsp;pt to
   14&nbsp;pt.</li>
 
-  <li><strong><code>PlateConstants.plateCenterY</code> is a second implementation
+  <li><strong><code>StageConstants.stageCenterY</code> is a second implementation
   of the stacking maths</strong>, deliberately independent of the layout path and
   kept for tests and the E2E harness to verify against. If you change the layout
   algorithm, change both — that redundancy is the check.</li>

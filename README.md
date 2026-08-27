@@ -2,7 +2,7 @@
 
 # Debut
 
-**A stage-based workspace manager for macOS.**
+**A space-based workspace manager for macOS.**
 <br>
 Cmd-Tab stops showing you every window you own and starts showing you the three you are working with.
 
@@ -11,7 +11,7 @@ Cmd-Tab stops showing you every window you own and starts showing you the three 
 ![Platform](https://img.shields.io/badge/macOS-26%20Tahoe-black)
 ![Architecture](https://img.shields.io/badge/Apple%20Silicon-arm64-black)
 
-<img src="docs/media/overlay.jpg" alt="The Debut overlay: three stages of window previews stacked over a macOS desktop" width="820">
+<img src="docs/media/overlay.jpg" alt="The Debut overlay: three spaces of window previews stacked over a macOS desktop" width="820">
 
 </div>
 
@@ -20,39 +20,39 @@ Cmd-Tab stops showing you every window you own and starts showing you the three 
 The native app switcher shows every window on the machine, so the cost of a context
 switch grows with everything you have open, not with what you are doing.
 
-Debut splits the machine into **stages** — small sets of windows, one per task — and
+Debut splits the machine into **spaces** — small sets of windows, one per task — and
 scopes switching to the active one. The guarantee is short:
 
-> **No keyboard-driven switching ever crosses a stage boundary.**
+> **No keyboard-driven switching ever crosses a space boundary.**
 
-Cmd-Tab cycles inside the active stage. ``Cmd-` `` cycles the current app's windows
-inside the active stage. Nothing you press by reflex can land you in yesterday's work.
+Cmd-Tab cycles inside the active space. ``Cmd-` `` cycles the current app's windows
+inside the active space. Nothing you press by reflex can land you in yesterday's work.
 
 ## In use
 
-**Switch stages.** Hold Cmd-Option-Tab to bring up the plates and step through them.
-The active stage sits centred at full size; the others scale down above and below it.
+**Switch spaces.** Hold Cmd-Option-Tab to bring up the stages and step through them.
+The active space sits centred at full size; the others scale down above and below it.
 
-<img src="docs/media/stage-switch.gif" alt="Cycling through three stages with Cmd-Option-Tab" width="760">
+<img src="docs/media/space-switch.gif" alt="Cycling through three spaces with Cmd-Option-Tab" width="760">
 
 **Cycle windows.** Hold Cmd-Tab. The selection starts on the *second* most recent
 window, so a single tap goes back to where you just were — and it never leaves the
-stage.
+space.
 
-<img src="docs/media/window-cycle.gif" alt="Cycling windows inside one stage with Cmd-Tab" width="760">
+<img src="docs/media/window-cycle.gif" alt="Cycling windows inside one space with Cmd-Tab" width="760">
 
-**Jump straight there.** Control-1 through Control-9 switch stage with no overlay at
-all — the digit is the stage's position, and a stage that does not exist yet does
+**Jump straight there.** Control-1 through Control-9 switch space with no overlay at
+all — the digit is the space's position, and a space that does not exist yet does
 nothing.
 
-<img src="docs/media/quick-switch.gif" alt="Jumping between stages with Control-1, Control-2 and Control-3" width="760">
+<img src="docs/media/quick-switch.gif" alt="Jumping between spaces with Control-1, Control-2 and Control-3" width="760">
 
 **Reorganise without leaving the keyboard.** Inside the overlay, the arrow keys move
-the selected window between stages, and the selection travels with it.
+the selected window between spaces, and the selection travels with it.
 
-<img src="docs/media/window-move.gif" alt="Moving a window down a stage and back with the arrow keys" width="760">
+<img src="docs/media/window-move.gif" alt="Moving a window down a space and back with the arrow keys" width="760">
 
-The pointer works too: drag a preview onto another plate to move that window.
+The pointer works too: drag a preview onto another stage to move that window.
 
 ## Install
 
@@ -64,8 +64,8 @@ On first launch it asks for two permissions:
 
 | Permission | Used for |
 | --- | --- |
-| **Accessibility** | Enumerating windows, reading titles, raising the active stage |
-| **Screen Recording** | Rendering the window previews on the plates |
+| **Accessibility** | Enumerating windows, reading titles, raising the active space |
+| **Screen Recording** | Rendering the window previews on the stages |
 
 Both are local. Nothing Debut reads leaves the machine — see [Privacy](#privacy).
 
@@ -94,25 +94,25 @@ Every binding below is a default and every one is editable in Settings.
 
 | Shortcut | Action |
 | --- | --- |
-| `⌘ Tab` | Cycle windows in the active stage — tap to switch, hold for the overlay |
+| `⌘ Tab` | Cycle windows in the active space — tap to switch, hold for the overlay |
 | `⌘ ⇧ Tab` | The same, backwards |
-| `⌘ ⌥ Tab` | Cycle stages — tap to switch, hold for the overlay |
+| `⌘ ⌥ Tab` | Cycle spaces — tap to switch, hold for the overlay |
 | `⌘ ⌥ ⇧ Tab` / ``⌘ ⌥ ` `` | The same, backwards |
-| ``⌘ ` `` / ``⌘ ⇧ ` `` | Cycle the current app's windows, within the active stage |
-| `⌃ 1` … `⌃ 9` | Jump straight to a stage, no overlay |
+| ``⌘ ` `` / ``⌘ ⇧ ` `` | Cycle the current app's windows, within the active space |
+| `⌃ 1` … `⌃ 9` | Jump straight to a space, no overlay |
 
 A *tap* — releasing before the hold delay — switches without ever drawing the
-overlay. Holding past it presents the plates.
+overlay. Holding past it presents the stages.
 
 **While the overlay is up**, with the activation modifier still held:
 
 | Key | Action |
 | --- | --- |
 | `Tab` / `⇧ Tab` | Next / previous window |
-| `⌥ Tab` / `⌥ ⇧ Tab` | Next / previous stage |
-| `1` … `9` | Jump to that stage — `9` means the *last* one |
-| `←` `→` | Reorder the window inside its stage |
-| `↑` `↓` | Move the window to the stage above or below |
+| `⌥ Tab` / `⌥ ⇧ Tab` | Next / previous space |
+| `1` … `9` | Jump to that space — `9` means the *last* one |
+| `←` `→` | Reorder the window inside its space |
+| `↑` `↓` | Move the window to the space above or below |
 | `Q` | Quit the selected app |
 | `Esc` | Close the overlay without ending the session |
 
@@ -121,15 +121,15 @@ session alive, so the next navigation key brings it straight back.
 
 ## How it works
 
-**Stages hold windows, not apps.** One app can have windows on several stages at
+**Spaces hold windows, not apps.** One app can have windows on several spaces at
 once — the browser window you need for this task, and the four you do not.
 
-**Stages are not named.** A stage's label is its 1-based position, so adding or
+**Spaces are not named.** A space's label is its 1-based position, so adding or
 removing a desktop needs no bookkeeping and no rename step.
 
-**A stage is a real macOS desktop.** Stage 3 is desktop 3, and macOS — not Debut — is
-the source of truth for which desktop a window is on. Switching a stage is therefore
-one composited transition drawn by the window server, so the whole stage appears at
+**A space is a real macOS desktop.** Space 3 is desktop 3, and macOS — not Debut — is
+the source of truth for which desktop a window is on. Switching a space is therefore
+one composited transition drawn by the window server, so the whole space appears at
 once instead of its windows being raised one by one. Debut follows desktops it did not
 switch, so Mission Control and Control-Arrow stay in sync.
 
@@ -141,7 +141,7 @@ timer rather than handing the transition to the Dock. That is what lets the swit
 setting be a duration in milliseconds, from an instant cut up to a slide you can
 follow.
 
-**Moving a window between stages does not move your cursor.** The reassignment goes
+**Moving a window between spaces does not move your cursor.** The reassignment goes
 through the window server directly and settles in a few milliseconds. Nothing is
 dragged, nothing is minimised, and your session stays on the desktop it was on.
 
@@ -161,8 +161,8 @@ Accessibility notifications and workspace events. There are no timers.
 
 A single scrolling window with a sidebar, opened from the menu bar item.
 
-- **Appearance** — glass style, plate geometry, and the preview refresh policy.
-- **Excluded Apps** — apps the stage manager ignores entirely, applied immediately
+- **Appearance** — glass style, stage geometry, and the preview refresh policy.
+- **Excluded Apps** — apps the space manager ignores entirely, applied immediately
   across discovery, launch, activation, reconciliation and tracking.
 - **App** — launch at login, via `SMAppService`. Overlay animation follows the system
   Reduce Motion setting rather than a toggle of its own.
@@ -215,7 +215,7 @@ drives a real macOS desktop inside that same VM. Nothing in `docs/media` is a mo
 | | |
 | --- | --- |
 | [docs/html](docs/html) | The full technical guide — concepts, architecture, tracking, persistence, verification. Open `index.html` locally |
-| [spec/stage-manager.md](spec/stage-manager.md) | Overlay layout, activation, navigation, stage management |
+| [spec/space-manager.md](spec/space-manager.md) | Overlay layout, activation, navigation, space management |
 | [spec/behaviors.md](spec/behaviors.md) | Assignment rules, isolation, persistence, reconciliation |
 | [spec/settings.md](spec/settings.md) | Settings sections and behaviour |
 | [AGENTS.md](AGENTS.md) | Architecture constraints, toolchain, task workflow |

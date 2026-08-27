@@ -16,28 +16,28 @@ public enum PerformanceOperation: String, CaseIterable, Codable, Sendable {
     case windowDiscovery = "window_discovery"
     case windowClassification = "window_classification"
     case windowReconciliation = "window_reconciliation"
-    case stageSwitch = "stage_switch"
-    case stageRaise = "stage_raise"
+    case spaceSwitch = "space_switch"
+    case spaceRaise = "space_raise"
     case wallpaperCapture = "wallpaper_capture"
     case statePersistence = "state_persistence"
     case hiddenIdle = "hidden_idle"
 }
 
 public struct PerformanceWorkload: Codable, Equatable, Sendable {
-    public var stages: Int
+    public var spaces: Int
     public var windows: Int
     public var dormantWindows: Int
     public var processes: Int
     public var captures: Int
 
     public init(
-        stages: Int = 0,
+        spaces: Int = 0,
         windows: Int = 0,
         dormantWindows: Int = 0,
         processes: Int = 0,
         captures: Int = 0
     ) {
-        self.stages = max(0, stages)
+        self.spaces = max(0, spaces)
         self.windows = max(0, windows)
         self.dormantWindows = max(0, dormantWindows)
         self.processes = max(0, processes)
@@ -298,7 +298,7 @@ public final class PerformanceRecorder: @unchecked Sendable {
     ) -> UUID {
         let startResources = sampleResources ? resourceReader.read() : nil
         let signpostID = OSSignpostID(log: log)
-        let signpostMetadata = "operation=\(operation.rawValue) correlation=\(correlationID.uuidString) windows=\(workload.windows) stages=\(workload.stages)" as NSString
+        let signpostMetadata = "operation=\(operation.rawValue) correlation=\(correlationID.uuidString) windows=\(workload.windows) spaces=\(workload.spaces)" as NSString
         os_signpost(.begin, log: log, name: "DebutOperation", signpostID: signpostID,
                     "%{public}@", signpostMetadata)
         lock.lock()
@@ -415,7 +415,7 @@ public final class PerformanceRecorder: @unchecked Sendable {
         correlationID: UUID = UUID(),
         workload: PerformanceWorkload = PerformanceWorkload()
     ) {
-        let signpostMetadata = "operation=\(operation.rawValue) correlation=\(correlationID.uuidString) windows=\(workload.windows) stages=\(workload.stages)" as NSString
+        let signpostMetadata = "operation=\(operation.rawValue) correlation=\(correlationID.uuidString) windows=\(workload.windows) spaces=\(workload.spaces)" as NSString
         os_signpost(.event, log: log, name: "DebutPoint", "%{public}@", signpostMetadata)
     }
 

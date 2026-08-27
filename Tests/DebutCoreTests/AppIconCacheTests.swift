@@ -44,7 +44,7 @@ struct AppIconCacheTests {
         #expect(counter.total == 4)
     }
 
-    // SwiftUI calls updateNSView repeatedly during plate cycling (KHA-448), so a miss that
+    // SwiftUI calls updateNSView repeatedly during stage cycling (KHA-448), so a miss that
     // rasterized every time would be worse than the lazy icon it replaced.
     @Test("A cache miss rasterizes once and is served from the cache thereafter")
     func missRasterizesOnce() {
@@ -125,11 +125,11 @@ struct AppIconCacheTests {
         #expect(!(rep is NSBitmapImageRep))
     }
 
-    @Test("The warmed sizes do not move with the plate scale")
+    @Test("The warmed sizes do not move with the stage scale")
     func warmedSizesAreScaleIndependent() {
         // The cache is keyed by size, so following the scale would discard every warmed icon
         // whenever the slider moved and put the KHA-481 rasterize back on the main thread.
-        let largest = PlateMetrics.standard.scaled(by: CGFloat(AppSettings.maximumPlateScale))
+        let largest = StageMetrics.standard.scaled(by: CGFloat(AppSettings.maximumStageScale))
         #expect(AppIconCache.badgeRasterSize == largest.badgeSize)
         #expect(AppIconCache.placeholderIconRasterSize == largest.previewPlaceholderIconSize)
         #expect(AppIconCache.overlayIconSizes

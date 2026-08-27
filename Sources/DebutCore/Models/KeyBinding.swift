@@ -1,32 +1,32 @@
 import Carbon.HIToolbox
 
 public enum KeyAction: String, Codable, Sendable, CaseIterable {
-    // Global Stage Manager activation
+    // Global Space Manager activation
     case activateNextWindow
     case activatePreviousWindow
-    case activateNextStage
-    case activatePreviousStage
-    case activatePreviousStageAlternate
+    case activateNextSpace
+    case activatePreviousSpace
+    case activatePreviousSpaceAlternate
 
-    // Global stage switching
-    case quickSwitchStage1, quickSwitchStage2, quickSwitchStage3
-    case quickSwitchStage4, quickSwitchStage5, quickSwitchStage6
-    case quickSwitchStage7, quickSwitchStage8, quickSwitchStage9
+    // Global space switching
+    case quickSwitchSpace1, quickSwitchSpace2, quickSwitchSpace3
+    case quickSwitchSpace4, quickSwitchSpace5, quickSwitchSpace6
+    case quickSwitchSpace7, quickSwitchSpace8, quickSwitchSpace9
 
     // Global same-app window cycling
     case nextAppWindow
     case previousAppWindow
 
-    // Stage Manager session
+    // Space Manager session
     case nextWindow
     case previousWindow
     case previousWindowAlternate
-    case nextStage
-    case previousStage
+    case nextSpace
+    case previousSpace
     case nextDisplayStack
-    case jumpToStage1, jumpToStage2, jumpToStage3
-    case jumpToStage4, jumpToStage5, jumpToStage6
-    case jumpToStage7, jumpToStage8, jumpToStage9
+    case jumpToSpace1, jumpToSpace2, jumpToSpace3
+    case jumpToSpace4, jumpToSpace5, jumpToSpace6
+    case jumpToSpace7, jumpToSpace8, jumpToSpace9
     case moveWindowUp
     case moveWindowDown
     case moveWindowLeft
@@ -39,39 +39,39 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         switch self {
         case .activateNextWindow: "Open / cycle windows"
         case .activatePreviousWindow: "Open / cycle windows backward"
-        case .activateNextStage: "Open / cycle stages"
-        case .activatePreviousStage: "Open / cycle stages backward"
-        case .activatePreviousStageAlternate: "Open / cycle stages backward (alternate)"
-        case .quickSwitchStage1: "Quick switch to stage 1"
-        case .quickSwitchStage2: "Quick switch to stage 2"
-        case .quickSwitchStage3: "Quick switch to stage 3"
-        case .quickSwitchStage4: "Quick switch to stage 4"
-        case .quickSwitchStage5: "Quick switch to stage 5"
-        case .quickSwitchStage6: "Quick switch to stage 6"
-        case .quickSwitchStage7: "Quick switch to stage 7"
-        case .quickSwitchStage8: "Quick switch to stage 8"
-        case .quickSwitchStage9: "Quick switch to stage 9"
+        case .activateNextSpace: "Open / cycle spaces"
+        case .activatePreviousSpace: "Open / cycle spaces backward"
+        case .activatePreviousSpaceAlternate: "Open / cycle spaces backward (alternate)"
+        case .quickSwitchSpace1: "Quick switch to space 1"
+        case .quickSwitchSpace2: "Quick switch to space 2"
+        case .quickSwitchSpace3: "Quick switch to space 3"
+        case .quickSwitchSpace4: "Quick switch to space 4"
+        case .quickSwitchSpace5: "Quick switch to space 5"
+        case .quickSwitchSpace6: "Quick switch to space 6"
+        case .quickSwitchSpace7: "Quick switch to space 7"
+        case .quickSwitchSpace8: "Quick switch to space 8"
+        case .quickSwitchSpace9: "Quick switch to space 9"
         case .nextAppWindow: "Next window in current app"
         case .previousAppWindow: "Previous window in current app"
         case .nextWindow: "Next window"
         case .previousWindow: "Previous window"
         case .previousWindowAlternate: "Previous window (alternate)"
-        case .nextStage: "Next stage"
-        case .previousStage: "Previous stage"
+        case .nextSpace: "Next space"
+        case .previousSpace: "Previous space"
         case .nextDisplayStack: "Next display stack"
-        case .jumpToStage1: "Jump to stage 1"
-        case .jumpToStage2: "Jump to stage 2"
-        case .jumpToStage3: "Jump to stage 3"
-        case .jumpToStage4: "Jump to stage 4"
-        case .jumpToStage5: "Jump to stage 5"
-        case .jumpToStage6: "Jump to stage 6"
-        case .jumpToStage7: "Jump to stage 7"
-        case .jumpToStage8: "Jump to stage 8"
-        case .jumpToStage9: "Jump to last stage"
+        case .jumpToSpace1: "Jump to space 1"
+        case .jumpToSpace2: "Jump to space 2"
+        case .jumpToSpace3: "Jump to space 3"
+        case .jumpToSpace4: "Jump to space 4"
+        case .jumpToSpace5: "Jump to space 5"
+        case .jumpToSpace6: "Jump to space 6"
+        case .jumpToSpace7: "Jump to space 7"
+        case .jumpToSpace8: "Jump to space 8"
+        case .jumpToSpace9: "Jump to last space"
         case .moveWindowUp: "Move window up"
         case .moveWindowDown: "Move window down"
-        case .moveWindowLeft: "Move window left in stage"
-        case .moveWindowRight: "Move window right in stage"
+        case .moveWindowLeft: "Move window left in space"
+        case .moveWindowRight: "Move window right in space"
         case .quitSelectedApp: "Quit selected app"
         case .closeSelectedWindow: "Close selected window"
         case .dismissOverlay: "Close overlay"
@@ -92,35 +92,35 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         switch self {
         case .activateNextWindow: .cmdTabHold
         case .activatePreviousWindow: .cmdShiftTabHold
-        case .activateNextStage: .cmdOptionTabHold
-        case .activatePreviousStage: .cmdOptionShiftTabHold
-        case .activatePreviousStageAlternate: .cmdOptionShiftTabHold
-        case .quickSwitchStage1: .switchToStage(1)
-        case .quickSwitchStage2: .switchToStage(2)
-        case .quickSwitchStage3: .switchToStage(3)
-        case .quickSwitchStage4: .switchToStage(4)
-        case .quickSwitchStage5: .switchToStage(5)
-        case .quickSwitchStage6: .switchToStage(6)
-        case .quickSwitchStage7: .switchToStage(7)
-        case .quickSwitchStage8: .switchToStage(8)
-        case .quickSwitchStage9: .switchToStage(9)
+        case .activateNextSpace: .cmdOptionTabHold
+        case .activatePreviousSpace: .cmdOptionShiftTabHold
+        case .activatePreviousSpaceAlternate: .cmdOptionShiftTabHold
+        case .quickSwitchSpace1: .switchToSpace(1)
+        case .quickSwitchSpace2: .switchToSpace(2)
+        case .quickSwitchSpace3: .switchToSpace(3)
+        case .quickSwitchSpace4: .switchToSpace(4)
+        case .quickSwitchSpace5: .switchToSpace(5)
+        case .quickSwitchSpace6: .switchToSpace(6)
+        case .quickSwitchSpace7: .switchToSpace(7)
+        case .quickSwitchSpace8: .switchToSpace(8)
+        case .quickSwitchSpace9: .switchToSpace(9)
         case .nextAppWindow: .cmdBacktick
         case .previousAppWindow: .cmdShiftBacktick
         case .nextWindow: .nextWindow
         case .previousWindow: .previousWindow
         case .previousWindowAlternate: .previousWindow
-        case .nextStage: .nextStage
-        case .previousStage: .previousStage
+        case .nextSpace: .nextSpace
+        case .previousSpace: .previousSpace
         case .nextDisplayStack: .nextDisplayStack
-        case .jumpToStage1: .jumpToStage(1)
-        case .jumpToStage2: .jumpToStage(2)
-        case .jumpToStage3: .jumpToStage(3)
-        case .jumpToStage4: .jumpToStage(4)
-        case .jumpToStage5: .jumpToStage(5)
-        case .jumpToStage6: .jumpToStage(6)
-        case .jumpToStage7: .jumpToStage(7)
-        case .jumpToStage8: .jumpToStage(8)
-        case .jumpToStage9: .jumpToLastStage
+        case .jumpToSpace1: .jumpToSpace(1)
+        case .jumpToSpace2: .jumpToSpace(2)
+        case .jumpToSpace3: .jumpToSpace(3)
+        case .jumpToSpace4: .jumpToSpace(4)
+        case .jumpToSpace5: .jumpToSpace(5)
+        case .jumpToSpace6: .jumpToSpace(6)
+        case .jumpToSpace7: .jumpToSpace(7)
+        case .jumpToSpace8: .jumpToSpace(8)
+        case .jumpToSpace9: .jumpToLastSpace
         case .moveWindowUp: .moveWindowUp
         case .moveWindowDown: .moveWindowDown
         case .moveWindowLeft: .moveWindowLeft
@@ -148,10 +148,10 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     public var shortcutScope: ShortcutScope {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
-             .activateNextStage, .activatePreviousStage, .activatePreviousStageAlternate,
-             .quickSwitchStage1, .quickSwitchStage2, .quickSwitchStage3,
-             .quickSwitchStage4, .quickSwitchStage5, .quickSwitchStage6,
-             .quickSwitchStage7, .quickSwitchStage8, .quickSwitchStage9,
+             .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate,
+             .quickSwitchSpace1, .quickSwitchSpace2, .quickSwitchSpace3,
+             .quickSwitchSpace4, .quickSwitchSpace5, .quickSwitchSpace6,
+             .quickSwitchSpace7, .quickSwitchSpace8, .quickSwitchSpace9,
              .nextAppWindow, .previousAppWindow:
             .global
         default:
@@ -162,7 +162,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     public var isOverlayActivation: Bool {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
-             .activateNextStage, .activatePreviousStage, .activatePreviousStageAlternate:
+             .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate:
             true
         default:
             false
@@ -171,15 +171,15 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
 
     public var quickSwitchPosition: Int? {
         switch self {
-        case .quickSwitchStage1: 1
-        case .quickSwitchStage2: 2
-        case .quickSwitchStage3: 3
-        case .quickSwitchStage4: 4
-        case .quickSwitchStage5: 5
-        case .quickSwitchStage6: 6
-        case .quickSwitchStage7: 7
-        case .quickSwitchStage8: 8
-        case .quickSwitchStage9: 9
+        case .quickSwitchSpace1: 1
+        case .quickSwitchSpace2: 2
+        case .quickSwitchSpace3: 3
+        case .quickSwitchSpace4: 4
+        case .quickSwitchSpace5: 5
+        case .quickSwitchSpace6: 6
+        case .quickSwitchSpace7: 7
+        case .quickSwitchSpace8: 8
+        case .quickSwitchSpace9: 9
         default: nil
         }
     }
@@ -189,14 +189,14 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     }
 
     /// Actions that step a selection one place along a list. Only these are paced while held:
-    /// swallowing repeats of something like "delete stage" would drop keystrokes the user meant.
+    /// swallowing repeats of something like "delete space" would drop keystrokes the user meant.
     public var isCycling: Bool {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
-             .activateNextStage, .activatePreviousStage, .activatePreviousStageAlternate,
+             .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate,
              .nextAppWindow, .previousAppWindow,
              .nextWindow, .previousWindow, .previousWindowAlternate,
-             .nextStage, .previousStage:
+             .nextSpace, .previousSpace:
             true
         case .nextDisplayStack:
             true
@@ -207,13 +207,13 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
 
     public static let activationActions: [KeyAction] = [
         .activateNextWindow, .activatePreviousWindow,
-        .activateNextStage, .activatePreviousStage, .activatePreviousStageAlternate,
+        .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate,
     ]
 
     public static let quickSwitchActions: [KeyAction] = [
-        .quickSwitchStage1, .quickSwitchStage2, .quickSwitchStage3,
-        .quickSwitchStage4, .quickSwitchStage5, .quickSwitchStage6,
-        .quickSwitchStage7, .quickSwitchStage8, .quickSwitchStage9,
+        .quickSwitchSpace1, .quickSwitchSpace2, .quickSwitchSpace3,
+        .quickSwitchSpace4, .quickSwitchSpace5, .quickSwitchSpace6,
+        .quickSwitchSpace7, .quickSwitchSpace8, .quickSwitchSpace9,
     ]
 
     public static let sameAppActions: [KeyAction] = [
@@ -223,17 +223,17 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     public static let globalActions = activationActions + quickSwitchActions + sameAppActions
     public static let sessionActions = allCases.filter { $0.shortcutScope == .session }
 
-    public static func jumpAction(forStageIndex index: Int) -> KeyAction? {
+    public static func jumpAction(forSpaceIndex index: Int) -> KeyAction? {
         switch index {
-        case 0: .jumpToStage1
-        case 1: .jumpToStage2
-        case 2: .jumpToStage3
-        case 3: .jumpToStage4
-        case 4: .jumpToStage5
-        case 5: .jumpToStage6
-        case 6: .jumpToStage7
-        case 7: .jumpToStage8
-        case 8: .jumpToStage9
+        case 0: .jumpToSpace1
+        case 1: .jumpToSpace2
+        case 2: .jumpToSpace3
+        case 3: .jumpToSpace4
+        case 4: .jumpToSpace5
+        case 5: .jumpToSpace6
+        case 6: .jumpToSpace7
+        case 7: .jumpToSpace8
+        case 8: .jumpToSpace9
         default: nil
         }
     }
@@ -355,27 +355,27 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
         [
             .activateNextWindow: KeyCombo(keyCode: kVK_Tab, command: true),
             .activatePreviousWindow: KeyCombo(keyCode: kVK_Tab, command: true, shift: true),
-            .activateNextStage: KeyCombo(keyCode: kVK_Tab, command: true, option: true),
-            .activatePreviousStage: KeyCombo(
+            .activateNextSpace: KeyCombo(keyCode: kVK_Tab, command: true, option: true),
+            .activatePreviousSpace: KeyCombo(
                 keyCode: kVK_Tab,
                 command: true,
                 shift: true,
                 option: true
             ),
-            .activatePreviousStageAlternate: KeyCombo(
+            .activatePreviousSpaceAlternate: KeyCombo(
                 keyCode: kVK_ANSI_Grave,
                 command: true,
                 option: true
             ),
-            .quickSwitchStage1: KeyCombo(keyCode: kVK_ANSI_1, control: true),
-            .quickSwitchStage2: KeyCombo(keyCode: kVK_ANSI_2, control: true),
-            .quickSwitchStage3: KeyCombo(keyCode: kVK_ANSI_3, control: true),
-            .quickSwitchStage4: KeyCombo(keyCode: kVK_ANSI_4, control: true),
-            .quickSwitchStage5: KeyCombo(keyCode: kVK_ANSI_5, control: true),
-            .quickSwitchStage6: KeyCombo(keyCode: kVK_ANSI_6, control: true),
-            .quickSwitchStage7: KeyCombo(keyCode: kVK_ANSI_7, control: true),
-            .quickSwitchStage8: KeyCombo(keyCode: kVK_ANSI_8, control: true),
-            .quickSwitchStage9: KeyCombo(keyCode: kVK_ANSI_9, control: true),
+            .quickSwitchSpace1: KeyCombo(keyCode: kVK_ANSI_1, control: true),
+            .quickSwitchSpace2: KeyCombo(keyCode: kVK_ANSI_2, control: true),
+            .quickSwitchSpace3: KeyCombo(keyCode: kVK_ANSI_3, control: true),
+            .quickSwitchSpace4: KeyCombo(keyCode: kVK_ANSI_4, control: true),
+            .quickSwitchSpace5: KeyCombo(keyCode: kVK_ANSI_5, control: true),
+            .quickSwitchSpace6: KeyCombo(keyCode: kVK_ANSI_6, control: true),
+            .quickSwitchSpace7: KeyCombo(keyCode: kVK_ANSI_7, control: true),
+            .quickSwitchSpace8: KeyCombo(keyCode: kVK_ANSI_8, control: true),
+            .quickSwitchSpace9: KeyCombo(keyCode: kVK_ANSI_9, control: true),
             .nextAppWindow: KeyCombo(keyCode: kVK_ANSI_Grave, command: true),
             .previousAppWindow: KeyCombo(
                 keyCode: kVK_ANSI_Grave,
@@ -385,18 +385,18 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .nextWindow: KeyCombo(keyCode: kVK_Tab),
             .previousWindow: KeyCombo(keyCode: kVK_Tab, shift: true),
             .previousWindowAlternate: KeyCombo(keyCode: kVK_ANSI_Grave),
-            .nextStage: KeyCombo(keyCode: kVK_Tab, option: true),
-            .previousStage: KeyCombo(keyCode: kVK_Tab, shift: true, option: true),
+            .nextSpace: KeyCombo(keyCode: kVK_Tab, option: true),
+            .previousSpace: KeyCombo(keyCode: kVK_Tab, shift: true, option: true),
             .nextDisplayStack: KeyCombo(keyCode: kVK_Return),
-            .jumpToStage1: KeyCombo(keyCode: kVK_ANSI_1),
-            .jumpToStage2: KeyCombo(keyCode: kVK_ANSI_2),
-            .jumpToStage3: KeyCombo(keyCode: kVK_ANSI_3),
-            .jumpToStage4: KeyCombo(keyCode: kVK_ANSI_4),
-            .jumpToStage5: KeyCombo(keyCode: kVK_ANSI_5),
-            .jumpToStage6: KeyCombo(keyCode: kVK_ANSI_6),
-            .jumpToStage7: KeyCombo(keyCode: kVK_ANSI_7),
-            .jumpToStage8: KeyCombo(keyCode: kVK_ANSI_8),
-            .jumpToStage9: KeyCombo(keyCode: kVK_ANSI_9),
+            .jumpToSpace1: KeyCombo(keyCode: kVK_ANSI_1),
+            .jumpToSpace2: KeyCombo(keyCode: kVK_ANSI_2),
+            .jumpToSpace3: KeyCombo(keyCode: kVK_ANSI_3),
+            .jumpToSpace4: KeyCombo(keyCode: kVK_ANSI_4),
+            .jumpToSpace5: KeyCombo(keyCode: kVK_ANSI_5),
+            .jumpToSpace6: KeyCombo(keyCode: kVK_ANSI_6),
+            .jumpToSpace7: KeyCombo(keyCode: kVK_ANSI_7),
+            .jumpToSpace8: KeyCombo(keyCode: kVK_ANSI_8),
+            .jumpToSpace9: KeyCombo(keyCode: kVK_ANSI_9),
             .moveWindowUp: KeyCombo(keyCode: kVK_UpArrow),
             .moveWindowDown: KeyCombo(keyCode: kVK_DownArrow),
             .moveWindowLeft: KeyCombo(keyCode: kVK_LeftArrow),

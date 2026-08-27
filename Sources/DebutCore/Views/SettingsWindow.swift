@@ -86,7 +86,7 @@ public struct SettingsView: View {
                 viewModel.resetWindowCache()
             }
         } message: {
-            Text("This removes all stage window assignments, including dormant windows, and rebuilds one stage from windows Debut can currently discover. Settings are preserved.")
+            Text("This removes all space window assignments, including dormant windows, and rebuilds one space from windows Debut can currently discover. Settings are preserved.")
         }
         .sheet(isPresented: $showingTelemetryPayload) {
             VStack(alignment: .leading, spacing: 12) {
@@ -116,7 +116,7 @@ public struct SettingsView: View {
             Text("Appearance")
                 .font(.title2.bold())
 
-            Text("The overlay draws one plate per stage. The selected window is shown by magnifying it, so there is no separate selection colour to configure.")
+            Text("The overlay draws one stage per space. The selected window is shown by magnifying it, so there is no separate selection colour to configure.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -131,50 +131,50 @@ public struct SettingsView: View {
                     .pickerStyle(.segmented)
                     .frame(width: 150)
                 }
-                Text("Clear lets more of the wallpaper through. Regular frosts the plate for more contrast over busy backgrounds.")
+                Text("Clear lets more of the wallpaper through. Regular frosts the stage for more contrast over busy backgrounds.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Plate corner radius")
+                    Text("Stage corner radius")
                     Spacer()
-                    Text("\(Int(viewModel.settings.plateCornerRadius)) pt")
+                    Text("\(Int(viewModel.settings.stageCornerRadius)) pt")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                Slider(value: $viewModel.settings.plateCornerRadius, in: 0...40, step: 1)
+                Slider(value: $viewModel.settings.stageCornerRadius, in: 0...40, step: 1)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Window size")
                     Spacer()
-                    Text("\(Int((viewModel.settings.plateScale * 100).rounded()))%")
+                    Text("\(Int((viewModel.settings.stageScale * 100).rounded()))%")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(
-                    value: $viewModel.settings.plateScale,
-                    in: AppSettings.minimumPlateScale...AppSettings.maximumPlateScale,
-                    step: AppSettings.plateScaleStep
+                    value: $viewModel.settings.stageScale,
+                    in: AppSettings.minimumStageScale...AppSettings.maximumStageScale,
+                    step: AppSettings.stageScaleStep
                 )
-                Text("How large window previews are drawn. Larger previews show fewer windows per row, and a stage with too many to fit is scaled back down so its plate stays on screen.")
+                Text("How large window previews are drawn. Larger previews show fewer windows per row, and a space with too many to fit is scaled back down so its stage stays on screen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Inactive plate scale")
+                    Text("Inactive stage scale")
                     Spacer()
-                    Text("\(Int((viewModel.settings.inactivePlateScale * 100).rounded()))%")
+                    Text("\(Int((viewModel.settings.inactiveStageScale * 100).rounded()))%")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                Slider(value: $viewModel.settings.inactivePlateScale, in: 0.4...1.0, step: 0.05)
-                Text("How far stages other than the current one shrink. Smaller values make the current stage stand out more.")
+                Slider(value: $viewModel.settings.inactiveStageScale, in: 0.4...1.0, step: 0.05)
+                Text("How far spaces other than the current one shrink. Smaller values make the current space stand out more.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -228,7 +228,7 @@ public struct SettingsView: View {
             Text("Excluded Apps")
                 .font(.title2.bold())
 
-            Text("Excluded apps are invisible to the stage manager. They won't appear in any stage and won't trigger stage switches.")
+            Text("Excluded apps are invisible to the space manager. They won't appear in any space and won't trigger space switches.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -364,7 +364,7 @@ public struct SettingsView: View {
                 .padding(.top, 4)
 
             HStack {
-                Text("Switch directly to stage")
+                Text("Switch directly to space")
                 Spacer()
                 Picker("", selection: $viewModel.settings.quickSwitchModifiers) {
                     ForEach(ShortcutModifiers.choices, id: \.self) { modifiers in
@@ -375,7 +375,7 @@ public struct SettingsView: View {
             }
 
             HStack {
-                Text("Switch to stage with current app")
+                Text("Switch to space with current app")
                 Spacer()
                 Picker("", selection: $viewModel.settings.quickSwitchSameApplicationModifiers) {
                     ForEach(ShortcutModifiers.choices, id: \.self) { modifiers in
@@ -425,7 +425,7 @@ public struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Stage switch duration")
+                    Text("Space switch duration")
                     Spacer()
                     Text(Self.switchDurationLabel(viewModel.settings.spaceSwitchDuration))
                         .foregroundStyle(.secondary)
@@ -436,7 +436,7 @@ public struct SettingsView: View {
                     in: AppSettings.minimumSpaceSwitchDuration...AppSettings.maximumSpaceSwitchDuration,
                     step: 0.01
                 )
-                Text("How long the desktop takes to slide across when switching stages, per stage crossed. Instant cuts straight to the stage with no transition.")
+                Text("How long the desktop takes to slide across when switching spaces, per space crossed. Instant cuts straight to the space with no transition.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -532,7 +532,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Text("Stage Manager session")
+            Text("Space Manager session")
                 .font(.headline)
                 .padding(.top, 8)
 
@@ -608,7 +608,7 @@ public struct SettingsView: View {
                         .font(.title3.bold())
                     Text("Version \(DebutCore.version)")
                         .foregroundStyle(.secondary)
-                    Text("Stage-based workspace manager for macOS")
+                    Text("Space-based workspace manager for macOS")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

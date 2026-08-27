@@ -33,7 +33,7 @@ struct OnboardingTests {
 
         #expect(viewModel.page == .welcome)
         #expect(viewModel.introduction.contains("Command–Tab"))
-        #expect(viewModel.introduction.contains("windows and stages"))
+        #expect(viewModel.introduction.contains("windows and spaces"))
     }
 
     @Test("Accessibility and screen recording are both required")
@@ -125,7 +125,7 @@ struct OnboardingTests {
         #expect(observedState?.accessibilityGranted == true)
     }
 
-    @Test("Tutorial walks through switching, stage creation, and moving a window")
+    @Test("Tutorial walks through switching, space creation, and moving a window")
     func tutorialSequence() {
         let permissions = MockOnboardingPermissionClient()
         permissions.state = OnboardingPermissionState(

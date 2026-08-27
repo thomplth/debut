@@ -50,7 +50,7 @@ private final class DelayedCaptureWindowService: WindowService, @unchecked Senda
     func isAccessibilityEnabled() -> Bool { true }
 }
 
-private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked Sendable {
+private final class PreviewRefreshDelegate: SpaceControllerDelegate, @unchecked Sendable {
     let overlayOpened = DispatchSemaphore(value: 0)
     let overlayClosed = DispatchSemaphore(value: 0)
     let overlayUpdated = DispatchSemaphore(value: 0)
@@ -72,13 +72,13 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
         lock.withLock { storedOverlayWindowIDSets }
     }
 
-    func stageControllerDidOpenOverlay(_ controller: StageController) {
+    func spaceControllerDidOpenOverlay(_ controller: SpaceController) {
         onOverlayOpened?()
         overlayOpened.signal()
     }
 
-    func stageControllerDidOpenOverlay(
-        _ controller: StageController,
+    func spaceControllerDidOpenOverlay(
+        _ controller: SpaceController,
         overlayPresentation: OverlayPresentationContext?
     ) {
         if let overlayPresentation {
@@ -88,22 +88,22 @@ private final class PreviewRefreshDelegate: StageControllerDelegate, @unchecked 
         overlayOpened.signal()
     }
 
-    func stageControllerDidCloseOverlay(_ controller: StageController) {
+    func spaceControllerDidCloseOverlay(_ controller: SpaceController) {
         overlayClosed.signal()
     }
 
-    func stageControllerDidUpdateSelection(_ controller: StageController) {
+    func spaceControllerDidUpdateSelection(_ controller: SpaceController) {
         lock.withLock {
             storedPreviewSets.append(Set(controller.windowPreviews.keys))
             storedOverlayWindowIDSets.append(Set(
-                controller.overlayStageManager.allStages.flatMap { $0.windows.map(\.windowID) }
+                controller.overlaySpaceManager.allSpaces.flatMap { $0.windows.map(\.windowID) }
             ))
         }
         overlayUpdated.signal()
     }
 
-    func stageControllerDidSwitchStage(_ controller: StageController) {}
-    func stageControllerDidMutateState(_ controller: StageController) {}
+    func spaceControllerDidSwitchSpace(_ controller: SpaceController) {}
+    func spaceControllerDidMutateState(_ controller: SpaceController) {}
 }
 
 // Parallel suites can starve the main queue for seconds, so waits that only
@@ -159,15 +159,15 @@ private final class CommandUsageRecorder: @unchecked Sendable {
     }
 }
 
-@Suite("StageController", .serialized)
-struct StageControllerTests {
+@Suite("SpaceController", .serialized)
+struct SpaceControllerTests {
 
     @Test("Quick release finalizes its correlated presentation as cancelled")
     @MainActor
     func quickReleaseFinalizesPresentationTrace() throws {
         let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
         let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
             overlayPresentationDelay: 1,
@@ -193,7 +193,7 @@ struct StageControllerTests {
     func fullscreenAppStillPresentsOverlay() throws {
         let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
         let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
             focusedWindowSnapshotProvider: {
@@ -208,7 +208,7 @@ struct StageControllerTests {
 
         controller.handleKeyEvent(.cmdTabHold, overlayPresentation: context)
 
-        #expect(controller.isStageManagerVisible)
+        #expect(controller.isSpaceManagerVisible)
         #expect(overlay.snapshot().completed.isEmpty)
         let trace = try #require(overlay.snapshot().active.first)
         #expect(trace.phases.contains { $0.phase == .controllerAccepted })
@@ -220,7 +220,7 @@ struct StageControllerTests {
         // E2E can only tell a fullscreen presentation from an ordinary one through the
         // diagnostic state block, so the probe's answer has to outlive the probe.
         var snapshot = FocusedWindowSnapshot(frame: nil, isFullscreen: true)
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
             overlayPresentationDelay: 0,
@@ -240,7 +240,7 @@ struct StageControllerTests {
     @MainActor
     func overlayPublishesFocusedWindowFrame() {
         let frame = CGRect(x: 1920, y: 200, width: 900, height: 700)
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
             overlayPresentationDelay: 0,
@@ -263,7 +263,7 @@ struct StageControllerTests {
             frame: CGRect(x: 0, y: 0, width: 800, height: 600),
             isFullscreen: false
         )
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
             overlayPresentationDelay: 0,
@@ -282,7 +282,7 @@ struct StageControllerTests {
     func presentationDeadlinePreservesTrace() throws {
         let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
         let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
             overlayPresentationDelay: 0,
@@ -326,10 +326,10 @@ struct StageControllerTests {
         return ctx.makeImage()!
     }
 
-    private func makeController() -> (StageController, MockWindowService, MockKeyboardService) {
+    private func makeController() -> (SpaceController, MockWindowService, MockKeyboardService) {
         let windowService = MockWindowService()
         let keyboardService = MockKeyboardService()
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: windowService,
             keyboardService: keyboardService,
             focusedWindowSnapshotProvider: { .unfocused }
@@ -338,21 +338,21 @@ struct StageControllerTests {
     }
 
     // Raising every window was the desktop-surface architecture lifting them above the
-    // wallpaper overlay one at a time. Stages are real desktops now, so macOS reveals the
-    // whole stage in one transition and only the requested window is touched.
-    @Test("Cross-stage switch raises the requested window")
-    func switchStage() {
+    // wallpaper overlay one at a time. Spaces are real desktops now, so macOS reveals the
+    // whole space in one transition and only the requested window is touched.
+    @Test("Cross-space switch raises the requested window")
+    func switchSpace() {
         let (controller, windowSvc, _) = makeController()
-        let stageAID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        let stageBID = controller.stageManager.stages[1].id
+        let spaceAID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let spaceBID = controller.spaceManager.spaces[1].id
 
-        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageAID)
-        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageBID)
-        controller.stageManager.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageBID)
-        controller.stageManager.activateStage(id: stageAID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceAID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceBID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toSpaceID: spaceBID)
+        controller.spaceManager.activateSpace(id: spaceAID)
 
-        controller.switchToStage(id: stageBID, raiseWindowID: 202)
+        controller.switchToSpace(id: spaceBID, raiseWindowID: 202)
 
         #expect(windowSvc.raisedWindowIDs.contains(202))
         #expect(!windowSvc.raisedWindowIDs.contains(303))
@@ -373,63 +373,63 @@ struct StageControllerTests {
     @Test("Window switch raises selected window")
     func windowSwitch() {
         let (controller, windowSvc, _) = makeController()
-        let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceID)
 
-        controller.switchToStage(id: stageID, raiseWindowID: 202)
+        controller.switchToSpace(id: spaceID, raiseWindowID: 202)
 
         #expect(windowSvc.raisedWindowID == 202)
     }
 
-    @Test("Clicking a window immediately switches to its stage and window")
+    @Test("Clicking a window immediately switches to its space and window")
     func mouseSelectionCommitsImmediately() {
         let (controller, windowSvc, keyboardSvc) = makeController()
-        let firstStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        let secondStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: firstStageID
+        let firstSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let secondSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: firstSpaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
-            toStageID: secondStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toSpaceID: secondSpaceID
         )
-        controller.stageManager.activateStage(id: firstStageID)
+        controller.spaceManager.activateSpace(id: firstSpaceID)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
-        controller.commitOverlaySelection(stageIndex: 1, windowIndex: 0)
+        controller.commitOverlaySelection(spaceIndex: 1, windowIndex: 0)
 
-        #expect(!controller.isStageManagerVisible)
-        #expect(controller.stageManager.activeStageID == secondStageID)
+        #expect(!controller.isSpaceManagerVisible)
+        #expect(controller.spaceManager.activeSpaceID == secondSpaceID)
         #expect(windowSvc.raisedWindowID == 202)
         #expect(windowSvc.activatedBundleID == "com.b")
     }
 
-    @Test("Dropping a window first in the current stage activates it on commit")
-    func currentStageDropSelectionCommitsDroppedWindow() {
+    @Test("Dropping a window first in the current space activates it on commit")
+    func currentSpaceDropSelectionCommitsDroppedWindow() {
         let (controller, windowSvc, keyboardSvc) = makeController()
-        let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: stageID
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: spaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
-            toStageID: stageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toSpaceID: spaceID
         )
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(controller.moveWindowByDrag(
             windowID: 202,
-            fromStageIndex: 0,
-            toStageIndex: 0,
+            fromSpaceIndex: 0,
+            toSpaceIndex: 0,
             toWindowIndex: 0
         ))
         keyboardSvc.simulateEvent(.cmdRelease)
 
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [202, 101])
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [202, 101])
         #expect(windowSvc.raisedWindowID == 202)
         #expect(windowSvc.activatedBundleID == "com.b")
     }
@@ -438,20 +438,20 @@ struct StageControllerTests {
     func cmdTabHold() {
         let (controller, _, keyboardSvc) = makeController()
         keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(controller.isStageManagerVisible)
+        #expect(controller.isSpaceManagerVisible)
     }
 
-    @Test("Cmd+Tab from an excluded app starts on the stage MRU window")
+    @Test("Cmd+Tab from an excluded app starts on the space MRU window")
     func excludedAppCmdTabStartsAtMRU() {
         let (controller, _, keyboardService) = makeController()
-        let stageID = controller.stageManager.activeStageID
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "MRU"),
-            toStageID: stageID
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "MRU"),
+            toSpaceID: spaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Next"),
-            toStageID: stageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Next"),
+            toSpaceID: spaceID
         )
         controller.updateFrontmostApp(isExcluded: true)
 
@@ -460,17 +460,17 @@ struct StageControllerTests {
         #expect(controller.selectedWindowIndex == 0)
     }
 
-    @Test("Quick Cmd+Tab from an excluded app activates the stage MRU app")
+    @Test("Quick Cmd+Tab from an excluded app activates the space MRU app")
     func excludedAppQuickCmdTabActivatesMRU() {
         let (controller, windowService, keyboardService) = makeController()
-        let stageID = controller.stageManager.activeStageID
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "MRU"),
-            toStageID: stageID
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "MRU"),
+            toSpaceID: spaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Next"),
-            toStageID: stageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Next"),
+            toSpaceID: spaceID
         )
         controller.updateFrontmostApp(isExcluded: true)
 
@@ -484,16 +484,16 @@ struct StageControllerTests {
     func cmdTabReturnsBeforePreviewCaptureFinishes() {
         let windowService = DelayedCaptureWindowService(captureDelay: 0.35)
         let keyboardService = MockKeyboardService()
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: windowService,
             keyboardService: keyboardService,
             focusedWindowSnapshotProvider: { .unfocused }
         )
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: controller.stageManager.activeStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: controller.spaceManager.activeSpaceID
         )
 
         let start = ContinuousClock.now
@@ -510,14 +510,14 @@ struct StageControllerTests {
         let (controller, windowService, keyboardService) = makeController()
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
-        let stageID = controller.stageManager.activeStageID
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: stageID
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: spaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
-            toStageID: stageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toSpaceID: spaceID
         )
 
         keyboardService.simulateEvent(.cmdTabHold)
@@ -526,7 +526,7 @@ struct StageControllerTests {
         #expect(delegate.overlayOpened.wait(timeout: .now() + 0.35) == .timedOut)
         #expect(delegate.overlayClosed.wait(timeout: .now()) == .timedOut)
         #expect(windowService.raisedWindowID == 202)
-        #expect(!controller.isStageManagerVisible)
+        #expect(!controller.isSpaceManagerVisible)
     }
 
     @Test("Held Cmd+Tab presents overlay UI after a short delay")
@@ -551,18 +551,18 @@ struct StageControllerTests {
         controller.delegate = delegate
         controller.overlayPresentationDelay = 0
 
-        let sourceStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        controller.stageManager.addWindow(
-            StageWindow(
+        let sourceSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addWindow(
+            SpaceWindow(
                 windowID: 101,
                 ownerBundleID: "com.a",
                 ownerName: "A",
                 windowTitle: "T1"
             ),
-            toStageID: sourceStageID
+            toSpaceID: sourceSpaceID
         )
-        controller.stageManager.activateStage(id: sourceStageID)
+        controller.spaceManager.activateSpace(id: sourceSpaceID)
 
         keyboardService.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
@@ -571,16 +571,16 @@ struct StageControllerTests {
 
         #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(delegate.overlayOpened.wait(timeout: .now() + 0.1) == .timedOut)
-        #expect(controller.selectedStageIndex == 1)
-        #expect(controller.stageManager.stages[1].windows.isEmpty)
-        #expect(controller.overlayStageManager.stages[1].windows.map(\.windowID) == [101])
+        #expect(controller.selectedSpaceIndex == 1)
+        #expect(controller.spaceManager.spaces[1].windows.isEmpty)
+        #expect(controller.overlaySpaceManager.spaces[1].windows.map(\.windowID) == [101])
     }
 
     @Test("Configured overlay presentation delay controls the hold threshold")
     func configuredOverlayPresentationDelay() {
         let windowService = MockWindowService()
         let keyboardService = MockKeyboardService()
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: windowService,
             keyboardService: keyboardService,
             overlayPresentationDelay: 0.5,
@@ -603,16 +603,16 @@ struct StageControllerTests {
             capturedImage: makeTestImage()
         )
         let keyboardService = MockKeyboardService()
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: windowService,
             keyboardService: keyboardService,
             focusedWindowSnapshotProvider: { .unfocused }
         )
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: controller.stageManager.activeStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: controller.spaceManager.activeSpaceID
         )
 
         keyboardService.simulateEvent(.cmdTabHold)
@@ -634,7 +634,7 @@ struct StageControllerTests {
             perWindowDelay: [101: 0.05, 202: 0.3]
         )
         let keyboardService = MockKeyboardService()
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: windowService,
             keyboardService: keyboardService,
             overlayPresentationDelay: 0,
@@ -643,9 +643,9 @@ struct StageControllerTests {
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
         for windowID in [CGWindowID(101), 202] {
-            controller.stageManager.addWindow(
-                StageWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"),
-                toStageID: controller.stageManager.activeStageID
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"),
+                toSpaceID: controller.spaceManager.activeSpaceID
             )
         }
 
@@ -664,10 +664,10 @@ struct StageControllerTests {
         policy: PreviewRefreshPolicy = .lastActiveOnly,
         ttl: TimeInterval = 600,
         clock: TestClock = TestClock()
-    ) -> (StageController, MockWindowService, MockKeyboardService, PreviewRefreshDelegate) {
+    ) -> (SpaceController, MockWindowService, MockKeyboardService, PreviewRefreshDelegate) {
         let windowService = MockWindowService()
         let keyboardService = MockKeyboardService()
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: windowService,
             keyboardService: keyboardService,
             focusedWindowSnapshotProvider: { .unfocused },
@@ -683,16 +683,16 @@ struct StageControllerTests {
     @Test("Hidden startup prewarm fills the cold preview cache")
     func hiddenStartupPrewarmFillsColdCache() throws {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
-        let firstStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        let secondStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: firstStageID
+        let firstSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let secondSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: firstSpaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
-            toStageID: secondStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toSpaceID: secondSpaceID
         )
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
 
@@ -700,12 +700,12 @@ struct StageControllerTests {
 
         #expect(waitUntil { controller.windowPreviews.count == 2 })
         #expect(Set(try #require(windowSvc.captureRequests.first)) == [101, 202])
-        #expect(!controller.isStageManagerVisible)
+        #expect(!controller.isSpaceManagerVisible)
         #expect(delegate.overlayOpened.wait(timeout: .now()) == .timedOut)
         #expect(delegate.overlayUpdated.wait(timeout: .now()) == .timedOut)
 
         let activeWindowID = try #require(
-            controller.stageManager.activeStage.windows.first?.windowID
+            controller.spaceManager.activeSpace.windows.first?.windowID
         )
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
@@ -718,11 +718,11 @@ struct StageControllerTests {
     @Test("Cached previews are served without re-capturing")
     func cachedPreviewsSkipCapture() throws {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
-        let stageID = controller.stageManager.stages[0].id
+        let spaceID = controller.spaceManager.spaces[0].id
         for windowID in [CGWindowID(101), 202, 303] {
-            controller.stageManager.addWindow(
-                StageWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
-                toStageID: stageID
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
+                toSpaceID: spaceID
             )
         }
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage(), 303: makeTestImage()]
@@ -732,7 +732,7 @@ struct StageControllerTests {
         #expect(waitUntil { controller.windowPreviews.count == 3 })
         keyboardSvc.simulateEvent(.escape)
 
-        let frontWindowID = try #require(controller.stageManager.activeStage.windows.first?.windowID)
+        let frontWindowID = try #require(controller.spaceManager.activeSpace.windows.first?.windowID)
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(waitUntil { windowSvc.captureRequests.count == 2 })
@@ -746,18 +746,18 @@ struct StageControllerTests {
     @Test("An activation with nothing dirty captures nothing at all")
     func fullyCachedActivationIssuesNoCapture() {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
-        let activeStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        let otherStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: activeStageID
+        let activeSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let otherSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: activeSpaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
-            toStageID: otherStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toSpaceID: otherSpaceID
         )
-        controller.stageManager.activateStage(id: activeStageID)
+        controller.spaceManager.activateSpace(id: activeSpaceID)
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
 
         keyboardSvc.simulateEvent(.cmdTabHold)
@@ -765,9 +765,9 @@ struct StageControllerTests {
         #expect(waitUntil { controller.windowPreviews.count == 2 })
         keyboardSvc.simulateEvent(.escape)
 
-        // With the active stage emptied there is no last-active window left to refresh.
-        controller.stageManager.removeWindow(windowID: 101, fromStageID: activeStageID)
-        controller.stageManager.activateStage(id: activeStageID)
+        // With the active space emptied there is no last-active window left to refresh.
+        controller.spaceManager.removeWindow(windowID: 101, fromSpaceID: activeSpaceID)
+        controller.spaceManager.activateSpace(id: activeSpaceID)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
@@ -780,18 +780,18 @@ struct StageControllerTests {
     @Test("A title change forces a re-capture")
     func titleChangeForcesRecapture() {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
-        let activeStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        let otherStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: activeStageID
+        let activeSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let otherSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: activeSpaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Inbox"),
-            toStageID: otherStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Inbox"),
+            toSpaceID: otherSpaceID
         )
-        controller.stageManager.activateStage(id: activeStageID)
+        controller.spaceManager.activateSpace(id: activeSpaceID)
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
 
         keyboardSvc.simulateEvent(.cmdTabHold)
@@ -799,7 +799,7 @@ struct StageControllerTests {
         #expect(waitUntil { controller.windowPreviews.count == 2 })
         keyboardSvc.simulateEvent(.escape)
 
-        controller.stageManager.updateWindowTitle(windowID: 202, title: "Inbox (3)")
+        controller.spaceManager.updateWindowTitle(windowID: 202, title: "Inbox (3)")
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
@@ -812,18 +812,18 @@ struct StageControllerTests {
     func ttlExpiryForcesRecapture() {
         let clock = TestClock()
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(ttl: 60, clock: clock)
-        let activeStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        let otherStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: activeStageID
+        let activeSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let otherSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: activeSpaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
-            toStageID: otherStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toSpaceID: otherSpaceID
         )
-        controller.stageManager.activateStage(id: activeStageID)
+        controller.spaceManager.activateSpace(id: activeSpaceID)
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
 
         keyboardSvc.simulateEvent(.cmdTabHold)
@@ -850,18 +850,18 @@ struct StageControllerTests {
     func expiredPreviewUsesStaleWhileRevalidate() throws {
         let clock = TestClock()
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(ttl: 60, clock: clock)
-        let activeStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        let otherStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: activeStageID
+        let activeSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let otherSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: activeSpaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
-            toStageID: otherStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toSpaceID: otherSpaceID
         )
-        controller.stageManager.activateStage(id: activeStageID)
+        controller.spaceManager.activateSpace(id: activeSpaceID)
 
         let staleImage = makeTestImage()
         windowSvc.capturedImages = [101: staleImage, 202: staleImage]
@@ -894,11 +894,11 @@ struct StageControllerTests {
     @Test("The all-previews policy re-captures every window")
     func allPolicyCapturesEveryWindow() {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(policy: .all)
-        let stageID = controller.stageManager.stages[0].id
+        let spaceID = controller.spaceManager.spaces[0].id
         for windowID in [CGWindowID(101), 202, 303] {
-            controller.stageManager.addWindow(
-                StageWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
-                toStageID: stageID
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
+                toSpaceID: spaceID
             )
         }
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage(), 303: makeTestImage()]
@@ -918,11 +918,11 @@ struct StageControllerTests {
     @Test("No preview is captured before the overlay is revealed")
     func capturesWaitForOverlayReveal() {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
-        let stageID = controller.stageManager.stages[0].id
+        let spaceID = controller.spaceManager.spaces[0].id
         for windowID in [CGWindowID(101), 202] {
-            controller.stageManager.addWindow(
-                StageWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
-                toStageID: stageID
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
+                toSpaceID: spaceID
             )
         }
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
@@ -938,38 +938,38 @@ struct StageControllerTests {
         keyboardSvc.simulateEvent(.escape)
     }
 
-    @Test("Cmd+Option+Tab hold opens overlay in stage mode")
+    @Test("Cmd+Option+Tab hold opens overlay in space mode")
     func cmdOptionTabHold() {
         let (controller, _, keyboardSvc) = makeController()
-        controller.stageManager.createStage(position: .below)
-        controller.stageManager.activateStage(id: controller.stageManager.stages[0].id)
+        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
         keyboardSvc.simulateEvent(.cmdOptionTabHold)
-        #expect(controller.isStageManagerVisible)
-        #expect(controller.selectedStageIndex == 1)
+        #expect(controller.isSpaceManagerVisible)
+        #expect(controller.selectedSpaceIndex == 1)
     }
 
-    @Test("Overlay last-stage shortcut selects the final plate")
-    func overlayLastStageShortcut() {
+    @Test("Overlay last-space shortcut selects the final stage")
+    func overlayLastSpaceShortcut() {
         let (controller, _, keyboardSvc) = makeController()
         for _ in 0..<3 {
-            controller.stageManager.createStage(position: .below)
+            controller.spaceManager.createSpace(position: .below)
         }
 
         keyboardSvc.simulateEvent(.cmdOptionTabHold)
-        keyboardSvc.simulateEvent(.jumpToLastStage)
+        keyboardSvc.simulateEvent(.jumpToLastSpace)
 
-        #expect(controller.isStageManagerVisible)
-        #expect(controller.selectedStageIndex == controller.stageManager.stages.count - 1)
+        #expect(controller.isSpaceManagerVisible)
+        #expect(controller.selectedSpaceIndex == controller.spaceManager.spaces.count - 1)
     }
 
     @Test("Escape discards")
     func escape() {
         let (controller, _, keyboardSvc) = makeController()
-        let originalStageID = controller.stageManager.activeStageID
+        let originalSpaceID = controller.spaceManager.activeSpaceID
         keyboardSvc.simulateEvent(.cmdTabHold)
         keyboardSvc.simulateEvent(.escape)
-        #expect(!controller.isStageManagerVisible)
-        #expect(controller.stageManager.activeStageID == originalStageID)
+        #expect(!controller.isSpaceManagerVisible)
+        #expect(controller.spaceManager.activeSpaceID == originalSpaceID)
     }
 
     @Test("Desktop selection closes the overlay and requests the real desktop")
@@ -981,17 +981,17 @@ struct StageControllerTests {
         keyboardSvc.simulateEvent(.cmdTabHold)
         controller.revealDesktop()
 
-        #expect(!controller.isStageManagerVisible)
+        #expect(!controller.isSpaceManagerVisible)
         #expect(revealCount == 1)
     }
 
     @Test("Held Tab stops at the last window and a fresh press wraps")
     func tabCycle() {
         let (controller, _, keyboardSvc) = makeController()
-        let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageID)
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toSpaceID: spaceID)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(controller.selectedWindowIndex == 1) // starts at second window like native
@@ -1004,69 +1004,69 @@ struct StageControllerTests {
     }
 
     @Test("Left and right arrows preview a reorder and apply it only on commit")
-    func reorderWindowWithinStage() {
+    func reorderWindowWithinSpace() {
         let (controller, _, keyboardSvc) = makeController()
-        let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageID)
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toSpaceID: spaceID)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(controller.selectedWindowIndex == 1)
 
         keyboardSvc.simulateEvent(.moveWindowRight)
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 202, 303])
-        #expect(controller.overlayStageManager.stages[0].windows.map(\.windowID) == [101, 303, 202])
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [101, 202, 303])
+        #expect(controller.overlaySpaceManager.spaces[0].windows.map(\.windowID) == [101, 303, 202])
         #expect(controller.selectedWindowIndex == 2)
 
         keyboardSvc.simulateEvent(.moveWindowRight)
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 202, 303])
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [101, 202, 303])
         #expect(controller.selectedWindowIndex == 2)
 
         keyboardSvc.simulateEvent(.moveWindowLeft)
         keyboardSvc.simulateEvent(.moveWindowLeft)
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 202, 303])
-        #expect(controller.overlayStageManager.stages[0].windows.map(\.windowID) == [202, 101, 303])
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [101, 202, 303])
+        #expect(controller.overlaySpaceManager.spaces[0].windows.map(\.windowID) == [202, 101, 303])
         #expect(controller.selectedWindowIndex == 0)
 
         keyboardSvc.simulateEvent(.moveWindowLeft)
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101, 202, 303])
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [101, 202, 303])
         #expect(controller.selectedWindowIndex == 0)
 
         keyboardSvc.simulateEvent(.cmdRelease)
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [202, 101, 303])
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [202, 101, 303])
     }
 
-    @Test("Escape discards pending plate-stack moves")
-    func escapeDiscardsPendingPlateStackMoves() {
+    @Test("Escape discards pending stage-stack moves")
+    func escapeDiscardsPendingStageStackMoves() {
         let (controller, _, keyboardSvc) = makeController()
-        let firstStageID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: firstStageID
+        let firstSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: firstSpaceID
         )
-        controller.stageManager.activateStage(id: firstStageID)
+        controller.spaceManager.activateSpace(id: firstSpaceID)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         keyboardSvc.simulateEvent(.moveWindowDown)
 
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101])
-        #expect(controller.overlayStageManager.stages[1].windows.map(\.windowID) == [101])
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [101])
+        #expect(controller.overlaySpaceManager.spaces[1].windows.map(\.windowID) == [101])
 
         keyboardSvc.simulateEvent(.escape)
 
-        #expect(controller.stageManager.stages[0].windows.map(\.windowID) == [101])
-        #expect(controller.stageManager.stages[1].windows.isEmpty)
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [101])
+        #expect(controller.spaceManager.spaces[1].windows.isEmpty)
     }
 
     @Test("Held backward Tab stops at the first window and a fresh press wraps")
     func backwardTabCycle() {
         let (controller, _, keyboardSvc) = makeController()
-        let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageID)
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toSpaceID: spaceID)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(controller.selectedWindowIndex == 1)
@@ -1081,16 +1081,16 @@ struct StageControllerTests {
     @Test("Held backward app-window shortcut stops at the first window")
     func heldAppWindowCycleStopsAtStart() {
         let (controller, windowService, keyboardService) = makeController()
-        let stageID = controller.stageManager.activeStageID
+        let spaceID = controller.spaceManager.activeSpaceID
         for windowID in [CGWindowID(101), 202, 303] {
-            controller.stageManager.addWindow(
-                StageWindow(
+            controller.spaceManager.addWindow(
+                SpaceWindow(
                     windowID: windowID,
                     ownerBundleID: "com.example.App",
                     ownerName: "App",
                     windowTitle: "Window \(windowID)"
                 ),
-                toStageID: stageID
+                toSpaceID: spaceID
             )
         }
 
@@ -1107,14 +1107,14 @@ struct StageControllerTests {
     @Test("Quit terminates the app owning the selected window, not the frontmost app")
     func quitSelectedApp() {
         let (controller, windowService, keyboardService) = makeController()
-        let stageID = controller.stageManager.activeStageID
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 11),
-            toStageID: stageID
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 11),
+            toSpaceID: spaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2", ownerPID: 22),
-            toStageID: stageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2", ownerPID: 22),
+            toSpaceID: spaceID
         )
 
         keyboardService.simulateEvent(.cmdTabHold)
@@ -1122,10 +1122,10 @@ struct StageControllerTests {
         keyboardService.simulateEvent(.quitSelectedApp)
 
         #expect(windowService.terminatedPIDs == [22])
-        #expect(controller.isStageManagerVisible)
+        #expect(controller.isSpaceManagerVisible)
     }
 
-    @Test("Quit does nothing when the stage has no windows")
+    @Test("Quit does nothing when the space has no windows")
     func quitSelectedAppWithoutSelection() {
         let (_, windowService, keyboardService) = makeController()
 
@@ -1140,14 +1140,14 @@ struct StageControllerTests {
         let (controller, windowService, keyboardService) = makeController()
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
-        let stageID = controller.stageManager.activeStageID
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 11),
-            toStageID: stageID
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 11),
+            toSpaceID: spaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2", ownerPID: 22),
-            toStageID: stageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2", ownerPID: 22),
+            toSpaceID: spaceID
         )
 
         keyboardService.simulateEvent(.cmdTabHold)
@@ -1157,15 +1157,15 @@ struct StageControllerTests {
 
         #expect(windowService.closedWindowIDs == [202])
         #expect(windowService.terminatedPIDs.isEmpty)
-        #expect(controller.isStageManagerVisible)
-        #expect(controller.stageManager.activeStage.windows.map(\.windowID) == [101])
-        #expect(controller.overlayStageManager.activeStage.windows.map(\.windowID) == [101])
+        #expect(controller.isSpaceManagerVisible)
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [101])
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101])
         #expect(controller.selectedWindowIndex == 0)
         #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(waitUntil { delegate.overlayWindowIDSets.last == [101] })
     }
 
-    @Test("Close does nothing when the stage has no windows")
+    @Test("Close does nothing when the space has no windows")
     func closeSelectedWindowWithoutSelection() {
         let (_, windowService, keyboardService) = makeController()
 
@@ -1179,17 +1179,17 @@ struct StageControllerTests {
     func rejectedCloseSelectedWindowKeepsAssignment() {
         let (controller, windowService, keyboardService) = makeController()
         windowService.closeWindowResult = false
-        let stageID = controller.stageManager.activeStageID
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toStageID: stageID
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: spaceID
         )
 
         keyboardService.simulateEvent(.cmdTabHold)
         keyboardService.simulateEvent(.closeSelectedWindow)
 
-        #expect(controller.stageManager.activeStage.windows.map(\.windowID) == [101])
-        #expect(controller.overlayStageManager.activeStage.windows.map(\.windowID) == [101])
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [101])
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101])
         #expect(controller.selectedWindowIndex == 0)
     }
 
@@ -1198,24 +1198,24 @@ struct StageControllerTests {
         let (controller, _, keyboardService) = makeController()
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
-        let stageID = controller.stageManager.activeStageID
+        let spaceID = controller.spaceManager.activeSpaceID
         for (windowID, pid) in [(CGWindowID(101), pid_t(11)), (202, 22), (303, 22)] {
-            controller.stageManager.addWindow(
-                StageWindow(
+            controller.spaceManager.addWindow(
+                SpaceWindow(
                     windowID: windowID,
                     ownerBundleID: "com.a",
                     ownerName: "A",
                     windowTitle: "T\(windowID)",
                     ownerPID: pid
                 ),
-                toStageID: stageID
+                toSpaceID: spaceID
             )
         }
         keyboardService.simulateEvent(.cmdTabHold)
         keyboardService.simulateEvent(.nextWindow)
         #expect(controller.selectedWindowIndex == 2)
 
-        _ = controller.stageManager.makeWindowsDormant(forOwnerPID: 22)
+        _ = controller.spaceManager.makeWindowsDormant(forOwnerPID: 22)
         controller.handleLiveWindowsRemoved()
 
         #expect(controller.selectedWindowIndex == 0)
@@ -1225,20 +1225,20 @@ struct StageControllerTests {
     @Test("Removing the last window leaves the selection at zero rather than negative")
     func liveWindowRemovalOfEveryWindow() {
         let (controller, _, keyboardService) = makeController()
-        let stageID = controller.stageManager.activeStageID
-        controller.stageManager.addWindow(
-            StageWindow(
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
                 windowID: 101,
                 ownerBundleID: "com.a",
                 ownerName: "A",
                 windowTitle: "T1",
                 ownerPID: 11
             ),
-            toStageID: stageID
+            toSpaceID: spaceID
         )
         keyboardService.simulateEvent(.cmdTabHold)
 
-        _ = controller.stageManager.makeWindowsDormant(forOwnerPID: 11)
+        _ = controller.spaceManager.makeWindowsDormant(forOwnerPID: 11)
         controller.handleLiveWindowsRemoved()
 
         #expect(controller.selectedWindowIndex == 0)
@@ -1247,16 +1247,16 @@ struct StageControllerTests {
     @Test("Held app-window shortcut stops at the last window")
     func heldAppWindowCycleStopsAtEnd() {
         let (controller, windowService, keyboardService) = makeController()
-        let stageID = controller.stageManager.activeStageID
+        let spaceID = controller.spaceManager.activeSpaceID
         for windowID in [CGWindowID(101), 202, 303] {
-            controller.stageManager.addWindow(
-                StageWindow(
+            controller.spaceManager.addWindow(
+                SpaceWindow(
                     windowID: windowID,
                     ownerBundleID: "com.example.App",
                     ownerName: "App",
                     windowTitle: "Window \(windowID)"
                 ),
-                toStageID: stageID
+                toSpaceID: spaceID
             )
         }
 
@@ -1270,42 +1270,42 @@ struct StageControllerTests {
     @Test("MRU: recordWindowActivation brings to front")
     func mruTracking() {
         let (controller, _, _) = makeController()
-        let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toStageID: stageID)
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toSpaceID: spaceID)
 
         controller.recordWindowActivation(windowID: 303)
         controller.recordWindowActivation(windowID: 101)
 
-        let windowIDs = controller.stageManager.activeStage.windows.map(\.windowID)
+        let windowIDs = controller.spaceManager.activeSpace.windows.map(\.windowID)
         #expect(windowIDs == [101, 303, 202])
     }
 
-    // Stages are desktops, so when macOS reports a focused window on the desktop showing,
-    // that outranks whatever Debut recorded earlier. The window moves to the showing stage
+    // Spaces are desktops, so when macOS reports a focused window on the desktop showing,
+    // that outranks whatever Debut recorded earlier. The window moves to the showing space
     // rather than the user being moved to the window, and it must not end up in both.
-    @Test("Cross-stage window activation moves the window, not the user")
-    func crossStageActivationMovesTheWindow() {
+    @Test("Cross-space window activation moves the window, not the user")
+    func crossSpaceActivationMovesTheWindow() {
         let (controller, _, _) = makeController()
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         controller.spaceSwitcher = spaces
-        let stageAID = controller.stageManager.stages[0].id
-        controller.stageManager.createStage(position: .below)
-        let stageBID = controller.stageManager.stages[1].id
+        let spaceAID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let spaceBID = controller.spaceManager.spaces[1].id
 
-        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageAID)
-        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageBID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceAID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceBID)
 
         spaces.windowDesktops = [101: 1, 202: 1]
-        controller.switchToStage(id: stageBID)
-        #expect(controller.stageManager.activeStageID == stageBID)
+        controller.switchToSpace(id: spaceBID)
+        #expect(controller.spaceManager.activeSpaceID == spaceBID)
 
         controller.recordWindowActivation(windowID: 101)
 
-        #expect(controller.stageManager.activeStageID == stageBID)
-        #expect(!controller.stageManager.stages[0].windows.contains(where: { $0.windowID == 101 }))
-        #expect(controller.stageManager.stages[1].windows.contains(where: { $0.windowID == 101 }))
+        #expect(controller.spaceManager.activeSpaceID == spaceBID)
+        #expect(!controller.spaceManager.spaces[0].windows.contains(where: { $0.windowID == 101 }))
+        #expect(controller.spaceManager.spaces[1].windows.contains(where: { $0.windowID == 101 }))
     }
 
     @Test("Window cache reset can report diagnostics while rebuilding controller state")
@@ -1325,127 +1325,127 @@ struct StageControllerTests {
         let discovery = WindowDiscoveryService(windowService: windowService)
         discovery.armingOverride = { _, _ in .armed }
 
-        var manager = StageManager()
+        var manager = SpaceManager()
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 101,
                 ownerBundleID: "com.ghost",
                 ownerName: "Ghost",
                 windowTitle: "Stale",
                 ownerPID: 10
             ),
-            toStageID: manager.activeStageID
+            toSpaceID: manager.activeSpaceID
         )
-        let controller = StageController(
+        let controller = SpaceController(
             windowService: windowService,
             keyboardService: MockKeyboardService(),
-            stageManager: manager
+            spaceManager: manager
         )
 
         controller.rebuildWindowCache(using: discovery)
 
-        #expect(controller.stageManager.stages.count == 1)
-        #expect(controller.stageManager.activeStage.windows.map(\.windowID) == [202])
-        #expect(controller.selectedStageIndex == 0)
+        #expect(controller.spaceManager.spaces.count == 1)
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [202])
+        #expect(controller.selectedSpaceIndex == 0)
         #expect(controller.selectedWindowIndex == 0)
     }
 
     @Test("Cmd+Tab tap switches to second MRU window")
     func cmdTabTap() {
         let (controller, windowSvc, keyboardSvc) = makeController()
-        let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceID)
 
         keyboardSvc.simulateEvent(.cmdTabTap)
 
         #expect(windowSvc.raisedWindowID == 202)
-        #expect(controller.stageManager.activeStage.windows[0].windowID == 202)
+        #expect(controller.spaceManager.activeSpace.windows[0].windowID == 202)
     }
 
-    @Test("Quick switch focuses the current app's MRU window in the target stage")
+    @Test("Quick switch focuses the current app's MRU window in the target space")
     func quickSwitchKeepsCurrentApp() {
         let (controller, windowSvc, keyboardSvc) = makeController()
-        let sourceStageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
-            toStageID: sourceStageID
+        let sourceSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
+            toSpaceID: sourceSpaceID
         )
 
-        controller.stageManager.createStage(position: .below)
-        let targetStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
-            toStageID: targetStageID
+        controller.spaceManager.createSpace(position: .below)
+        let targetSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
+            toSpaceID: targetSpaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 303, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Target Current"),
-            toStageID: targetStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 303, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Target Current"),
+            toSpaceID: targetSpaceID
         )
-        controller.stageManager.activateStage(id: sourceStageID)
+        controller.spaceManager.activateSpace(id: sourceSpaceID)
 
-        keyboardSvc.simulateEvent(.switchToStageKeepingCurrentApplication(2))
+        keyboardSvc.simulateEvent(.switchToSpaceKeepingCurrentApplication(2))
 
-        #expect(controller.stageManager.activeStageID == targetStageID)
+        #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
         #expect(windowSvc.raisedWindowID == 303)
         #expect(windowSvc.activatedBundleID == "com.current")
-        #expect(controller.stageManager.activeStage.windows.first?.windowID == 303)
+        #expect(controller.spaceManager.activeSpace.windows.first?.windowID == 303)
     }
 
     // Debut and macOS both write focus within a few milliseconds of the Space flip, so the
     // winner varies run to run, and `recordWindowActivation` then writes a lost race into the
-    // stage's MRU head — making a single loss permanent. Plain quick switch therefore moves the
+    // space's MRU head — making a single loss permanent. Plain quick switch therefore moves the
     // desktop and leaves the choice of app to macOS.
     @Test("Quick switch moves the desktop without focusing anything")
     func quickSwitchDefaultsToTargetMRU() {
         let (controller, windowService, keyboardService) = makeController()
-        let sourceStageID = controller.stageManager.activeStageID
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
-            toStageID: sourceStageID
+        let sourceSpaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
+            toSpaceID: sourceSpaceID
         )
-        controller.stageManager.createStage(position: .below)
-        let targetStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
-            toStageID: targetStageID
+        controller.spaceManager.createSpace(position: .below)
+        let targetSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
+            toSpaceID: targetSpaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 303, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Same App"),
-            toStageID: targetStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 303, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Same App"),
+            toSpaceID: targetSpaceID
         )
 
-        keyboardService.simulateEvent(.switchToStage(2))
+        keyboardService.simulateEvent(.switchToSpace(2))
 
-        #expect(controller.stageManager.activeStageID == targetStageID)
+        #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
         #expect(windowService.raisedWindowID == nil)
         #expect(windowService.activatedBundleID == nil)
     }
 
-    @Test("Quick switch falls back to the target stage's MRU window when the current app is absent")
+    @Test("Quick switch falls back to the target space's MRU window when the current app is absent")
     func quickSwitchFallsBackToTargetMRU() {
         let (controller, windowSvc, keyboardSvc) = makeController()
-        let sourceStageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
-            toStageID: sourceStageID
+        let sourceSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
+            toSpaceID: sourceSpaceID
         )
 
-        controller.stageManager.createStage(position: .below)
-        let targetStageID = controller.stageManager.stages[1].id
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
-            toStageID: targetStageID
+        controller.spaceManager.createSpace(position: .below)
+        let targetSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
+            toSpaceID: targetSpaceID
         )
-        controller.stageManager.addWindow(
-            StageWindow(windowID: 303, ownerBundleID: "com.third", ownerName: "Third", windowTitle: "Target Older"),
-            toStageID: targetStageID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 303, ownerBundleID: "com.third", ownerName: "Third", windowTitle: "Target Older"),
+            toSpaceID: targetSpaceID
         )
-        controller.stageManager.activateStage(id: sourceStageID)
+        controller.spaceManager.activateSpace(id: sourceSpaceID)
 
-        keyboardSvc.simulateEvent(.switchToStageKeepingCurrentApplication(2))
+        keyboardSvc.simulateEvent(.switchToSpaceKeepingCurrentApplication(2))
 
-        #expect(controller.stageManager.activeStageID == targetStageID)
+        #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
         #expect(windowSvc.raisedWindowID == 202)
         #expect(windowSvc.activatedBundleID == "com.other")
     }
@@ -1455,9 +1455,9 @@ struct StageControllerTests {
         let (controller, windowSvc, keyboardSvc) = makeController()
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
-        let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
-        controller.stageManager.addWindow(StageWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toStageID: stageID)
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceID)
 
         // Create a test image with real pixel variation.
         let testImage = makeTestImage()
@@ -1486,8 +1486,8 @@ struct StageControllerTests {
         let (controller, windowSvc, keyboardSvc) = makeController()
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
-        let stageID = controller.stageManager.stages[0].id
-        controller.stageManager.addWindow(StageWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toStageID: stageID)
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
 
         let testImage = makeTestImage()
         windowSvc.capturedImages = [101: testImage]
@@ -1498,8 +1498,8 @@ struct StageControllerTests {
         #expect(waitUntil { controller.windowPreviews[101] != nil })
         keyboardSvc.simulateEvent(.escape)
 
-        // Remove window from stage
-        controller.stageManager.removeWindow(windowID: 101, fromStageID: stageID)
+        // Remove window from space
+        controller.spaceManager.removeWindow(windowID: 101, fromSpaceID: spaceID)
 
         // Open overlay again — stale preview should be cleaned up
         keyboardSvc.simulateEvent(.cmdTabHold)
@@ -1513,7 +1513,7 @@ struct StageControllerTests {
         // Passing 0 to AXUIElementSetMessagingTimeout means "use the system
         // default", which is seconds long. That would put an unbounded
         // cross-process wait back on the overlay-open path.
-        #expect(StageController.focusProbeTimeout > 0)
-        #expect(StageController.focusProbeTimeout <= 0.1)
+        #expect(SpaceController.focusProbeTimeout > 0)
+        #expect(SpaceController.focusProbeTimeout <= 0.1)
     }
 }

@@ -2,13 +2,13 @@ import Testing
 import Foundation
 @testable import DebutCore
 
-@Suite("PlateWindowLayout")
-struct PlateWindowLayoutTests {
+@Suite("StageWindowLayout")
+struct StageWindowLayoutTests {
 
-    private let metrics = PlateMetrics.standard
+    private let metrics = StageMetrics.standard
 
-    private func layout(_ windowCount: Int, availableWidth: CGFloat) -> PlateWindowLayout {
-        PlateWindowLayout(
+    private func layout(_ windowCount: Int, availableWidth: CGFloat) -> StageWindowLayout {
+        StageWindowLayout(
             windowCount: windowCount,
             availableWidth: availableWidth,
             metrics: metrics
@@ -25,15 +25,15 @@ struct PlateWindowLayoutTests {
 
     @Test("Column capacity comes from the available width and the fixed card width")
     func columnCapacity() {
-        #expect(PlateWindowLayout.columnCapacity(
+        #expect(StageWindowLayout.columnCapacity(
             availableWidth: fourColumnWidth,
             metrics: metrics
         ) == 4)
-        #expect(PlateWindowLayout.columnCapacity(
+        #expect(StageWindowLayout.columnCapacity(
             availableWidth: fourColumnWidth + metrics.cardWidth + metrics.windowSpacing,
             metrics: metrics
         ) == 5)
-        #expect(PlateWindowLayout.columnCapacity(
+        #expect(StageWindowLayout.columnCapacity(
             availableWidth: fourColumnWidth - 1,
             metrics: metrics
         ) == 3)
@@ -41,8 +41,8 @@ struct PlateWindowLayoutTests {
 
     @Test("A width too narrow for even one card still lays out one column")
     func minimumOneColumn() {
-        #expect(PlateWindowLayout.columnCapacity(availableWidth: 0, metrics: metrics) == 1)
-        #expect(PlateWindowLayout.columnCapacity(availableWidth: -500, metrics: metrics) == 1)
+        #expect(StageWindowLayout.columnCapacity(availableWidth: 0, metrics: metrics) == 1)
+        #expect(StageWindowLayout.columnCapacity(availableWidth: -500, metrics: metrics) == 1)
 
         let single = layout(3, availableWidth: 0)
         #expect(single.rowSizes == [1, 1, 1])
@@ -75,27 +75,27 @@ struct PlateWindowLayoutTests {
         #expect(layout(0, availableWidth: fourColumnWidth).rowSizes == [])
     }
 
-    @Test("Plate width follows the widest row and plate height follows the row count")
-    func plateSize() {
+    @Test("Stage width follows the widest row and stage height follows the row count")
+    func stageSize() {
         let oneRow = layout(3, availableWidth: fourColumnWidth)
-        #expect(oneRow.plateSize.width
+        #expect(oneRow.stageSize.width
             == metrics.cardWidth * 3 + metrics.windowSpacing * 2 + metrics.padding * 2)
-        #expect(oneRow.plateSize.height
+        #expect(oneRow.stageSize.height
             == metrics.cardHeight + metrics.topPadding + metrics.bottomPadding)
 
         let twoRows = layout(5, availableWidth: fourColumnWidth)
-        #expect(twoRows.plateSize.width
+        #expect(twoRows.stageSize.width
             == metrics.cardWidth * 3 + metrics.windowSpacing * 2 + metrics.padding * 2)
-        #expect(twoRows.plateSize.height
+        #expect(twoRows.stageSize.height
             == metrics.cardHeight * 2 + metrics.rowSpacing
                 + metrics.topPadding + metrics.bottomPadding)
     }
 
-    @Test("An empty plate keeps a placeholder width and one row of height")
-    func emptyPlateSize() {
+    @Test("An empty stage keeps a placeholder width and one row of height")
+    func emptyStageSize() {
         let empty = layout(0, availableWidth: fourColumnWidth)
-        #expect(empty.plateSize.width == metrics.minPlateWidth)
-        #expect(empty.plateSize.height
+        #expect(empty.stageSize.width == metrics.minStageWidth)
+        #expect(empty.stageSize.height
             == metrics.cardHeight + metrics.topPadding + metrics.bottomPadding)
     }
 
@@ -103,10 +103,10 @@ struct PlateWindowLayoutTests {
     func rowMajorOrder() {
         let wrapped = layout(5, availableWidth: fourColumnWidth)
 
-        #expect(wrapped.slot(at: 0) == PlateGridSlot(row: 0, column: 0))
-        #expect(wrapped.slot(at: 2) == PlateGridSlot(row: 0, column: 2))
-        #expect(wrapped.slot(at: 3) == PlateGridSlot(row: 1, column: 0))
-        #expect(wrapped.slot(at: 4) == PlateGridSlot(row: 1, column: 1))
+        #expect(wrapped.slot(at: 0) == StageGridSlot(row: 0, column: 0))
+        #expect(wrapped.slot(at: 2) == StageGridSlot(row: 0, column: 2))
+        #expect(wrapped.slot(at: 3) == StageGridSlot(row: 1, column: 0))
+        #expect(wrapped.slot(at: 4) == StageGridSlot(row: 1, column: 1))
         #expect(wrapped.slot(at: 5) == nil)
     }
 
@@ -139,24 +139,24 @@ struct PlateWindowLayoutTests {
         #expect(threeRows.cardOffsetFromCenter(at: 8).height == rowStride)
     }
 
-    @Test("A wrapped plate never grows past the width it was laid out for")
-    func plateStaysWithinAvailableWidth() {
+    @Test("A wrapped stage never grows past the width it was laid out for")
+    func stageStaysWithinAvailableWidth() {
         for windowCount in 1...40 {
             let wrapped = layout(windowCount, availableWidth: fourColumnWidth)
-            #expect(wrapped.plateSize.width <= fourColumnWidth)
+            #expect(wrapped.stageSize.width <= fourColumnWidth)
         }
     }
 
     @Test("Insertion slots cover every position including one past the end")
     func insertionSlots() {
         let wrapped = layout(5, availableWidth: fourColumnWidth)
-        // An insertion at the end resolves against the layout the plate will have once the
+        // An insertion at the end resolves against the layout the stage will have once the
         // window arrives, so the layout itself only has to answer for its own cards.
         #expect(wrapped.slot(at: 4) != nil)
 
         let grown = layout(6, availableWidth: fourColumnWidth)
         #expect(grown.rowSizes == [3, 3])
-        #expect(grown.slot(at: 5) == PlateGridSlot(row: 1, column: 2))
+        #expect(grown.slot(at: 5) == StageGridSlot(row: 1, column: 2))
     }
 
     @Test("Scaling multiplies every dimension, so a card keeps its proportions")
@@ -170,7 +170,7 @@ struct PlateWindowLayoutTests {
         #expect(scaled.windowSpacing == metrics.windowSpacing * 1.5)
         #expect(scaled.rowSpacing == metrics.rowSpacing * 1.5)
         #expect(scaled.padding == metrics.padding * 1.5)
-        #expect(scaled.minPlateWidth == metrics.minPlateWidth * 1.5)
+        #expect(scaled.minStageWidth == metrics.minStageWidth * 1.5)
 
         #expect(scaled.cardWidth == metrics.cardWidth * 1.5)
         #expect(scaled.cardHeight == metrics.cardHeight * 1.5)
@@ -183,7 +183,7 @@ struct PlateWindowLayoutTests {
     func scaleReducesColumnCapacity() {
         let width: CGFloat = 1_200
         let capacities = [1.0, 1.5, 2.0].map { scale in
-            PlateWindowLayout.columnCapacity(
+            StageWindowLayout.columnCapacity(
                 availableWidth: width,
                 metrics: metrics.scaled(by: CGFloat(scale))
             )
@@ -193,18 +193,18 @@ struct PlateWindowLayoutTests {
         #expect(capacities.first! > capacities.last!)
     }
 
-    @Test("Plate height never shrinks as the scale grows, which is what makes the fit searchable")
-    func plateHeightIsMonotoneInScale() {
+    @Test("Stage height never shrinks as the scale grows, which is what makes the fit searchable")
+    func stageHeightIsMonotoneInScale() {
         // Scale, capacity and row count are circular: a bigger card fits fewer per row, which
         // adds rows, which adds height. The fitted scale is found by walking candidates down,
         // and that only finds the largest fitting scale if height never dips on the way up.
         for windowCount in [1, 5, 8, 17, 30] {
             let heights = stride(from: 0.5, through: 2.5, by: 0.05).map { scale in
-                PlateWindowLayout(
+                StageWindowLayout(
                     windowCount: windowCount,
                     availableWidth: 1_400,
                     metrics: metrics.scaled(by: CGFloat(scale))
-                ).plateSize.height
+                ).stageSize.height
             }
             #expect(zip(heights, heights.dropFirst()).allSatisfy { $0 <= $1 },
                     "height dipped as scale grew for \(windowCount) windows")
@@ -212,13 +212,13 @@ struct PlateWindowLayoutTests {
     }
 }
 
-@Suite("Fitted plate scale")
-struct FittedPlateScaleTests {
+@Suite("Fitted stage scale")
+struct FittedStageScaleTests {
 
     private let roomyDisplay = CGSize(width: 2_560, height: 1_440)
 
     private func fitted(_ requested: Double, windowCounts: [Int], display: CGSize) -> CGFloat {
-        PlateConstants.fittedPlateScale(
+        StageConstants.fittedStageScale(
             requested: CGFloat(requested),
             windowCounts: windowCounts,
             containerSize: display
@@ -234,29 +234,29 @@ struct FittedPlateScaleTests {
     @Test("The requested scale is clamped to the range the slider offers")
     func requestedScaleIsClamped() {
         #expect(fitted(9, windowCounts: [1], display: roomyDisplay)
-            == CGFloat(AppSettings.maximumPlateScale))
+            == CGFloat(AppSettings.maximumStageScale))
         #expect(fitted(0.01, windowCounts: [1], display: roomyDisplay)
-            == CGFloat(AppSettings.minimumPlateScale))
+            == CGFloat(AppSettings.minimumStageScale))
     }
 
-    @Test("A plate too tall for the display scales down until it fits")
-    func tallPlateScalesDown() {
+    @Test("A stage too tall for the display scales down until it fits")
+    func tallStageScalesDown() {
         let display = CGSize(width: 1_440, height: 900)
         let scale = fitted(1.5, windowCounts: [24], display: display)
 
         #expect(scale < 1.5)
-        #expect(scale >= CGFloat(AppSettings.minimumPlateScale))
+        #expect(scale >= CGFloat(AppSettings.minimumStageScale))
 
-        let fittedHeight = PlateConstants.plateLayouts(
+        let fittedHeight = StageConstants.stageLayouts(
             forWindowCounts: [24],
             screenWidth: display.width,
-            metrics: PlateMetrics.standard.scaled(by: scale)
-        )[0].plateSize.height
-        #expect(fittedHeight <= PlateConstants.availablePlateHeight(screenHeight: display.height))
+            metrics: StageMetrics.standard.scaled(by: scale)
+        )[0].stageSize.height
+        #expect(fittedHeight <= StageConstants.availableStageHeight(screenHeight: display.height))
     }
 
-    @Test("The tallest plate sets the scale for the whole stack")
-    func tallestPlateBinds() {
+    @Test("The tallest stage sets the scale for the whole stack")
+    func tallestStageBinds() {
         let display = CGSize(width: 1_440, height: 900)
         let alone = fitted(1.5, windowCounts: [24], display: display)
         let inStack = fitted(1.5, windowCounts: [1, 24, 2], display: display)
@@ -267,21 +267,21 @@ struct FittedPlateScaleTests {
     @Test("A display too small at every scale still returns a usable scale")
     func impossibleFitFallsBackToTheFloor() {
         let scale = fitted(1.5, windowCounts: [200], display: CGSize(width: 600, height: 400))
-        #expect(scale == CGFloat(AppSettings.minimumPlateScale))
+        #expect(scale == CGFloat(AppSettings.minimumStageScale))
     }
 
-    @Test("Fitting never leaves a plate wider than the display")
-    func fittedPlatesStayWithinWidth() {
+    @Test("Fitting never leaves a stage wider than the display")
+    func fittedStagesStayWithinWidth() {
         for display in [CGSize(width: 1_280, height: 800), CGSize(width: 3_840, height: 2_160)] {
             for count in [1, 4, 9, 18] {
                 let scale = fitted(2.5, windowCounts: [count], display: display)
-                let width = PlateConstants.plateLayouts(
+                let width = StageConstants.stageLayouts(
                     forWindowCounts: [count],
                     screenWidth: display.width,
-                    metrics: PlateMetrics.standard.scaled(by: scale)
-                )[0].plateSize.width
-                #expect(width <= PlateConstants.availablePlateWidth(screenWidth: display.width)
-                    || scale == CGFloat(AppSettings.minimumPlateScale))
+                    metrics: StageMetrics.standard.scaled(by: scale)
+                )[0].stageSize.width
+                #expect(width <= StageConstants.availableStageWidth(screenWidth: display.width)
+                    || scale == CGFloat(AppSettings.minimumStageScale))
             }
         }
     }
@@ -291,8 +291,8 @@ struct FittedPlateScaleTests {
         let display = CGSize(width: 1_440, height: 900)
         for count in 1...30 {
             let scale = fitted(2.5, windowCounts: [count], display: display)
-            let steps = (scale - CGFloat(AppSettings.minimumPlateScale))
-                / CGFloat(AppSettings.plateScaleStep)
+            let steps = (scale - CGFloat(AppSettings.minimumStageScale))
+                / CGFloat(AppSettings.stageScaleStep)
             #expect(abs(steps - steps.rounded()) < 0.0001, "\(scale) is off the step grid")
         }
     }

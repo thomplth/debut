@@ -42,11 +42,11 @@ public protocol OnboardingPermissionClient: AnyObject {
 @MainActor
 @Observable
 public final class OnboardingViewModel {
-    public let introduction = "Debut replaces the system Command–Tab switcher with a visual way to move through your windows and stages."
+    public let introduction = "Debut replaces the system Command–Tab switcher with a visual way to move through your windows and spaces."
 
     public let screenRecordingRequirement = OnboardingPermissionRequirement(
         isRequired: true,
-        detail: "Required to read your desktop wallpaper, so stages sit on it instead of a black rectangle, and to draw live window previews. Debut reads the screen on your Mac and never records, stores, or transmits it."
+        detail: "Required to read your desktop wallpaper, so spaces sit on it instead of a black rectangle, and to draw live window previews. Debut reads the screen on your Mac and never records, stores, or transmits it."
     )
 
     public private(set) var page: OnboardingPage = .welcome

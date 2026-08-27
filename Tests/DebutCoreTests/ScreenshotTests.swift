@@ -32,11 +32,11 @@ struct ScreenshotTests {
         return img
     }
 
-    private func renderPlateFrames<V: View>(_ view: V, size: NSSize) -> [Int: CGRect] {
+    private func renderStageFrames<V: View>(_ view: V, size: NSSize) -> [Int: CGRect] {
         var frames: [Int: CGRect] = [:]
         let rootView = view
             .frame(width: size.width, height: size.height)
-            .onPreferenceChange(PlateFramePreferenceKey.self) { frames = $0 }
+            .onPreferenceChange(StageFramePreferenceKey.self) { frames = $0 }
         let hostingView = NSHostingView(rootView: rootView)
         hostingView.frame = NSRect(origin: .zero, size: size)
         hostingView.layoutSubtreeIfNeeded()
@@ -54,11 +54,11 @@ struct ScreenshotTests {
         return frames
     }
 
-    private func renderPlateSurfaceFrames<V: View>(_ view: V, size: NSSize) -> [Int: CGRect] {
+    private func renderStageSurfaceFrames<V: View>(_ view: V, size: NSSize) -> [Int: CGRect] {
         var frames: [Int: CGRect] = [:]
         let rootView = view
             .frame(width: size.width, height: size.height)
-            .onPreferenceChange(PlateSurfaceFramePreferenceKey.self) { frames = $0 }
+            .onPreferenceChange(StageSurfaceFramePreferenceKey.self) { frames = $0 }
         let hostingView = NSHostingView(rootView: rootView)
         hostingView.frame = NSRect(origin: .zero, size: size)
         hostingView.layoutSubtreeIfNeeded()
@@ -77,12 +77,12 @@ struct ScreenshotTests {
     enum ScreenshotError: Error { case renderFailed }
 
     private func makeSampleViewModel(
-        stageCount: Int = 3,
-        windowsPerStage: [Int] = [3, 4, 2],
+        spaceCount: Int = 3,
+        windowsPerSpace: [Int] = [3, 4, 2],
         activeIndex: Int = 1,
         appearance: AppSettings = AppSettings()
-    ) -> OverlayViewModel {
-        var sm = StageManager()
+    ) -> StageOverlayViewModel {
+        var sm = SpaceManager()
         let windowData: [(String, String, String)] = [
             ("com.apple.mail", "Mail", "Inbox"), ("com.apple.Safari", "Safari", "Google"),
             ("com.apple.Terminal", "Terminal", "~ zsh"), ("com.microsoft.VSCode", "VS Code", "main.swift"),
@@ -90,70 +90,70 @@ struct ScreenshotTests {
             ("com.apple.Notes", "Notes", "Meeting Notes"), ("com.google.Chrome", "Chrome", "GitHub"),
             ("com.apple.dt.Xcode", "Xcode", "Debut.xcodeproj"), ("com.apple.Preview", "Preview", "screenshot.png"),
         ]
-        let defaultID = sm.stages[0].id
+        let defaultID = sm.spaces[0].id
         var windowCounter: CGWindowID = 100
 
-        for i in 0..<stageCount {
+        for i in 0..<spaceCount {
             if i == 0 {
-                for _ in 0..<windowsPerStage[i % windowsPerStage.count] {
+                for _ in 0..<windowsPerSpace[i % windowsPerSpace.count] {
                     let w = windowData[Int(windowCounter - 100) % windowData.count]
-                    sm.addWindow(StageWindow(windowID: windowCounter, ownerBundleID: w.0, ownerName: w.1, windowTitle: w.2), toStageID: defaultID)
+                    sm.addWindow(SpaceWindow(windowID: windowCounter, ownerBundleID: w.0, ownerName: w.1, windowTitle: w.2), toSpaceID: defaultID)
                     windowCounter += 1
                 }
             } else {
-                sm.activateStage(id: sm.stages[i - 1].id)
-                sm.createStage(position: .below)
-                let stageID = sm.stages[i].id
-                for _ in 0..<windowsPerStage[i % windowsPerStage.count] {
+                sm.activateSpace(id: sm.spaces[i - 1].id)
+                sm.createSpace(position: .below)
+                let spaceID = sm.spaces[i].id
+                for _ in 0..<windowsPerSpace[i % windowsPerSpace.count] {
                     let w = windowData[Int(windowCounter - 100) % windowData.count]
-                    sm.addWindow(StageWindow(windowID: windowCounter, ownerBundleID: w.0, ownerName: w.1, windowTitle: w.2), toStageID: stageID)
+                    sm.addWindow(SpaceWindow(windowID: windowCounter, ownerBundleID: w.0, ownerName: w.1, windowTitle: w.2), toSpaceID: spaceID)
                     windowCounter += 1
                 }
             }
         }
-        sm.activateStage(id: sm.stages[min(activeIndex, sm.stages.count - 1)].id)
-        return OverlayViewModel(
-            stageManager: sm,
-            activeStageIndex: activeIndex,
+        sm.activateSpace(id: sm.spaces[min(activeIndex, sm.spaces.count - 1)].id)
+        return StageOverlayViewModel(
+            spaceManager: sm,
+            activeSpaceIndex: activeIndex,
             selectedWindowIndex: 1,
             appearance: appearance
         )
     }
 
-    @Test("Three plates render correctly")
-    func threePlates() throws {
-        let vm = makeSampleViewModel(stageCount: 3, windowsPerStage: [3, 4, 2], activeIndex: 1)
-        guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: NSSize(width: 1200, height: 600)) else {
+    @Test("Three stages render correctly")
+    func threeStages() throws {
+        let vm = makeSampleViewModel(spaceCount: 3, windowsPerSpace: [3, 4, 2], activeIndex: 1)
+        guard let img = renderSwiftUI(StageOverlayView(viewModel: vm), size: NSSize(width: 1200, height: 600)) else {
             throw ScreenshotError.renderFailed
         }
-        try saveImage(img, name: "02_three_plates")
-        #expect(vm.plates.count == 3)
+        try saveImage(img, name: "02_three_stages")
+        #expect(vm.stages.count == 3)
     }
 
-    @Test("Many plates render with a depth gradient")
-    func manyPlatesDepthGradient() throws {
+    @Test("Many stages render with a depth gradient")
+    func manyStagesDepthGradient() throws {
         let vm = makeSampleViewModel(
-            stageCount: 9,
-            windowsPerStage: [2, 3, 1],
+            spaceCount: 9,
+            windowsPerSpace: [2, 3, 1],
             activeIndex: 4
         )
         guard let img = renderSwiftUI(
-            OverlaySwiftUIView(viewModel: vm),
+            StageOverlayView(viewModel: vm),
             size: NSSize(width: 1200, height: 700)
         ) else {
             throw ScreenshotError.renderFailed
         }
-        try saveImage(img, name: "02_many_plates_depth_gradient")
-        #expect(vm.plates.count == 9)
+        try saveImage(img, name: "02_many_stages_depth_gradient")
+        #expect(vm.stages.count == 9)
     }
 
     @Test("Selection on second window")
     func selectionState() throws {
-        let vm = OverlayViewModel(
-            stageManager: makeSampleViewModel(stageCount: 2, windowsPerStage: [5, 3], activeIndex: 0).stageManager,
-            activeStageIndex: 0, selectedWindowIndex: 2
+        let vm = StageOverlayViewModel(
+            spaceManager: makeSampleViewModel(spaceCount: 2, windowsPerSpace: [5, 3], activeIndex: 0).spaceManager,
+            activeSpaceIndex: 0, selectedWindowIndex: 2
         )
-        guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: NSSize(width: 1200, height: 400)) else {
+        guard let img = renderSwiftUI(StageOverlayView(viewModel: vm), size: NSSize(width: 1200, height: 400)) else {
             throw ScreenshotError.renderFailed
         }
         try saveImage(img, name: "05_selection_state")
@@ -161,87 +161,87 @@ struct ScreenshotTests {
     }
 
     /// Pins the scale so the wrap threshold under test is a property of the width, not of
-    /// whatever the plate-scale default happens to be.
+    /// whatever the stage-scale default happens to be.
     private func unscaledAppearance() -> AppSettings {
         var settings = AppSettings()
-        settings.plateScale = 1
+        settings.stageScale = 1
         return settings
     }
 
-    @Test("A plate too wide for the display renders its windows in balanced rows")
-    func widePlateWrapsIntoRows() throws {
-        let metrics = PlateMetrics.standard
+    @Test("A stage too wide for the display renders its windows in balanced rows")
+    func wideStageWrapsIntoRows() throws {
+        let metrics = StageMetrics.standard
         let vm = makeSampleViewModel(
-            stageCount: 1,
-            windowsPerStage: [8],
+            spaceCount: 1,
+            windowsPerSpace: [8],
             activeIndex: 0,
             appearance: unscaledAppearance()
         )
         let size = NSSize(width: 1200, height: 700)
 
-        guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: size) else {
+        guard let img = renderSwiftUI(StageOverlayView(viewModel: vm), size: size) else {
             throw ScreenshotError.renderFailed
         }
-        try saveImage(img, name: "06_wrapped_plate_rows")
+        try saveImage(img, name: "06_wrapped_stage_rows")
 
-        let frames = renderWindowFrames(OverlaySwiftUIView(viewModel: vm), size: size)
-        let cards = (0..<8).map { frames[WindowFrameID(stageIndex: 0, windowIndex: $0)]! }
+        let frames = renderWindowFrames(StageOverlayView(viewModel: vm), size: size)
+        let cards = (0..<8).map { frames[WindowFrameID(spaceIndex: 0, windowIndex: $0)]! }
         let rows = Dictionary(grouping: cards) { ($0.midY * 10).rounded() }
 
         #expect(rows.count == 2)
         #expect(rows.values.allSatisfy { $0.count == 4 })
         #expect(cards.allSatisfy { $0.maxX <= size.width })
 
-        guard let plate = renderPlateSurfaceFrames(
-            OverlaySwiftUIView(viewModel: vm),
+        guard let stage = renderStageSurfaceFrames(
+            StageOverlayView(viewModel: vm),
             size: size
         )[0] else { throw ScreenshotError.renderFailed }
-        #expect(abs(plate.height
+        #expect(abs(stage.height
             - (metrics.cardHeight * 2 + metrics.rowSpacing
                 + metrics.topPadding + metrics.bottomPadding)) < 0.5)
 
         // What is drawn has to be where the geometry says, or drag projection and the E2E hit
         // tests are aiming at slots the view never used.
-        let layout = PlateWindowLayout(
+        let layout = StageWindowLayout(
             windowCount: 8,
-            availableWidth: PlateConstants.availablePlateWidth(screenWidth: size.width),
+            availableWidth: StageConstants.availableStageWidth(screenWidth: size.width),
             metrics: metrics
         )
         for (index, card) in cards.enumerated() {
             let expected = layout.cardOffsetFromCenter(at: index)
-            #expect(abs(card.midX - (plate.midX + expected.width)) < 0.5)
-            #expect(abs(card.midY - (plate.midY + expected.height)) < 0.5)
+            #expect(abs(card.midX - (stage.midX + expected.width)) < 0.5)
+            #expect(abs(card.midY - (stage.midY + expected.height)) < 0.5)
         }
     }
 
-    @Test("The plate scale setting reaches the cards the overlay actually draws")
-    func plateScaleEnlargesRenderedCards() throws {
+    @Test("The stage scale setting reaches the cards the overlay actually draws")
+    func stageScaleEnlargesRenderedCards() throws {
         let size = NSSize(width: 1600, height: 1000)
         let counts = [4]
 
-        func cardSize(plateScale: Double) -> CGSize {
+        func cardSize(stageScale: Double) -> CGSize {
             var settings = AppSettings()
-            settings.plateScale = plateScale
+            settings.stageScale = stageScale
             let vm = makeSampleViewModel(
-                stageCount: 1,
-                windowsPerStage: counts,
+                spaceCount: 1,
+                windowsPerSpace: counts,
                 activeIndex: 0,
                 appearance: settings
             )
-            let frames = renderWindowFrames(OverlaySwiftUIView(viewModel: vm), size: size)
-            return frames[WindowFrameID(stageIndex: 0, windowIndex: 0)]!.size
+            let frames = renderWindowFrames(StageOverlayView(viewModel: vm), size: size)
+            return frames[WindowFrameID(spaceIndex: 0, windowIndex: 0)]!.size
         }
 
-        let unscaled = cardSize(plateScale: 1)
-        let enlarged = cardSize(plateScale: AppSettings.defaultPlateScale)
+        let unscaled = cardSize(stageScale: 1)
+        let enlarged = cardSize(stageScale: AppSettings.defaultStageScale)
 
         #expect(abs(enlarged.width - unscaled.width * 1.5) < 0.5)
         #expect(abs(enlarged.height - unscaled.height * 1.5) < 0.5)
 
         // E2E clicks screen coordinates it derives from drawnMetrics, so a card drawn at any
         // other size sends those clicks somewhere the overlay never drew.
-        let expected = PlateConstants.drawnMetrics(
-            plateScale: CGFloat(AppSettings.defaultPlateScale),
+        let expected = StageConstants.drawnMetrics(
+            stageScale: CGFloat(AppSettings.defaultStageScale),
             windowCounts: counts,
             containerSize: size
         )
@@ -249,49 +249,49 @@ struct ScreenshotTests {
         #expect(abs(enlarged.height - expected.cardHeight) < 0.5)
     }
 
-    @Test("The default plate scale still fits the display, and a crowded stage shrinks to fit")
-    func defaultPlateScaleFitsTheDisplay() throws {
+    @Test("The default stage scale still fits the display, and a crowded space shrinks to fit")
+    func defaultStageScaleFitsTheDisplay() throws {
         let size = NSSize(width: 1440, height: 900)
-        let vm = makeSampleViewModel(stageCount: 1, windowsPerStage: [6], activeIndex: 0)
+        let vm = makeSampleViewModel(spaceCount: 1, windowsPerSpace: [6], activeIndex: 0)
 
-        guard let img = renderSwiftUI(OverlaySwiftUIView(viewModel: vm), size: size) else {
+        guard let img = renderSwiftUI(StageOverlayView(viewModel: vm), size: size) else {
             throw ScreenshotError.renderFailed
         }
-        try saveImage(img, name: "06_default_plate_scale")
+        try saveImage(img, name: "06_default_stage_scale")
 
-        guard let plate = renderPlateSurfaceFrames(
-            OverlaySwiftUIView(viewModel: vm),
+        guard let stage = renderStageSurfaceFrames(
+            StageOverlayView(viewModel: vm),
             size: size
         )[0] else { throw ScreenshotError.renderFailed }
-        #expect(plate.width <= PlateConstants.availablePlateWidth(screenWidth: size.width))
-        #expect(plate.height <= PlateConstants.availablePlateHeight(screenHeight: size.height))
+        #expect(stage.width <= StageConstants.availableStageWidth(screenWidth: size.width))
+        #expect(stage.height <= StageConstants.availableStageHeight(screenHeight: size.height))
 
         // The same display cannot hold twenty windows at the requested scale, so the overlay
-        // has to give scale back rather than draw a plate off the bottom of the screen.
-        let crowded = makeSampleViewModel(stageCount: 1, windowsPerStage: [20], activeIndex: 0)
-        guard let crowdedPlate = renderPlateSurfaceFrames(
-            OverlaySwiftUIView(viewModel: crowded),
+        // has to give scale back rather than draw a stage off the bottom of the screen.
+        let crowded = makeSampleViewModel(spaceCount: 1, windowsPerSpace: [20], activeIndex: 0)
+        guard let crowdedStage = renderStageSurfaceFrames(
+            StageOverlayView(viewModel: crowded),
             size: size
         )[0] else { throw ScreenshotError.renderFailed }
 
-        #expect(crowdedPlate.width <= PlateConstants.availablePlateWidth(screenWidth: size.width))
-        #expect(crowdedPlate.height <= PlateConstants.availablePlateHeight(screenHeight: size.height))
+        #expect(crowdedStage.width <= StageConstants.availableStageWidth(screenWidth: size.width))
+        #expect(crowdedStage.height <= StageConstants.availableStageHeight(screenHeight: size.height))
     }
 
-    @Test("Dragging a window preview does not shift the plate stack")
-    func windowDragPreviewDoesNotShiftPlateStack() throws {
-        let vm = makeSampleViewModel(stageCount: 3, windowsPerStage: [3, 4, 2], activeIndex: 1)
+    @Test("Dragging a window preview does not shift the stage stack")
+    func windowDragPreviewDoesNotShiftStageStack() throws {
+        let vm = makeSampleViewModel(spaceCount: 3, windowsPerSpace: [3, 4, 2], activeIndex: 1)
         let size = NSSize(width: 1200, height: 600)
         let drag = WindowDragState(
-            windowID: vm.plates[1].windows[0].id,
-            sourceStageIndex: 1,
+            windowID: vm.stages[1].windows[0].id,
+            sourceSpaceIndex: 1,
             sourceWindowIndex: 0,
             location: CGPoint(x: 600, y: 300),
             dropTarget: nil
         )
-        let idleFrames = renderPlateFrames(OverlaySwiftUIView(viewModel: vm), size: size)
-        let draggingFrames = renderPlateFrames(
-            OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag),
+        let idleFrames = renderStageFrames(StageOverlayView(viewModel: vm), size: size)
+        let draggingFrames = renderStageFrames(
+            StageOverlayView(viewModel: vm, initialWindowDrag: drag),
             size: size
         )
 
@@ -303,41 +303,41 @@ struct ScreenshotTests {
 
     @Test("Window frame preferences remain stable drag-slot anchors")
     func windowFramesRemainStableDragSlotAnchors() throws {
-        let vm = makeSampleViewModel(stageCount: 1, windowsPerStage: [3], activeIndex: 0)
+        let vm = makeSampleViewModel(spaceCount: 1, windowsPerSpace: [3], activeIndex: 0)
         let size = NSSize(width: 1200, height: 400)
         let drag = WindowDragState(
-            windowID: vm.plates[0].windows[0].id,
-            sourceStageIndex: 0,
+            windowID: vm.stages[0].windows[0].id,
+            sourceSpaceIndex: 0,
             sourceWindowIndex: 0,
             location: CGPoint(x: 600, y: 200),
-            dropTarget: WindowDropTarget(stageIndex: 0, windowIndex: 2)
+            dropTarget: WindowDropTarget(spaceIndex: 0, windowIndex: 2)
         )
-        let idle = renderWindowFrames(OverlaySwiftUIView(viewModel: vm), size: size)
+        let idle = renderWindowFrames(StageOverlayView(viewModel: vm), size: size)
         let dragging = renderWindowFrames(
-            OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag),
+            StageOverlayView(viewModel: vm, initialWindowDrag: drag),
             size: size
         )
 
         #expect(abs(
-            dragging[WindowFrameID(stageIndex: 0, windowIndex: 0)]!.midX
-                - idle[WindowFrameID(stageIndex: 0, windowIndex: 0)]!.midX
+            dragging[WindowFrameID(spaceIndex: 0, windowIndex: 0)]!.midX
+                - idle[WindowFrameID(spaceIndex: 0, windowIndex: 0)]!.midX
         ) < 0.5)
     }
 
-    @Test("Cross-stage drag grows the target plate before drop")
-    func crossStageDragFocusesTargetPlate() throws {
-        let vm = makeSampleViewModel(stageCount: 2, windowsPerStage: [2, 2], activeIndex: 0)
+    @Test("Cross-space drag grows the target stage before drop")
+    func crossSpaceDragFocusesTargetStage() throws {
+        let vm = makeSampleViewModel(spaceCount: 2, windowsPerSpace: [2, 2], activeIndex: 0)
         let size = NSSize(width: 1200, height: 500)
         let drag = WindowDragState(
-            windowID: vm.plates[0].windows[0].id,
-            sourceStageIndex: 0,
+            windowID: vm.stages[0].windows[0].id,
+            sourceSpaceIndex: 0,
             sourceWindowIndex: 0,
             location: CGPoint(x: 600, y: 330),
-            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 0)
+            dropTarget: WindowDropTarget(spaceIndex: 1, windowIndex: 0)
         )
-        let idle = renderPlateFrames(OverlaySwiftUIView(viewModel: vm), size: size)
-        let dragging = renderPlateFrames(
-            OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag),
+        let idle = renderStageFrames(StageOverlayView(viewModel: vm), size: size)
+        let dragging = renderStageFrames(
+            StageOverlayView(viewModel: vm, initialWindowDrag: drag),
             size: size
         )
 
@@ -345,20 +345,20 @@ struct ScreenshotTests {
         #expect(dragging[1]!.width > dragging[0]!.width)
     }
 
-    @Test("Cross-stage drag resizes the rendered plate surfaces")
-    func crossStageDragResizesPlateSurfaces() throws {
-        let vm = makeSampleViewModel(stageCount: 2, windowsPerStage: [2, 2], activeIndex: 0)
+    @Test("Cross-space drag resizes the rendered stage surfaces")
+    func crossSpaceDragResizesStageSurfaces() throws {
+        let vm = makeSampleViewModel(spaceCount: 2, windowsPerSpace: [2, 2], activeIndex: 0)
         let size = NSSize(width: 1200, height: 500)
         let drag = WindowDragState(
-            windowID: vm.plates[0].windows[0].id,
-            sourceStageIndex: 0,
+            windowID: vm.stages[0].windows[0].id,
+            sourceSpaceIndex: 0,
             sourceWindowIndex: 0,
             location: CGPoint(x: 600, y: 330),
-            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 0)
+            dropTarget: WindowDropTarget(spaceIndex: 1, windowIndex: 0)
         )
-        let idle = renderPlateSurfaceFrames(OverlaySwiftUIView(viewModel: vm), size: size)
-        let dragging = renderPlateSurfaceFrames(
-            OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag),
+        let idle = renderStageSurfaceFrames(StageOverlayView(viewModel: vm), size: size)
+        let dragging = renderStageSurfaceFrames(
+            StageOverlayView(viewModel: vm, initialWindowDrag: drag),
             size: size
         )
 
@@ -366,24 +366,24 @@ struct ScreenshotTests {
         #expect(dragging[1]!.width > idle[1]!.width)
     }
 
-    @Test("Cross-stage drag keeps source icons inside its centered plate surface")
-    func crossStageDragKeepsSourceIconsInsidePlateSurface() throws {
-        let vm = makeSampleViewModel(stageCount: 2, windowsPerStage: [3, 2], activeIndex: 0)
+    @Test("Cross-space drag keeps source icons inside its centered stage surface")
+    func crossSpaceDragKeepsSourceIconsInsideStageSurface() throws {
+        let vm = makeSampleViewModel(spaceCount: 2, windowsPerSpace: [3, 2], activeIndex: 0)
         let size = NSSize(width: 1200, height: 500)
         let drag = WindowDragState(
-            windowID: vm.plates[0].windows[2].id,
-            sourceStageIndex: 0,
+            windowID: vm.stages[0].windows[2].id,
+            sourceSpaceIndex: 0,
             sourceWindowIndex: 2,
             location: CGPoint(x: 600, y: 330),
-            dropTarget: WindowDropTarget(stageIndex: 1, windowIndex: 0)
+            dropTarget: WindowDropTarget(spaceIndex: 1, windowIndex: 0)
         )
-        let view = OverlaySwiftUIView(viewModel: vm, initialWindowDrag: drag)
-        let surfaces = renderPlateSurfaceFrames(view, size: size)
+        let view = StageOverlayView(viewModel: vm, initialWindowDrag: drag)
+        let surfaces = renderStageSurfaceFrames(view, size: size)
         let windows = renderWindowFrames(view, size: size)
 
         let sourceSurface = try #require(surfaces[0])
         let visibleSourceFrames = windows
-            .filter { $0.key.stageIndex == 0 && $0.key.windowIndex != 2 }
+            .filter { $0.key.spaceIndex == 0 && $0.key.windowIndex != 2 }
             .map(\.value)
         let sourceBounds = try #require(visibleSourceFrames.reduce(nil as CGRect?) { bounds, frame in
             bounds.map { $0.union(frame) } ?? frame
@@ -397,11 +397,11 @@ struct ScreenshotTests {
     @Test("Display stack indicator clears the menu bar")
     func displayStackIndicatorClearsMenuBar() throws {
         var manager = makeSampleViewModel(
-            stageCount: 3,
-            windowsPerStage: [3, 2, 1],
+            spaceCount: 3,
+            windowsPerSpace: [3, 2, 1],
             activeIndex: 1
-        ).stageManager
-        manager.reconcileStageStacks(with: SpaceTopology(separateSpaces: true, stacks: [
+        ).spaceManager
+        manager.reconcileSpaceStacks(with: SpaceTopology(separateSpaces: true, stacks: [
             SpaceStackDescriptor(
                 id: "display-a", displayID: 1, displayName: "Studio Display",
                 frame: .zero, desktopIDs: [10, 11, 12], currentDesktopID: 11
@@ -411,15 +411,15 @@ struct ScreenshotTests {
                 frame: .zero, desktopIDs: [20], currentDesktopID: 20
             ),
         ]))
-        let vm = OverlayViewModel(
-            stageManager: manager,
-            activeStageIndex: 1,
+        let vm = StageOverlayViewModel(
+            spaceManager: manager,
+            activeSpaceIndex: 1,
             selectedWindowIndex: 1,
             displayTopContentInset: 22
         )
 
         guard let image = renderSwiftUI(
-            OverlaySwiftUIView(viewModel: vm),
+            StageOverlayView(viewModel: vm),
             size: NSSize(width: 1200, height: 600)
         ) else {
             throw ScreenshotError.renderFailed

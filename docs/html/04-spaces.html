@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>04 · Stages &amp; switching — Debut</title>
+<title>04 · Spaces &amp; switching — Debut</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -18,7 +18,7 @@
     <li><a href="01-concepts.html"><span class="num">01</span>Concepts</a></li>
     <li><a href="02-architecture.html"><span class="num">02</span>Architecture</a></li>
     <li><a href="03-window-tracking.html"><span class="num">03</span>Window tracking</a></li>
-    <li><a class="current" href="04-stages.html"><span class="num">04</span>Stages &amp; switching</a></li>
+    <li><a class="current" href="04-spaces.html"><span class="num">04</span>Spaces &amp; switching</a></li>
     <li><a href="05-keyboard.html"><span class="num">05</span>Keyboard</a></li>
     <li><a href="06-overlay.html"><span class="num">06</span>The overlay</a></li>
     <li><a href="07-persistence.html"><span class="num">07</span>Persistence</a></li>
@@ -32,10 +32,10 @@
 <main>
 
 <p class="eyebrow">Chapter 04</p>
-<h1>Stages and switching</h1>
+<h1>Spaces and switching</h1>
 <p class="lede">
-The model that holds the stages, the controller that acts on the system, the
-exact sequence that makes a stage switch look instantaneous, and the full-screen
+The model that holds the spaces, the controller that acts on the system, the
+exact sequence that makes a space switch look instantaneous, and the full-screen
 window that makes the whole approach possible.
 </p>
 
@@ -47,11 +47,11 @@ before reading either file.
 </p>
 
 <table>
-  <tr><th></th><th><code>StageManager</code></th><th><code>StageController</code></th></tr>
+  <tr><th></th><th><code>SpaceManager</code></th><th><code>SpaceController</code></th></tr>
   <tr>
     <td>Kind</td>
-    <td><code>struct … Codable, Sendable</code> <span class="src">Models/StageManager.swift:14</span></td>
-    <td><code>final class … @unchecked Sendable</code> <span class="src">Services/StageController.swift:151</span></td>
+    <td><code>struct … Codable, Sendable</code> <span class="src">Models/SpaceManager.swift:14</span></td>
+    <td><code>final class … @unchecked Sendable</code> <span class="src">Services/SpaceController.swift:151</span></td>
   </tr>
   <tr>
     <td>Imports</td>
@@ -60,22 +60,22 @@ before reading either file.
   </tr>
   <tr>
     <td>Holds</td>
-    <td><code>stages</code>, <code>activeStageID</code>, <code>dormantWindowAssignments</code></td>
-    <td>The <code>StageManager</code> value, services, preview cache, overlay state, and the <em>selection</em></td>
+    <td><code>spaces</code>, <code>activeSpaceID</code>, <code>dormantWindowAssignments</code></td>
+    <td>The <code>SpaceManager</code> value, services, preview cache, overlay state, and the <em>selection</em></td>
   </tr>
   <tr>
     <td>Methods</td>
-    <td>Queries (<code>activeStage</code>, <code>stage(atIndex:)</code>, <code>stageContainingWindow</code>) plus <code>mutating func</code>s that touch nothing outside the struct</td>
+    <td>Queries (<code>activeSpace</code>, <code>space(atIndex:)</code>, <code>spaceContainingWindow</code>) plus <code>mutating func</code>s that touch nothing outside the struct</td>
     <td>Side effects on real windows</td>
   </tr>
 </table>
 
 <p>
 The distinction that trips people up: the model tracks the <strong>committed</strong>
-active stage; the controller tracks the <strong>tentative</strong> overlay
-selection, in <code>selectedStageIndex</code> and <code>selectedWindowIndex</code>.
+active space; the controller tracks the <strong>tentative</strong> overlay
+selection, in <code>selectedSpaceIndex</code> and <code>selectedWindowIndex</code>.
 While the overlay is open those two disagree, and that is the point — moving the
-selection must not switch stages. They reconcile in <code>commitSelection()</code>
+selection must not switch spaces. They reconcile in <code>commitSelection()</code>
 when the modifier is released.
 </p>
 
@@ -88,7 +88,7 @@ the code names:
 <blockquote>
 Rebuild into a local copy so discovery diagnostics can read controller state
 without an overlapping exclusive access.
-<cite>paraphrasing StageController.swift:306</cite>
+<cite>paraphrasing SpaceController.swift:306</cite>
 </blockquote>
 
 <p>
@@ -99,27 +99,27 @@ guarding exactly that.
 <h2>The activation sequence</h2>
 
 <p>
-<code>switchToStage(id:raiseWindowID:)</code>&nbsp;<span class="src">StageController.swift:245</span>
-is the single entry point for becoming a different stage, and its ordering is the
+<code>switchToSpace(id:raiseWindowID:)</code>&nbsp;<span class="src">SpaceController.swift:245</span>
+is the single entry point for becoming a different space, and its ordering is the
 core trick of the product.
 </p>
 
 <div class="diagram">1. Clear any in-flight same-app cycle state.
 
-   -- everything below only if the target differs from the current stage --
+   -- everything below only if the target differs from the current space --
 
-2. Record previousStageID; stageManager.activateStage(id:)
+2. Record previousSpaceID; spaceManager.activateSpace(id:)
        the model flips first, so anything reading state sees the new truth
 
 3. desktopSurfaces.orderToFront()
        the full-screen surface jumps above EVERY window: total occlusion
 
-4. For each window in the target stage: windowService.raiseWindow(windowID:)
+4. For each window in the target space: windowService.raiseWindow(windowID:)
        AX-raises them back above the surface, in MRU order
 
-5. Emit the stage_switched diagnostic
+5. Emit the space_switched diagnostic
 
-   -- always, even for a same-stage commit --
+   -- always, even for a same-space commit --
 
 6. Focus one window: raise it, bringWindowToFront in the model,
    then exactly ONE NSRunningApplication.activate(bundleID:)</div>
@@ -140,35 +140,35 @@ Three details make it work:
   per window would produce a visible flash of each app in turn; the code comment
   is simply "single activation, no flash".</li>
 
-  <li><strong>Steps 2–5 are skipped for a same-stage commit.</strong> The whole
-  block, from recording <code>previousStageID</code> through raising the stage's
-  windows, sits behind a <code>previousID != targetID</code> guard&nbsp;<span class="src">StageController.swift:263</span>.
-  Choosing a different window inside the current stage must not reshuffle z-order
+  <li><strong>Steps 2–5 are skipped for a same-space commit.</strong> The whole
+  block, from recording <code>previousSpaceID</code> through raising the space's
+  windows, sits behind a <code>previousID != targetID</code> guard&nbsp;<span class="src">SpaceController.swift:263</span>.
+  Choosing a different window inside the current space must not reshuffle z-order
   for everything else.</li>
 </ul>
 
 <h2>MRU is the array</h2>
 
 <p>
-There is no separate recency list. <code>Stage.windows</code> <em>is</em> the MRU
+There is no separate recency list. <code>Space.windows</code> <em>is</em> the MRU
 order, most recent first, and the only mutator is
-<code>Stage.bringWindowToFront(windowID:)</code>&nbsp;<span class="src">Models/Stage.swift:54</span>,
+<code>Space.bringWindowToFront(windowID:)</code>&nbsp;<span class="src">Models/Space.swift:54</span>,
 which removes and reinserts at index 0.
 </p>
 
 <p>Four events promote a window:</p>
 
 <ul class="tight">
-  <li><code>recordWindowActivation</code> when the window is already in the active stage</li>
+  <li><code>recordWindowActivation</code> when the window is already in the active space</li>
   <li>a tap of the activation shortcut</li>
   <li>committing a same-app cycle (the cycle raises windows live but only commits MRU on release)</li>
-  <li>the focus step of <code>switchToStage</code></li>
+  <li>the focus step of <code>switchToSpace</code></li>
 </ul>
 
 <p>
 Selection defaults read straight off that ordering.
-<code>openOverlay(selectNextWindow:)</code>&nbsp;<span class="src">StageController.swift:577</span>
-sets the selected index to 1 — the second most recent window — unless the stage
+<code>openOverlay(selectNextWindow:)</code>&nbsp;<span class="src">SpaceController.swift:577</span>
+sets the selected index to 1 — the second most recent window — unless the space
 has fewer than two windows, <em>or</em> the frontmost application is excluded from
 Debut. In the excluded case there is nothing to skip past, so index 0 is correct.
 The exclusion flag is pushed in from the delegate, never queried.
@@ -177,19 +177,19 @@ The exclusion flag is pushed in from the delegate, never queried.
 <h2>Assignment: the three-branch core</h2>
 
 <p>
-<code>recordWindowActivation(windowID:)</code>&nbsp;<span class="src">StageController.swift:323</span>
+<code>recordWindowActivation(windowID:)</code>&nbsp;<span class="src">SpaceController.swift:323</span>
 is where the assignment rules from chapter 1 actually live:
 </p>
 
-<pre><code>owner stage == active stage   ->  promote in MRU, nothing else
-owner stage != active stage   ->  switchToStage(id: ownerStageID, raiseWindowID: windowID)
+<pre><code>owner space == active space   ->  promote in MRU, nothing else
+owner space != active space   ->  switchToSpace(id: ownerSpaceID, raiseWindowID: windowID)
 no owner at all               ->  look the window up in the window service,
-                                  build a StageWindow, add it to the ACTIVE stage</code></pre>
+                                  build a SpaceWindow, add it to the ACTIVE space</code></pre>
 
 <p>
 The third branch is annotated with its motivating case: <code>code .</code>
 creating a new editor window while other windows of that editor live in a
-different stage. The new window belongs where you are, not where its siblings
+different space. The new window belongs where you are, not where its siblings
 are.
 </p>
 
@@ -199,56 +199,56 @@ activations of windows inside that cycle are ignored, so the Accessibility focus
 callbacks the cycle itself generates cannot scramble the MRU order mid-cycle.
 </p>
 
-<h2>Stage mutations</h2>
+<h2>Space mutations</h2>
 
 <dl>
-  <dt>Create <span class="src">StageManager.swift:66</span></dt>
+  <dt>Create <span class="src">SpaceManager.swift:66</span></dt>
   <dd>Inserts at the active index (above) or after it (below) and immediately
-  activates the new stage. The controller first activates the <em>selected</em>
-  stage, because insertion is relative to <code>activeStageID</code> and the
+  activates the new space. The controller first activates the <em>selected</em>
+  space, because insertion is relative to <code>activeSpaceID</code> and the
   overlay selection may have moved.</dd>
 
-  <dt>Delete <span class="src">StageManager.swift:81</span></dt>
-  <dd>Deleting the only stage wipes and recreates a fresh default rather than
-  leaving zero stages. Otherwise the overflow target is index 1 when deleting
+  <dt>Delete <span class="src">SpaceManager.swift:81</span></dt>
+  <dd>Deleting the only space wipes and recreates a fresh default rather than
+  leaving zero spaces. Otherwise the overflow target is index 1 when deleting
   index 0, and <code>index - 1</code> in every other case; the windows are
-  appended to that stage before the removal, and the active stage follows
+  appended to that space before the removal, and the active space follows
   them.</dd>
 
-  <dt>Move a window <span class="src">StageManager.swift:276</span></dt>
-  <dd><code>moveWindow(windowID:fromStageID:toStageID:at:)</code> appends when
+  <dt>Move a window <span class="src">SpaceManager.swift:276</span></dt>
+  <dd><code>moveWindow(windowID:fromSpaceID:toSpaceID:at:)</code> appends when
   <code>at</code> is nil and inserts at an index otherwise — which is how a drag
-  preserves the position you dropped at. Its guard permits a same-stage move
-  precisely when an index is supplied, which is what makes in-stage reordering by
+  preserves the position you dropped at. Its guard permits a same-space move
+  precisely when an index is supplied, which is what makes in-space reordering by
   drag possible.</dd>
 
-  <dt>Prune <span class="src">StageManager.swift:138</span></dt>
-  <dd><code>removeEmptyStages()</code> keeps any stage holding dormant
-  assignments, and keeps everything if all stages are empty. There is always at
-  least one stage.</dd>
+  <dt>Prune <span class="src">SpaceManager.swift:138</span></dt>
+  <dd><code>removeEmptySpaces()</code> keeps any space holding dormant
+  assignments, and keeps everything if all spaces are empty. There is always at
+  least one space.</dd>
 </dl>
 
 <div class="note">
   <span class="label">Known rough edge</span>
   <p>
-  In <code>deleteStage</code>&nbsp;<span class="src">StageManager.swift:94</span>,
+  In <code>deleteSpace</code>&nbsp;<span class="src">SpaceManager.swift:94</span>,
   the new active index is computed as
-  <code>min(overflowIndex, stages.count - 1)</code> against <em>post-removal</em>
+  <code>min(overflowIndex, spaces.count - 1)</code> against <em>post-removal</em>
   indices, while <code>overflowIndex</code> was computed <em>pre-removal</em>.
   </p>
   <p>
-  Deleting the stage at index <strong>0</strong> when three or more stages exist
-  sets <code>overflowIndex = 1</code>, moves the windows into that stage, then
+  Deleting the space at index <strong>0</strong> when three or more spaces exist
+  sets <code>overflowIndex = 1</code>, moves the windows into that space, then
   removes index 0 — which shifts the overflow destination down to index 0.
-  <code>min(1, count-1)</code> then activates the stage <em>after</em> the one that
+  <code>min(1, count-1)</code> then activates the space <em>after</em> the one that
   received the windows. Deleting any non-zero index is correct, because
   <code>index - 1</code> is unaffected by the removal, and deleting index 0 of
-  exactly two stages is correct by coincidence of the <code>min</code>.
+  exactly two spaces is correct by coincidence of the <code>min</code>.
   </p>
   <p>
-  <code>StageManagerTests.swift</code> has three <code>deleteStage</code> tests
-  (:55, :360) and none of them asserts <code>activeStageID</code> for this case.
-  <code>spec/stage-manager.md:105</code> says the active stage should follow the
+  <code>SpaceManagerTests.swift</code> has three <code>deleteSpace</code> tests
+  (:55, :360) and none of them asserts <code>activeSpaceID</code> for this case.
+  <code>spec/space-manager.md:105</code> says the active space should follow the
   overflow, so the code looks wrong — but verify against the spec before you
   "fix" it.
   </p>
@@ -268,7 +268,7 @@ so multi-monitor behaviour is unit-testable without monitors.
 
 <table>
   <tr><th>Property</th><th>Value</th><th>Reason</th></tr>
-  <tr><td><code>level</code></td><td><code>.normal</code></td><td>It must sit <em>between</em> ordinary windows in z-order, not above them. A higher level would cover the active stage too.</td></tr>
+  <tr><td><code>level</code></td><td><code>.normal</code></td><td>It must sit <em>between</em> ordinary windows in z-order, not above them. A higher level would cover the active space too.</td></tr>
   <tr><td><code>collectionBehavior</code></td><td><code>[.transient, .ignoresCycle]</code></td><td>Keeps it out of Mission Control and out of Cmd+Tab.</td></tr>
   <tr><td>&nbsp;</td><td><strong>not</strong> <code>.canJoinAllSpaces</code></td><td>Joining all Spaces makes the surface follow you into a full-screen Space and cover the app you went there to use.</td></tr>
   <tr><td><code>canBecomeKey</code> / <code>canBecomeMain</code></td><td><code>false</code></td><td>It must never steal focus from the windows it is occluding.</td></tr>
@@ -323,7 +323,7 @@ UI windows.
 <h2>Talking to the rest of the app</h2>
 
 <p>
-Downward, the controller uses a weak <code>StageControllerDelegate</code> with six
+Downward, the controller uses a weak <code>SpaceControllerDelegate</code> with six
 methods. Two of them have overloads carrying an
 <code>OverlayPresentationContext?</code> so a UI update can be correlated with the
 trace that caused it; protocol-extension defaults forward the context-free
@@ -334,7 +334,7 @@ did not justify protocol methods.
 
 <p>
 Upward, the controller <em>is</em> the keyboard delegate.
-<code>handleKeyEvent(_:overlayPresentation:)</code>&nbsp;<span class="src">StageController.swift:399</span>
+<code>handleKeyEvent(_:overlayPresentation:)</code>&nbsp;<span class="src">SpaceController.swift:399</span>
 is one switch over the <code>DebutKeyEvent</code> enum, and it is where every
 interaction in chapter 5 lands.
 </p>

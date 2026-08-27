@@ -1,28 +1,28 @@
 import AppKit
 
-/// Debut's mark: the active stage as a full-width bar between two shorter, dimmer
-/// neighbours — the overlay's plate stack reduced to what survives at 16pt.
+/// Debut's mark: the active space as a full-width bar between two shorter, dimmer
+/// neighbours — the overlay's stage stack reduced to what survives at 16pt.
 public enum DebutGlyph {
     /// Geometry in unit coordinates with a top-left origin, matching
     /// `docs/media/icons/debut-menubar.svg`.
-    private struct Stage {
+    private struct Space {
         let frame: CGRect
         let radius: CGFloat
         let alpha: CGFloat
     }
 
-    private static let stages = [
-        Stage(
+    private static let spaces = [
+        Space(
             frame: CGRect(x: 0.1875, y: 0.15625, width: 0.625, height: 0.15625),
             radius: 0.0625,
             alpha: 0.45
         ),
-        Stage(
+        Space(
             frame: CGRect(x: 0.0625, y: 0.40625, width: 0.875, height: 0.1875),
             radius: 0.078125,
             alpha: 1
         ),
-        Stage(
+        Space(
             frame: CGRect(x: 0.1875, y: 0.6875, width: 0.625, height: 0.15625),
             radius: 0.0625,
             alpha: 0.45
@@ -38,15 +38,15 @@ public enum DebutGlyph {
             size: NSSize(width: size, height: size),
             flipped: true
         ) { _ in
-            for stage in stages {
+            for space in spaces {
                 let frame = CGRect(
-                    x: stage.frame.minX * size,
-                    y: stage.frame.minY * size,
-                    width: stage.frame.width * size,
-                    height: stage.frame.height * size
+                    x: space.frame.minX * size,
+                    y: space.frame.minY * size,
+                    width: space.frame.width * size,
+                    height: space.frame.height * size
                 )
-                let radius = stage.radius * size
-                NSColor.black.withAlphaComponent(stage.alpha).setFill()
+                let radius = space.radius * size
+                NSColor.black.withAlphaComponent(space.alpha).setFill()
                 NSBezierPath(roundedRect: frame, xRadius: radius, yRadius: radius).fill()
             }
             return true

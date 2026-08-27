@@ -62,7 +62,7 @@ public struct DiagnosticScreenSnapshot: Sendable {
 }
 
 public struct DiagnosticExportSnapshot: Sendable {
-    public let stageManager: StageManager
+    public let spaceManager: SpaceManager
     public let settings: AppSettings
     public let liveWindows: [WindowInfo]
     public let runningApps: [AppInfo]
@@ -74,7 +74,7 @@ public struct DiagnosticExportSnapshot: Sendable {
     public let screens: [DiagnosticScreenSnapshot]
 
     public init(
-        stageManager: StageManager,
+        spaceManager: SpaceManager,
         settings: AppSettings,
         liveWindows: [WindowInfo],
         runningApps: [AppInfo],
@@ -85,7 +85,7 @@ public struct DiagnosticExportSnapshot: Sendable {
         accessibilityEnabled: Bool,
         screens: [DiagnosticScreenSnapshot]
     ) {
-        self.stageManager = stageManager
+        self.spaceManager = spaceManager
         self.settings = settings
         self.liveWindows = liveWindows
         self.runningApps = runningApps
@@ -98,7 +98,7 @@ public struct DiagnosticExportSnapshot: Sendable {
     }
 
     public static let empty = DiagnosticExportSnapshot(
-        stageManager: StageManager(),
+        spaceManager: SpaceManager(),
         settings: AppSettings(),
         liveWindows: [],
         runningApps: [],
@@ -180,7 +180,7 @@ public final class DiagnosticExporter {
             frontmostBundleID = NSNull()
         }
         return [
-            "stageManager": try jsonObject(snapshot.stageManager),
+            "spaceManager": try jsonObject(snapshot.spaceManager),
             "settings": try jsonObject(snapshot.settings),
             "discoveredWindows": snapshot.liveWindows
                 .sorted { $0.windowID < $1.windowID }

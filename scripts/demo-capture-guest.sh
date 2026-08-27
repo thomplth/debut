@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Guest half of the README media capture. Mirrors tart-e2e-guest.sh — install the host
-# build, grant TCC, stage windows, run a driver — but the windows here are meant to look
+# build, grant TCC, space windows, run a driver — but the windows here are meant to look
 # like a desk someone works at, not like deterministic fixtures.
 
 SHARE_DIR="/Volumes/My Shared Files"
@@ -101,8 +101,8 @@ Release notes — draft
 Shipped
   * The overlay opens on the display holding the focused window, not
     on whichever display macOS calls main.
-  * The plates reach inside a full-screen app's Space.
-  * Stage labels follow position, so they need no rename.
+  * The stages reach inside a full-screen app's Space.
+  * Space labels follow position, so they need no rename.
   * Quitting an app no longer forgets where its windows lived; the
     assignments go dormant and come back on the next launch.
 
@@ -112,19 +112,19 @@ Still to write up
   * The exclusion list, and the five layers that have to honour it.
 TXT
 cat > "$DESK_DIR/Notes.txt" <<'TXT'
-Stages
+Spaces
 ======
 
   1  Writing   — the draft and the docs
   2  Review    — the diff and the terminal
   3  Reading   — everything that can wait
 
-Command-Tab cycles inside a stage. It never leaves one.
-Command-Option-Tab moves between the stages themselves.
-Control-1 through Control-9 jump straight to a stage.
+Command-Tab cycles inside a space. It never leaves one.
+Command-Option-Tab moves between the spaces themselves.
+Control-1 through Control-9 jump straight to a space.
 
 Down-arrow inside the overlay sends the selected window to the
-stage below, which is how the three above got their windows.
+space below, which is how the three above got their windows.
 TXT
 cat > "$DESK_DIR/Reading list.txt" <<'TXT'
 Reading list
@@ -137,7 +137,7 @@ Reading list
   [x]  Spaces, and the parts of them that are private API
 
 Nothing here is urgent, which is the whole reason it lives on
-its own stage.
+its own space.
 TXT
 chown -R "$console_user" "$DESK_DIR"
 
@@ -165,13 +165,13 @@ SH
 chmod +x "$DESK_DIR/session.command" "$DESK_DIR/events.command"
 chown -R "$console_user" "$DESK_DIR"
 
-# Nine windows: arrangeStages moves six out of the startup stage, and three plates of three is
+# Nine windows: arrangeSpaces moves six out of the startup space, and three stages of three is
 # what the README is trying to show.
 as_console open -a Safari "$DESK_DIR/html/index.html"
 sleep 5
 as_console open -a Safari "$DESK_DIR/html/02-architecture.html"
 sleep 4
-as_console open -a Safari "$DESK_DIR/html/04-stages.html"
+as_console open -a Safari "$DESK_DIR/html/04-spaces.html"
 sleep 4
 as_console open -a Calculator
 sleep 3

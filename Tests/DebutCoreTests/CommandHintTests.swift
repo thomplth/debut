@@ -5,10 +5,10 @@ import Testing
 
 @Suite("Command hints")
 struct CommandHintTests {
-    @Test("Stage spacing expands only when a footer hint is visible")
+    @Test("Space spacing expands only when a footer hint is visible")
     func stageSpacing() {
-        #expect(PlateConstants.stageSpacing(hasVisibleFooterHints: false) == 14)
-        #expect(PlateConstants.stageSpacing(hasVisibleFooterHints: true) == 34)
+        #expect(StageConstants.stageSpacing(hasVisibleFooterHints: false) == 14)
+        #expect(StageConstants.stageSpacing(hasVisibleFooterHints: true) == 34)
     }
 
     @Test("Automatic hints retire after the third use of that command")
@@ -34,11 +34,11 @@ struct CommandHintTests {
         #expect(settings.commandUsageCounts[.moveWindowLeft] == 3)
     }
 
-    @Test("Every footer command retires, collapsing the stage spacing")
+    @Test("Every footer command retires, collapsing the space spacing")
     func footerHintsRetireCompletely() {
         var settings = AppSettings()
-        let footerActions = CommandHintCatalog.plateFooterHints(
-            stageIndex: 0,
+        let footerActions = CommandHintCatalog.stageFooterHints(
+            spaceIndex: 0,
             isActive: true,
             hasSelectedWindow: true,
             settings: settings
@@ -49,24 +49,24 @@ struct CommandHintTests {
             for _ in 0..<3 { _ = settings.recordCommandUsage(action) }
         }
 
-        let remaining = CommandHintCatalog.plateFooterHints(
-            stageIndex: 0,
+        let remaining = CommandHintCatalog.stageFooterHints(
+            spaceIndex: 0,
             isActive: true,
             hasSelectedWindow: true,
             settings: settings
         )
         #expect(remaining.isEmpty)
         #expect(
-            PlateConstants.stageSpacing(hasVisibleFooterHints: !remaining.isEmpty)
-                == PlateConstants.compactStageSpacing
+            StageConstants.stageSpacing(hasVisibleFooterHints: !remaining.isEmpty)
+                == StageConstants.compactStageSpacing
         )
     }
 
     @Test("Footer hints cover every command the overlay accepts on a selected window")
     func footerHintsCoverWindowCommands() {
         let settings = AppSettings()
-        let hints = CommandHintCatalog.plateFooterHints(
-            stageIndex: 0,
+        let hints = CommandHintCatalog.stageFooterHints(
+            spaceIndex: 0,
             isActive: true,
             hasSelectedWindow: true,
             settings: settings
@@ -109,8 +109,8 @@ struct CommandHintTests {
     func footerOmitsQuitHint() {
         var settings = AppSettings()
         settings.commandHintVisibility = .always
-        let hints = CommandHintCatalog.plateFooterHints(
-            stageIndex: 0,
+        let hints = CommandHintCatalog.stageFooterHints(
+            spaceIndex: 0,
             isActive: true,
             hasSelectedWindow: true,
             settings: settings
@@ -120,26 +120,26 @@ struct CommandHintTests {
         #expect(!hints.flatMap(\.actions).contains(.closeSelectedWindow))
     }
 
-    @Test("The footer never offers to reorder stages")
-    func footerOmitsStageReorderHint() {
+    @Test("The footer never offers to reorder spaces")
+    func footerOmitsSpaceReorderHint() {
         var settings = AppSettings()
         settings.commandHintVisibility = .always
-        let hints = CommandHintCatalog.plateFooterHints(
-            stageIndex: 0,
+        let hints = CommandHintCatalog.stageFooterHints(
+            spaceIndex: 0,
             isActive: true,
             hasSelectedWindow: true,
             settings: settings
         )
 
-        #expect(!hints.contains { $0.label == "Reorder stage" })
-        #expect(!hints.flatMap(\.actions).contains { $0.rawValue.hasPrefix("swapStage") })
+        #expect(!hints.contains { $0.label == "Reorder space" })
+        #expect(!hints.flatMap(\.actions).contains { $0.rawValue.hasPrefix("swapSpace") })
     }
 
-    @Test("Hints that need a window disappear when the stage has none")
+    @Test("Hints that need a window disappear when the space has none")
     func footerHintsWithoutSelection() {
         let settings = AppSettings()
-        let hints = CommandHintCatalog.plateFooterHints(
-            stageIndex: 0,
+        let hints = CommandHintCatalog.stageFooterHints(
+            spaceIndex: 0,
             isActive: true,
             hasSelectedWindow: false,
             settings: settings
@@ -175,34 +175,34 @@ struct CommandHintTests {
         #expect(settings.shouldShowCommandHint(for: .moveWindowLeft))
     }
 
-    @Test("Stage number hints sit left of every plate without an icon")
-    func stageHintCatalog() {
+    @Test("Space number hints sit left of every stage without an icon")
+    func spaceHintCatalog() {
         var settings = AppSettings()
         settings.keyBindings.bindings[.moveWindowLeft] = KeyCombo(keyCode: kVK_ANSI_B)
 
-        let numberHint = CommandHintCatalog.stageNumberHint(
-            stageIndex: 0,
+        let numberHint = CommandHintCatalog.spaceNumberHint(
+            spaceIndex: 0,
             settings: settings
         )
 
-        #expect(numberHint?.actions == [.jumpToStage1])
+        #expect(numberHint?.actions == [.jumpToSpace1])
         #expect(numberHint?.placement == .stageLeading)
         #expect(numberHint?.iconSystemName == nil)
     }
 
-    @Test("Active plate actions sit below the plate and use purpose icons")
-    func plateFooterCatalog() {
+    @Test("Active stage actions sit below the stage and use purpose icons")
+    func stageFooterCatalog() {
         var settings = AppSettings()
         settings.keyBindings.bindings[.moveWindowLeft] = KeyCombo(keyCode: kVK_ANSI_B)
 
-        let inactiveHints = CommandHintCatalog.plateFooterHints(
-            stageIndex: 0,
+        let inactiveHints = CommandHintCatalog.stageFooterHints(
+            spaceIndex: 0,
             isActive: false,
             hasSelectedWindow: false,
             settings: settings
         )
-        let activeHints = CommandHintCatalog.plateFooterHints(
-            stageIndex: 0,
+        let activeHints = CommandHintCatalog.stageFooterHints(
+            spaceIndex: 0,
             isActive: true,
             hasSelectedWindow: true,
             settings: settings
@@ -212,7 +212,7 @@ struct CommandHintTests {
         #expect(activeHints.flatMap(\.actions).contains(.moveWindowLeft))
         #expect(activeHints.flatMap(\.actions).contains(.moveWindowUp))
         #expect(activeHints.first(where: { $0.actions.contains(.moveWindowLeft) })?.shortcut.contains("B") == true)
-        #expect(activeHints.allSatisfy { $0.placement == .plateFooter })
+        #expect(activeHints.allSatisfy { $0.placement == .stageFooter })
         #expect(activeHints.allSatisfy { $0.iconSystemName != nil })
     }
 
@@ -251,8 +251,8 @@ struct CommandHintTests {
         var settings = AppSettings()
         settings.commandUsageCounts[.moveWindowUp] = 3
 
-        let hints = CommandHintCatalog.plateFooterHints(
-            stageIndex: 0,
+        let hints = CommandHintCatalog.stageFooterHints(
+            spaceIndex: 0,
             isActive: true,
             hasSelectedWindow: true,
             settings: settings
@@ -266,9 +266,9 @@ struct CommandHintTests {
     @Test("Key events map to hint usage without counting auto-repeat")
     func eventActionMapping() {
         #expect(DebutKeyEvent.cmdTabHold.commandHintAction == .nextWindow)
-        #expect(DebutKeyEvent.cmdOptionTabHold.commandHintAction == .nextStage)
+        #expect(DebutKeyEvent.cmdOptionTabHold.commandHintAction == .nextSpace)
         #expect(DebutKeyEvent.moveWindowLeft.commandHintAction == .moveWindowLeft)
-        #expect(DebutKeyEvent.jumpToLastStage.commandHintAction == .jumpToStage9)
+        #expect(DebutKeyEvent.jumpToLastSpace.commandHintAction == .jumpToSpace9)
         #expect(DebutKeyEvent.escape.commandHintAction == .dismissOverlay)
         #expect(DebutKeyEvent.nextWindowRepeat.commandHintAction == nil)
         #expect(DebutKeyEvent.cmdRelease.commandHintAction == nil)

@@ -17,16 +17,16 @@ struct DiagnosticExporterTests {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        var manager = StageManager()
+        var manager = SpaceManager()
         manager.addWindow(
-            StageWindow(
+            SpaceWindow(
                 windowID: 41,
                 ownerBundleID: "com.example.Editor",
                 ownerName: "Editor",
                 windowTitle: "Runtime document",
                 ownerPID: 501
             ),
-            toStageID: manager.activeStageID
+            toSpaceID: manager.activeSpaceID
         )
         let store = StateStore(directory: directory)
         try store.save(manager)
@@ -35,7 +35,7 @@ struct DiagnosticExporterTests {
         try store.saveSettings(settings)
 
         let reporter = DiagnosticReporter(directory: directory)
-        reporter.setStateProvider { ["stageCount": "1", "windowCountsByStage": "1"] }
+        reporter.setStateProvider { ["spaceCount": "1", "windowCountsBySpace": "1"] }
         reporter.report("tracking_failed", details: [
             "windowID": "99",
             "step": "element_lookup",
@@ -43,7 +43,7 @@ struct DiagnosticExporterTests {
         reporter.flush()
 
         let snapshot = DiagnosticExportSnapshot(
-            stageManager: manager,
+            spaceManager: manager,
             settings: settings,
             liveWindows: [
                 WindowInfo(
@@ -112,8 +112,8 @@ struct DiagnosticExporterTests {
 
         let persisted = try #require(root["persisted"] as? [String: Any])
         let persistedState = try #require(persisted["state"] as? [String: Any])
-        let stages = try #require(persistedState["stages"] as? [[String: Any]])
-        let persistedWindows = try #require(stages.first?["windows"] as? [[String: Any]])
+        let spaces = try #require(persistedState["spaces"] as? [[String: Any]])
+        let persistedWindows = try #require(spaces.first?["windows"] as? [[String: Any]])
         #expect(persistedWindows.first?["windowTitle"] as? String == "Runtime document")
 
         let diagnostic = try #require(root["diagnostic"] as? [String: Any])
@@ -121,7 +121,7 @@ struct DiagnosticExporterTests {
         #expect(currentLog.last?["event"] as? String == "tracking_failed")
         let currentSnapshot = try #require(diagnostic["currentSnapshot"] as? [String: Any])
         let diagnosticState = try #require(currentSnapshot["state"] as? [String: String])
-        #expect(diagnosticState["stageCount"] == "1")
+        #expect(diagnosticState["spaceCount"] == "1")
     }
 
     @Test("Export records missing support files instead of failing")

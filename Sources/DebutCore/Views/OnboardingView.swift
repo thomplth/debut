@@ -87,7 +87,7 @@ public struct OnboardingView: View {
 
             HStack(spacing: 22) {
                 welcomeFeature(icon: "macwindow.on.rectangle", label: "See every window")
-                welcomeFeature(icon: "rectangle.3.group", label: "Organize stages")
+                welcomeFeature(icon: "rectangle.3.group", label: "Organize spaces")
                 welcomeFeature(icon: "keyboard", label: "Stay on the keyboard")
             }
 
@@ -136,7 +136,7 @@ public struct OnboardingView: View {
                 permissionCard(
                     icon: "accessibility",
                     title: "Accessibility",
-                    detail: "Required to discover, focus, and arrange your app windows. Debut cannot manage stages without it.",
+                    detail: "Required to discover, focus, and arrange your app windows. Debut cannot manage spaces without it.",
                     badge: "Required",
                     isGranted: viewModel.permissions.accessibilityGranted,
                     action: viewModel.requestAccessibility
@@ -329,8 +329,8 @@ public struct OnboardingView: View {
             TutorialContent(
                 icon: "rectangle.portrait.and.arrow.forward",
                 shortTitle: "Move",
-                title: "Move a window between stages",
-                detail: "Select a window and press the Down Arrow, or drag its card onto another stage. Debut keeps each window in one stage.",
+                title: "Move a window between spaces",
+                detail: "Select a window and press the Down Arrow, or drag its card onto another space. Debut keeps each window in one space.",
                 shortcut: "↓  or  drag"
             )
         }
