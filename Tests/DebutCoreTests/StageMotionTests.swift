@@ -889,9 +889,9 @@ struct StageMotionTests {
         // already grown to three for the incoming card, space 2 is an empty destination.
         let layouts = [grid(3, capacity: 4), grid(3, capacity: 4), grid(1, capacity: 4)]
         let stages = [
-            0: CGRect(x: 0, y: 0, width: 640, height: 178),
-            1: CGRect(x: 0, y: 200, width: 640, height: 178),
-            2: CGRect(x: 100, y: 400, width: 300, height: 178),
+            0: CGRect(x: 0, y: 0, width: 640, height: 164),
+            1: CGRect(x: 0, y: 200, width: 640, height: 164),
+            2: CGRect(x: 100, y: 400, width: 300, height: 164),
         ]
 
         #expect(StageMotion.windowDropDestination(
@@ -918,7 +918,7 @@ struct StageMotionTests {
     func releasedPreviewFollowsStageScale() {
         let metrics = StageMetrics.standard
         let stride = metrics.cardWidth + metrics.windowSpacing
-        let stages = [0: CGRect(x: 0, y: 0, width: 320, height: 89)]
+        let stages = [0: CGRect(x: 0, y: 0, width: 320, height: 82)]
 
         #expect(StageMotion.windowDropDestination(
             target: WindowDropTarget(spaceIndex: 0, windowIndex: 2),

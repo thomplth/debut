@@ -74,6 +74,93 @@ struct ScreenshotTests {
         try png.write(to: url)
     }
 
+    private struct ScreenshotDifference {
+        let meanChannelDifference: Double
+        let changedPixelRatio: Double
+        let comparedPixelCount: Int
+    }
+
+    /// Draws an image into a deterministic @2x bitmap. Passing a smaller point size is the
+    /// screenshot equivalent of looking at a scaled stage from the same distance.
+    private func normalizedBitmap(_ image: NSImage, size: NSSize) -> NSBitmapImageRep? {
+        let scale: CGFloat = 2
+        var sourceRect = NSRect(origin: .zero, size: image.size)
+        guard let source = image.cgImage(forProposedRect: &sourceRect, context: nil, hints: nil),
+              let context = CGContext(
+                  data: nil,
+                  width: Int((size.width * scale).rounded()),
+                  height: Int((size.height * scale).rounded()),
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: CGColorSpaceCreateDeviceRGB(),
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return nil }
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(
+            x: 0,
+            y: 0,
+            width: size.width * scale,
+            height: size.height * scale
+        ))
+        guard let normalized = context.makeImage() else { return nil }
+        let bitmap = NSBitmapImageRep(cgImage: normalized)
+        bitmap.size = size
+        return bitmap
+    }
+
+    /// Compares only pixels that contain overlay content in at least one image. The large bare
+    /// desktop around the stages must not dilute a local visual regression into a passing score.
+    private func screenshotDifference(
+        _ lhs: NSBitmapImageRep,
+        _ rhs: NSBitmapImageRep
+    ) -> ScreenshotDifference {
+        precondition(lhs.pixelsWide == rhs.pixelsWide && lhs.pixelsHigh == rhs.pixelsHigh)
+        let background = lhs.colorAt(x: 0, y: 0) ?? .black
+        var totalDifference = 0.0
+        var changedPixels = 0
+        var comparedPixels = 0
+
+        for x in 0..<lhs.pixelsWide {
+            for y in 0..<lhs.pixelsHigh {
+                guard let left = lhs.colorAt(x: x, y: y),
+                      let right = rhs.colorAt(x: x, y: y)
+                else { continue }
+                let leftFromBackground = max(
+                    abs(left.redComponent - background.redComponent),
+                    abs(left.greenComponent - background.greenComponent),
+                    abs(left.blueComponent - background.blueComponent)
+                )
+                let rightFromBackground = max(
+                    abs(right.redComponent - background.redComponent),
+                    abs(right.greenComponent - background.greenComponent),
+                    abs(right.blueComponent - background.blueComponent)
+                )
+                guard max(leftFromBackground, rightFromBackground) > 0.01 else { continue }
+
+                let redDifference = abs(left.redComponent - right.redComponent)
+                let greenDifference = abs(left.greenComponent - right.greenComponent)
+                let blueDifference = abs(left.blueComponent - right.blueComponent)
+                let alphaDifference = abs(left.alphaComponent - right.alphaComponent)
+                let difference = (redDifference + greenDifference
+                    + blueDifference + alphaDifference) / 4
+                totalDifference += difference
+                changedPixels += difference > 0.08 ? 1 : 0
+                comparedPixels += 1
+            }
+        }
+
+        return ScreenshotDifference(
+            meanChannelDifference: comparedPixels > 0
+                ? totalDifference / Double(comparedPixels)
+                : 1,
+            changedPixelRatio: comparedPixels > 0
+                ? Double(changedPixels) / Double(comparedPixels)
+                : 1,
+            comparedPixelCount: comparedPixels
+        )
+    }
+
     enum ScreenshotError: Error { case renderFailed }
 
     private func makeSampleViewModel(
@@ -247,6 +334,54 @@ struct ScreenshotTests {
         )
         #expect(abs(enlarged.width - expected.cardWidth) < 0.5)
         #expect(abs(enlarged.height - expected.cardHeight) < 0.5)
+    }
+
+    @Test("The default stage scale is a proportional rendering of the original UI")
+    func defaultStageScalePreservesRenderedProportions() throws {
+        let originalSize = NSSize(width: 1_200, height: 600)
+        let scale = CGFloat(AppSettings.defaultStageScale)
+        let enlargedSize = NSSize(
+            width: originalSize.width * scale,
+            height: originalSize.height * scale
+        )
+
+        var originalAppearance = AppSettings()
+        originalAppearance.stageScale = 1
+        let original = try #require(renderSwiftUI(
+            StageOverlayView(viewModel: makeSampleViewModel(
+                spaceCount: 3,
+                windowsPerSpace: [3, 4, 2],
+                activeIndex: 1,
+                appearance: originalAppearance
+            )),
+            size: originalSize
+        ))
+        let enlarged = try #require(renderSwiftUI(
+            StageOverlayView(viewModel: makeSampleViewModel(
+                spaceCount: 3,
+                windowsPerSpace: [3, 4, 2],
+                activeIndex: 1
+            )),
+            size: enlargedSize
+        ))
+        let originalBitmap = try #require(normalizedBitmap(original, size: originalSize))
+        let normalizedEnlarged = try #require(normalizedBitmap(enlarged, size: originalSize))
+
+        let normalizedImage = NSImage(size: originalSize)
+        normalizedImage.addRepresentation(normalizedEnlarged)
+        try saveImage(original, name: "06_proportional_scale_original")
+        try saveImage(normalizedImage, name: "06_proportional_scale_normalized_default")
+
+        let difference = screenshotDifference(originalBitmap, normalizedEnlarged)
+        #expect(difference.comparedPixelCount > 10_000)
+        #expect(
+            difference.meanChannelDifference < 0.035,
+            "mean normalized screenshot difference was \(difference.meanChannelDifference)"
+        )
+        #expect(
+            difference.changedPixelRatio < 0.12,
+            "normalized screenshot changed-pixel ratio was \(difference.changedPixelRatio)"
+        )
     }
 
     @Test("The default stage scale still fits the display, and a crowded space shrinks to fit")

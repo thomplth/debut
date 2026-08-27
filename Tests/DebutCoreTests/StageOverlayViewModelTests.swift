@@ -72,6 +72,7 @@ struct OverlayViewModelTests {
         let metrics = StageMetrics.standard
         let container = CGSize(width: 1_200, height: 800)
         let stride = metrics.cardWidth + metrics.windowSpacing
+        let opticalOffset = (metrics.topPadding - metrics.bottomPadding) / 2
 
         let first = StageConstants.windowCardCenter(
             spaceIndex: 0, windowIndex: 0, windowCounts: [3],
@@ -82,8 +83,8 @@ struct OverlayViewModelTests {
             activeSpaceIndex: 0, inactiveScale: 0.8, containerSize: container
         )
 
-        #expect(first == CGPoint(x: 600 - stride, y: 400))
-        #expect(last == CGPoint(x: 600 + stride, y: 400))
+        #expect(first == CGPoint(x: 600 - stride, y: 400 + opticalOffset))
+        #expect(last == CGPoint(x: 600 + stride, y: 400 + opticalOffset))
         #expect(StageConstants.windowCardCenter(
             spaceIndex: 0, windowIndex: 3, windowCounts: [3],
             activeSpaceIndex: 0, inactiveScale: 0.8, containerSize: container

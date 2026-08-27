@@ -862,8 +862,11 @@ public struct StageConstants {
         }
     }
 
-    public static func stageSpacing(hasVisibleFooterHints: Bool) -> CGFloat {
-        hasVisibleFooterHints ? stageSpacing : compactStageSpacing
+    public static func stageSpacing(
+        hasVisibleFooterHints: Bool,
+        scale: CGFloat = 1
+    ) -> CGFloat {
+        (hasVisibleFooterHints ? stageSpacing : compactStageSpacing) * scale
     }
 
     public static func stageCenterY(
@@ -871,7 +874,8 @@ public struct StageConstants {
         stageHeights: [CGFloat],
         activeSpaceIndex: Int,
         inactiveScale: CGFloat,
-        containerHeight: CGFloat
+        containerHeight: CGFloat,
+        stageScale: CGFloat = 1
     ) -> CGFloat? {
         guard stageHeights.indices.contains(spaceIndex),
               stageHeights.indices.contains(activeSpaceIndex)
@@ -880,7 +884,7 @@ public struct StageConstants {
         let layout = StageMotion.stackLayout(
             stageHeights: stageHeights,
             focusIndex: activeSpaceIndex,
-            spacing: stageSpacing,
+            spacing: stageSpacing * stageScale,
             inactiveScale: inactiveScale
         )
         return containerHeight / 2
@@ -912,7 +916,8 @@ public struct StageConstants {
                   stageHeights: layouts.map(\.stageSize.height),
                   activeSpaceIndex: activeSpaceIndex,
                   inactiveScale: inactiveScale,
-                  containerHeight: containerSize.height
+                  containerHeight: containerSize.height,
+                  stageScale: metrics.scaleFactor
               )
         else { return nil }
 
@@ -1055,7 +1060,8 @@ public struct StageOverlayView: View {
 
             let inactiveScale = CGFloat(viewModel.appearance.inactiveStageScale)
             let spacing = StageConstants.stageSpacing(
-                hasVisibleFooterHints: !activeFooterHints.isEmpty
+                hasVisibleFooterHints: !activeFooterHints.isEmpty,
+                scale: metrics.scaleFactor
             )
             let focusTransition = StageMotion.focusTransition(reduceMotion: reduceMotion)
             let layoutAnimationKey = StageMotion.layoutAnimationKey(
@@ -1129,6 +1135,7 @@ public struct StageOverlayView: View {
                         )
                         let stageOpacity = StageMotion.stageOpacity(scale: scale)
                         let lift = StageMotion.lift(isActive: isInteractionTarget)
+                        let visualScale = metrics.scaleFactor
                         let selectedWindowIndex = pointerSelection?.spaceIndex == index
                             ? pointerSelection?.windowIndex
                             : (isActive ? viewModel.selectedWindowIndex : nil)
@@ -1183,7 +1190,8 @@ public struct StageOverlayView: View {
                             StageSurfaceView(
                                 spaceIndex: index,
                                 size: CGSize(width: stageWidth, height: stageHeight),
-                                cornerRadius: CGFloat(viewModel.appearance.stageCornerRadius),
+                                cornerRadius: CGFloat(viewModel.appearance.stageCornerRadius)
+                                    * visualScale,
                                 appearance: viewModel.appearance
                             )
                         }
@@ -1198,8 +1206,8 @@ public struct StageOverlayView: View {
                         .scaleEffect(scale)
                         .shadow(
                             color: .black.opacity(lift.shadowOpacity),
-                            radius: lift.shadowRadius,
-                            y: lift.shadowY
+                            radius: lift.shadowRadius * visualScale,
+                            y: lift.shadowY * visualScale
                         )
                         .opacity(stageOpacity)
                         .offset(y: slotOffset)
@@ -1500,6 +1508,7 @@ struct StageSwiftUIView: View {
     }
 
     var body: some View {
+        let visualScale = layout.metrics.scaleFactor
         // Cards are placed, not stacked and nudged: `.offset` is a render transform, so a grid
         // built from it would report every card at the stage's centre and leave drop targeting
         // with nothing to aim at.
@@ -1511,7 +1520,7 @@ struct StageSwiftUIView: View {
             ZStack(alignment: .topLeading) {
                 if stage.windows.isEmpty {
                     Text("Empty")
-                        .font(.system(size: 13))
+                        .font(.system(size: 13 * visualScale))
                         .foregroundStyle(.secondary.opacity(0.5))
                         .position(stageCenter)
                 } else {
@@ -1610,14 +1619,14 @@ struct StageSwiftUIView: View {
         .animation(removalTransition.animation, value: stage.windows.count)
         .overlay(alignment: .leading) {
             if let spaceNumberHint {
-                CommandHintStrip(hints: [spaceNumberHint])
-                    .offset(x: -18)
+                CommandHintStrip(hints: [spaceNumberHint], scale: visualScale)
+                    .offset(x: -18 * visualScale)
             }
         }
         .overlay(alignment: .bottom) {
             if !footerHints.isEmpty {
-                CommandHintStrip(hints: footerHints)
-                    .offset(y: StageConstants.commandHintFooterOffset)
+                CommandHintStrip(hints: footerHints, scale: visualScale)
+                    .offset(y: StageConstants.commandHintFooterOffset * visualScale)
             }
         }
     }
@@ -1739,7 +1748,8 @@ struct WindowPreviewView: View {
                                 AppIconImage(
                                     bundleID: window.ownerBundleID,
                                     name: window.ownerName,
-                                    iconSize: AppIconCache.placeholderIconRasterSize
+                                    iconSize: AppIconCache.placeholderIconRasterSize,
+                                    fallbackBaseSize: StageMetrics.standard.previewPlaceholderIconSize
                                 )
                                 .frame(
                                     width: metrics.previewPlaceholderIconSize,
@@ -1751,19 +1761,25 @@ struct WindowPreviewView: View {
                 .frame(width: metrics.thumbnailWidth, height: metrics.thumbnailHeight)
                 .overlay(alignment: .bottomTrailing) {
                     if !commandHints.isEmpty {
-                        CommandHintStrip(hints: commandHints)
-                            .padding(6)
+                        CommandHintStrip(hints: commandHints, scale: metrics.scaleFactor)
+                            .padding(6 * metrics.scaleFactor)
                     }
                 }
 
                 AppIconImage(
                     bundleID: window.ownerBundleID,
                     name: window.ownerName,
-                    iconSize: AppIconCache.badgeRasterSize
+                    iconSize: AppIconCache.badgeRasterSize,
+                    fallbackBaseSize: StageMetrics.standard.badgeSize
                 )
                     .frame(width: metrics.badgeSize, height: metrics.badgeSize)
-                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                    .offset(x: -4, y: -4)
+                    .shadow(
+                        color: .black.opacity(0.3),
+                        radius: 2 * metrics.scaleFactor,
+                        x: 0,
+                        y: metrics.scaleFactor
+                    )
+                    .offset(x: -4 * metrics.scaleFactor, y: -4 * metrics.scaleFactor)
             }
 
             Text(window.windowTitle.isEmpty ? window.ownerName : window.windowTitle)
@@ -1776,8 +1792,8 @@ struct WindowPreviewView: View {
         .scaleEffect(StageMotion.windowScale(isSelected: isWindowSelected, isDragging: isDragging))
         .shadow(
             color: .black.opacity(lift.shadowOpacity),
-            radius: lift.shadowRadius,
-            y: lift.shadowY
+            radius: lift.shadowRadius * metrics.scaleFactor,
+            y: lift.shadowY * metrics.scaleFactor
         )
         .animation(.spring(duration: 0.18, bounce: 0.08), value: isWindowSelected)
         .animation(.easeOut(duration: 0.12), value: isDragging)
@@ -1786,26 +1802,31 @@ struct WindowPreviewView: View {
 
 struct CommandHintStrip: View {
     let hints: [CommandHintPresentation]
+    var scale: CGFloat = 1
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 4 * scale) {
             ForEach(hints) { hint in
-                HStack(spacing: 3) {
+                HStack(spacing: 3 * scale) {
                     if let iconSystemName = hint.iconSystemName {
                         Image(systemName: iconSystemName)
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(.system(size: 8 * scale, weight: .semibold))
                     }
                     Text(hint.shortcut)
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .font(.system(
+                            size: 9 * scale,
+                            weight: .semibold,
+                            design: .monospaced
+                        ))
                 }
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 5 * scale)
+                    .padding(.vertical, 3 * scale)
                     .background(.black.opacity(0.55), in: Capsule())
                     .overlay {
-                        Capsule().stroke(.white.opacity(0.14), lineWidth: 0.5)
+                        Capsule().stroke(.white.opacity(0.14), lineWidth: 0.5 * scale)
                     }
                     .help("\(hint.label): \(hint.shortcut)")
             }
@@ -1829,20 +1850,19 @@ struct LiquidGlassModifier: ViewModifier {
     }
 }
 
-struct AppIconImage: NSViewRepresentable {
+struct AppIconImage: View {
     let bundleID: String
     let name: String
     var iconSize: CGFloat = 128
+    var fallbackBaseSize: CGFloat = 128
 
-    func makeNSView(context: Context) -> NSImageView {
-        let imageView = NSImageView()
-        imageView.imageScaling = .scaleProportionallyUpOrDown
-        imageView.image = resolveIcon()
-        return imageView
-    }
-
-    func updateNSView(_ nsView: NSImageView, context: Context) {
-        nsView.image = resolveIcon()
+    var body: some View {
+        // `iconSize` is the cache's raster size, not this view's layout size. A resizable SwiftUI
+        // image accepts the frame proposed by its caller; NSImageView instead retained the
+        // maximum-scale bitmap's intrinsic 100/80-point size and overflowed that frame.
+        Image(nsImage: resolveIcon())
+            .resizable()
+            .aspectRatio(contentMode: .fit)
     }
 
     private func resolveIcon() -> NSImage {
@@ -1851,21 +1871,22 @@ struct AppIconImage: NSViewRepresentable {
         if let icon = AppIconCache.shared.cachedOrRasterize(bundleID: bundleID, size: iconSize) {
             return icon
         }
-        // Proportional to the requested size, which is a raster size rather than the drawn one
-        // and so is not a number this can assume.
+        // Draw the original fallback design at the cache's larger raster size. It is later
+        // downsampled by the resizable Image, just like a real application icon.
         let size = iconSize
-        let inset = size * 0.2
+        let rasterScale = size / fallbackBaseSize
+        let inset = 8 * rasterScale
         let img = NSImage(size: NSSize(width: size, height: size))
         img.lockFocus()
         NSColor.white.withAlphaComponent(0.06).setFill()
         NSBezierPath(
             roundedRect: NSRect(x: inset, y: inset, width: size - inset * 2, height: size - inset * 2),
-            xRadius: size * 0.25,
-            yRadius: size * 0.25
+            xRadius: 20 * rasterScale,
+            yRadius: 20 * rasterScale
         ).fill()
         let label = String(name.prefix(2)).uppercased()
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: size * 0.34, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: 40 * rasterScale, weight: .semibold),
             .foregroundColor: NSColor.white.withAlphaComponent(0.3),
         ]
         let sz = (label as NSString).size(withAttributes: attrs)
