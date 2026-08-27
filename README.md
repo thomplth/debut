@@ -232,9 +232,11 @@ to every official build is available from that release's tag.
 Releases are automated and always gated on the full CI and end-to-end suites. Release
 notes are the commit subjects in the range, and each release attaches a `Debut.dmg`.
 
-- **Daily** — a scheduled run bumps the patch number and publishes whenever `main` has
-  moved since the last tag. It skips silently when nothing has landed.
-- **Manual** — the *Manual Release* workflow, with a `minor` or `major` bump.
+- **Daily** — a scheduled run bumps the patch number and publishes a GitHub prerelease
+  whenever `main` has moved since the last tag. Daily builds never enter the automatic-update
+  feed and the job skips silently when nothing has landed.
+- **Manual** — the *Manual Release* workflow promotes a Developer ID-signed and notarized
+  `minor` or `major` `.0` release to Sparkle's stable automatic-update feed after approval.
 
 The version comes from the tags alone. A build reporting `0.0.0-dev` is telling you it
 is not a release.

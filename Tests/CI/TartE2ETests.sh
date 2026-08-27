@@ -91,6 +91,8 @@ if [[ -f "$guest_runner" ]]; then
         "guest readiness must require discovered fixture windows"
     expect_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS="\$' \
         "the drag flag must be a scalar; bash 3.2 rejects empty array expansion under set -u"
+    expect_not_contains "$guest_runner" 'unzip -Z1.*awk.*exit' \
+        "archive discovery must drain large framework bundles instead of SIGPIPE under pipefail"
 
     expect_mode_dispatch() {
         local mode="$1"

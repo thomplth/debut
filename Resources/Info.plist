@@ -24,6 +24,14 @@
     <string>0.0.0-dev</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/thomplth/debut/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>CtM67t8i60pFgyqC08m0za5aNl8anza7JZv6A93SILA=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
     <key>LSUIElement</key>
