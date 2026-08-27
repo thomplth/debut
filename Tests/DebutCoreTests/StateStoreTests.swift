@@ -217,7 +217,7 @@ struct StateStoreTests {
         #expect(decoded.commandUsageCounts.isEmpty)
     }
 
-    @Test("Settings written before the stage scale existed take the larger new default")
+    @Test("Settings written before the stage scale existed use the 100 percent default")
     func legacySettingsDefaultStageScale() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
@@ -229,7 +229,7 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.stageScale == AppSettings.defaultStageScale)
-        #expect(AppSettings.defaultStageScale == 1.5)
+        #expect(AppSettings.defaultStageScale == 1.0)
     }
 
     @Test("Settings files written before the option audit still load")
