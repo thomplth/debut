@@ -44,6 +44,10 @@ public struct Space: Codable, Identifiable, Equatable, Sendable {
         windows.removeAll { $0.ownerBundleID == bundleID }
     }
 
+    public mutating func removeAllWindows() {
+        windows.removeAll()
+    }
+
     @discardableResult
     public mutating func removeAllWindows(forOwnerPID ownerPID: pid_t) -> Int {
         let previousCount = windows.count
