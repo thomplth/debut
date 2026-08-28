@@ -543,6 +543,44 @@ struct SpaceControllerSpaceTests {
         #expect(spaces.moveRequests.map(\.desktop) == [1])
     }
 
+    // The overlay reconciles on every open, so a reconcile now lands in the middle of a session
+    // holding an uncommitted move. Aligning spaces to the desktop order must carry the previewed
+    // move with them: rebuilding the array from macOS and losing the preview would show the user
+    // one thing and commit another.
+    @Test("A reconcile during an uncommitted move preserves the preview")
+    @MainActor
+    func reconcileDuringPendingMoveKeepsPreview() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.completesMovesImmediately = false
+        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+        let spaceA = controller.spaceManager.spaces[0].id
+        let spaceB = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: spaceA
+        )
+        controller.spaceManager.activateSpace(id: spaceA)
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.moveWindowDown)
+        // The overlay shows the move straight away while the live model waits for the commit,
+        // so the two deliberately disagree here. E2E reads the overlay's copy.
+        #expect(controller.overlaySpaceManager.spaces.map(\.windows.count) == [0, 1])
+        #expect(controller.spaceManager.spaces.map(\.windows.count) == [1, 0])
+
+        controller.reconcileSpacesWithDesktops()
+
+        #expect(controller.overlaySpaceManager.spaces.map(\.windows.count) == [0, 1])
+        #expect(controller.spaceManager.spaces.map(\.windows.count) == [1, 0])
+
+        keyboardService.simulateEvent(.cmdRelease)
+
+        #expect(spaces.moveRequests.map(\.windowID) == [101])
+        #expect(spaces.moveRequests.map(\.desktop) == [1])
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 101) == spaceB)
+    }
+
     @Test("Arrow-key moves reach the window server only when the session commits")
     @MainActor
     func keyboardMoveWaitsForCommit() {
