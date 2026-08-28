@@ -160,13 +160,14 @@ public struct SpaceManager: Codable, Sendable {
             if let index = spaceStacks.firstIndex(where: { $0.id == descriptor.id }) {
                 spaceStacks[index].displayName = descriptor.displayName
                 spaceStacks[index].isConnected = true
-                resizeStack(at: index, to: descriptor.desktopIDs.count)
-                if let current = descriptor.currentDesktopIndex,
-                   spaceStacks[index].spaces.indices.contains(current) {
-                    spaceStacks[index].activeSpaceID = spaceStacks[index].spaces[current].id
+                alignStack(at: index, to: descriptor)
+                if let active = activeSpaceID(at: index, for: descriptor) {
+                    spaceStacks[index].activeSpaceID = active
                 }
             } else {
-                let spaces = (0..<descriptor.desktopIDs.count).map { _ in Space() }
+                let spaces = (0..<descriptor.desktopIDs.count).map { position in
+                    Space(desktopUUID: descriptor.desktopUUID(at: position))
+                }
                 let activeIndex = min(
                     max(descriptor.currentDesktopIndex ?? 0, 0),
                     spaces.count - 1
@@ -249,6 +250,69 @@ public struct SpaceManager: Codable, Sendable {
             spaceStacks[0].displayName = firstDescriptor.displayName
             selectedSpaceStackID = firstDescriptor.id
         }
+    }
+
+    /// Rebuilds one stack so its spaces stand in the order macOS reports its desktops in.
+    ///
+    /// macOS is authoritative for the order, the count and the membership; the uuid stored on
+    /// a space is only the join key that says which stored record belongs to which desktop.
+    /// Without it a reorder is invisible, because it leaves the desktop count unchanged and a
+    /// count is all a resize can compare.
+    private mutating func alignStack(at stackIndex: Int, to descriptor: SpaceStackDescriptor) {
+        guard !descriptor.desktopUUIDs.isEmpty else {
+            resizeStack(at: stackIndex, to: descriptor.desktopIDs.count)
+            return
+        }
+
+        var unclaimed = spaceStacks[stackIndex].spaces
+        var aligned: [Space?] = Array(repeating: nil, count: descriptor.desktopUUIDs.count)
+
+        // Identity first, so a space only ever lands on the desktop it was already joined to.
+        for (position, uuid) in descriptor.desktopUUIDs.enumerated() {
+            guard let match = unclaimed.firstIndex(where: { $0.desktopUUID == uuid }) else { continue }
+            aligned[position] = unclaimed.remove(at: match)
+        }
+
+        // Then position, which only reaches spaces that have never been joined to a desktop.
+        // A space whose desktop is gone is deliberately not reused: inheriting it would
+        // attach one desktop's windows to another, which is the failure this exists to stop.
+        for position in aligned.indices where aligned[position] == nil {
+            let uuid = descriptor.desktopUUIDs[position]
+            if let adoptable = unclaimed.firstIndex(where: { $0.desktopUUID == nil }) {
+                var space = unclaimed.remove(at: adoptable)
+                space.joinDesktop(uuid: uuid)
+                aligned[position] = space
+            } else {
+                aligned[position] = Space(desktopUUID: uuid)
+            }
+        }
+
+        var spaces = aligned.compactMap { $0 }
+        for departed in unclaimed {
+            dormantWindowAssignments.removeAll { $0.spaceID == departed.id }
+            for window in departed.windows {
+                spaces[spaces.count - 1].addWindow(window)
+            }
+        }
+
+        spaceStacks[stackIndex].spaces = spaces
+        if !spaces.contains(where: { $0.id == spaceStacks[stackIndex].activeSpaceID }) {
+            spaceStacks[stackIndex].activeSpaceID = spaces[0].id
+        }
+    }
+
+    private func activeSpaceID(
+        at stackIndex: Int,
+        for descriptor: SpaceStackDescriptor
+    ) -> UUID? {
+        let spaces = spaceStacks[stackIndex].spaces
+        if let uuid = descriptor.currentDesktopUUID,
+           let space = spaces.first(where: { $0.desktopUUID == uuid }) {
+            return space.id
+        }
+        guard let current = descriptor.currentDesktopIndex,
+              spaces.indices.contains(current) else { return nil }
+        return spaces[current].id
     }
 
     private mutating func resizeStack(at stackIndex: Int, to requestedCount: Int) {

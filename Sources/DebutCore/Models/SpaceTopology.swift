@@ -21,7 +21,12 @@ public struct SpaceStackDescriptor: Equatable, Sendable {
     public let displayName: String
     public let frame: CGRect
     public let desktopIDs: [CGSSpaceID]
+    /// The same desktops as `desktopIDs`, in the same order, keyed by the identity that
+    /// survives a reboot. Empty when the window server withheld a uuid for any desktop, so
+    /// this is all-or-nothing rather than something to index opportunistically.
+    public let desktopUUIDs: [String]
     public let currentDesktopID: CGSSpaceID?
+    public let currentDesktopUUID: String?
 
     public init(
         id: String,
@@ -29,18 +34,27 @@ public struct SpaceStackDescriptor: Equatable, Sendable {
         displayName: String,
         frame: CGRect,
         desktopIDs: [CGSSpaceID],
-        currentDesktopID: CGSSpaceID?
+        desktopUUIDs: [String] = [],
+        currentDesktopID: CGSSpaceID?,
+        currentDesktopUUID: String? = nil
     ) {
         self.id = id
         self.displayID = displayID
         self.displayName = displayName
         self.frame = frame
         self.desktopIDs = desktopIDs
+        self.desktopUUIDs = desktopUUIDs.count == desktopIDs.count ? desktopUUIDs : []
         self.currentDesktopID = currentDesktopID
+        self.currentDesktopUUID = currentDesktopUUID
     }
 
     public var currentDesktopIndex: Int? {
         currentDesktopID.flatMap(desktopIDs.firstIndex)
+    }
+
+    public func desktopUUID(at index: Int) -> String? {
+        guard desktopUUIDs.indices.contains(index) else { return nil }
+        return desktopUUIDs[index]
     }
 
     public func location(at index: Int) -> DesktopLocation? {

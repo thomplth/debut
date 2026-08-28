@@ -5,9 +5,21 @@ public struct Space: Codable, Identifiable, Equatable, Sendable {
     public let id: UUID
     public private(set) var windows: [SpaceWindow]
 
-    public init() {
+    /// The macOS desktop this space is joined to, as the window server's persistent `uuid`.
+    ///
+    /// A join key and nothing more: reconciliation reads the desktop order from macOS every
+    /// time and never consults this to decide it. `nil` means no join is established yet,
+    /// which is the state every space restored from a pre-identity `state.json` starts in.
+    public private(set) var desktopUUID: String?
+
+    public init(desktopUUID: String? = nil) {
         self.id = UUID()
         self.windows = []
+        self.desktopUUID = desktopUUID
+    }
+
+    public mutating func joinDesktop(uuid: String) {
+        desktopUUID = uuid
     }
 
     public var windowIDs: Set<CGWindowID> {
