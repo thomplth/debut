@@ -17,13 +17,21 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     private(set) var spaceDidChangeCount = 0
     private var pendingMoveCompletions: [(@Sendable () -> Void)] = []
 
+    /// The desktops in display order, each named by a stable key. `nil` numbers them 0..<n,
+    /// which is what a test that only cares about the count wants; assigning a permutation is
+    /// how a Mission Control reorder is expressed, since that leaves the count untouched.
+    var desktopKeys: [Int]?
+
     init(desktops: Int = 3, current: Int = 0) {
         self.desktops = desktops
         self.current = current
     }
 
+    private var keys: [Int] { desktopKeys ?? Array(0..<desktops) }
+
     func spaceTopology() -> SpaceTopology {
-        let desktopIDs = (0..<desktops).map { CGSSpaceID($0 + 100) }
+        let keys = self.keys
+        let desktopIDs = keys.map { CGSSpaceID($0 + 100) }
         return SpaceTopology(separateSpaces: false, stacks: [
             SpaceStackDescriptor(
                 id: SpaceTopology.sharedStackID,
@@ -31,15 +39,17 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
                 displayName: "All Displays",
                 frame: .zero,
                 desktopIDs: desktopIDs,
-                currentDesktopID: desktopIDs.indices.contains(current) ? desktopIDs[current] : nil
+                desktopUUIDs: keys.map { "DESKTOP-\($0)" },
+                currentDesktopID: desktopIDs.indices.contains(current) ? desktopIDs[current] : nil,
+                currentDesktopUUID: keys.indices.contains(current) ? "DESKTOP-\(keys[current])" : nil
             ),
         ])
     }
 
-    func desktopCount() -> Int { desktops }
+    func desktopCount() -> Int { keys.count }
     /// Nil off the end, mirroring the real service: a fullscreen Space is not a user
     /// desktop, so macOS reports no index while one is showing.
-    func currentDesktopIndex() -> Int? { (0..<desktops).contains(current) ? current : nil }
+    func currentDesktopIndex() -> Int? { keys.indices.contains(current) ? current : nil }
     func desktopIndex(forWindow windowID: CGWindowID) -> Int? { windowDesktops[windowID] }
 
     func isSwitchInFlight(stackID: String) -> Bool {
@@ -738,6 +748,40 @@ struct SpaceControllerSpaceTests {
         #expect(controller.spaceManager.spaces.count == 4)
         #expect(controller.overlaySpaceManager.spaces.count == 4)
         #expect(delegate.mutationCount == 1)
+    }
+
+    // Dragging desktops around in Mission Control changes their order but not their number, so
+    // a reconcile that compares counts sees nothing and stays silent. Nothing then persists the
+    // new order or redraws the overlay, and the stale order outlives the session.
+    @Test("Reordering desktops permutes the spaces and reports the mutation")
+    func reorderPermutesSpacesAndReports() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+        let before = controller.spaceManager.spaces.map(\.id)
+        let delegate = SpaceMutationDelegate()
+        controller.delegate = delegate
+
+        spaces.desktopKeys = [0, 2, 1]
+        controller.reconcileSpacesWithDesktops()
+
+        #expect(controller.spaceManager.spaces.map(\.id) == [before[0], before[2], before[1]])
+        #expect(delegate.mutationCount == 1)
+    }
+
+    // The overlay reconciles on every open, so a reconcile that changed nothing must stay quiet;
+    // reporting anyway would persist and redraw on each Cmd+Tab.
+    @Test("A reconcile that changes nothing reports no mutation")
+    func unchangedReconcileIsSilent() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+        let delegate = SpaceMutationDelegate()
+        controller.delegate = delegate
+
+        controller.reconcileSpacesWithDesktops()
+
+        #expect(delegate.mutationCount == 0)
     }
 
     // A window server that answers "no desktops" is answered with silence: the space list is
