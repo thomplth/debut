@@ -28,7 +28,7 @@ nonisolated(unsafe) private let skyLight: UnsafeMutableRawPointer? = {
         ?? UnsafeMutableRawPointer(bitPattern: -2)
 }()
 
-private func skyLightSymbol<T>(_ name: String) -> T? {
+func skyLightSymbol<T>(_ name: String) -> T? {
     dlsym(skyLight, name).map { unsafeBitCast($0, to: T.self) }
 }
 
