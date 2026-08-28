@@ -313,12 +313,16 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             diag.report("spaces_reconcile_refused", details: ["reason": "noDesktopsReported"])
             return
         }
+        // Compared whole rather than by count: reordering desktops in Mission Control leaves
+        // both counts identical, so a count check calls a reorder a no-op and nothing persists
+        // or redraws the new order.
+        let stacksBefore = spaceManager.spaceStacks
         let stackCountBefore = spaceManager.connectedSpaceStacks.count
         let spaceCountBefore = spaceManager.allSpaces.count
         spaceManager.reconcileSpaceStacks(with: topology)
         let stackCountAfter = spaceManager.connectedSpaceStacks.count
         let spaceCountAfter = spaceManager.allSpaces.count
-        if stackCountBefore != stackCountAfter || spaceCountBefore != spaceCountAfter {
+        if stacksBefore != spaceManager.spaceStacks {
             diag.report("spaces_reconciled", details: [
                 "separateSpaces": "\(topology.separateSpaces)",
                 "stackCountBefore": "\(stackCountBefore)",
