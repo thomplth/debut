@@ -1679,6 +1679,190 @@ postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
 postFlagsChanged(flags: [])
 _ = terminateDebutAndWait()
 
+// --- 16. State written by a previous boot ---
+// A restart reissues window IDs and PIDs from low numbers, so a saved assignment does not
+// merely name a window that has gone — it names a live window belonging to somebody else.
+// Observed after a real restart: cards for windows macOS no longer had, duplicates of the
+// ones it did, and previews of whatever now owned the recycled ID, Debut's own overlay
+// included. The fixture is the same doctored state twice, differing only in its boot stamp,
+// because the stamp is the whole claim under test.
+header("16. State written by a previous boot")
+
+let stateFile: URL = diagnosticFile
+    .deletingLastPathComponent()
+    .appendingPathComponent("state.json")
+let originalStateData = try? Data(contentsOf: stateFile)
+
+let ghostWindowID = 999_001
+let ghostTitle = "Debut E2E Window From A Previous Boot"
+// Finder is always running, and that is the point: a running bundle ID is exactly what kept
+// the stale assignment out of the stopped-process sweep. Its PID is one macOS cannot issue.
+let ghostBundleID = "com.apple.finder"
+let ghostPID = 9_999_999
+
+func plantGhostWindow(bootSessionID: String) -> Bool {
+    guard let originalStateData,
+          var object = try? JSONSerialization.jsonObject(with: originalStateData) as? [String: Any],
+          var stacks = object["spaceStacks"] as? [[String: Any]],
+          !stacks.isEmpty,
+          var spaces = stacks[0]["spaces"] as? [[String: Any]],
+          !spaces.isEmpty
+    else { return false }
+
+    var windows = spaces[0]["windows"] as? [[String: Any]] ?? []
+    windows.append([
+        "id": UUID().uuidString,
+        "windowID": ghostWindowID,
+        "ownerBundleID": ghostBundleID,
+        "ownerName": "Finder",
+        "ownerPID": ghostPID,
+        "windowTitle": ghostTitle,
+    ])
+    spaces[0]["windows"] = windows
+    stacks[0]["spaces"] = spaces
+    object["spaceStacks"] = stacks
+    object["bootSessionID"] = bootSessionID
+
+    guard let data = try? JSONSerialization.data(withJSONObject: object) else { return false }
+    return (try? data.write(to: stateFile, options: .atomic)) != nil
+}
+
+/// Where the planted window ended up. Only meaningful once Debut has quit: a reconcile need
+/// not dirty the model, and reading the file under a running Debut just returns the fixture.
+///
+/// `retained` deliberately keys on the title rather than the ID, so that parking the window
+/// and recovering it onto a real window both count as keeping the placement. Which of the two
+/// happens depends on whether the host has a matching live window, and the claim under test
+/// is that the placement survives either way.
+func ghostPlacement() -> (liveByID: Bool, retained: Bool) {
+    guard let data = try? Data(contentsOf: stateFile),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return (false, false) }
+
+    let spaceWindows = (object["spaceStacks"] as? [[String: Any]] ?? []).flatMap { stack in
+        (stack["spaces"] as? [[String: Any]] ?? []).flatMap {
+            $0["windows"] as? [[String: Any]] ?? []
+        }
+    }
+    let dormantWindows = (object["dormantWindowAssignments"] as? [[String: Any]] ?? [])
+        .compactMap { $0["window"] as? [String: Any] }
+
+    let liveByID = spaceWindows.contains { $0["windowID"] as? Int == ghostWindowID }
+    let retained = (spaceWindows + dormantWindows).contains {
+        $0["windowTitle"] as? String == ghostTitle
+    }
+    return (liveByID, retained)
+}
+
+if originalStateData == nil {
+    skipTest("A window saved by the current boot stays live", reason: "no saved state to doctor")
+    skipTest("A window saved by a previous boot does not come back live", reason: "no saved state to doctor")
+    skipTest("The overlay shows no window from the previous boot", reason: "no saved state to doctor")
+} else {
+    // Control: the same fixture stamped with this boot. It must survive, or a later pass
+    // proves only that the fixture never took.
+    let controlPlanted = plantGhostWindow(bootSessionID: BootSession.current)
+    clearDiagnosticFile()
+    let controlApplication = launchDebut()
+    let controlReady = waitForDebutReady(controlApplication)
+    let controlReportedBootChange = readEvents().contains {
+        $0["event"] == "state_boot_session_changed"
+    }
+    // Quitting flushes the model to disk, which is the only way to see what Debut made of
+    // the fixture rather than the fixture itself.
+    _ = terminateDebutAndWait()
+    let controlPlacement = ghostPlacement()
+
+    info("Control (current boot): planted=\(controlPlanted) ready=\(controlReady) "
+        + "liveByID=\(controlPlacement.liveByID) retained=\(controlPlacement.retained) "
+        + "bootChangeReported=\(controlReportedBootChange)")
+
+    test("A window saved by the current boot stays live") {
+        guard controlPlanted else { info("  fixture was not written"); return false }
+        guard controlReady else { info("  Debut did not become ready"); return false }
+        guard !controlReportedBootChange else {
+            info("  the boot stamp was rejected even though it was this boot's")
+            return false
+        }
+        guard controlPlacement.liveByID else {
+            info("  the planted window was not kept live, so the fixture proves nothing")
+            return false
+        }
+        return true
+    }
+
+    let rebootPlanted = plantGhostWindow(bootSessionID: "e2e-previous-boot")
+    clearDiagnosticFile()
+    let rebootApplication = launchDebut()
+    let rebootReady = waitForDebutReady(rebootApplication)
+    let bootChange = readEvents().last { $0["event"] == "state_boot_session_changed" }
+
+    // The failure the user sees is a card in the overlay, so gather that evidence while
+    // Debut is still up, before quitting to flush the model to disk.
+    postFlagsChanged(flags: [.maskCommand])
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+    let rebootOverlayShown = waitFor(timeout: 5) { readState()["overlayVisible"] == "true" }
+    wait(0.5)
+    let _ = takeScreenshot("16_previous_boot_overlay")
+    let overlayStrings = rebootApplication.map {
+        accessibilityStrings(for: $0.processIdentifier)
+    } ?? []
+    postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+    postKeyDown(keyCode: CGKeyCode(kVK_Escape))
+    postKeyUp(keyCode: CGKeyCode(kVK_Escape))
+    postFlagsChanged(flags: [])
+
+    _ = terminateDebutAndWait()
+    let rebootPlacement = ghostPlacement()
+
+    info("Reboot (foreign boot): planted=\(rebootPlanted) ready=\(rebootReady) "
+        + "liveByID=\(rebootPlacement.liveByID) retained=\(rebootPlacement.retained) "
+        + "bootChange=\(bootChange ?? [:])")
+
+    test("A window saved by a previous boot does not come back live") {
+        guard rebootPlanted, rebootReady else {
+            info("  fixture planted=\(rebootPlanted), ready=\(rebootReady)")
+            return false
+        }
+        guard let bootChange else {
+            info("  no state_boot_session_changed event: the stamp was not compared")
+            return false
+        }
+        guard (Int(bootChange["madeDormant"] ?? "0") ?? 0) > 0 else {
+            info("  the stamp was compared but nothing was parked: \(bootChange)")
+            return false
+        }
+        guard !rebootPlacement.liveByID else {
+            info("  the previous boot's window ID is still assigned to a space")
+            return false
+        }
+        // Parked, not deleted: the placement is the only record of where it belonged.
+        guard rebootPlacement.retained else {
+            info("  the assignment was discarded rather than kept recoverable")
+            return false
+        }
+        return true
+    }
+
+    test("The overlay shows no window from the previous boot") {
+        guard rebootReady, rebootOverlayShown else {
+            info("  overlay did not open (ready=\(rebootReady), shown=\(rebootOverlayShown))")
+            return false
+        }
+        guard !overlayStrings.isEmpty else {
+            info("  read no accessibility strings from the overlay")
+            return false
+        }
+        let leaked = overlayStrings.filter { $0.contains(ghostTitle) }
+        if !leaked.isEmpty { info("  overlay still labels: \(leaked)") }
+        return leaked.isEmpty
+    }
+
+    if let originalStateData {
+        try? originalStateData.write(to: stateFile, options: .atomic)
+    }
+}
+
 // --- Summary ---
 header("Results")
 print("")

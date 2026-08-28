@@ -4,7 +4,7 @@ import Foundation
 import Testing
 @testable import DebutCore
 
-private final class MockProcessExitMonitor: ProcessExitMonitoring, @unchecked Sendable {
+final class MockProcessExitMonitor: ProcessExitMonitoring, @unchecked Sendable {
     private(set) var monitoredPIDs: Set<pid_t> = []
     private(set) var cancelledPIDs: [pid_t] = []
     private var handlers: [pid_t: @Sendable (pid_t) -> Void] = [:]
