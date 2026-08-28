@@ -345,6 +345,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             object: nil
         )
 
+        // Reordering desktops changes no active space, so no AppKit notification reports it.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(desktopLayoutMayHaveChanged(_:)),
+            name: .debutDesktopLayoutMayHaveChanged,
+            object: nil
+        )
+        let subscribed = DesktopReconfigurationObserver.start()
+        diag.report("desktop_reconfiguration_observed", details: [
+            "events": subscribed.map(String.init).joined(separator: ","),
+        ])
+
         // Screenshot previews are process-local. Warm them after startup reconciliation so the
         // first overlay does not reveal placeholders and then flash as captures arrive.
         controller.prewarmWindowPreviews()
@@ -388,6 +400,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             // only noticed the next time the user clicks the window.
             self.windowDiscovery?.refreshDesktopAssignments()
         }
+    }
+
+    /// Mission Control opened or closed, so the desktop list may have been rearranged.
+    @objc private func desktopLayoutMayHaveChanged(_ notification: Notification) {
+        spaceController?.reconcileSpacesWithDesktops()
+        windowDiscovery?.refreshDesktopAssignments()
     }
 
     @objc private func screenParametersDidChange(_ notification: Notification) {
