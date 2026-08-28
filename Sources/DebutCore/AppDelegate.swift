@@ -505,6 +505,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         overlayPresentation: OverlayPresentationContext? = nil
     ) {
         guard let spaceController, let overlayWindow else { return }
+        // Reordering desktops in Mission Control changes no active space, so nothing else
+        // wakes Debut to notice it. A topology read costs ~0.12ms warm, which buys the
+        // guarantee that the overlay never draws an order macOS has already moved past.
+        spaceController.reconcileSpacesWithDesktops()
         if let hiddenIdlePerformanceID {
             _ = PerformanceRecorder.shared.end(hiddenIdlePerformanceID)
             self.hiddenIdlePerformanceID = nil
