@@ -28,7 +28,7 @@ nonisolated(unsafe) private let skyLight: UnsafeMutableRawPointer? = {
         ?? UnsafeMutableRawPointer(bitPattern: -2)
 }()
 
-private func skyLightSymbol<T>(_ name: String) -> T? {
+func skyLightSymbol<T>(_ name: String) -> T? {
     dlsym(skyLight, name).map { unsafeBitCast($0, to: T.self) }
 }
 
@@ -589,16 +589,35 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             .takeRetainedValue() as? [[String: Any]] ?? []
     }
 
-    private static func desktopIDs(in display: [String: Any]) -> [CGSSpaceID] {
+    /// The user desktops of one display, read once so the two identities cannot disagree
+    /// about order or length.
+    ///
+    /// `id64` is a per-session counter — a fresh login renumbers it — while `uuid` is what
+    /// `com.apple.spaces` persists, so the uuid is the identity that outlives a reboot and
+    /// the id64 is what the switch machinery addresses. `uuids` comes back empty unless every
+    /// desktop supplied one, because a partial list would join some spaces and silently
+    /// mis-join the rest.
+    private static func desktops(
+        in display: [String: Any]
+    ) -> (ids: [CGSSpaceID], uuids: [String]) {
         let spaces = display["Spaces"] as? [[String: Any]] ?? []
-        return spaces.compactMap { space in
-            guard (space["type"] as? NSNumber)?.intValue ?? 0 == 0 else { return nil }
-            return (space["id64"] as? NSNumber)?.uint64Value
+        var ids: [CGSSpaceID] = []
+        var uuids: [String] = []
+        for space in spaces {
+            guard (space["type"] as? NSNumber)?.intValue ?? 0 == 0,
+                  let id = (space["id64"] as? NSNumber)?.uint64Value else { continue }
+            ids.append(id)
+            if let uuid = space["uuid"] as? String, !uuid.isEmpty { uuids.append(uuid) }
         }
+        return (ids, uuids.count == ids.count ? uuids : [])
     }
 
     private static func currentDesktopID(in display: [String: Any]) -> CGSSpaceID? {
         ((display["Current Space"] as? [String: Any])?["id64"] as? NSNumber)?.uint64Value
+    }
+
+    private static func currentDesktopUUID(in display: [String: Any]) -> String? {
+        (display["Current Space"] as? [String: Any])?["uuid"] as? String
     }
 
     private static func displayUUID(_ displayID: CGDirectDisplayID) -> String? {
@@ -620,14 +639,17 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             }) ?? managed[0]
             let frames = screens.map(\.frame)
             let frame = frames.dropFirst().reduce(frames.first ?? .zero) { $0.union($1) }
+            let desktops = Self.desktops(in: display)
             return SpaceTopology(separateSpaces: false, stacks: [
                 SpaceStackDescriptor(
                     id: SpaceTopology.sharedStackID,
                     displayID: NSScreen.main?.displayID,
                     displayName: "All Displays",
                     frame: frame,
-                    desktopIDs: Self.desktopIDs(in: display),
-                    currentDesktopID: Self.currentDesktopID(in: display)
+                    desktopIDs: desktops.ids,
+                    desktopUUIDs: desktops.uuids,
+                    currentDesktopID: Self.currentDesktopID(in: display),
+                    currentDesktopUUID: Self.currentDesktopUUID(in: display)
                 ),
             ])
         }
@@ -642,24 +664,30 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             else { continue }
             let display = remaining.remove(at: index)
             let name = screen.localizedName.isEmpty ? "Display \(descriptors.count + 1)" : screen.localizedName
+            let desktops = Self.desktops(in: display)
             descriptors.append(SpaceStackDescriptor(
                 id: uuid,
                 displayID: screen.displayID,
                 displayName: name,
                 frame: screen.frame,
-                desktopIDs: Self.desktopIDs(in: display),
-                currentDesktopID: Self.currentDesktopID(in: display)
+                desktopIDs: desktops.ids,
+                desktopUUIDs: desktops.uuids,
+                currentDesktopID: Self.currentDesktopID(in: display),
+                currentDesktopUUID: Self.currentDesktopUUID(in: display)
             ))
         }
         for display in remaining {
             guard let identifier = display["Display Identifier"] as? String else { continue }
+            let desktops = Self.desktops(in: display)
             descriptors.append(SpaceStackDescriptor(
                 id: identifier,
                 displayID: nil,
                 displayName: "Display \(descriptors.count + 1)",
                 frame: .zero,
-                desktopIDs: Self.desktopIDs(in: display),
-                currentDesktopID: Self.currentDesktopID(in: display)
+                desktopIDs: desktops.ids,
+                desktopUUIDs: desktops.uuids,
+                currentDesktopID: Self.currentDesktopID(in: display),
+                currentDesktopUUID: Self.currentDesktopUUID(in: display)
             ))
         }
         return SpaceTopology(separateSpaces: true, stacks: descriptors)
