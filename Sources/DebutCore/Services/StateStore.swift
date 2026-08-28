@@ -1,12 +1,51 @@
 import Foundation
 
+/// Identifies the running boot. Every window ID and PID in `state.json` was issued by one
+/// boot and means nothing in the next, because macOS reissues both from low numbers.
+public enum BootSession {
+    public static var current: String {
+        var boot = timeval()
+        var size = MemoryLayout<timeval>.size
+        guard sysctlbyname("kern.boottime", &boot, &size, nil, 0) == 0 else { return "unknown" }
+        return "\(boot.tv_sec).\(boot.tv_usec)"
+    }
+}
+
 public final class StateStore: Sendable {
     private let directory: URL
+    private let bootSessionID: String
+    private let diag: DiagnosticReporter
     private var stateFileURL: URL { directory.appendingPathComponent("state.json") }
     private var settingsFileURL: URL { directory.appendingPathComponent("settings.json") }
 
-    public init(directory: URL) {
+    /// The boot the saved window IDs belong to, written alongside the spaces.
+    private struct BootStamp: Codable {
+        let bootSessionID: String?
+    }
+
+    /// Writes the stamp into `SpaceManager`'s own keyed container, so the file keeps its
+    /// shape and the model stays free of a field only persistence cares about.
+    private struct StampedState: Encodable {
+        let manager: SpaceManager
+        let bootSessionID: String
+
+        private enum CodingKeys: String, CodingKey { case bootSessionID }
+
+        func encode(to encoder: any Encoder) throws {
+            try manager.encode(to: encoder)
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(bootSessionID, forKey: .bootSessionID)
+        }
+    }
+
+    public init(
+        directory: URL,
+        bootSessionID: String = BootSession.current,
+        diagnosticReporter: DiagnosticReporter = .shared
+    ) {
         self.directory = directory
+        self.bootSessionID = bootSessionID
+        self.diag = diagnosticReporter
     }
 
     public convenience init() {
@@ -34,7 +73,7 @@ public final class StateStore: Sendable {
         try ensureDirectory()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(manager)
+        let data = try encoder.encode(StampedState(manager: manager, bootSessionID: bootSessionID))
         try data.write(to: stateFileURL, options: .atomic)
     }
 
@@ -45,7 +84,20 @@ public final class StateStore: Sendable {
         let data = try Data(contentsOf: stateFileURL)
 
         // Try new format first
-        if let manager = try? JSONDecoder().decode(SpaceManager.self, from: data) {
+        if var manager = try? JSONDecoder().decode(SpaceManager.self, from: data) {
+            let saved = (try? JSONDecoder().decode(BootStamp.self, from: data))?.bootSessionID
+            guard saved == bootSessionID else {
+                // A restart reissues window IDs from low numbers, so the saved ones now
+                // name unrelated windows rather than nothing. Park every placement and let
+                // reconciliation recover it by (bundleID, title) against the live snapshot.
+                let parked = manager.makeAllWindowsDormant()
+                diag.report("state_boot_session_changed", details: [
+                    "savedBootSession": saved ?? "none",
+                    "currentBootSession": bootSessionID,
+                    "madeDormant": "\(parked)",
+                ])
+                return manager
+            }
             return manager
         }
 
