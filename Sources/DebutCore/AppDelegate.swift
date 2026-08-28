@@ -403,9 +403,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
     }
 
     /// Mission Control opened or closed, so the desktop list may have been rearranged.
+    ///
+    /// Only the space order is re-read. Reordering desktops does not change which desktop a
+    /// window is on — each space travels with its `desktopUUID` — so refreshing window
+    /// assignments here would be redundant, and it is not harmless: 1327 arrives before the
+    /// window server's list settles, so the reassignment lands on a stale read and can pull a
+    /// window that is mid-move back to the desktop it just left.
     @objc private func desktopLayoutMayHaveChanged(_ notification: Notification) {
         spaceController?.reconcileSpacesWithDesktops()
-        windowDiscovery?.refreshDesktopAssignments()
     }
 
     @objc private func screenParametersDidChange(_ notification: Notification) {
