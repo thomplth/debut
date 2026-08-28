@@ -1315,6 +1315,16 @@ if keyboardMoveSpaceCount < 2 {
             spaceSwitchIndex.map { moveIndex < $0 } ?? false
         } ?? false
         let committedCounts = spaceWindowCounts(in: readState())
+        // Eight clauses reporting one bit is unfalsifiable after the fact; name the failing one.
+        info("""
+              Keyboard move commit: originSelected=\(originSelected) \
+            waitedForCommit=\(waitedForCommit) \
+            moveEvents=\(moveEvents.count)>\(movesBefore) \
+            movePrecededSwitch=\(windowMovePrecededSpaceSwitch) \
+            moveIndex=\(moveEventIndex.map(String.init) ?? "nil") \
+            switchIndex=\(spaceSwitchIndex.map(String.init) ?? "nil") \
+            preview=\(previewCounts) committed=\(committedCounts) before=\(beforeCounts)
+            """)
         test("The keyboard move is reported and lands the window where the model says") {
             originSelected
                 && waitedForCommit
