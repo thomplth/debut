@@ -73,7 +73,8 @@ grant_accessibility() {
 
 grant_screen_capture() {
     local client="$1"
-    local signed_path="$2"
+    local client_type="$2"
+    local signed_path="$3"
     local requirement csreq_hex escaped_client timestamp
 
     requirement="$(codesign -d -r- "$signed_path" 2>&1 | awk -F ' => ' '/designated/{print $2}')"
@@ -82,9 +83,9 @@ grant_screen_capture() {
     timestamp="$(date +%s)"
 
     sudo sqlite3 "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
-'kTCCServiceScreenCapture','$escaped_client',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+'kTCCServiceScreenCapture','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
     sqlite3 "$USER_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
-'kTCCServiceScreenCapture','$escaped_client',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+'kTCCServiceScreenCapture','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
 grant_post_event() {
@@ -165,10 +166,19 @@ support_dir="$console_home/Library/Application Support/${bundle_id##*.}"
 
 echo "Granting Screen Recording and Accessibility to Debut and the E2E input driver..."
 grant_accessibility "$bundle_id" 0 "$APP_PATH"
-grant_screen_capture "$bundle_id" "$APP_PATH"
+grant_screen_capture "$bundle_id" 0 "$APP_PATH"
 grant_accessibility "$E2E_SOURCE" 1 "$E2E_SOURCE"
 grant_post_event "$E2E_SOURCE" "$E2E_SOURCE"
+# The suite samples animation frames itself rather than spawning `screencapture`, so it is a
+# screen capture client in its own right; without this it would meet a TCC prompt mid-run.
+grant_screen_capture "$E2E_SOURCE" 1 "$E2E_SOURCE"
 sudo killall tccd 2>/dev/null || true
+
+# Under Reduce Motion the removal transition is a 0.12s fade rather than a 0.36s spring, which is
+# correct behaviour but too brief to sample as motion. The fade branch is covered by unit tests, so
+# the disposable guest is pinned to the spring instead of the E2E check guessing which one it drew.
+as_console env HOME="$console_home" defaults write com.apple.universalaccess reduceMotion -bool false
+as_console env HOME="$console_home" defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool true
 
 echo "Preparing deterministic fixture windows..."
 as_console rm -rf "$support_dir"

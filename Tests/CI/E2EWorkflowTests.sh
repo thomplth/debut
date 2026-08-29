@@ -70,11 +70,15 @@ if [[ -f "$runner" ]]; then
         "CI E2E must suppress capture reminders for the hosted runner process"
     expect_contains "$runner" 'killall replayd' \
         "CI E2E must reload replayd after changing its capture approval"
+    expect_contains "$runner" 'com\.apple\.universalaccess reduceMotion -bool false' \
+        "CI E2E must pin the host to the spring the motion check samples"
     expect_contains "$runner" './scripts/build-app.sh' "CI E2E entry point must build the app"
     expect_contains "$runner" 'sudo cp -R "\$app_bundle" "\$app_path"' \
         "CI E2E entry point must install the bundle build-app.sh reported"
     expect_contains "$runner" '\.build/release/DebutE2E' \
         "CI E2E entry point must reuse the release suite built with the app"
+    expect_contains "$runner" "kTCCServiceScreenCapture','\\\$e2e_path'" \
+        "the hosted suite must hold Screen Recording, since it samples frames in-process"
 fi
 
 if [[ -f "$e2e_source" ]]; then
