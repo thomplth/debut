@@ -66,12 +66,23 @@ e2e_requirement=$(codesign -d -r- "$e2e_path" 2>&1 | awk -F ' => ' '/designated/
 e2e_csreq_hex=$(printf '%s' "$e2e_requirement" | csreq -r- -b /dev/stdout | xxd -p | tr -d '\n')
 sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceAccessibility','$e2e_path',1,2,4,1,X'$e2e_csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
+# The suite samples animation frames in-process rather than spawning `screencapture`, so it needs
+# the capture permission under its own identity rather than the shell's.
+sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
+'kTCCServiceScreenCapture','$e2e_path',1,2,4,1,X'$e2e_csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sudo killall tccd 2>/dev/null || true
 
 # launchctl reaches the app, which `open` spawns through launchd; the export reaches the suite,
 # which this shell spawns directly. Both need to agree that previews are off.
 launchctl setenv DEBUT_DISABLE_WINDOW_PREVIEWS 1
 export DEBUT_DISABLE_WINDOW_PREVIEWS=1
+
+# Under Reduce Motion the removal transition is a 0.12s fade rather than a 0.36s spring, which is
+# correct behaviour but too brief to sample as motion. The fade branch is covered by unit tests, so
+# the disposable host is pinned to the spring instead of the E2E check guessing which one it drew.
+echo "Reduce Motion before pinning: $(defaults read com.apple.universalaccess reduceMotion 2>&1)"
+defaults write com.apple.universalaccess reduceMotion -bool false
+defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool true
 
 echo "Preparing deterministic fixture windows..."
 rm -rf "$HOME/Library/Application Support/${bundle_id##*.}"
