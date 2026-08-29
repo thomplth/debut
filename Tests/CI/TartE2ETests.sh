@@ -69,6 +69,8 @@ if [[ -f "$guest_runner" ]]; then
         "the disposable guest must provision Accessibility"
     expect_contains "$guest_runner" 'kTCCServicePostEvent' \
         "the guest E2E driver must be authorized to inject HID events"
+    expect_contains "$guest_runner" 'grant_screen_capture "\$E2E_SOURCE"' \
+        "the guest suite must hold Screen Recording, since it samples frames in-process"
     expect_contains "$guest_runner" 'unset GITHUB_ACTIONS' \
         "the isolated local guest must run hosted-skipped gesture checks"
     expect_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
