@@ -75,6 +75,8 @@ if [[ -f "$guest_runner" ]]; then
         "the isolated local guest must run hosted-skipped gesture checks"
     expect_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
         "the default guest mode must identify unsupported virtualized drags"
+    expect_contains "$guest_runner" 'com\.apple\.universalaccess reduceMotion -bool false' \
+        "the guest must pin the host to the spring the motion check samples"
     expect_contains "$guest_runner" 'TextEdit' \
         "the guest must create deterministic E2E fixture windows"
     expect_contains "$guest_runner" 'wait_for_fixture_apps' \

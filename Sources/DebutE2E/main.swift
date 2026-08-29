@@ -1814,6 +1814,7 @@ info(
         + "accessibilityCount=\(selectedTitleCountBefore)->\(selectedTitleCountAfter) "
         + "accessibilityStrings=\(accessibleBeforeDismissal.count)->\(accessibleAfterDismissal.count) "
         + "motionSamples=\(dismissalMotionSamples.count) "
+        + "reduceMotion=\(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) "
         + "settledChangedPixelRatio=\(dismissalSettledChangedPixelRatio.map { String(format: "%.4f", $0) } ?? "none") "
         + "intermediatePixelRatio=\(dismissalMotionRatio.map { String(format: "%.4f", $0) } ?? "none") "
         + "intermediateFrames=\(dismissalIntermediateRegions.count) "
