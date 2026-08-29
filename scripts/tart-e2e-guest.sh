@@ -174,6 +174,12 @@ grant_post_event "$E2E_SOURCE" "$E2E_SOURCE"
 grant_screen_capture "$E2E_SOURCE" 1 "$E2E_SOURCE"
 sudo killall tccd 2>/dev/null || true
 
+# Under Reduce Motion the removal transition is a 0.12s fade rather than a 0.36s spring, which is
+# correct behaviour but too brief to sample as motion. The fade branch is covered by unit tests, so
+# the disposable guest is pinned to the spring instead of the E2E check guessing which one it drew.
+as_console env HOME="$console_home" defaults write com.apple.universalaccess reduceMotion -bool false
+as_console env HOME="$console_home" defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool true
+
 echo "Preparing deterministic fixture windows..."
 as_console rm -rf "$support_dir"
 as_console env HOME="$console_home" defaults write "$bundle_id" hasCompletedOnboarding -bool true
