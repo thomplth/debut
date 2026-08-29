@@ -138,6 +138,7 @@ struct SampledRegion {
     let width: Int
     let height: Int
     let pixels: [UInt8]
+    let bitmapInfo: UInt32
 }
 
 func sampleRegion(
@@ -170,7 +171,12 @@ func sampleRegion(
         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
     ) else { return nil }
     context.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
-    return SampledRegion(width: width, height: height, pixels: pixels)
+    return SampledRegion(
+        width: width,
+        height: height,
+        pixels: pixels,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )
 }
 
 func changedPixelRatio(from before: SampledRegion, to after: SampledRegion) -> Double? {
@@ -269,25 +275,138 @@ let displayCaptureFilter: SendableContentFilter? = {
     return box.load()
 }()
 
-func captureDisplayImage() -> CGImage? {
-    guard let displayCaptureFilter else { return nil }
-    let box = LockedBox<CGImage>()
-    let semaphore = DispatchSemaphore(value: 0)
-    Task.detached {
-        defer { semaphore.signal() }
+/// Asking for one screenshot at a time samples an animation at whatever rate the host can answer a
+/// round trip, and a hosted runner busy compositing the very motion being measured answered four
+/// times across a third of a second. A stream is driven by the compositor instead, so the rate is
+/// the screen's rather than the harness's, and it keeps recording while the main thread blocks
+/// waiting for the model. Frames are cropped as they arrive, since retaining whole ones would
+/// exhaust the pool the stream recycles.
+final class MotionRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
+    static let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue
+        | CGBitmapInfo.byteOrder32Little.rawValue
+
+    private let screenPoint: CGPoint
+    private let cropSizeInPoints: CGSize
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "com.debut.e2e.motion-recorder")
+    private var recorded: [(elapsed: TimeInterval, region: SampledRegion)] = []
+    private var stream: SCStream?
+    private var startedAt = Date()
+
+    init(centeredAt screenPoint: CGPoint, cropSizeInPoints: CGSize) {
+        self.screenPoint = screenPoint
+        self.cropSizeInPoints = cropSizeInPoints
+    }
+
+    var frames: [(elapsed: TimeInterval, region: SampledRegion)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recorded
+    }
+
+    func start() -> Bool {
+        guard let displayCaptureFilter else { return false }
         let filter = displayCaptureFilter.filter
         let configuration = SCStreamConfiguration()
         configuration.width = Int(filter.contentRect.width * CGFloat(filter.pointPixelScale))
         configuration.height = Int(filter.contentRect.height * CGFloat(filter.pointPixelScale))
         configuration.showsCursor = false
-        configuration.captureResolution = .best
-        box.store(try? await SCScreenshotManager.captureImage(
-            contentFilter: filter,
-            configuration: configuration
-        ))
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        configuration.queueDepth = 8
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        guard (try? stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)) != nil
+        else { return false }
+
+        let started = LockedBox<Bool>()
+        let semaphore = DispatchSemaphore(value: 0)
+        startedAt = Date()
+        stream.startCapture { error in
+            started.store(error == nil)
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 10)
+        guard started.load() == true else { return false }
+        self.stream = stream
+        return true
     }
-    _ = semaphore.wait(timeout: .now() + 5)
-    return box.load()
+
+    func stop() {
+        guard let stream else { return }
+        let semaphore = DispatchSemaphore(value: 0)
+        stream.stopCapture { _ in semaphore.signal() }
+        _ = semaphore.wait(timeout: .now() + 10)
+        self.stream = nil
+    }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of type: SCStreamOutputType
+    ) {
+        guard type == .screen,
+              let attachments = CMSampleBufferGetSampleAttachmentsArray(
+                  sampleBuffer,
+                  createIfNecessary: false
+              ) as? [[SCStreamFrameInfo: Any]],
+              let rawStatus = attachments.first?[.status] as? Int,
+              SCFrameStatus(rawValue: rawStatus) == .complete,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+              let region = crop(pixelBuffer)
+        else { return }
+
+        let elapsed = Date().timeIntervalSince(startedAt)
+        lock.lock()
+        if recorded.count < 240 {
+            recorded.append((elapsed, region))
+        }
+        lock.unlock()
+    }
+
+    private func crop(_ pixelBuffer: CVPixelBuffer) -> SampledRegion? {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
+
+        let bufferWidth = CVPixelBufferGetWidth(pixelBuffer)
+        let bufferHeight = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let displayBounds = CGDisplayBounds(CGMainDisplayID())
+        let scaleX = CGFloat(bufferWidth) / displayBounds.width
+        let scaleY = CGFloat(bufferHeight) / displayBounds.height
+        let crop = CGRect(
+            x: (screenPoint.x - cropSizeInPoints.width / 2) * scaleX,
+            y: (screenPoint.y - cropSizeInPoints.height / 2) * scaleY,
+            width: cropSizeInPoints.width * scaleX,
+            height: cropSizeInPoints.height * scaleY
+        ).integral.intersection(
+            CGRect(x: 0, y: 0, width: bufferWidth, height: bufferHeight)
+        )
+        guard crop.width > 0, crop.height > 0 else { return nil }
+
+        let originX = Int(crop.minX)
+        let originY = Int(crop.minY)
+        let width = Int(crop.width)
+        let height = Int(crop.height)
+        let source = base.assumingMemoryBound(to: UInt8.self)
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { destination in
+            guard let start = destination.baseAddress else { return }
+            for row in 0..<height {
+                memcpy(
+                    start.advanced(by: row * width * 4),
+                    source + (originY + row) * bytesPerRow + originX * 4,
+                    width * 4
+                )
+            }
+        }
+        return SampledRegion(
+            width: width,
+            height: height,
+            pixels: pixels,
+            bitmapInfo: Self.bitmapInfo
+        )
+    }
 }
 
 func writeRegion(_ region: SampledRegion, named name: String) -> String? {
@@ -300,7 +419,7 @@ func writeRegion(_ region: SampledRegion, named name: String) -> String? {
         bitsPerComponent: 8,
         bytesPerRow: region.width * 4,
         space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        bitmapInfo: region.bitmapInfo
     ),
         let image = context.makeImage(),
         let destination = CGImageDestinationCreateWithURL(
@@ -1718,48 +1837,32 @@ let dismissalRegionSize = CGSize(
     width: dismissalScreen.width * 0.8,
     height: dismissalMetrics.cardHeight + 40
 )
-func sampleDismissalRegion() -> SampledRegion? {
-    guard let dismissalRegionCenter, let image = captureDisplayImage() else { return nil }
-    return sampleRegion(
-        of: image,
-        centeredAt: dismissalRegionCenter,
-        cropSizeInPoints: dismissalRegionSize
-    )
+let dismissalRecorder = dismissalRegionCenter.map {
+    MotionRecorder(centeredAt: $0, cropSizeInPoints: dismissalRegionSize)
 }
-let beforeDismissalRegion = sampleDismissalRegion()
+let dismissalRecording = dismissalRecorder?.start() ?? false
+// The stream reports only frames the compositor actually redrew, so the still overlay yields the
+// one baseline frame this waits for rather than a run of duplicates.
+wait(0.25)
 
 postKeyDown(keyCode: CGKeyCode(kVK_ANSI_W), flags: [.maskCommand])
 postKeyUp(keyCode: CGKeyCode(kVK_ANSI_W), flags: [.maskCommand])
-
-// A frame matching neither the overlay before the key nor the one it settles into is a part-way
-// state, and a transition is a run of them. One alone proves nothing: with every stage animation
-// zeroed, a change landing between two of Debut's updates still produced a single such frame at
-// 0.0965. Cropping is deferred until after the burst so the sample rate reflects capture alone.
-let dismissalSamplingStart = Date()
-var dismissalMotionFrames: [(elapsed: TimeInterval, image: CGImage)] = []
-let dismissalSamplingDeadline = dismissalSamplingStart.addingTimeInterval(0.5)
-while Date() < dismissalSamplingDeadline, dismissalMotionFrames.count < 32 {
-    guard let image = captureDisplayImage() else { break }
-    dismissalMotionFrames.append((Date().timeIntervalSince(dismissalSamplingStart), image))
-}
 
 _ = waitFor(timeout: 5) {
     (Int(readState()["windowsInActiveSpace"] ?? "0") ?? 0) == windowsBeforeDismissal - 1
 }
 wait(0.7)
+dismissalRecorder?.stop()
 _ = takeScreenshot("16_selected_window_dismissed")
-let settledDismissalRegion = sampleDismissalRegion()
-let dismissalMotionSamples: [(elapsed: TimeInterval, region: SampledRegion)] =
-    dismissalMotionFrames.compactMap { frame in
-        guard let dismissalRegionCenter,
-              let region = sampleRegion(
-                  of: frame.image,
-                  centeredAt: dismissalRegionCenter,
-                  cropSizeInPoints: dismissalRegionSize
-              )
-        else { return nil }
-        return (frame.elapsed, region)
-    }
+
+// The recording brackets the whole gesture, so its own ends are the two states the transition ran
+// between and no separate capture can disagree with them about format or framing.
+let dismissalMotionSamples = dismissalRecorder?.frames ?? []
+let beforeDismissalRegion = dismissalMotionSamples.first?.region
+let settledDismissalRegion = dismissalMotionSamples.last?.region
+// A frame matching neither the overlay before the key nor the one it settles into is a part-way
+// state, and a transition is a run of them. One alone proves nothing: with every stage animation
+// zeroed, a change landing between two of Debut's updates still produced a single such frame.
 let dismissalIntermediateRatios: [Double?] = dismissalMotionSamples.map { sample in
     guard let beforeDismissalRegion, let settledDismissalRegion,
           let changedSinceBefore = changedPixelRatio(from: beforeDismissalRegion, to: sample.region),
@@ -1785,7 +1888,11 @@ let dismissalIntermediateSpread = dismissalIntermediateRegions.indices
 if let index = dismissalIntermediateRatios.firstIndex(where: { $0 == dismissalMotionRatio }) {
     _ = writeRegion(dismissalMotionSamples[index].region, named: "15_selected_window_dismissal_motion")
 }
+// A stream reports far more frames than a log line can carry, and the still ones on either side of
+// the transition are the ones that say nothing.
 let dismissalSampleTrace = zip(dismissalMotionSamples, dismissalIntermediateRatios)
+    .filter { _, ratio in (ratio ?? 0) > 0 }
+    .prefix(24)
     .map { sample, ratio in
         String(format: "%.3fs:%@", sample.elapsed, ratio.map { String(format: "%.4f", $0) } ?? "none")
     }
@@ -1813,6 +1920,7 @@ info(
         + "cardLabel=\(selectedCardLabel ?? "none") "
         + "accessibilityCount=\(selectedTitleCountBefore)->\(selectedTitleCountAfter) "
         + "accessibilityStrings=\(accessibleBeforeDismissal.count)->\(accessibleAfterDismissal.count) "
+        + "recording=\(dismissalRecording) "
         + "motionSamples=\(dismissalMotionSamples.count) "
         + "reduceMotion=\(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) "
         + "settledChangedPixelRatio=\(dismissalSettledChangedPixelRatio.map { String(format: "%.4f", $0) } ?? "none") "
