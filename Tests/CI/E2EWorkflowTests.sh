@@ -75,6 +75,8 @@ if [[ -f "$runner" ]]; then
         "CI E2E entry point must install the bundle build-app.sh reported"
     expect_contains "$runner" '\.build/release/DebutE2E' \
         "CI E2E entry point must reuse the release suite built with the app"
+    expect_contains "$runner" "kTCCServiceScreenCapture','\\\$e2e_path'" \
+        "the hosted suite must hold Screen Recording, since it samples frames in-process"
 fi
 
 if [[ -f "$e2e_source" ]]; then
