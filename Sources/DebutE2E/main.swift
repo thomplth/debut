@@ -5,6 +5,10 @@ import Foundation
 import ImageIO
 import ScreenCaptureKit
 
+// A piped, non-tty stdout is fully block-buffered by default, so a crash mid-run drops the
+// entire unflushed buffer — exactly the blind spot that hid where switch-to-desktop segfaulted.
+setvbuf(stdout, nil, _IOLBF, 0)
+
 // MARK: - Output
 
 nonisolated(unsafe) var passCount = 0
@@ -842,6 +846,36 @@ func waitForDebutReady(
 
 func clearDiagnosticFile() {
     try? FileManager.default.removeItem(at: diagnosticFile)
+}
+
+// A warm, reused guest keeps whatever desktop the previous run left active. Fixture windows
+// open on the active desktop, so without this a run that ended on a later desktop plants the
+// next run's fixtures with no empty desktop after them — the exact adjacency every drop/move
+// check needs. Debut is the only thing in this environment proven to move the real desktop
+// (it forges the DockSwipe gesture itself); the OS's own Control-Left shortcut is not — so this
+// launches a throwaway instance solely to drive the switch, then quits before the real fixtures
+// are created.
+//
+// This must run after every supporting global above (diagnosticFile in particular) has been
+// initialized: main.swift runs top-level `let`s in sequential order, not lazily, and
+// waitForDebutReady() reads diagnosticFile through readEvents() — dispatching this subcommand
+// any earlier in the file reads that global before its initializer runs and segfaults.
+if CommandLine.arguments.dropFirst().first == "switch-to-desktop" {
+    let target = Int(CommandLine.arguments.dropFirst(2).first ?? "") ?? 0
+    clearDiagnosticFile()
+    let service = SpaceService()
+    let application = launchDebut()
+    let ready = waitForDebutReady(application)
+    var landed = false
+    if ready {
+        postQuickSwitch(to: target)
+        landed = waitFor { service.currentDesktopIndex() == target }
+        wait(0.5)
+    }
+    _ = terminateDebutAndWait()
+    print("switch-to-desktop \(target): ready=\(ready) landed=\(landed) "
+        + "index=\(service.currentDesktopIndex().map(String.init) ?? "unknown")")
+    exit(landed ? 0 : 1)
 }
 
 // MARK: - Main
@@ -1949,174 +1983,140 @@ postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
 postFlagsChanged(flags: [])
 _ = terminateDebutAndWait()
 
-// --- 16. State written by a previous boot ---
-// A restart reissues window IDs and PIDs from low numbers, so a saved assignment does not
-// merely name a window that has gone — it names a live window belonging to somebody else.
-// Observed after a real restart: cards for windows macOS no longer had, duplicates of the
-// ones it did, and previews of whatever now owned the recycled ID, Debut's own overlay
-// included. The fixture is the same doctored state twice, differing only in its boot stamp,
-// because the stamp is the whole claim under test.
-header("16. State written by a previous boot")
+// --- 16. A recycled window ID under a stale identity ---
+// A window ID surviving a relaunch is not proof it still names the same window — only its
+// owning process is. The previous defence compared a boot stamp and parked the whole session
+// on the slightest mismatch; `kern.boottime` drifts within a single boot from NTP slew, so it
+// fired on ordinary relaunches too, not only real reboots. The identity pass replacing it
+// parks exactly the one assignment whose bundle ID disagrees with the live window sitting at
+// its ID — this fixture forges precisely that, on a window ID that is genuinely live, not a
+// number nothing owns.
+header("16. A recycled window ID under a stale identity")
 
 let stateFile: URL = diagnosticFile
     .deletingLastPathComponent()
     .appendingPathComponent("state.json")
 let originalStateData = try? Data(contentsOf: stateFile)
+info("state.json diagnostics: path=\(stateFile.path) exists=\(FileManager.default.fileExists(atPath: stateFile.path)) "
+    + "bytes=\(originalStateData?.count ?? -1)")
+if let originalStateData {
+    let parsed = try? JSONSerialization.jsonObject(with: originalStateData) as? [String: Any]
+    let stacks = parsed?["spaceStacks"] as? [[String: Any]]
+    let windowCounts = (stacks ?? []).map { stack in
+        (stack["spaces"] as? [[String: Any]] ?? []).map { ($0["windows"] as? [[String: Any]])?.count ?? -1 }
+    }
+    info("state.json parsed: stackCount=\(stacks?.count ?? -1) windowCountsPerStack=\(windowCounts)")
+}
 
-let ghostWindowID = 999_001
-let ghostTitle = "Debut E2E Window From A Previous Boot"
-// Finder is always running, and that is the point: a running bundle ID is exactly what kept
-// the stale assignment out of the stopped-process sweep. Its PID is one macOS cannot issue.
-let ghostBundleID = "com.apple.finder"
-let ghostPID = 9_999_999
+let ghostTitle = "Debut E2E Window From A Foreign Identity"
+let ghostBundleID = "com.debut.e2e.ghost-bundle"
 
-func plantGhostWindow(bootSessionID: String) -> Bool {
+/// Rewrites the first live window's assignment to a foreign bundle ID and title while
+/// keeping its real window ID. That ID still names a real, live window once Debut relaunches
+/// — the app never quit — so the mismatch this plants is exactly what the identity pass
+/// exists to catch, not a window that is simply gone.
+///
+/// Searches every space rather than assuming windows sit on space 0: the fixture windows
+/// consistently land on a non-first space (scenario 10 measures `windows=[0, 3, 0]`), so a
+/// hard-coded `spaces[0]` always found an empty list and silently skipped the whole scenario.
+func plantRecycledIdentity() -> (windowID: Int, realBundleID: String, realTitle: String)? {
     guard let originalStateData,
           var object = try? JSONSerialization.jsonObject(with: originalStateData) as? [String: Any],
           var stacks = object["spaceStacks"] as? [[String: Any]],
-          !stacks.isEmpty,
-          var spaces = stacks[0]["spaces"] as? [[String: Any]],
-          !spaces.isEmpty
-    else { return false }
+          !stacks.isEmpty
+    else { return nil }
 
-    var windows = spaces[0]["windows"] as? [[String: Any]] ?? []
-    windows.append([
-        "id": UUID().uuidString,
-        "windowID": ghostWindowID,
-        "ownerBundleID": ghostBundleID,
-        "ownerName": "Finder",
-        "ownerPID": ghostPID,
-        "windowTitle": ghostTitle,
-    ])
-    spaces[0]["windows"] = windows
-    stacks[0]["spaces"] = spaces
-    object["spaceStacks"] = stacks
-    object["bootSessionID"] = bootSessionID
+    for stackIndex in stacks.indices {
+        guard var spaces = stacks[stackIndex]["spaces"] as? [[String: Any]] else { continue }
+        for spaceIndex in spaces.indices {
+            guard var windows = spaces[spaceIndex]["windows"] as? [[String: Any]],
+                  !windows.isEmpty,
+                  let windowID = windows[0]["windowID"] as? Int,
+                  let realBundleID = windows[0]["ownerBundleID"] as? String,
+                  let realTitle = windows[0]["windowTitle"] as? String
+            else { continue }
 
-    guard let data = try? JSONSerialization.data(withJSONObject: object) else { return false }
-    return (try? data.write(to: stateFile, options: .atomic)) != nil
+            windows[0]["ownerBundleID"] = ghostBundleID
+            windows[0]["ownerName"] = "Ghost"
+            windows[0]["windowTitle"] = ghostTitle
+            spaces[spaceIndex]["windows"] = windows
+            stacks[stackIndex]["spaces"] = spaces
+            object["spaceStacks"] = stacks
+
+            guard let data = try? JSONSerialization.data(withJSONObject: object),
+                  (try? data.write(to: stateFile, options: .atomic)) != nil
+            else { return nil }
+            return (windowID, realBundleID, realTitle)
+        }
+    }
+    return nil
 }
 
-/// Where the planted window ended up. Only meaningful once Debut has quit: a reconcile need
-/// not dirty the model, and reading the file under a running Debut just returns the fixture.
-///
-/// `retained` deliberately keys on the title rather than the ID, so that parking the window
-/// and recovering it onto a real window both count as keeping the placement. Which of the two
-/// happens depends on whether the host has a matching live window, and the claim under test
-/// is that the placement survives either way.
-func ghostPlacement() -> (liveByID: Bool, retained: Bool) {
-    guard let data = try? Data(contentsOf: stateFile),
-          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    else { return (false, false) }
-
-    let spaceWindows = (object["spaceStacks"] as? [[String: Any]] ?? []).flatMap { stack in
-        (stack["spaces"] as? [[String: Any]] ?? []).flatMap {
-            $0["windows"] as? [[String: Any]] ?? []
-        }
-    }
-    let dormantWindows = (object["dormantWindowAssignments"] as? [[String: Any]] ?? [])
-        .compactMap { $0["window"] as? [String: Any] }
-
-    let liveByID = spaceWindows.contains { $0["windowID"] as? Int == ghostWindowID }
-    let retained = (spaceWindows + dormantWindows).contains {
-        $0["windowTitle"] as? String == ghostTitle
-    }
-    return (liveByID, retained)
-}
-
-if originalStateData == nil {
-    skipTest("A window saved by the current boot stays live", reason: "no saved state to doctor")
-    skipTest("A window saved by a previous boot does not come back live", reason: "no saved state to doctor")
-    skipTest("The overlay shows no window from the previous boot", reason: "no saved state to doctor")
-} else {
-    // Control: the same fixture stamped with this boot. It must survive, or a later pass
-    // proves only that the fixture never took.
-    let controlPlanted = plantGhostWindow(bootSessionID: BootSession.current)
+if let planted = plantRecycledIdentity() {
     clearDiagnosticFile()
-    let controlApplication = launchDebut()
-    let controlReady = waitForDebutReady(controlApplication)
-    let controlReportedBootChange = readEvents().contains {
-        $0["event"] == "state_boot_session_changed"
+    let application = launchDebut()
+    let ready = waitForDebutReady(application)
+
+    let recycledEvent = readEvents().first {
+        $0["event"] == "window_made_dormant"
+            && $0["reason"] == "id_recycled"
+            && Int($0["windowID"] ?? "") == planted.windowID
     }
-    // Quitting flushes the model to disk, which is the only way to see what Debut made of
-    // the fixture rather than the fixture itself.
-    _ = terminateDebutAndWait()
-    let controlPlacement = ghostPlacement()
-
-    info("Control (current boot): planted=\(controlPlanted) ready=\(controlReady) "
-        + "liveByID=\(controlPlacement.liveByID) retained=\(controlPlacement.retained) "
-        + "bootChangeReported=\(controlReportedBootChange)")
-
-    test("A window saved by the current boot stays live") {
-        guard controlPlanted else { info("  fixture was not written"); return false }
-        guard controlReady else { info("  Debut did not become ready"); return false }
-        guard !controlReportedBootChange else {
-            info("  the boot stamp was rejected even though it was this boot's")
-            return false
-        }
-        guard controlPlacement.liveByID else {
-            info("  the planted window was not kept live, so the fixture proves nothing")
-            return false
-        }
-        return true
-    }
-
-    let rebootPlanted = plantGhostWindow(bootSessionID: "e2e-previous-boot")
-    clearDiagnosticFile()
-    let rebootApplication = launchDebut()
-    let rebootReady = waitForDebutReady(rebootApplication)
-    let bootChange = readEvents().last { $0["event"] == "state_boot_session_changed" }
 
     // The failure the user sees is a card in the overlay, so gather that evidence while
-    // Debut is still up, before quitting to flush the model to disk.
+    // Debut is still up, before quitting flushes the model to disk.
     postFlagsChanged(flags: [.maskCommand])
     postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
-    let rebootOverlayShown = waitFor(timeout: 5) { readState()["overlayVisible"] == "true" }
+    let overlayShown = waitFor(timeout: 5) { readState()["overlayVisible"] == "true" }
     wait(0.5)
-    let _ = takeScreenshot("16_previous_boot_overlay")
-    let overlayStrings = rebootApplication.map {
-        accessibilityStrings(for: $0.processIdentifier)
-    } ?? []
+    let _ = takeScreenshot("16_recycled_identity_overlay")
+    let overlayStrings = application.map { accessibilityStrings(for: $0.processIdentifier) } ?? []
     postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
     postKeyDown(keyCode: CGKeyCode(kVK_Escape))
     postKeyUp(keyCode: CGKeyCode(kVK_Escape))
     postFlagsChanged(flags: [])
 
     _ = terminateDebutAndWait()
-    let rebootPlacement = ghostPlacement()
+    let finalData = try? Data(contentsOf: stateFile)
+    let finalObject = finalData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    let finalSpaceWindows = (finalObject?["spaceStacks"] as? [[String: Any]] ?? []).flatMap { stack in
+        (stack["spaces"] as? [[String: Any]] ?? []).flatMap { $0["windows"] as? [[String: Any]] ?? [] }
+    }
+    let finalDormant = (finalObject?["dormantWindowAssignments"] as? [[String: Any]] ?? [])
+        .compactMap { $0["window"] as? [String: Any] }
 
-    info("Reboot (foreign boot): planted=\(rebootPlanted) ready=\(rebootReady) "
-        + "liveByID=\(rebootPlacement.liveByID) retained=\(rebootPlacement.retained) "
-        + "bootChange=\(bootChange ?? [:])")
+    info("Recycled identity: windowID=\(planted.windowID) realBundle=\(planted.realBundleID) "
+        + "ready=\(ready) recycledEvent=\(recycledEvent ?? [:])")
 
-    test("A window saved by a previous boot does not come back live") {
-        guard rebootPlanted, rebootReady else {
-            info("  fixture planted=\(rebootPlanted), ready=\(rebootReady)")
-            return false
-        }
-        guard let bootChange else {
-            info("  no state_boot_session_changed event: the stamp was not compared")
-            return false
-        }
-        guard (Int(bootChange["madeDormant"] ?? "0") ?? 0) > 0 else {
-            info("  the stamp was compared but nothing was parked: \(bootChange)")
-            return false
-        }
-        guard !rebootPlacement.liveByID else {
-            info("  the previous boot's window ID is still assigned to a space")
-            return false
-        }
-        // Parked, not deleted: the placement is the only record of where it belonged.
-        guard rebootPlacement.retained else {
-            info("  the assignment was discarded rather than kept recoverable")
+    test("The stale assignment is parked as a recycled ID, not silently kept live") {
+        guard ready else { info("  Debut did not become ready"); return false }
+        guard recycledEvent != nil else {
+            info("  no window_made_dormant/id_recycled event for windowID \(planted.windowID)")
             return false
         }
         return true
     }
 
-    test("The overlay shows no window from the previous boot") {
-        guard rebootReady, rebootOverlayShown else {
-            info("  overlay did not open (ready=\(rebootReady), shown=\(rebootOverlayShown))")
+    test("The real window behind the recycled ID is recovered under its own identity") {
+        guard ready else { return false }
+        guard let liveEntry = finalSpaceWindows.first(where: { $0["windowID"] as? Int == planted.windowID }) else {
+            info("  window \(planted.windowID) is not live in any space after relaunch")
+            return false
+        }
+        let bundleID = liveEntry["ownerBundleID"] as? String
+        if bundleID != planted.realBundleID { info("  window \(planted.windowID) carries bundleID \(bundleID ?? "nil")") }
+        return bundleID == planted.realBundleID
+    }
+
+    test("The foreign identity is retained as a dormant assignment, not deleted") {
+        let retained = finalDormant.contains { $0["windowTitle"] as? String == ghostTitle }
+        if !retained { info("  no dormant assignment carries the ghost title") }
+        return retained
+    }
+
+    test("The overlay shows no window under the foreign identity") {
+        guard ready, overlayShown else {
+            info("  overlay did not open (ready=\(ready), shown=\(overlayShown))")
             return false
         }
         guard !overlayStrings.isEmpty else {
@@ -2130,6 +2130,139 @@ if originalStateData == nil {
 
     if let originalStateData {
         try? originalStateData.write(to: stateFile, options: .atomic)
+    }
+} else {
+    let reason = "no saved state to doctor"
+    skipTest("The stale assignment is parked as a recycled ID, not silently kept live", reason: reason)
+    skipTest("The real window behind the recycled ID is recovered under its own identity", reason: reason)
+    skipTest("The foreign identity is retained as a dormant assignment, not deleted", reason: reason)
+    skipTest("The overlay shows no window under the foreign identity", reason: reason)
+}
+
+// --- 16b. Startup discovers windows on every desktop, not just the active one ---
+// Root cause 1: `kAXWindows` only returns the active Space's windows, so before Stage 1/2 a
+// first pass only ever picked up windows on the desktop the user happened to be standing on,
+// and the rest trickled in over the following seconds as focus moved between them. Unit tests
+// fake the enumeration; this is the only place a real relaunch against real desktops can catch
+// the AX-only path coming back. Gated on its own precondition rather than sharing scenario 16's
+// gate: this needs two desktops *and* a window parked on the non-active one, which scenario 16
+// does not set up.
+header("16b. Startup discovers windows on every desktop")
+
+let coverageSpaceService = SpaceService()
+let coverageDesktopCount = coverageSpaceService.userDesktops().count
+let coverageGateReason: String? = coverageDesktopCount < 2
+    ? "This host has one desktop, so there is nowhere else a window could hide"
+    : (!coverageSpaceService.canMoveWindows
+        ? "The bridged window-server move is inert on this host, so a window cannot be placed on a second desktop"
+        : nil)
+
+if let coverageGateReason {
+    skipTest("windows_reconciled liveCount covers windows on every desktop at startup",
+             reason: coverageGateReason)
+} else {
+    // Scenario 16 always ends with Debut terminated, whether or not its fixture planted —
+    // there is nothing running here to read state from until this scenario launches its own.
+    // The diagnostic file must be cleared first: otherwise waitForDebutReady finds scenario
+    // 16's leftover app_ready event and reports ready before this instance's event tap is
+    // actually live, so the Cmd+Tab below races the real launch and gets silently dropped.
+    clearDiagnosticFile()
+    let coverageSetupApplication = launchDebut()
+    let coverageSetupReady = waitForDebutReady(coverageSetupApplication)
+
+    if !coverageSetupReady {
+        skipTest("windows_reconciled liveCount covers windows on every desktop at startup",
+                 reason: "Debut did not become ready to set up the coverage fixture")
+    } else {
+        // Move one window onto the next desktop over, the same bridged keyboard move 10b
+        // proves is real, so the relaunch below has a window sitting off the active desktop.
+        // Mirrors 10b exactly: the origin space is read from inside the open overlay, not
+        // before it opens — opening the overlay resets `selectedSpaceIndex` to the active
+        // space, and computing origin from a stale pre-overlay snapshot desynced the two.
+        let coverageMovesBefore = readEvents().filter { $0["event"] == "window_moved_by_key" }.count
+
+        postFlagsChanged(flags: [.maskCommand])
+        wait(0.1)
+        postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+        // A fresh launch's event tap/session takes longer to become responsive than a flat
+        // 0.8s covers — scenario 16 polls for the same fresh-launch overlay-open and this one
+        // must too, or the digit press below lands before there is any overlay to receive it.
+        _ = waitFor(timeout: 5) { readState()["overlayVisible"] == "true" }
+        wait(0.5)
+
+        let openStateDump = readState()
+        let coverageOpenCounts = spaceWindowCounts(in: openStateDump)
+        let coverageOrigin = coverageOpenCounts.indices.first {
+            $0 < coverageOpenCounts.count - 1 && coverageOpenCounts[$0] > 0
+        } ?? -1
+        info("Coverage overlay opened: overlayVisible=\(openStateDump["overlayVisible"] ?? "nil") "
+            + "selectedSpaceIndex=\(openStateDump["selectedSpaceIndex"] ?? "nil") "
+            + "spaceCount=\(openStateDump["spaceCount"] ?? "nil") origin=\(coverageOrigin)")
+
+        if coverageOrigin < 0 {
+            postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+            postFlagsChanged(flags: [])
+            skipTest("windows_reconciled liveCount covers windows on every desktop at startup",
+                     reason: "No space has both a window and a next space to move it to")
+        } else {
+            postKeyDown(keyCode: digitKeyCode(coverageOrigin + 1), flags: [.maskCommand])
+            let coverageOriginSelected = waitFor {
+                Int(readState()["selectedSpaceIndex"] ?? "") == coverageOrigin
+            }
+            let afterDigitState = readState()
+            info("Coverage after digit: overlayVisible=\(afterDigitState["overlayVisible"] ?? "nil") "
+                + "selectedSpaceIndex=\(afterDigitState["selectedSpaceIndex"] ?? "nil") "
+                + "originSelected=\(coverageOriginSelected)")
+            let coverageBeforeCounts = spaceWindowCounts(in: readState())
+
+            postKeyDown(keyCode: CGKeyCode(kVK_DownArrow), flags: [.maskCommand])
+            wait(1.0)
+            postFlagsChanged(flags: [])
+            for _ in 0..<30 {
+                if readEvents().filter({ $0["event"] == "window_moved_by_key" }).count > coverageMovesBefore,
+                   readState()["overlayVisible"] == "false" {
+                    break
+                }
+                wait(0.1)
+            }
+
+            let coverageMovedCounts = spaceWindowCounts(in: readState())
+            let coverageTotalBeforeRelaunch = coverageMovedCounts.reduce(0, +)
+            let coverageMoveLanded = coverageMovedCounts.indices.contains(coverageOrigin + 1)
+                && coverageMovedCounts[coverageOrigin + 1] == coverageBeforeCounts[coverageOrigin + 1] + 1
+
+            info("Coverage setup: origin=\(coverageOrigin) originSelected=\(coverageOriginSelected) "
+                + "open=\(coverageOpenCounts) before=\(coverageBeforeCounts) moved=\(coverageMovedCounts) "
+                + "moveLanded=\(coverageMoveLanded)")
+
+            _ = terminateDebutAndWait()
+            clearDiagnosticFile()
+            let coverageApplication = launchDebut()
+            let coverageReady = waitForDebutReady(coverageApplication)
+            let coverageFirstReconcile = readEvents().first { $0["event"] == "windows_reconciled" }
+            let coverageLiveCount = Int(coverageFirstReconcile?["liveCount"] ?? "") ?? -1
+
+            info("Coverage: moveLanded=\(coverageMoveLanded) before=\(coverageTotalBeforeRelaunch) "
+                + "ready=\(coverageReady) firstReconcile=\(coverageFirstReconcile ?? [:])")
+
+            test("windows_reconciled liveCount covers windows on every desktop at startup") {
+                guard coverageMoveLanded else {
+                    info("  the setup move did not land, nothing to measure")
+                    return false
+                }
+                guard coverageReady else { info("  Debut did not become ready"); return false }
+                guard coverageFirstReconcile != nil else {
+                    info("  no windows_reconciled event at startup")
+                    return false
+                }
+                guard coverageLiveCount >= coverageTotalBeforeRelaunch else {
+                    info("  liveCount \(coverageLiveCount) undercounts the "
+                        + "\(coverageTotalBeforeRelaunch) windows seen before relaunch")
+                    return false
+                }
+                return true
+            }
+        }
     }
 }
 

@@ -35,6 +35,34 @@ struct WindowServiceTests {
         ))
     }
 
+    // AX role/subrole is a snapshot, not a verdict: an app that hasn't answered AX yet, or a
+    // window on a Space that isn't showing (kAXWindows cannot see it there at all), is neither
+    // trackable nor untrackable. Only a positively-untrackable window may be dropped outright;
+    // an AX-unknown window instead falls back to this CG-only heuristic.
+    @Test("An AX-unknown window is plausible only when every CG signal agrees")
+    func classifiesPlausibleUntrackedWindows() {
+        let bounds = CGRect(x: 0, y: 0, width: 200, height: 200)
+        #expect(AccessibilityWindowService.isPlausibleUntrackedWindow(
+            layer: 0, isRegularApp: true, bounds: bounds, hasResolvedDesktop: true
+        ))
+        #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
+            layer: 3, isRegularApp: true, bounds: bounds, hasResolvedDesktop: true
+        ))
+        #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
+            layer: nil, isRegularApp: true, bounds: bounds, hasResolvedDesktop: true
+        ))
+        #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
+            layer: 0, isRegularApp: false, bounds: bounds, hasResolvedDesktop: true
+        ))
+        #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
+            layer: 0, isRegularApp: true, bounds: bounds, hasResolvedDesktop: false
+        ))
+        #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
+            layer: 0, isRegularApp: true,
+            bounds: CGRect(x: 0, y: 0, width: 10, height: 10), hasResolvedDesktop: true
+        ))
+    }
+
     @Test("Disabled live previews neither enumerate nor capture")
     func disabledLivePreviewsAvoidCapture() async {
         let service = AccessibilityWindowService(windowCaptureEnabled: false)

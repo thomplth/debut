@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AppKit
 import CoreGraphics
 @testable import DebutCore
 
@@ -306,5 +307,99 @@ struct SpaceServiceMappingTests {
         let indexes = switcher.desktopIndexes(forWindows: [11, 22, 33])
 
         #expect(indexes == [11: 0, 22: 2])
+    }
+
+    // A conformer that has not implemented per-Space enumeration must not be forced to:
+    // the default keeps callers working with an empty map rather than a compile error.
+    @Test("A conformer without its own implementation reports no window locations")
+    func defaultWindowLocationsIsEmpty() {
+        let switcher = MockSpaceSwitcher(desktops: 3, current: 0)
+        #expect(switcher.windowLocations().isEmpty)
+    }
+}
+
+// kAXWindows only reports windows on the active Space, plus windows assigned to every Space.
+// A window on a Space that is not showing is invisible to Accessibility, so discovering it at
+// all requires asking the window server directly, one desktop at a time.
+@Suite("SpaceService window enumeration")
+struct SpaceServiceWindowEnumerationTests {
+
+    // A freshly created test-process window does not reliably land on a listed user desktop —
+    // measured landing on a Space absent from `userDesktops()` entirely — so this places the
+    // window with the same bridged move the reassignment feature already relies on, rather
+    // than trusting wherever AppKit happens to put a brand-new window.
+    @Test("windowLocations finds a window placed on a known desktop")
+    @MainActor func windowLocationsFindsPlacedWindow() throws {
+        let service = SpaceService()
+        let target = try #require(service.userDesktops().first)
+
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        // Closing an NSWindow releases it by default, which over-releases the reference this
+        // test still holds and segfaults the *next* test rather than this one.
+        window.isReleasedWhenClosed = false
+        window.orderFront(nil)
+        defer { window.close() }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+
+        let windowID = CGWindowID(window.windowNumber)
+        #expect(BridgedWindowManagement.moveWindows([windowID], toSpace: target))
+        #expect(service.waitForWindow(windowID, toReachSpace: target))
+
+        let locations = service.windowLocations()
+
+        #expect(locations[windowID]?.desktopID == target)
+    }
+
+    @Test("windowLocations finds a window on a desktop that is not showing",
+          .enabled(if: BridgedWindowManagementTests.hasSecondDesktop, "needs at least two user desktops"))
+    @MainActor func windowLocationsFindsOtherDesktopWindow() throws {
+        let service = SpaceService()
+        let desktops = service.userDesktops()
+
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.orderFront(nil)
+        defer { window.close() }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+
+        let windowID = CGWindowID(window.windowNumber)
+        let origin = try #require(service.spaces(forWindow: windowID).first)
+        let target = try #require(desktops.first { $0 != origin })
+
+        #expect(BridgedWindowManagement.moveWindows([windowID], toSpace: target))
+        #expect(service.waitForWindow(windowID, toReachSpace: target))
+
+        let locations = service.windowLocations()
+
+        #expect(locations[windowID]?.desktopID == target)
+    }
+
+    // desktopLocation(forWindow:) already treats a window that belongs to more than one
+    // Space as having no single answer — that is what stops an all-Spaces window like
+    // Finder from being swept onto whichever desktop is queried first. windowLocations()
+    // enumerates per desktop, so it must apply the same rule itself rather than letting the
+    // last desktop queried silently win the dictionary write.
+    @Test("windowLocations omits a window that belongs to every desktop",
+          .enabled(if: BridgedWindowManagementTests.hasSecondDesktop, "needs at least two user desktops"))
+    @MainActor func windowLocationsOmitsAllSpacesWindow() throws {
+        let service = SpaceService()
+        #expect(service.userDesktops().count >= 2)
+
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.collectionBehavior.insert(.canJoinAllSpaces)
+        window.orderFront(nil)
+        defer { window.close() }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+
+        let windowID = CGWindowID(window.windowNumber)
+        #expect(service.spaces(forWindow: windowID).count > 1)
+
+        let locations = service.windowLocations()
+
+        #expect(locations[windowID] == nil)
     }
 }
