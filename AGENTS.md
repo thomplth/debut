@@ -79,6 +79,8 @@ Every job in a release run is pinned to the commit that triggered it, and `scrip
 
 The next version comes from the tags alone, via `scripts/release-plan.sh`; nothing else records the current version. Release notes are the commit subjects in the range, so a vague commit message becomes a vague changelog entry.
 
+The manual workflow's reusable publish job must keep `secrets: inherit`. GitHub otherwise resolves the called job's protected `stable-release` environment variables but leaves its environment secrets empty. The daily caller must not inherit secrets: it uses `daily-release`, and the Sparkle private key must remain unreachable from that path. `scripts/validate-release-credentials.sh` is the fail-fast guard for this wiring.
+
 A release never commits and never pushes a branch. The `Main Protection` ruleset forbids any bot from updating `main`, and an earlier design that pushed a `Release vX.Y.Z` commit died at that push having already pushed its tag. The publish workflow instead tags the tested commit in place and pushes only the tag, which the ruleset does not cover.
 
 `scripts/apply-version.sh` therefore stamps the version into `Sources/DebutCore/DebutCore.swift` and `Resources/Info.plist` for the build only — those edits are deliberately thrown away. Both files must keep their current shape for the stamp to land. What is checked in stays `0.0.0-dev`, so a build reporting that version is telling you it is not a release. Do not "fix" it to a real number.
