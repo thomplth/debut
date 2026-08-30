@@ -3,7 +3,8 @@
 ## Issue Lifecycle
 
 - Linear is the source of truth for task scope, decisions, progress, and acceptance criteria.
-- Before starting work, create a Linear issue if the user did not specify one. If the user specified an issue, use that issue instead.
+- Before starting implementation works that involves creating a commit to the repo, create a Linear issue if the user did not specify one. If the user specified an issue, use that issue instead.
+- Work with implementation plan decided moves to Todo.
 - Completed work moves to Review.
 - Only humans move issues to Done or close them.
 
