@@ -375,4 +375,31 @@ struct SpaceServiceWindowEnumerationTests {
 
         #expect(locations[windowID]?.desktopID == target)
     }
+
+    // desktopLocation(forWindow:) already treats a window that belongs to more than one
+    // Space as having no single answer — that is what stops an all-Spaces window like
+    // Finder from being swept onto whichever desktop is queried first. windowLocations()
+    // enumerates per desktop, so it must apply the same rule itself rather than letting the
+    // last desktop queried silently win the dictionary write.
+    @Test("windowLocations omits a window that belongs to every desktop",
+          .enabled(if: BridgedWindowManagementTests.hasSecondDesktop, "needs at least two user desktops"))
+    @MainActor func windowLocationsOmitsAllSpacesWindow() throws {
+        let service = SpaceService()
+        #expect(service.userDesktops().count >= 2)
+
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.collectionBehavior.insert(.canJoinAllSpaces)
+        window.orderFront(nil)
+        defer { window.close() }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+
+        let windowID = CGWindowID(window.windowNumber)
+        #expect(service.spaces(forWindow: windowID).count > 1)
+
+        let locations = service.windowLocations()
+
+        #expect(locations[windowID] == nil)
+    }
 }

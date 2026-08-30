@@ -129,8 +129,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     public func populateDefaultSpace(_ spaceManager: inout SpaceManager) {
         let windows = discoverRunningWindows()
-        let desktopLocations = spaceSwitcher?
-            .desktopLocations(forWindows: windows.map(\.windowID)) ?? [:]
+        let liveIDs = Set(windows.map(\.windowID))
+        let desktopLocations = (spaceSwitcher?.windowLocations() ?? [:])
+            .filter { liveIDs.contains($0.key) }
 
         for window in windows {
             // This path never reaches the reconciler, so the desktop rule is applied here
@@ -523,11 +524,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     private func desktopIndexes(for windows: [WindowInfo]) -> [CGWindowID: Int] {
-        spaceSwitcher?.desktopIndexes(forWindows: windows.map(\.windowID)) ?? [:]
+        desktopLocations(for: windows).mapValues(\.index)
     }
 
+    /// One `windowLocations()` call covering every desktop, filtered down to the windows
+    /// asked about — not one `SLSCopySpacesForWindows` call per window. `listWindows()`
+    /// already calls `windowLocations()` to discover windows outside the active Space, so
+    /// this reuses that same per-desktop enumeration for placement instead of re-asking
+    /// per window.
     private func desktopLocations(for windows: [WindowInfo]) -> [CGWindowID: DesktopLocation] {
-        spaceSwitcher?.desktopLocations(forWindows: windows.map(\.windowID)) ?? [:]
+        guard let spaceSwitcher else { return [:] }
+        let liveIDs = Set(windows.map(\.windowID))
+        return spaceSwitcher.windowLocations().filter { liveIDs.contains($0.key) }
     }
 
     private func discoverLaunchedWindows(for app: AppInfo) {
