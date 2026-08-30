@@ -117,6 +117,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         spaceService.switchDuration = currentSettings.spaceSwitchDuration
         self.spaceService = spaceService
         discovery.spaceSwitcher = spaceService
+        windowService.spaceSwitcher = spaceService
 
         // Windows are placed by the desktop they are on, so the space list has to cover
         // every desktop before the first reconcile. Growing it afterwards would leave the
