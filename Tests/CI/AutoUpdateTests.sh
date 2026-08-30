@@ -11,6 +11,7 @@ package_dmg="$repo_root/scripts/package-dmg.sh"
 daily="$repo_root/.github/workflows/release-daily.yml"
 manual="$repo_root/.github/workflows/release-manual.yml"
 publish="$repo_root/.github/workflows/release-publish.yml"
+validate_credentials="$repo_root/scripts/validate-release-credentials.sh"
 failures=0
 
 fail() {
@@ -25,6 +26,7 @@ expect_contains() {
 
 [[ -x "$eligibility" ]] || fail "missing executable stable-update-eligibility.sh"
 [[ -x "$appcast" ]] || fail "missing executable generate-appcast.sh"
+[[ -x "$validate_credentials" ]] || fail "missing executable validate-release-credentials.sh"
 
 if [[ -x "$eligibility" ]]; then
     [[ "$($eligibility stable 1.2.0)" == "eligible=true" ]] \
@@ -37,6 +39,23 @@ if [[ -x "$eligibility" ]]; then
     if "$eligibility" stable invalid >/dev/null 2>&1; then
         fail "an invalid stable version must be rejected"
     fi
+fi
+
+if [[ -x "$validate_credentials" ]]; then
+    if "$validate_credentials" stable >/dev/null 2>&1; then
+        fail "stable releases must reject missing signing and notarization credentials"
+    fi
+    DEVELOPER_ID_CERTIFICATE_BASE64=certificate \
+        DEVELOPER_ID_CERTIFICATE_PASSWORD=password \
+        DEVELOPER_IDENTITY=identity \
+        APP_STORE_CONNECT_API_KEY_P8=notary-key \
+        APP_STORE_CONNECT_API_KEY_ID=notary-key-id \
+        APP_STORE_CONNECT_ISSUER_ID=notary-issuer-id \
+        SPARKLE_EDDSA_PRIVATE_KEY=sparkle-key \
+        "$validate_credentials" stable >/dev/null \
+        || fail "stable releases must accept a complete credential set"
+    "$validate_credentials" daily >/dev/null \
+        || fail "daily releases must not require stable credentials"
 fi
 
 if [[ -x "$appcast" ]]; then
@@ -94,8 +113,18 @@ expect_contains "$package_dmg" 'codesign.*\$DMG' \
 
 expect_contains "$daily" 'channel: daily' "daily releases must identify the daily channel"
 expect_contains "$manual" 'channel: stable' "manual releases must identify the stable channel"
+manual_publish_job="$(sed -n '/^  publish:/,$p' "$manual")"
+if ! grep -Eq '^    secrets: inherit$' <<< "$manual_publish_job"; then
+    fail "the stable caller must enable protected environment secrets in the reusable workflow"
+fi
+daily_publish_job="$(sed -n '/^  publish:/,$p' "$daily")"
+if grep -Eq '^    secrets: inherit$' <<< "$daily_publish_job"; then
+    fail "the daily caller must not inherit stable release secrets"
+fi
 expect_contains "$publish" "environment:.*(daily-release|stable-release)" \
     "release secrets must be isolated by channel environment"
+expect_contains "$publish" 'validate-release-credentials\.sh' \
+    "publishing must fail before stamping or tagging when protected credentials are unavailable"
 expect_contains "$publish" 'stable-update-eligibility\.sh' \
     "publishing must enforce stable update eligibility"
 expect_contains "$publish" -- '--prerelease' "daily GitHub releases must be prereleases"
