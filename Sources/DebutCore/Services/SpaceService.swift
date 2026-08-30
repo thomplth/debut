@@ -38,9 +38,19 @@ private let cgsCopyManagedDisplaySpaces: (@convention(c) (CGSConnectionID, CFStr
     skyLightSymbol("CGSCopyManagedDisplaySpaces")
 private let slsCopySpacesForWindows: (@convention(c) (CGSConnectionID, Int32, CFArray) -> Unmanaged<CFArray>?)? =
     skyLightSymbol("SLSCopySpacesForWindows")
+private let slsCopyWindowsWithOptionsAndTags: (@convention(c) (
+    CGSConnectionID, UInt32, CFArray, UInt32,
+    UnsafeMutablePointer<UInt64>, UnsafeMutablePointer<UInt64>
+) -> Unmanaged<CFArray>?)? = skyLightSymbol("SLSCopyWindowsWithOptionsAndTags")
 
 /// Selector for `SLSCopySpacesForWindows` meaning "all spaces the window belongs to".
 private let kSpaceSelectorAll: Int32 = 7
+
+/// Option bits for `SLSCopyWindowsWithOptionsAndTags`: include invisible/off-screen windows
+/// (`1<<0`, `1<<2`) and windows at the screen-saver level (`1<<1`). Without these a window
+/// on a desktop that is not showing is exactly the kind of window this call exists to find,
+/// and the default options omit it.
+private let kWindowEnumerationOptions: UInt32 = 0x7
 
 // Private CGEvent fields carrying DockSwipe gesture parameters.
 //
@@ -460,6 +470,11 @@ public protocol SpaceSwitching: AnyObject {
     func spaceTopology() -> SpaceTopology
     func desktopLocation(forWindow windowID: CGWindowID) -> DesktopLocation?
     func desktopLocations(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: DesktopLocation]
+    /// Every window on every desktop, keyed by window ID. Unlike `desktopLocations(forWindows:)`
+    /// this does not start from a set of window IDs to resolve — `kAXWindows` only reports
+    /// windows on the active Space, so this is how a window on another desktop is discovered
+    /// at all, not just located once already known.
+    func windowLocations() -> [CGWindowID: DesktopLocation]
     func desktopCount() -> Int
     func currentDesktopIndex() -> Int?
     func desktopIndex(forWindow windowID: CGWindowID) -> Int?
@@ -515,6 +530,11 @@ public extension SpaceSwitching {
             result[windowID] = desktopLocation(forWindow: windowID)
         }
     }
+
+    /// A conformer that has no per-Space enumeration of its own — every mock, and any future
+    /// conformer that only ever resolves windows it already knows about — reports none rather
+    /// than failing to build.
+    func windowLocations() -> [CGWindowID: DesktopLocation] { [:] }
 
     func moveWindow(windowID: CGWindowID, toDesktop: Int) {
         moveWindow(windowID: windowID, toDesktop: toDesktop, completion: nil)
@@ -748,6 +768,30 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
 
     static func index(of space: CGSSpaceID, in desktops: [CGSSpaceID]) -> Int? {
         desktops.firstIndex(of: space)
+    }
+
+    /// Every window on every desktop, one `SLSCopyWindowsWithOptionsAndTags` call per desktop.
+    /// `kAXWindows` cannot see a desktop that is not showing, so this is the only path that
+    /// finds a window there at all.
+    public func windowLocations() -> [CGWindowID: DesktopLocation] {
+        guard let connection, let slsCopyWindowsWithOptionsAndTags else { return [:] }
+        let topology = spaceTopology()
+        var result: [CGWindowID: DesktopLocation] = [:]
+        for stack in topology.stacks {
+            for (index, desktopID) in stack.desktopIDs.enumerated() {
+                var setTags: UInt64 = 0
+                var clearTags: UInt64 = 0
+                guard let windowIDs = slsCopyWindowsWithOptionsAndTags(
+                    connection, 0, [NSNumber(value: desktopID)] as CFArray,
+                    kWindowEnumerationOptions, &setTags, &clearTags
+                )?.takeRetainedValue() as? [NSNumber] else { continue }
+                let location = DesktopLocation(stackID: stack.id, desktopID: desktopID, index: index)
+                for windowID in windowIDs {
+                    result[windowID.uint32Value] = location
+                }
+            }
+        }
+        return result
     }
 
     // MARK: Switching
