@@ -8,6 +8,9 @@ daily=".github/workflows/release-daily.yml"
 manual=".github/workflows/release-manual.yml"
 publish=".github/workflows/release-publish.yml"
 e2e=".github/workflows/e2e.yml"
+agents="AGENTS.md"
+readme="README.md"
+release_guide="docs/html/10-build-release.html"
 failures=0
 
 fail() {
@@ -100,6 +103,17 @@ if [[ -f "$manual" ]]; then
     expect_not_contains "$manual" '\-\-require-changes' \
         "a human-triggered release must not be skipped for want of new commits"
 fi
+
+expect_contains "$agents" 'single explicit user request' \
+    "the agent release policy must treat one explicit user request as authorization"
+expect_not_contains "$agents" 'approved through the protected' \
+    "the agent release policy must not require a second stable-release approval"
+expect_contains "$readme" 'single explicit release request' \
+    "the public release documentation must describe one-request releases"
+expect_not_contains "$readme" 'after approval' \
+    "the public release documentation must not promise a separate approval gate"
+expect_contains "$release_guide" 'single explicit release request' \
+    "the build guide must describe one-request stable promotion"
 
 if [[ -f "$publish" ]]; then
     expect_contains "$publish" '^  workflow_call:' "the publish workflow must only run as a called gate"
