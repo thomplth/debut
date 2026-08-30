@@ -1104,7 +1104,7 @@ struct SpaceControllerTests {
         #expect(windowService.raisedWindowID == 101)
     }
 
-    @Test("Quit terminates the app owning the selected window, not the frontmost app")
+    @Test("Quit hides every window owned by the terminating app without making it dormant")
     func quitSelectedApp() {
         let (controller, windowService, keyboardService) = makeController()
         let spaceID = controller.spaceManager.activeSpaceID
@@ -1116,6 +1116,14 @@ struct SpaceControllerTests {
             SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2", ownerPID: 22),
             toSpaceID: spaceID
         )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 303, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T3", ownerPID: 22),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 404, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T4", ownerPID: 33),
+            toSpaceID: spaceID
+        )
 
         keyboardService.simulateEvent(.cmdTabHold)
         #expect(controller.selectedWindowIndex == 1)
@@ -1123,6 +1131,89 @@ struct SpaceControllerTests {
 
         #expect(windowService.terminatedPIDs == [22])
         #expect(controller.isSpaceManagerVisible)
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [101, 202, 303, 404])
+        #expect(controller.spaceManager.dormantWindowAssignments.isEmpty)
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101, 404])
+        #expect(controller.selectedWindowIndex == 1)
+
+        keyboardService.simulateEvent(.cmdRelease)
+
+        #expect(windowService.raisedWindowID == 404)
+        #expect(windowService.activatedBundleID == "com.c")
+    }
+
+    @Test("A rejected quit leaves the selected app available")
+    func rejectedQuitLeavesAppAvailable() {
+        let (controller, windowService, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 11),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2", ownerPID: 22),
+            toSpaceID: spaceID
+        )
+        windowService.terminateAppResult = false
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.quitSelectedApp)
+
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101, 202])
+
+        keyboardService.simulateEvent(.cmdRelease)
+
+        #expect(windowService.raisedWindowID == 202)
+        #expect(windowService.activatedBundleID == "com.b")
+    }
+
+    @Test("External activation restores an app whose quit is still pending")
+    func activationResolvesPendingQuit() {
+        let (controller, _, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 11),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2", ownerPID: 22),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.quitSelectedApp)
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101])
+
+        controller.recordWindowActivation(windowID: 202)
+
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [202, 101])
+    }
+
+    @Test("Process exit releases termination state before its PID can be reused")
+    func processExitResolvesPendingQuit() {
+        let (controller, _, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 11),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2", ownerPID: 22),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.quitSelectedApp)
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101])
+
+        _ = controller.spaceManager.removeAllWindows(forOwnerPID: 22)
+        controller.recordAppTermination(ownerPID: 22)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3", ownerPID: 22),
+            toSpaceID: spaceID
+        )
+
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101, 303])
     }
 
     @Test("Quit does nothing when the space has no windows")
