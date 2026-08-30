@@ -38,6 +38,7 @@ public struct WindowAssignmentEvent: Equatable, Sendable {
     public enum Kind: String, Sendable {
         case assigned
         case reassigned
+        case madeDormant = "made_dormant"
     }
 
     public enum Reason: String, Sendable {
@@ -47,6 +48,10 @@ public struct WindowAssignmentEvent: Equatable, Sendable {
         case dormantRestored = "dormant_restored"
         case strandedSpaceRecovered = "stranded_space_recovered"
         case desktopChanged = "desktop_changed"
+        /// A CGWindowID macOS reissued to a window with a different owner. Caught by the
+        /// identity pass, which parks the stale assignment rather than leaving it live under
+        /// somebody else's window.
+        case idRecycled = "id_recycled"
     }
 
     public let kind: Kind
@@ -73,19 +78,22 @@ public struct WindowAssignmentEvent: Equatable, Sendable {
 public struct RuntimeWindowReconciliationResult: Equatable, Sendable {
     public let addedCount: Int
     public let reassignedCount: Int
+    public let dormantCount: Int
     public let events: [WindowAssignmentEvent]
 
     public init(
         addedCount: Int = 0,
         reassignedCount: Int = 0,
+        dormantCount: Int = 0,
         events: [WindowAssignmentEvent] = []
     ) {
         self.addedCount = addedCount
         self.reassignedCount = reassignedCount
+        self.dormantCount = dormantCount
         self.events = events
     }
 
-    public var didMutate: Bool { addedCount > 0 || reassignedCount > 0 }
+    public var didMutate: Bool { addedCount > 0 || reassignedCount > 0 || dormantCount > 0 }
 }
 
 public struct RuntimeWindowReconciler: Sendable {
@@ -112,6 +120,7 @@ public struct RuntimeWindowReconciler: Sendable {
     ) -> RuntimeWindowReconciliationResult {
         var addedCount = 0
         var reassignedCount = 0
+        var dormantCount = 0
         var events: [WindowAssignmentEvent] = []
         var consumedLiveWindowIDs = Set<CGWindowID>()
         let preferredSpaceIDs: [CGWindowID: UUID] = Dictionary(
@@ -126,6 +135,35 @@ public struct RuntimeWindowReconciler: Sendable {
         )
         provisionalWindowIDs = provisionalWindowIDs.filter {
             spaceManager.spaceContainingWindow(windowID: $0) != nil
+        }
+
+        // A CGWindowID only means anything within the boot that issued it, and macOS
+        // reissues them continuously as windows close — not only across a reboot. A recycled
+        // ID is still present in allWindowIDs, so the missing-assignment check below would
+        // never catch it; only comparing the live window's bundleID against the assignment's
+        // does. Parking here, before that check runs, lets the same pass recover the
+        // assignment onto its real window by (bundleID, title) below.
+        let liveWindowsByID = Dictionary(
+            snapshot.liveWindows.map { ($0.windowID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for assignment in assignments(in: spaceManager) {
+            guard let info = liveWindowsByID[assignment.window.windowID],
+                  info.ownerBundleID != assignment.window.ownerBundleID
+            else { continue }
+            let fromSpace = spaceManager.spaceIndex(id: assignment.spaceID)
+            guard spaceManager.makeWindowDormant(windowID: assignment.window.windowID) != nil
+            else { continue }
+            dormantCount += 1
+            events.append(WindowAssignmentEvent(
+                kind: .madeDormant,
+                windowID: assignment.window.windowID,
+                bundleID: assignment.window.ownerBundleID,
+                windowTitle: assignment.window.windowTitle,
+                fromSpace: fromSpace,
+                toSpace: nil,
+                reason: .idRecycled
+            ))
         }
 
         // Spaces still holding an assignment whose window vanished and could not
@@ -328,6 +366,7 @@ public struct RuntimeWindowReconciler: Sendable {
         return RuntimeWindowReconciliationResult(
             addedCount: addedCount,
             reassignedCount: reassignedCount,
+            dormantCount: dormantCount,
             events: events
         )
     }

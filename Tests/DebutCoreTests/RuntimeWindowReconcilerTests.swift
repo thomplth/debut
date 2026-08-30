@@ -796,4 +796,98 @@ struct RuntimeWindowReconcilerTests {
 
         #expect(manager.spaceContainingWindow(windowID: 61000) == spaceIDs[1])
     }
+
+    // MARK: - Window identity validation
+    //
+    // A CGWindowID only means anything within the boot that issued it, and macOS reissues
+    // them continuously as windows close — not only across a reboot. A recycled ID is still
+    // present in allWindowIDs, so the missing-assignment check never sees it; only comparing
+    // the live window's bundleID against the assignment's catches it.
+
+    @Test("A recycled window ID is parked then recovered onto its real window in one pass")
+    func recycledIDIsParkedThenRecoveredInOnePass() {
+        var manager = SpaceManager()
+        let space1 = manager.spaces[0].id
+        manager.createSpace(position: .below)
+        manager.addWindow(
+            SpaceWindow(windowID: 42, ownerBundleID: "com.old", ownerName: "Old", windowTitle: "Old Window", ownerPID: 10),
+            toSpaceID: space1
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [
+                    liveWindow(42, bundleID: "com.new", ownerName: "New", ownerPID: 20, title: "New Window"),
+                    liveWindow(99, bundleID: "com.old", ownerName: "Old", ownerPID: 10, title: "Old Window"),
+                ],
+                allWindowIDs: [42, 99]
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(result.addedCount == 1)
+        #expect(result.reassignedCount == 1)
+        #expect(manager.dormantWindowAssignments.isEmpty)
+        #expect(manager.spaceContainingWindow(windowID: 99) == space1)
+        #expect(manager.spaces.first(where: { $0.id == space1 })?.windows.map(\.windowID) == [99])
+
+        let dormancy = result.events.first { $0.kind == .madeDormant }
+        #expect(dormancy?.windowID == 42)
+        #expect(dormancy?.bundleID == "com.old")
+        #expect(dormancy?.reason == .idRecycled)
+        let recovery = result.events.first { $0.kind == .reassigned }
+        #expect(recovery?.windowID == 99)
+        #expect(recovery?.reason == .dormantRestored)
+    }
+
+    @Test("A window whose ID and bundle still agree is left untouched")
+    func matchingIDAndBundleIsUntouched() {
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(
+            SpaceWindow(windowID: 5, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Doc", ownerPID: 10),
+            toSpaceID: spaceID
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(5, bundleID: "com.a", ownerName: "A", ownerPID: 10, title: "Doc")],
+                allWindowIDs: [5]
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(result.events.isEmpty)
+        #expect(manager.spaceContainingWindow(windowID: 5) == spaceID)
+    }
+
+    @Test("A recycled ID with no recovery candidate stays dormant rather than being deleted")
+    func recycledIDWithNoCandidateStaysDormant() {
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(
+            SpaceWindow(windowID: 7, ownerBundleID: "com.old", ownerName: "Old", windowTitle: "Doc", ownerPID: 10),
+            toSpaceID: spaceID
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(7, bundleID: "com.new", ownerName: "New", ownerPID: 20, title: "Other")],
+                allWindowIDs: [7]
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(result.addedCount == 1)
+        #expect(manager.dormantWindowAssignments.count == 1)
+        #expect(manager.dormantWindowAssignments.first?.window.ownerBundleID == "com.old")
+        #expect(manager.spaceContainingWindow(windowID: 7) == spaceID)
+        #expect(manager.spaces.first(where: { $0.id == spaceID })?.windows.first?.ownerBundleID == "com.new")
+
+        let dormancy = result.events.first { $0.kind == .madeDormant }
+        #expect(dormancy?.reason == .idRecycled)
+    }
 }

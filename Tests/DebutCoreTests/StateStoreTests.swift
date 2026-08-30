@@ -30,56 +30,11 @@ struct StateStoreTests {
         #expect(loaded.spaces[1].windows.count == 1)
     }
 
-    // Window IDs and PIDs only mean anything within the boot that issued them. macOS
-    // reissues both from low numbers at every boot, so state saved before a restart
-    // describes windows that either no longer exist or now belong to somebody else.
-    @Test("State saved in an earlier boot comes back dormant, not live")
-    func earlierBootSessionRestoresDormant() throws {
-        let dir = try makeTempDirectory()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        var sm = SpaceManager()
-        sm.createSpace(position: .below)
-        let secondSpaceID = sm.spaces[1].id
-        sm.addWindow(
-            SpaceWindow(windowID: 121, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T", ownerPID: 724),
-            toSpaceID: secondSpaceID
-        )
-        try StateStore(directory: dir, bootSessionID: "boot-1").save(sm)
-
-        let loaded = try StateStore(directory: dir, bootSessionID: "boot-2").load()
-
-        #expect(loaded.spaces.count == 2)
-        #expect(loaded.liveWindowCount == 0)
-        // Dormant, never deleted: the placement is the only record of where the
-        // window belonged, and reconciliation recovers it by (bundleID, title).
-        #expect(loaded.dormantWindowAssignments.map(\.window.windowID) == [121])
-        #expect(loaded.dormantWindowAssignments.first?.spaceID == secondSpaceID)
-    }
-
-    @Test("State saved in the current boot keeps its windows live")
-    func sameBootSessionKeepsWindowsLive() throws {
-        let dir = try makeTempDirectory()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        var sm = SpaceManager()
-        sm.addWindow(
-            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T", ownerPID: 10),
-            toSpaceID: sm.activeSpaceID
-        )
-        let store = StateStore(directory: dir, bootSessionID: "boot-1")
-        try store.save(sm)
-
-        let loaded = try store.load()
-
-        #expect(loaded.activeSpace.windows.map(\.windowID) == [101])
-        #expect(loaded.dormantWindowAssignments.isEmpty)
-    }
-
-    // State files written before the stamp existed carry no boot session at all. They are
-    // as untrustworthy as any other foreign boot, so they must not be read as current.
-    @Test("State saved without a boot session stamp comes back dormant")
-    func missingBootSessionRestoresDormant() throws {
+    // Old state.json files carry a bootSessionID key alongside the spaces, written by the
+    // boot stamp this store no longer keeps. Nothing compares that key anymore, so it must
+    // decode as an unknown field rather than as a reason to lose every live assignment.
+    @Test("A legacy file with a bootSessionID key still loads with its assignments live")
+    func legacyBootSessionIDStillLoadsLive() throws {
         let dir = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -89,19 +44,23 @@ struct StateStoreTests {
             toSpaceID: sm.activeSpaceID
         )
         let encoded = try JSONEncoder().encode(sm)
-        try encoded.write(to: dir.appendingPathComponent("state.json"))
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["bootSessionID"] = "1234567.89"
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        try legacyData.write(to: dir.appendingPathComponent("state.json"))
 
-        let loaded = try StateStore(directory: dir, bootSessionID: "boot-1").load()
+        let loaded = try StateStore(directory: dir).load()
 
-        #expect(loaded.liveWindowCount == 0)
-        #expect(loaded.dormantWindowAssignments.map(\.window.windowID) == [101])
+        #expect(loaded.activeSpace.windows.map(\.windowID) == [101])
+        #expect(loaded.dormantWindowAssignments.isEmpty)
     }
 
     // Observed after a restart: Debut showed windows macOS no longer had, duplicated the
     // ones it did have, and rendered previews of whatever now owned the recycled window
-    // ID — including its own overlay. Every one of those cards was a pre-reboot window ID
-    // that startup reconciliation had left live.
-    @Test("A reboot leaves no pre-reboot window ID live in any space")
+    // ID — including its own overlay. A window ID surviving a restart is not evidence it
+    // still names the same window, so a live window found under a stale ID must be judged
+    // by its identity (bundle ID), not by the number alone.
+    @Test("A reboot leaves no pre-reboot window ID live under its old identity")
     func rebootLeavesNoGhostWindowIDs() throws {
         let dir = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -129,35 +88,52 @@ struct StateStoreTests {
             ),
             toSpaceID: before.spaces[1].id
         )
-        try StateStore(directory: dir, bootSessionID: "boot-1").save(before)
+        try StateStore(directory: dir).save(before)
 
         // The new boot relaunched Ghostty, so its bundle ID is running again under a new
-        // PID with a new window ID. Dia is not running at all, and window ID 121 now
-        // belongs to a window Debut never lists.
+        // PID with a new window ID. Dia's process is still running in the background —
+        // as browsers do once their last window closes — so the stopped-process sweep
+        // alone cannot explain away window ID 121: macOS reissued it to Notes, a window
+        // Debut has never seen before. Only comparing identity at that ID catches it.
         let windowService = MockWindowService()
         windowService.apps = [
             AppInfo(bundleID: "com.mitchellh.ghostty", name: "Ghostty", pid: 653, isHidden: false),
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 800, isHidden: false),
         ]
-        windowService.windowList = [WindowInfo(
-            windowID: 78,
-            ownerBundleID: "com.mitchellh.ghostty",
-            ownerName: "Ghostty",
-            ownerPID: 653,
-            title: "~/Dropbox/Viewer-player",
-            bounds: .zero,
-            isOnScreen: true
-        )]
+        windowService.windowList = [
+            WindowInfo(
+                windowID: 78,
+                ownerBundleID: "com.mitchellh.ghostty",
+                ownerName: "Ghostty",
+                ownerPID: 653,
+                title: "~/Dropbox/Viewer-player",
+                bounds: .zero,
+                isOnScreen: true
+            ),
+            WindowInfo(
+                windowID: 121,
+                ownerBundleID: "com.apple.Notes",
+                ownerName: "Notes",
+                ownerPID: 900,
+                title: "Untitled Note",
+                bounds: .zero,
+                isOnScreen: true
+            ),
+        ]
         windowService.allWindowIDList = [78, 121]
 
-        var manager = try StateStore(directory: dir, bootSessionID: "boot-2").load()
+        var manager = try StateStore(directory: dir).load()
         WindowDiscoveryService(
             windowService: windowService,
             processExitMonitor: MockProcessExitMonitor()
         ).reconcileWindows(&manager)
 
-        let liveWindowIDs = manager.allSpaces.flatMap(\.windows).map(\.windowID)
-        #expect(liveWindowIDs == [78])
+        let liveWindows = manager.allSpaces.flatMap(\.windows)
+        #expect(liveWindows.map(\.windowID).sorted() == [78, 121])
         #expect(manager.spaceContainingWindow(windowID: 78) == terminalSpaceID)
+        // Notes, not Dia, owns window 121 now — the recycled ID carries the new window's
+        // identity, never the assignment that used to sit under it.
+        #expect(liveWindows.first(where: { $0.windowID == 121 })?.ownerBundleID == "com.apple.Notes")
         // Dia is gone, but where its window belonged is not — it stays recoverable.
         #expect(manager.dormantWindowAssignments.map(\.window.ownerBundleID) == ["company.thebrowser.dia"])
     }
