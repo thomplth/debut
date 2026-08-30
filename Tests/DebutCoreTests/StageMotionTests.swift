@@ -48,11 +48,11 @@ struct StageMotionTests {
         #expect(before != after)
     }
 
-    @Test("Space focus uses a restrained spring")
-    func stageFocusUsesRestrainedSpring() {
+    @Test("Space focus keeps its duration while settling without bounce")
+    func stageFocusSettlesWithoutBounce() {
         #expect(
             StageMotion.focusTransition(reduceMotion: false)
-                == .spring(duration: 0.26, bounce: 0.08)
+                == .spring(duration: 0.26, bounce: 0)
         )
     }
 
