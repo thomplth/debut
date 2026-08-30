@@ -51,6 +51,18 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: ./scripts/stable-update-eligibility.sh "$CHANNEL" "$VERSION" | tee -a "$GITHUB_OUTPUT"
 
+      - name: Validate stable release credentials
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          DEVELOPER_IDENTITY: ${{ vars.DEVELOPER_IDENTITY }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+        run: ./scripts/validate-release-credentials.sh "$CHANNEL"
+
       - name: Select the macOS 26 toolchain
         run: |
           echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> "$GITHUB_ENV"
