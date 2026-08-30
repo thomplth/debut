@@ -71,7 +71,7 @@ Before adding a check that needs two desktops, decide what it should do on a hos
 Releases are automated in GitHub Actions and are never cut by hand. Both paths gate on the full CI suite (`.github/workflows/ci.yml`) and the full E2E suite before anything is tagged or published.
 
 - **Daily** (`release-daily.yml`) — a scheduled run bumps the patch number and publishes a GitHub prerelease when `main` has moved since the last tag, and skips when it has not. Daily releases never generate or modify the stable Sparkle appcast.
-- **Manual** (`release-manual.yml`) — human triggered with a `minor` or `major` bump, and never skipped for want of new commits. The resulting `.0` release is Developer ID-signed, notarized, approved through the protected `stable-release` environment, and published to the stable automatic-update feed.
+- **Manual** (`release-manual.yml`) — human triggered with a `minor` or `major` bump, and never skipped for want of new commits. A single explicit user request authorizes an agent to dispatch and monitor the release end to end; do not require a second confirmation. The resulting `.0` release is Developer ID-signed, notarized, isolated through the `stable-release` environment, and published to the stable automatic-update feed.
 
 Automatic-update eligibility is a promotion decision, not a version comparison alone. `scripts/stable-update-eligibility.sh` must accept a release before an appcast is generated. Patch releases and every daily build are ineligible, even if their version is newer. The Sparkle EdDSA private key exists only in the protected `stable-release` environment; never expose it to the daily job.
 
@@ -80,6 +80,8 @@ Every job in a release run is pinned to the commit that triggered it, and `scrip
 The next version comes from the tags alone, via `scripts/release-plan.sh`; nothing else records the current version. Release notes are the commit subjects in the range, so a vague commit message becomes a vague changelog entry.
 
 The manual workflow's reusable publish job must keep `secrets: inherit`. GitHub otherwise resolves the called job's protected `stable-release` environment variables but leaves its environment secrets empty. The daily caller must not inherit secrets: it uses `daily-release`, and the Sparkle private key must remain unreachable from that path. `scripts/validate-release-credentials.sh` is the fail-fast guard for this wiring.
+
+The `stable-release` environment deliberately has no required reviewer. Its custom deployment branch policy still permits only `main`, while the CI, E2E, commit-pinning, eligibility, signing, and notarization gates remain mandatory. This lets one explicit release request complete without a second approval while preserving the boundary that excludes daily and patch builds.
 
 A release never commits and never pushes a branch. The `Main Protection` ruleset forbids any bot from updating `main`, and an earlier design that pushed a `Release vX.Y.Z` commit died at that push having already pushed its tag. The publish workflow instead tags the tested commit in place and pushes only the tag, which the ruleset does not cover.
 
