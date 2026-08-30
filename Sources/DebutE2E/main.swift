@@ -5,6 +5,10 @@ import Foundation
 import ImageIO
 import ScreenCaptureKit
 
+// A piped, non-tty stdout is fully block-buffered by default, so a crash mid-run drops the
+// entire unflushed buffer — exactly the blind spot that hid where switch-to-desktop segfaulted.
+setvbuf(stdout, nil, _IOLBF, 0)
+
 // MARK: - Output
 
 nonisolated(unsafe) var passCount = 0
@@ -842,6 +846,36 @@ func waitForDebutReady(
 
 func clearDiagnosticFile() {
     try? FileManager.default.removeItem(at: diagnosticFile)
+}
+
+// A warm, reused guest keeps whatever desktop the previous run left active. Fixture windows
+// open on the active desktop, so without this a run that ended on a later desktop plants the
+// next run's fixtures with no empty desktop after them — the exact adjacency every drop/move
+// check needs. Debut is the only thing in this environment proven to move the real desktop
+// (it forges the DockSwipe gesture itself); the OS's own Control-Left shortcut is not — so this
+// launches a throwaway instance solely to drive the switch, then quits before the real fixtures
+// are created.
+//
+// This must run after every supporting global above (diagnosticFile in particular) has been
+// initialized: main.swift runs top-level `let`s in sequential order, not lazily, and
+// waitForDebutReady() reads diagnosticFile through readEvents() — dispatching this subcommand
+// any earlier in the file reads that global before its initializer runs and segfaults.
+if CommandLine.arguments.dropFirst().first == "switch-to-desktop" {
+    let target = Int(CommandLine.arguments.dropFirst(2).first ?? "") ?? 0
+    clearDiagnosticFile()
+    let service = SpaceService()
+    let application = launchDebut()
+    let ready = waitForDebutReady(application)
+    var landed = false
+    if ready {
+        postQuickSwitch(to: target)
+        landed = waitFor { service.currentDesktopIndex() == target }
+        wait(0.5)
+    }
+    _ = terminateDebutAndWait()
+    print("switch-to-desktop \(target): ready=\(ready) landed=\(landed) "
+        + "index=\(service.currentDesktopIndex().map(String.init) ?? "unknown")")
+    exit(landed ? 0 : 1)
 }
 
 // MARK: - Main
@@ -1963,6 +1997,16 @@ let stateFile: URL = diagnosticFile
     .deletingLastPathComponent()
     .appendingPathComponent("state.json")
 let originalStateData = try? Data(contentsOf: stateFile)
+info("state.json diagnostics: path=\(stateFile.path) exists=\(FileManager.default.fileExists(atPath: stateFile.path)) "
+    + "bytes=\(originalStateData?.count ?? -1)")
+if let originalStateData {
+    let parsed = try? JSONSerialization.jsonObject(with: originalStateData) as? [String: Any]
+    let stacks = parsed?["spaceStacks"] as? [[String: Any]]
+    let windowCounts = (stacks ?? []).map { stack in
+        (stack["spaces"] as? [[String: Any]] ?? []).map { ($0["windows"] as? [[String: Any]])?.count ?? -1 }
+    }
+    info("state.json parsed: stackCount=\(stacks?.count ?? -1) windowCountsPerStack=\(windowCounts)")
+}
 
 let ghostTitle = "Debut E2E Window From A Foreign Identity"
 let ghostBundleID = "com.debut.e2e.ghost-bundle"
@@ -1971,31 +2015,41 @@ let ghostBundleID = "com.debut.e2e.ghost-bundle"
 /// keeping its real window ID. That ID still names a real, live window once Debut relaunches
 /// — the app never quit — so the mismatch this plants is exactly what the identity pass
 /// exists to catch, not a window that is simply gone.
+///
+/// Searches every space rather than assuming windows sit on space 0: the fixture windows
+/// consistently land on a non-first space (scenario 10 measures `windows=[0, 3, 0]`), so a
+/// hard-coded `spaces[0]` always found an empty list and silently skipped the whole scenario.
 func plantRecycledIdentity() -> (windowID: Int, realBundleID: String, realTitle: String)? {
     guard let originalStateData,
           var object = try? JSONSerialization.jsonObject(with: originalStateData) as? [String: Any],
           var stacks = object["spaceStacks"] as? [[String: Any]],
-          !stacks.isEmpty,
-          var spaces = stacks[0]["spaces"] as? [[String: Any]],
-          !spaces.isEmpty,
-          var windows = spaces[0]["windows"] as? [[String: Any]],
-          !windows.isEmpty,
-          let windowID = windows[0]["windowID"] as? Int,
-          let realBundleID = windows[0]["ownerBundleID"] as? String,
-          let realTitle = windows[0]["windowTitle"] as? String
+          !stacks.isEmpty
     else { return nil }
 
-    windows[0]["ownerBundleID"] = ghostBundleID
-    windows[0]["ownerName"] = "Ghost"
-    windows[0]["windowTitle"] = ghostTitle
-    spaces[0]["windows"] = windows
-    stacks[0]["spaces"] = spaces
-    object["spaceStacks"] = stacks
+    for stackIndex in stacks.indices {
+        guard var spaces = stacks[stackIndex]["spaces"] as? [[String: Any]] else { continue }
+        for spaceIndex in spaces.indices {
+            guard var windows = spaces[spaceIndex]["windows"] as? [[String: Any]],
+                  !windows.isEmpty,
+                  let windowID = windows[0]["windowID"] as? Int,
+                  let realBundleID = windows[0]["ownerBundleID"] as? String,
+                  let realTitle = windows[0]["windowTitle"] as? String
+            else { continue }
 
-    guard let data = try? JSONSerialization.data(withJSONObject: object),
-          (try? data.write(to: stateFile, options: .atomic)) != nil
-    else { return nil }
-    return (windowID, realBundleID, realTitle)
+            windows[0]["ownerBundleID"] = ghostBundleID
+            windows[0]["ownerName"] = "Ghost"
+            windows[0]["windowTitle"] = ghostTitle
+            spaces[spaceIndex]["windows"] = windows
+            stacks[stackIndex]["spaces"] = spaces
+            object["spaceStacks"] = stacks
+
+            guard let data = try? JSONSerialization.data(withJSONObject: object),
+                  (try? data.write(to: stateFile, options: .atomic)) != nil
+            else { return nil }
+            return (windowID, realBundleID, realTitle)
+        }
+    }
+    return nil
 }
 
 if let planted = plantRecycledIdentity() {
@@ -2107,59 +2161,107 @@ if let coverageGateReason {
     skipTest("windows_reconciled liveCount covers windows on every desktop at startup",
              reason: coverageGateReason)
 } else {
-    let coverageBeforeCounts = spaceWindowCounts(in: readState())
-    let coverageOrigin = coverageBeforeCounts.indices.first {
-        $0 < coverageBeforeCounts.count - 1 && coverageBeforeCounts[$0] > 0
-    } ?? -1
+    // Scenario 16 always ends with Debut terminated, whether or not its fixture planted —
+    // there is nothing running here to read state from until this scenario launches its own.
+    // The diagnostic file must be cleared first: otherwise waitForDebutReady finds scenario
+    // 16's leftover app_ready event and reports ready before this instance's event tap is
+    // actually live, so the Cmd+Tab below races the real launch and gets silently dropped.
+    clearDiagnosticFile()
+    let coverageSetupApplication = launchDebut()
+    let coverageSetupReady = waitForDebutReady(coverageSetupApplication)
 
-    if coverageOrigin < 0 {
+    if !coverageSetupReady {
         skipTest("windows_reconciled liveCount covers windows on every desktop at startup",
-                 reason: "No space has both a window and a next space to move it to")
+                 reason: "Debut did not become ready to set up the coverage fixture")
     } else {
         // Move one window onto the next desktop over, the same bridged keyboard move 10b
         // proves is real, so the relaunch below has a window sitting off the active desktop.
+        // Mirrors 10b exactly: the origin space is read from inside the open overlay, not
+        // before it opens — opening the overlay resets `selectedSpaceIndex` to the active
+        // space, and computing origin from a stale pre-overlay snapshot desynced the two.
+        let coverageMovesBefore = readEvents().filter { $0["event"] == "window_moved_by_key" }.count
+
         postFlagsChanged(flags: [.maskCommand])
         wait(0.1)
         postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
-        wait(0.8)
-        postKeyDown(keyCode: digitKeyCode(coverageOrigin + 1), flags: [.maskCommand])
-        _ = waitFor { Int(readState()["selectedSpaceIndex"] ?? "") == coverageOrigin }
-        postKeyDown(keyCode: CGKeyCode(kVK_DownArrow), flags: [.maskCommand])
-        wait(1.0)
-        postFlagsChanged(flags: [])
-        wait(1.0)
+        // A fresh launch's event tap/session takes longer to become responsive than a flat
+        // 0.8s covers — scenario 16 polls for the same fresh-launch overlay-open and this one
+        // must too, or the digit press below lands before there is any overlay to receive it.
+        _ = waitFor(timeout: 5) { readState()["overlayVisible"] == "true" }
+        wait(0.5)
 
-        let coverageMovedCounts = spaceWindowCounts(in: readState())
-        let coverageTotalBeforeRelaunch = coverageMovedCounts.reduce(0, +)
-        let coverageMoveLanded = coverageMovedCounts.indices.contains(coverageOrigin + 1)
-            && coverageMovedCounts[coverageOrigin + 1] == coverageBeforeCounts[coverageOrigin + 1] + 1
+        let openStateDump = readState()
+        let coverageOpenCounts = spaceWindowCounts(in: openStateDump)
+        let coverageOrigin = coverageOpenCounts.indices.first {
+            $0 < coverageOpenCounts.count - 1 && coverageOpenCounts[$0] > 0
+        } ?? -1
+        info("Coverage overlay opened: overlayVisible=\(openStateDump["overlayVisible"] ?? "nil") "
+            + "selectedSpaceIndex=\(openStateDump["selectedSpaceIndex"] ?? "nil") "
+            + "spaceCount=\(openStateDump["spaceCount"] ?? "nil") origin=\(coverageOrigin)")
 
-        _ = terminateDebutAndWait()
-        clearDiagnosticFile()
-        let coverageApplication = launchDebut()
-        let coverageReady = waitForDebutReady(coverageApplication)
-        let coverageFirstReconcile = readEvents().first { $0["event"] == "windows_reconciled" }
-        let coverageLiveCount = Int(coverageFirstReconcile?["liveCount"] ?? "") ?? -1
-
-        info("Coverage: moveLanded=\(coverageMoveLanded) before=\(coverageTotalBeforeRelaunch) "
-            + "ready=\(coverageReady) firstReconcile=\(coverageFirstReconcile ?? [:])")
-
-        test("windows_reconciled liveCount covers windows on every desktop at startup") {
-            guard coverageMoveLanded else {
-                info("  the setup move did not land, nothing to measure")
-                return false
+        if coverageOrigin < 0 {
+            postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+            postFlagsChanged(flags: [])
+            skipTest("windows_reconciled liveCount covers windows on every desktop at startup",
+                     reason: "No space has both a window and a next space to move it to")
+        } else {
+            postKeyDown(keyCode: digitKeyCode(coverageOrigin + 1), flags: [.maskCommand])
+            let coverageOriginSelected = waitFor {
+                Int(readState()["selectedSpaceIndex"] ?? "") == coverageOrigin
             }
-            guard coverageReady else { info("  Debut did not become ready"); return false }
-            guard coverageFirstReconcile != nil else {
-                info("  no windows_reconciled event at startup")
-                return false
+            let afterDigitState = readState()
+            info("Coverage after digit: overlayVisible=\(afterDigitState["overlayVisible"] ?? "nil") "
+                + "selectedSpaceIndex=\(afterDigitState["selectedSpaceIndex"] ?? "nil") "
+                + "originSelected=\(coverageOriginSelected)")
+            let coverageBeforeCounts = spaceWindowCounts(in: readState())
+
+            postKeyDown(keyCode: CGKeyCode(kVK_DownArrow), flags: [.maskCommand])
+            wait(1.0)
+            postFlagsChanged(flags: [])
+            for _ in 0..<30 {
+                if readEvents().filter({ $0["event"] == "window_moved_by_key" }).count > coverageMovesBefore,
+                   readState()["overlayVisible"] == "false" {
+                    break
+                }
+                wait(0.1)
             }
-            guard coverageLiveCount >= coverageTotalBeforeRelaunch else {
-                info("  liveCount \(coverageLiveCount) undercounts the "
-                    + "\(coverageTotalBeforeRelaunch) windows seen before relaunch")
-                return false
+
+            let coverageMovedCounts = spaceWindowCounts(in: readState())
+            let coverageTotalBeforeRelaunch = coverageMovedCounts.reduce(0, +)
+            let coverageMoveLanded = coverageMovedCounts.indices.contains(coverageOrigin + 1)
+                && coverageMovedCounts[coverageOrigin + 1] == coverageBeforeCounts[coverageOrigin + 1] + 1
+
+            info("Coverage setup: origin=\(coverageOrigin) originSelected=\(coverageOriginSelected) "
+                + "open=\(coverageOpenCounts) before=\(coverageBeforeCounts) moved=\(coverageMovedCounts) "
+                + "moveLanded=\(coverageMoveLanded)")
+
+            _ = terminateDebutAndWait()
+            clearDiagnosticFile()
+            let coverageApplication = launchDebut()
+            let coverageReady = waitForDebutReady(coverageApplication)
+            let coverageFirstReconcile = readEvents().first { $0["event"] == "windows_reconciled" }
+            let coverageLiveCount = Int(coverageFirstReconcile?["liveCount"] ?? "") ?? -1
+
+            info("Coverage: moveLanded=\(coverageMoveLanded) before=\(coverageTotalBeforeRelaunch) "
+                + "ready=\(coverageReady) firstReconcile=\(coverageFirstReconcile ?? [:])")
+
+            test("windows_reconciled liveCount covers windows on every desktop at startup") {
+                guard coverageMoveLanded else {
+                    info("  the setup move did not land, nothing to measure")
+                    return false
+                }
+                guard coverageReady else { info("  Debut did not become ready"); return false }
+                guard coverageFirstReconcile != nil else {
+                    info("  no windows_reconciled event at startup")
+                    return false
+                }
+                guard coverageLiveCount >= coverageTotalBeforeRelaunch else {
+                    info("  liveCount \(coverageLiveCount) undercounts the "
+                        + "\(coverageTotalBeforeRelaunch) windows seen before relaunch")
+                    return false
+                }
+                return true
             }
-            return true
         }
     }
 }

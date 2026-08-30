@@ -189,6 +189,12 @@ printf 'Debut E2E fixture one\n' > "$FIXTURE_DIR/one.txt"
 printf 'Debut E2E fixture two\n' > "$FIXTURE_DIR/two.txt"
 chown -R "$console_user" "$FIXTURE_DIR"
 
+# A reused warm guest keeps whatever desktop the previous run left active. Fixture windows below
+# open on the active desktop, so a run that starts anywhere but the first desktop plants fixtures
+# with no empty desktop after them — breaking the drop/move checks' shared precondition.
+echo "Resetting to the first desktop before planting fixtures..."
+as_console env HOME="$console_home" "$E2E_SOURCE" switch-to-desktop 0
+
 as_console open -na TextEdit "$FIXTURE_DIR/one.txt"
 as_console open -na TextEdit "$FIXTURE_DIR/two.txt"
 wait_for_fixture_apps
