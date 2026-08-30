@@ -79,9 +79,11 @@ enum StageMotion {
     }
 
     static func focusTransition(reduceMotion: Bool) -> StageFocusTransition {
+        // Held cycling accepts a new focus every 60 ms by default. Keep this spring short and
+        // critically damped so repeated targets do not accumulate unfinished bounce.
         reduceMotion
             ? .fade(duration: 0.12)
-            : .spring(duration: 0.26, bounce: 0.08)
+            : .spring(duration: 0.12, bounce: 0)
     }
 
     static func windowReorderTransition(reduceMotion: Bool) -> StageFocusTransition {
