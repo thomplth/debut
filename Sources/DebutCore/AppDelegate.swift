@@ -320,6 +320,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             DispatchQueue.main.async {
                 guard let self, let controller = self.spaceController else { return }
                 let dormantCount = controller.spaceManager.makeWindowsDormant(forOwnerPID: ownerPID)
+                controller.recordAppTermination(ownerPID: ownerPID)
                 if dormantCount > 0 {
                     self.diag.report("terminated_app_windows_made_dormant", details: [
                         "count": "\(dormantCount)",
