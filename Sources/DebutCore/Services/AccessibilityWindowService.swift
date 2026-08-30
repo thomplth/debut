@@ -19,6 +19,11 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     /// Replaces the running-app scan in tests. Production leaves this nil.
     var elementScanOverride: ((CGWindowID) -> AXUIElement?)?
 
+    /// Where a window's desktop comes from. `kAXWindows` only reports windows on the active
+    /// Space, so an AX-unknown window on another desktop still needs a way to resolve to
+    /// exactly one desktop before the CG heuristic in `listWindows()` will trust it.
+    public var spaceSwitcher: (any SpaceSwitching)?
+
     public init(
         windowCaptureEnabled: Bool = ProcessInfo.processInfo.environment["DEBUT_DISABLE_WINDOW_PREVIEWS"] != "1"
     ) {
@@ -59,8 +64,12 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
     // MARK: - Window listing
 
+    /// A window narrower or shorter than this is not a plausible standard window. Matches the
+    /// 40px margin macOS always keeps visible via AX position clamping.
+    private static let minimumPlausibleWindowDimension: CGFloat = 40
+
     public func listWindows() -> [WindowInfo] {
-        let trackableWindowIDs = classifyAXWindowIDs().trackable
+        let classification = classifyAXWindowIDs()
 
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[CFString: Any]] else {
@@ -77,6 +86,11 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             runningApps.map { ($0.processIdentifier, $0.localizedName ?? $0.bundleIdentifier!) },
             uniquingKeysWith: { first, _ in first }
         )
+        let regularPIDs = Set(runningApps.map(\.processIdentifier))
+
+        // `kAXWindows` only reports windows on the active Space. This is what lets a window on
+        // another desktop resolve to exactly one desktop even though AX has never seen it.
+        let resolvedDesktopWindowIDs = Set((spaceSwitcher?.windowLocations() ?? [:]).keys)
 
         var seen = Set<CGWindowID>()
         return infoList.compactMap { dict in
@@ -86,7 +100,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                   let bundleID = pidToBundleID[ownerPID]
             else { return nil }
 
-            guard trackableWindowIDs.contains(windowID) else { return nil }
+            // A positive AX verdict is a reason to exclude; the absence of one is not — an app
+            // still warming up, or a window on a Space that isn't showing, reports neither.
+            guard !classification.untrackable.contains(windowID) else { return nil }
             guard seen.insert(windowID).inserted else { return nil }
 
             let bounds = CGRect(
@@ -95,6 +111,15 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                 width: boundsDict["Width"] ?? 0,
                 height: boundsDict["Height"] ?? 0
             )
+
+            if !classification.trackable.contains(windowID) {
+                guard Self.isPlausibleUntrackedWindow(
+                    layer: dict[kCGWindowLayer] as? Int,
+                    isRegularApp: regularPIDs.contains(ownerPID),
+                    bounds: bounds,
+                    hasResolvedDesktop: resolvedDesktopWindowIDs.contains(windowID)
+                ) else { return nil }
+            }
 
             let title = dict[kCGWindowName] as? String ?? ""
             let isOnScreen = dict[kCGWindowIsOnscreen] as? Bool ?? true
@@ -110,6 +135,23 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                 isOnScreen: isOnScreen
             )
         }
+    }
+
+    /// Whether a window AX has not classified either way still looks like a standard window,
+    /// judged purely from Core Graphics signals: on the normal window layer, owned by a regular
+    /// (non-background) app, large enough to plausibly be user-facing, and resolvable to
+    /// exactly one desktop rather than absent from the window server's Space bookkeeping.
+    static func isPlausibleUntrackedWindow(
+        layer: Int?,
+        isRegularApp: Bool,
+        bounds: CGRect,
+        hasResolvedDesktop: Bool
+    ) -> Bool {
+        layer == 0
+            && isRegularApp
+            && hasResolvedDesktop
+            && bounds.width >= minimumPlausibleWindowDimension
+            && bounds.height >= minimumPlausibleWindowDimension
     }
 
     /// Returns window IDs that AX explicitly identifies as modal or auxiliary UI

@@ -456,26 +456,6 @@ public struct SpaceManager: Codable, Sendable {
         }
         return assignments.count
     }
-    /// Parks every live assignment, keeping the space and position it recorded. Used when
-    /// the window IDs and PIDs those assignments carry came from a boot that has ended.
-    @discardableResult
-    public mutating func makeAllWindowsDormant() -> Int {
-        let assignments = allSpaces.flatMap { space in
-            space.windows.enumerated().map { index, window in
-                DormantWindowAssignment(spaceID: space.id, windowIndex: index, window: window)
-            }
-        }
-        guard !assignments.isEmpty else { return 0 }
-        let ids = Set(assignments.map(\.id))
-        dormantWindowAssignments.removeAll { ids.contains($0.id) }
-        dormantWindowAssignments.append(contentsOf: assignments)
-        for stack in spaceStacks.indices {
-            for space in spaceStacks[stack].spaces.indices {
-                spaceStacks[stack].spaces[space].removeAllWindows()
-            }
-        }
-        return assignments.count
-    }
     @discardableResult
     public mutating func makeWindowDormant(windowID: CGWindowID) -> DormantWindowAssignment? {
         for stack in spaceStacks.indices {
