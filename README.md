@@ -235,8 +235,9 @@ notes are the commit subjects in the range, and each release attaches a `Debut.d
 - **Daily** — a scheduled run bumps the patch number and publishes a GitHub prerelease
   whenever `main` has moved since the last tag. Daily builds never enter the automatic-update
   feed and the job skips silently when nothing has landed.
-- **Manual** — the *Manual Release* workflow promotes a Developer ID-signed and notarized
-  `minor` or `major` `.0` release to Sparkle's stable automatic-update feed after approval.
+- **Manual** — a single explicit release request runs the *Manual Release* workflow end to end,
+  promoting a Developer ID-signed and notarized `minor` or `major` `.0` release to Sparkle's
+  stable automatic-update feed. Stable credentials remain isolated from daily builds.
 
 The version comes from the tags alone. A build reporting `0.0.0-dev` is telling you it
 is not a release.
