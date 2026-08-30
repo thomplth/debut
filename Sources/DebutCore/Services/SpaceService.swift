@@ -773,10 +773,16 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     /// Every window on every desktop, one `SLSCopyWindowsWithOptionsAndTags` call per desktop.
     /// `kAXWindows` cannot see a desktop that is not showing, so this is the only path that
     /// finds a window there at all.
+    ///
+    /// A window assigned to every Space (Finder, on some systems) is enumerated once per
+    /// desktop queried, not once overall — the same way `desktopLocation(forWindow:)` treats
+    /// more than one space as no single answer, a window seen on a second, different desktop
+    /// here is dropped rather than left pointing at whichever desktop was queried last.
     public func windowLocations() -> [CGWindowID: DesktopLocation] {
         guard let connection, let slsCopyWindowsWithOptionsAndTags else { return [:] }
         let topology = spaceTopology()
         var result: [CGWindowID: DesktopLocation] = [:]
+        var ambiguous: Set<CGWindowID> = []
         for stack in topology.stacks {
             for (index, desktopID) in stack.desktopIDs.enumerated() {
                 var setTags: UInt64 = 0
@@ -786,11 +792,17 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
                     kWindowEnumerationOptions, &setTags, &clearTags
                 )?.takeRetainedValue() as? [NSNumber] else { continue }
                 let location = DesktopLocation(stackID: stack.id, desktopID: desktopID, index: index)
-                for windowID in windowIDs {
-                    result[windowID.uint32Value] = location
+                for number in windowIDs {
+                    let windowID = number.uint32Value
+                    if let existing = result[windowID], existing != location {
+                        ambiguous.insert(windowID)
+                    } else {
+                        result[windowID] = location
+                    }
                 }
             }
         }
+        for windowID in ambiguous { result.removeValue(forKey: windowID) }
         return result
     }
 
