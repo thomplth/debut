@@ -52,6 +52,16 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     func currentDesktopIndex() -> Int? { keys.indices.contains(current) ? current : nil }
     func desktopIndex(forWindow windowID: CGWindowID) -> Int? { windowDesktops[windowID] }
 
+    /// Built from `windowDesktops` rather than tracked separately, so a test that plants a
+    /// window's desktop one way sees it consistently through both the per-window and the
+    /// bulk lookup — a caller migrating from one to the other should see no behavior change.
+    func windowLocations() -> [CGWindowID: DesktopLocation] {
+        guard let stack = spaceTopology().stacks.first else { return [:] }
+        return windowDesktops.reduce(into: [:]) { result, entry in
+            result[entry.key] = stack.location(at: entry.value)
+        }
+    }
+
     func isSwitchInFlight(stackID: String) -> Bool {
         switchingStackIDs.contains(stackID)
     }
