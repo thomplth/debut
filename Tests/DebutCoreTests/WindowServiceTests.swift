@@ -107,7 +107,7 @@ struct WindowServiceTests {
     func accessibilitySilenceOnShowingDesktopIsAVerdict() {
         // Chrome 17776, 1541x89, desktop 3 while desktop 3 showed; Chrome answered with 2 windows.
         #expect(AccessibilityWindowService.accessibilityContradictsWindow(
-            windowDesktop: 3, showingDesktop: 3, appIsAnsweringAX: true
+            windowDesktop: 3, showingDesktop: 3, appAXAnswerCoversShowingDesktop: true
         ))
     }
 
@@ -115,21 +115,69 @@ struct WindowServiceTests {
     func accessibilitySilenceElsewhereIsNotAVerdict() {
         // Dia 4794 really is on desktop 0; Dia reports exactly one AX window, the showing one.
         #expect(!AccessibilityWindowService.accessibilityContradictsWindow(
-            windowDesktop: 0, showingDesktop: 3, appIsAnsweringAX: true
+            windowDesktop: 0, showingDesktop: 3, appAXAnswerCoversShowingDesktop: true
         ))
         // An app AX answers nothing for cannot contradict anything, or every one of its
         // windows would be refused at once.
         #expect(!AccessibilityWindowService.accessibilityContradictsWindow(
-            windowDesktop: 3, showingDesktop: 3, appIsAnsweringAX: false
+            windowDesktop: 3, showingDesktop: 3, appAXAnswerCoversShowingDesktop: false
         ))
         // All-Spaces and fullscreen windows resolve to no desktop, so there is no moment at
         // which AX is known to have been able to see them.
         #expect(!AccessibilityWindowService.accessibilityContradictsWindow(
-            windowDesktop: nil, showingDesktop: 3, appIsAnsweringAX: true
+            windowDesktop: nil, showingDesktop: 3, appAXAnswerCoversShowingDesktop: true
         ))
         #expect(!AccessibilityWindowService.accessibilityContradictsWindow(
-            windowDesktop: 3, showingDesktop: nil, appIsAnsweringAX: true
+            windowDesktop: 3, showingDesktop: nil, appAXAnswerCoversShowingDesktop: true
         ))
+    }
+
+    // Debut samples on activeSpaceDidChangeNotification, when the window server has switched
+    // but `kAXWindows` has not. KHA-582 shipped without this and parked two genuine windows —
+    // Notion 182 and Ghostty 78 — on the transition into their own desktop, while an audit a
+    // second later showed AX naming both. Whether AX answered is not the question; whether its
+    // answer describes the desktop now showing is.
+    @Test("An AX answer that names only another desktop cannot contradict anything")
+    func laggingAXAnswerCorroboratesNothing() {
+        // Ghostty pid 653 settled on desktop 0: AX names 78, which SkyLight puts on desktop 0.
+        #expect(AccessibilityWindowService.appPIDsWhoseAXAnswerCoversShowingDesktop(
+            axWindowIDsByPID: [653: [78]],
+            windowDesktops: [78: 0, 45: 3, 79: 1],
+            showingDesktop: 0
+        ) == [653])
+
+        // The same app one moment earlier, its AX answer still describing desktop 3.
+        #expect(AccessibilityWindowService.appPIDsWhoseAXAnswerCoversShowingDesktop(
+            axWindowIDsByPID: [653: [45]],
+            windowDesktops: [78: 0, 45: 3, 79: 1],
+            showingDesktop: 0
+        ).isEmpty)
+    }
+
+    @Test("A corroborated AX answer still contradicts the ghost it declines to name")
+    func corroboratedAXAnswerStillContradicts() {
+        // Chrome pid 89895 on desktop 3 named 17774 and 18191, both on desktop 3, and declined
+        // to name the dismissed omnibox popup 17776, which is on desktop 3 too.
+        #expect(AccessibilityWindowService.appPIDsWhoseAXAnswerCoversShowingDesktop(
+            axWindowIDsByPID: [89895: [17774, 18191]],
+            windowDesktops: [17774: 3, 18191: 3, 17776: 3],
+            showingDesktop: 3
+        ) == [89895])
+    }
+
+    @Test("With no showing desktop no AX answer corroborates")
+    func noShowingDesktopCorroboratesNothing() {
+        #expect(AccessibilityWindowService.appPIDsWhoseAXAnswerCoversShowingDesktop(
+            axWindowIDsByPID: [653: [78]],
+            windowDesktops: [78: 0],
+            showingDesktop: nil
+        ).isEmpty)
+        // A window AX named that SkyLight places nowhere says nothing about the showing desktop.
+        #expect(AccessibilityWindowService.appPIDsWhoseAXAnswerCoversShowingDesktop(
+            axWindowIDsByPID: [653: [78]],
+            windowDesktops: [:],
+            showingDesktop: 0
+        ).isEmpty)
     }
 
     @Test("A contradiction outlives the desktop that produced it")
