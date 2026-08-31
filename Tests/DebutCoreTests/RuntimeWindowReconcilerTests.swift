@@ -891,6 +891,41 @@ struct RuntimeWindowReconcilerTests {
         #expect(dormancy?.reason == .idRecycled)
     }
 
+    // Chrome's dismissed omnibox popup stays in CGWindowList for the life of the process, so
+    // the missing-assignment check above can never reach it. AX declining to name it while its
+    // own desktop showed is the only positive statement anything makes about it.
+    @Test("A window AX contradicts is parked even though CG still lists it")
+    func axContradictedWindowIsParked() {
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        for windowID in [CGWindowID(17774), CGWindowID(17776)] {
+            manager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.google.Chrome",
+                            ownerName: "Chrome", windowTitle: "", ownerPID: 89895),
+                toSpaceID: spaceID
+            )
+        }
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(17774, bundleID: "com.google.Chrome",
+                                         ownerName: "Chrome", ownerPID: 89895, title: "")],
+                allWindowIDs: [17774, 17776],
+                axContradictedWindowIDs: [17776]
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(manager.activeSpace.windows.map(\.windowID) == [17774])
+        #expect(manager.dormantWindowAssignments.map(\.window.windowID) == [17776])
+        let dormancy = result.events.first { $0.kind == .madeDormant }
+        #expect(dormancy?.windowID == 17776)
+        #expect(dormancy?.reason == .axContradicted)
+        #expect(dormancy?.fromSpace == 0)
+        #expect(result.dormantCount == 1)
+    }
+
     // MARK: - Preview "Open" ghost regression (KHA-566)
     //
     // Reproduces a real session. Preview was quit while an image window and a generic
