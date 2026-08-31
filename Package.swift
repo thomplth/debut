@@ -55,7 +55,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "DebutE2E",
-            dependencies: ["DebutCore"],
+            dependencies: ["DebutCore", "AXPrivate"],
             path: "Sources/DebutE2E",
             linkerSettings: [
                 .linkedFramework("ApplicationServices"),
