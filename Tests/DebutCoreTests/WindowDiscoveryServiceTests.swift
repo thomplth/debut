@@ -740,6 +740,7 @@ struct WindowDiscoveryServiceTests {
             processExitMonitor: MockProcessExitMonitor()
         )
         var attempts = 0
+        service.windowElementOverride = { _, _ in AXUIElementCreateSystemWide() }
         service.armingOverride = { _, _ in
             attempts += 1
             return .armed
@@ -750,6 +751,26 @@ struct WindowDiscoveryServiceTests {
         service.registerTracking(windowID: 1, pid: 10)
 
         #expect(attempts == 1)
+    }
+
+    @Test("An armed window with no element yet re-attempts the lookup on the next activation")
+    func armedWindowWithoutElementRetriesElementLookup() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        var elementAvailable = false
+        service.windowElementOverride = { _, _ in elementAvailable ? element : nil }
+        service.armingOverride = { _, _ in .armed }
+
+        service.registerTracking(windowID: 7, pid: 10)
+        #expect(service.trackedWindowElement(windowID: 7) == nil)
+
+        elementAvailable = true
+        service.registerTracking(windowID: 7, pid: 10)
+
+        #expect(service.trackedWindowElement(windowID: 7) != nil)
     }
 
     @Test("Reset clears tracking caches and allows live windows to be armed again")

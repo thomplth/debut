@@ -331,7 +331,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         if retiredWindowOwners[windowID] == pid { return }
         // A window ID reused by a different process must still be armed: matching by ID
         // alone would trust bookkeeping left over from a process whose exit was missed.
-        if armedWindowIDs.contains(windowID), windowOwnerPIDs[windowID] == pid { return }
+        // An armed window with no element yet must also fall through, because a destroy
+        // notification is resolved back to a window ID through its stored element alone;
+        // arming succeeds without one, so the lookup has to be retried until it lands.
+        if armedWindowIDs.contains(windowID), windowOwnerPIDs[windowID] == pid,
+           trackedWindowElements[windowID] != nil { return }
 
         windowOwnerPIDs[windowID] = pid
         let element = windowElementOverride?(windowID, pid) ?? axWindowElement(for: windowID, pid: pid)
