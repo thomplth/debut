@@ -8,7 +8,6 @@ import CoreGraphics
 public enum WindowArmingOutcome: Equatable, Sendable {
     case armed
     case observerUnavailable
-    case elementUnavailable
     case notificationRejected(Int32)
 }
 
@@ -23,10 +22,6 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onAppActivated: ((RuntimeWindowSnapshot) -> Void)?
     public var onDesktopsChanged: ((RuntimeWindowSnapshot) -> Void)?
     public var onAppTerminated: ((pid_t) -> Void)?
-    /// Fired once a window's AX element has never resolved across several consecutive
-    /// arming attempts. The caller owns the space assignment, so making it dormant
-    /// (rather than deleting it) is left to the callback, matching `onWindowClosed`.
-    public var onWindowUntrackable: ((CGWindowID) -> Void)?
     public var excludedBundleIDs: Set<String> = []
     /// Spaces are desktops, so every snapshot carries the desktop macOS reports for each
     /// window. Without it the reconciler falls back to guessing from the active space.
@@ -48,16 +43,17 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public private(set) var unarmedWindowIDs: Set<CGWindowID> = []
     private var windowOwnerPIDs: [CGWindowID: pid_t] = [:]
 
-    /// Consecutive `.elementUnavailable` outcomes per window, since only that failure mode
-    /// means AX has never once found a matching element — as opposed to a rejected
-    /// notification, which means AX found the window and a transient arming step failed.
-    private var elementUnavailableCounts: [CGWindowID: Int] = [:]
-    private static let elementUnavailableThreshold = 3
+    /// Windows a destroy notification confirmed are gone, and the process that owned them.
+    ///
+    /// An app can keep a dismissed window's backing surface in `CGWindowList` for the rest of
+    /// its life — Preview's open panel was still listed four minutes after it closed — so the
+    /// CG heuristic in `listWindows()` re-admits a window that was just retired unless
+    /// something remembers the destruction. The owner is kept because the window server
+    /// recycles IDs: the same ID under a different process is a different window and must not
+    /// inherit this one's tombstone.
+    private var retiredWindowOwners: [CGWindowID: pid_t] = [:]
 
-    /// Windows whose AX element repeatedly failed to resolve. A CG-only heuristic can keep
-    /// admitting a phantom window into every subsequent snapshot, so once flagged here a
-    /// window is excluded from discovery entirely rather than retried forever.
-    public private(set) var persistentlyUnarmableWindowIDs: Set<CGWindowID> = []
+    public var retiredWindowIDs: Set<CGWindowID> { Set(retiredWindowOwners.keys) }
 
     public var diagnosticTrackingSnapshot: WindowTrackingDiagnosticSnapshot {
         WindowTrackingDiagnosticSnapshot(
@@ -130,17 +126,17 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         super.init()
     }
 
-    /// Windows that repeatedly reported no matching AX element are excluded from every
-    /// discovery path, not just the retry loop — otherwise a phantom window the CG-only
-    /// heuristic keeps admitting would flip back to live on the very next snapshot.
-    private func excludingPersistentlyUnarmable(_ windows: [WindowInfo]) -> [WindowInfo] {
-        persistentlyUnarmableWindowIDs.isEmpty
+    /// Retired windows are excluded from every discovery path, not just the one that observed
+    /// the destruction — otherwise the CG-only heuristic re-admits the leftover surface on the
+    /// very next snapshot, and the window returns as new.
+    private func excludingRetired(_ windows: [WindowInfo]) -> [WindowInfo] {
+        retiredWindowOwners.isEmpty
             ? windows
-            : windows.filter { !persistentlyUnarmableWindowIDs.contains($0.windowID) }
+            : windows.filter { retiredWindowOwners[$0.windowID] != $0.ownerPID }
     }
 
     public func discoverRunningWindows() -> [SpaceWindow] {
-        excludingPersistentlyUnarmable(windowService.listWindows())
+        excludingRetired(windowService.listWindows())
             .filter { !excludedBundleIDs.contains($0.ownerBundleID) }.map { info in
             SpaceWindow(
                 windowID: info.windowID,
@@ -179,7 +175,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Unmatched live windows go to the first space.
     public func reconcileWindows(_ spaceManager: inout SpaceManager) {
         let discoveryID = PerformanceRecorder.shared.begin(.windowDiscovery)
-        let liveWindows = excludingPersistentlyUnarmable(windowService.listWindows()).filter {
+        let liveWindows = excludingRetired(windowService.listWindows()).filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
         let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
@@ -305,8 +301,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         windowOwnerPIDs.removeAll()
         trackedWindowElements.removeAll()
         monitoredProcessIDs.removeAll()
-        elementUnavailableCounts.removeAll()
-        persistentlyUnarmableWindowIDs.removeAll()
+        retiredWindowOwners.removeAll()
         handledExitedProcessIDs.removeAll()
     }
 
@@ -333,15 +328,14 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     private func trackWindow(windowID: CGWindowID, pid: pid_t) {
-        if persistentlyUnarmableWindowIDs.contains(windowID) { return }
+        if retiredWindowOwners[windowID] == pid { return }
         // A window ID reused by a different process must still be armed: matching by ID
         // alone would trust bookkeeping left over from a process whose exit was missed.
         if armedWindowIDs.contains(windowID), windowOwnerPIDs[windowID] == pid { return }
 
         windowOwnerPIDs[windowID] = pid
         let element = windowElementOverride?(windowID, pid) ?? axWindowElement(for: windowID, pid: pid)
-        let outcome = armingOverride?(windowID, pid)
-            ?? armWindow(windowID: windowID, pid: pid, element: element)
+        let outcome = armingOverride?(windowID, pid) ?? armWindow(windowID: windowID, pid: pid)
         guard outcome == .armed else {
             // Leaving the window out of armedWindowIDs is what allows the next
             // activation to retry. Recording it as tracked regardless is what
@@ -349,36 +343,19 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             unarmedWindowIDs.insert(windowID)
             knownWindowIDs.remove(windowID)
             reportTrackingFailure(windowID: windowID, pid: pid, outcome: outcome)
-            if outcome == .elementUnavailable {
-                let failureCount = (elementUnavailableCounts[windowID] ?? 0) + 1
-                if failureCount >= Self.elementUnavailableThreshold {
-                    elementUnavailableCounts.removeValue(forKey: windowID)
-                    unarmedWindowIDs.remove(windowID)
-                    windowOwnerPIDs.removeValue(forKey: windowID)
-                    persistentlyUnarmableWindowIDs.insert(windowID)
-                    onWindowUntrackable?(windowID)
-                } else {
-                    elementUnavailableCounts[windowID] = failureCount
-                }
-            } else {
-                elementUnavailableCounts.removeValue(forKey: windowID)
-            }
             return
         }
         if let element { trackedWindowElements[windowID] = element }
         armedWindowIDs.insert(windowID)
         unarmedWindowIDs.remove(windowID)
         knownWindowIDs.insert(windowID)
-        elementUnavailableCounts.removeValue(forKey: windowID)
     }
 
-    private func armWindow(
-        windowID: CGWindowID,
-        pid: pid_t,
-        element axElement: AXUIElement?
-    ) -> WindowArmingOutcome {
+    /// Arming needs no per-window element: the registration below is on the application, and
+    /// `kAXWindows` cannot see a window on a desktop that is not showing, so requiring one
+    /// would fail on exactly the windows that are hardest to discover.
+    private func armWindow(windowID: CGWindowID, pid: pid_t) -> WindowArmingOutcome {
         guard let observer = getOrCreateObserver(for: pid) else { return .observerUnavailable }
-        guard axElement != nil else { return .elementUnavailable }
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         let lifecycleTarget = Self.lifecycleNotificationTarget(for: pid)
@@ -427,12 +404,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         switch outcome {
         case .armed: return
         case .observerUnavailable: step = "observer_create"
-        case .elementUnavailable: step = "element_lookup"
         case .notificationRejected(let error):
             step = "add_destroy_notification"
             axError = "\(error)"
         }
-        DiagnosticReporter.shared.report("tracking_failed", details: [
+        diag.report("tracking_failed", details: [
             "windowID": "\(windowID)",
             "pid": "\(pid)",
             "step": step,
@@ -455,6 +431,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private func removeAppObserver(for pid: pid_t) {
         // Arming records are keyed by window, not by observer, so they must be
         // cleared even when no observer was ever created for this app.
+        // The tombstones go too: the process that leaked those surfaces is gone, so any
+        // future window carrying one of its IDs belongs to something else.
+        for windowID in retiredWindowOwners.filter({ $0.value == pid }).keys {
+            retiredWindowOwners.removeValue(forKey: windowID)
+        }
         let ownedWindowIDs = Set(windowOwnerPIDs.filter { $0.value == pid }.keys)
         knownWindowIDs.subtract(ownedWindowIDs)
         armedWindowIDs.subtract(ownedWindowIDs)
@@ -494,6 +475,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     func handleWindowDestroyed(element: AXUIElement) {
         guard let windowID = trackedWindowID(for: element) else { return }
+        if let owner = windowOwnerPIDs[windowID] { retiredWindowOwners[windowID] = owner }
         trackedWindowElements.removeValue(forKey: windowID)
         knownWindowIDs.remove(windowID)
         armedWindowIDs.remove(windowID)
@@ -600,7 +582,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     private func discoverLaunchedWindows(for app: AppInfo) {
         let pid = app.pid
-        let windows = excludingPersistentlyUnarmable(windowService.listWindows())
+        let windows = excludingRetired(windowService.listWindows())
             .filter { $0.ownerPID == pid }
         // Matching by window ID alone would trust stale bookkeeping from a process whose
         // exit was missed, so a reused ID for a different PID must still be (re-)tracked.
@@ -652,7 +634,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// until then. Deliberately carries no focused window and registers no AX observers:
     /// nothing was activated, and the only question being asked is where things are now.
     public func refreshDesktopAssignments() {
-        let liveWindows = excludingPersistentlyUnarmable(windowService.listWindows()).filter {
+        let liveWindows = excludingRetired(windowService.listWindows()).filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
         onDesktopsChanged?(RuntimeWindowSnapshot(
@@ -685,7 +667,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // inserted the newly activated process into runningApplications yet.
         runningPIDs.insert(pid)
         pruneTracking(runningPIDs: runningPIDs)
-        let liveWindows = excludingPersistentlyUnarmable(windowService.listWindows()).filter {
+        let liveWindows = excludingRetired(windowService.listWindows()).filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
         // The full snapshot drives reconciliation, but only the activated app needs

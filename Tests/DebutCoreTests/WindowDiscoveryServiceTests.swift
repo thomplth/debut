@@ -778,64 +778,21 @@ struct WindowDiscoveryServiceTests {
         #expect(service.armedWindowIDs == [1])
     }
 
-    @Test("An unresolvable window element is recorded as unarmed, not silently dropped")
-    func unresolvableElementIsRecordedUnarmed() {
+    @Test("A window that fails to arm is recorded as unarmed, not silently dropped")
+    func failedArmingIsRecordedUnarmed() {
         let service = WindowDiscoveryService(
             windowService: MockWindowService(),
             processExitMonitor: MockProcessExitMonitor()
         )
-        service.armingOverride = { _, _ in .elementUnavailable }
+        service.armingOverride = { _, _ in .observerUnavailable }
 
         service.registerTracking(windowID: 7, pid: 10)
 
         #expect(service.unarmedWindowIDs == [7])
     }
 
-    @Test("A window whose AX element is never found is reported untrackable after repeated failures")
-    func persistentElementLookupFailureReportsUntrackable() {
-        let service = WindowDiscoveryService(
-            windowService: MockWindowService(),
-            processExitMonitor: MockProcessExitMonitor()
-        )
-        service.armingOverride = { _, _ in .elementUnavailable }
-        var untrackableWindowIDs: [CGWindowID] = []
-        service.onWindowUntrackable = { untrackableWindowIDs.append($0) }
-
-        service.registerTracking(windowID: 7, pid: 10)
-        service.registerTracking(windowID: 7, pid: 10)
-        #expect(untrackableWindowIDs.isEmpty)
-
-        service.registerTracking(windowID: 7, pid: 10)
-
-        #expect(untrackableWindowIDs == [7])
-        #expect(service.unarmedWindowIDs.isEmpty)
-        #expect(service.persistentlyUnarmableWindowIDs == [7])
-    }
-
-    @Test("Arming successfully resets the element-lookup failure count")
-    func successfulArmResetsElementUnavailableCount() {
-        let service = WindowDiscoveryService(
-            windowService: MockWindowService(),
-            processExitMonitor: MockProcessExitMonitor()
-        )
-        var attempts = 0
-        service.armingOverride = { _, _ in
-            attempts += 1
-            return attempts <= 2 ? .elementUnavailable : .armed
-        }
-        var untrackableWindowIDs: [CGWindowID] = []
-        service.onWindowUntrackable = { untrackableWindowIDs.append($0) }
-
-        service.registerTracking(windowID: 7, pid: 10)
-        service.registerTracking(windowID: 7, pid: 10)
-        service.registerTracking(windowID: 7, pid: 10)
-
-        #expect(service.armedWindowIDs == [7])
-        #expect(untrackableWindowIDs.isEmpty)
-    }
-
-    @Test("A window flagged untrackable stops being re-discovered as live")
-    func persistentlyUnarmableWindowStopsRetryingAfterThreshold() {
+    @Test("Repeated arming failures never exclude a window from discovery")
+    func repeatedArmingFailureKeepsWindowDiscoverable() {
         let windowService = MockWindowService()
         windowService.windowList = [liveWindow(7)]
         windowService.apps = [AppInfo(bundleID: "com.a", name: "A", pid: 10, isHidden: false)]
@@ -846,20 +803,100 @@ struct WindowDiscoveryServiceTests {
         var attempts = 0
         service.armingOverride = { _, _ in
             attempts += 1
-            return .elementUnavailable
+            return .observerUnavailable
         }
-        var untrackableWindowIDs: [CGWindowID] = []
-        service.onWindowUntrackable = { untrackableWindowIDs.append($0) }
 
         var spaceManager = SpaceManager()
-        service.reconcileWindows(&spaceManager)
-        service.reconcileWindows(&spaceManager)
-        service.reconcileWindows(&spaceManager)
-        service.reconcileWindows(&spaceManager)
+        for _ in 0..<4 { service.reconcileWindows(&spaceManager) }
 
-        #expect(attempts == 3)
-        #expect(untrackableWindowIDs == [7])
-        #expect(service.persistentlyUnarmableWindowIDs == [7])
+        // Retrying forever is the point: only a destroy notification may retire a window.
+        #expect(attempts == 4)
+        #expect(service.retiredWindowIDs.isEmpty)
+        #expect(service.discoverRunningWindows().map(\.windowID) == [7])
+    }
+
+    @Test("A destroyed window is not re-admitted while its process still lists it")
+    func destroyedWindowIsNotReadmitted() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 7, pid: 10)
+
+        service.handleWindowDestroyed(element: element)
+
+        // A dismissed panel can stay in CGWindowList for the life of its process, so the
+        // window is still listed here and only the destroy notification proves it is gone.
+        #expect(service.discoverRunningWindows().isEmpty)
+    }
+
+    @Test("A window ID recycled by another process is admitted again")
+    func recycledWindowIDIsAdmittedForNewOwner() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 7, pid: 10)
+        service.handleWindowDestroyed(element: element)
+
+        windowService.windowList = [liveWindow(7, ownerPID: 20)]
+
+        #expect(service.discoverRunningWindows().map(\.windowID) == [7])
+    }
+
+    @Test("Process exit drops that app's retired window records")
+    func processExitClearsRetiredWindows() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 7, pid: 10)
+        service.handleWindowDestroyed(element: element)
+        #expect(service.retiredWindowIDs == [7])
+
+        service.handleProcessExit(pid: 10)
+
+        #expect(service.retiredWindowIDs.isEmpty)
+    }
+
+    @Test("A missing AX element never fails arming, since lifecycle registers on the app")
+    func missingAXElementNeverFailsArming() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DebutArmingTest-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let reporter = DiagnosticReporter(directory: dir)
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+        // kAXWindows omits windows on a desktop that is not showing, so a nil element says
+        // which desktop is active, not whether the window exists.
+        service.windowElementOverride = { _, _ in nil }
+
+        service.registerTracking(windowID: 7, pid: getpid())
+        reporter.flush()
+
+        let text = (try? String(
+            contentsOf: dir.appendingPathComponent("diagnostic.jsonl"), encoding: .utf8
+        )) ?? ""
+        #expect(text.contains("element_lookup") == false)
     }
 
     @Test("Process exit clears both armed and unarmed records for that app")
@@ -868,7 +905,7 @@ struct WindowDiscoveryServiceTests {
             windowService: MockWindowService(),
             processExitMonitor: MockProcessExitMonitor()
         )
-        service.armingOverride = { windowID, _ in windowID == 1 ? .armed : .elementUnavailable }
+        service.armingOverride = { windowID, _ in windowID == 1 ? .armed : .observerUnavailable }
         service.registerTracking(windowID: 1, pid: 10)
         service.registerTracking(windowID: 2, pid: 10)
         service.registerTracking(windowID: 3, pid: 20)
@@ -890,7 +927,7 @@ struct WindowDiscoveryServiceTests {
             focusedWindowProvider: { _ in 1 },
             processExitMonitor: MockProcessExitMonitor()
         )
-        service.armingOverride = { windowID, _ in windowID == 2 ? .elementUnavailable : .armed }
+        service.armingOverride = { windowID, _ in windowID == 2 ? .observerUnavailable : .armed }
         var snapshotUnarmed: Set<CGWindowID> = []
         service.onAppActivated = { snapshotUnarmed = $0.unarmedWindowIDs }
 
@@ -923,7 +960,7 @@ struct WindowDiscoveryServiceTests {
         )
         let element = AXUIElementCreateSystemWide()
         service.windowElementOverride = { _, _ in element }
-        service.armingOverride = { _, _ in .elementUnavailable }
+        service.armingOverride = { _, _ in .observerUnavailable }
 
         service.registerTracking(windowID: 101, pid: 10)
 
