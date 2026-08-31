@@ -669,7 +669,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             allWindowIDs: windowService.listAllWindowIDs(),
             unarmedWindowIDs: unarmedWindowIDs,
             desktopIndexes: desktopIndexes(for: liveWindows),
-            desktopLocations: desktopLocations(for: liveWindows)
+            desktopLocations: desktopLocations(for: liveWindows),
+            axContradictedWindowIDs: windowService.listAXContradictedWindowIDs()
         ))
     }
 

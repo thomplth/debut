@@ -131,6 +131,28 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshot?.focusedWindowID == nil)
     }
 
+    // A window can only be contradicted while its own desktop is showing, and the desktop
+    // change that reveals it runs this refresh — not a full reconcile. Leaving the verdict
+    // out of the snapshot means nothing ever evicts a ghost that was already assigned.
+    @Test("A desktop refresh carries the AX contradictions it just observed")
+    func desktopRefreshCarriesAXContradictions() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1)]
+        windowService.allWindowIDList = [1, 2]
+        windowService.axContradictedWindowIDList = [2]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var snapshot: RuntimeWindowSnapshot?
+        service.onDesktopsChanged = { snapshot = $0 }
+
+        service.refreshDesktopAssignments()
+
+        #expect(snapshot?.axContradictedWindowIDs == [2])
+    }
+
     @Test("Startup reconcile places each window on the desktop it is actually on")
     func startupReconcilePlacesByDesktop() {
         let windowService = MockWindowService()
