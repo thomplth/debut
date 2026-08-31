@@ -8,6 +8,15 @@ private struct SendableCaptureWindow: @unchecked Sendable {
     let window: SCWindow
 }
 
+/// One window Accessibility contradicted, named together with the process that owned it. The
+/// bundle ID is only there to survive being written to disk: on reload it is what distinguishes
+/// the original owner from whatever process inherited its PID.
+struct AXContradictionRecord: Codable, Equatable, Sendable {
+    let windowID: CGWindowID
+    let ownerPID: pid_t
+    let ownerBundleID: String
+}
+
 /// Remembers which windows Accessibility has positively contradicted, keyed to the process
 /// that owned them at the time.
 ///
@@ -20,12 +29,29 @@ private struct SendableCaptureWindow: @unchecked Sendable {
 /// `clear` is what stops a lasting refusal from becoming a permanent loss: the entry is
 /// dropped as soon as AX does name the window, so a misreport heals itself.
 struct AXContradictionRegistry {
-    private var owners: [CGWindowID: pid_t] = [:]
+    private var owners: [CGWindowID: AXContradictionRecord] = [:]
 
     var windowIDs: Set<CGWindowID> { Set(owners.keys) }
 
-    mutating func record(windowID: CGWindowID, owner: pid_t) {
-        owners[windowID] = owner
+    var records: [AXContradictionRecord] { Array(owners.values) }
+
+    init() {}
+
+    /// Restores verdicts written by an earlier run of Debut. A window ID and a PID both mean
+    /// nothing on their own across a relaunch — macOS reissues them from low numbers — so a
+    /// record is only honoured while the PID it names is still running the app it named.
+    init(records: [AXContradictionRecord], runningBundleIDsByPID: [pid_t: String]) {
+        owners = Dictionary(
+            uniqueKeysWithValues: records
+                .filter { runningBundleIDsByPID[$0.ownerPID] == $0.ownerBundleID }
+                .map { ($0.windowID, $0) }
+        )
+    }
+
+    mutating func record(windowID: CGWindowID, owner: pid_t, bundleID: String) {
+        owners[windowID] = AXContradictionRecord(
+            windowID: windowID, ownerPID: owner, ownerBundleID: bundleID
+        )
     }
 
     mutating func clear(windowIDs: some Sequence<CGWindowID>) {
@@ -35,11 +61,11 @@ struct AXContradictionRegistry {
     /// Drops verdicts belonging to processes that are gone, so the table cannot grow without
     /// bound across a long session of app restarts.
     mutating func retainOnly(owners liveOwners: Set<pid_t>) {
-        owners = owners.filter { liveOwners.contains($0.value) }
+        owners = owners.filter { liveOwners.contains($0.value.ownerPID) }
     }
 
     func refuses(windowID: CGWindowID, owner: pid_t) -> Bool {
-        owners[windowID] == owner
+        owners[windowID]?.ownerPID == owner
     }
 }
 
@@ -61,6 +87,24 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
     private let contradictionLock = NSLock()
     private var contradictions = AXContradictionRegistry()
+
+    /// The verdicts worth carrying to the next launch, and the ones a previous launch left.
+    /// Without this the dormant assignment for a ghost outlives the reason it was parked, and
+    /// the startup reconcile restores the ghost before AX ever gets a chance to object again.
+    var contradictionRecords: [AXContradictionRecord] {
+        contradictionLock.withLock { contradictions.records }
+    }
+
+    func restoreContradictions(
+        _ records: [AXContradictionRecord],
+        runningBundleIDsByPID: [pid_t: String]
+    ) {
+        contradictionLock.withLock {
+            contradictions = AXContradictionRegistry(
+                records: records, runningBundleIDsByPID: runningBundleIDsByPID
+            )
+        }
+    }
 
     public init(
         windowCaptureEnabled: Bool = ProcessInfo.processInfo.environment["DEBUT_DISABLE_WINDOW_PREVIEWS"] != "1"
@@ -177,7 +221,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                     appAXAnswerCoversShowingDesktop: corroboratedPIDs.contains(ownerPID)
                 ) {
                     contradictionLock.withLock {
-                        contradictions.record(windowID: windowID, owner: ownerPID)
+                        contradictions.record(
+                            windowID: windowID, owner: ownerPID, bundleID: bundleID
+                        )
                     }
                     return nil
                 }
@@ -295,10 +341,14 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             as? [[CFString: Any]]
         else { return [] }
 
+        let pidToBundleID: [pid_t: String] = NSWorkspace.shared.runningApplications
+            .reduce(into: [:]) { table, app in table[app.processIdentifier] = app.bundleIdentifier }
+
         var contradicted = Set<CGWindowID>()
         for dict in infoList {
             guard let windowID = dict[kCGWindowNumber] as? CGWindowID,
                   let ownerPID = dict[kCGWindowOwnerPID] as? pid_t,
+                  let bundleID = pidToBundleID[ownerPID],
                   !classification.trackable.contains(windowID),
                   Self.accessibilityContradictsWindow(
                       windowDesktop: windowDesktops[windowID],
@@ -308,7 +358,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             else { continue }
             contradicted.insert(windowID)
             contradictionLock.withLock {
-                contradictions.record(windowID: windowID, owner: ownerPID)
+                contradictions.record(windowID: windowID, owner: ownerPID, bundleID: bundleID)
             }
         }
         // Assignments made on another desktop have to be reclaimed too, and the evidence that

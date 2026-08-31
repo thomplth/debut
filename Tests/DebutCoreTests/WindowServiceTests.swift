@@ -183,7 +183,7 @@ struct WindowServiceTests {
     @Test("A contradiction outlives the desktop that produced it")
     func contradictionIsRememberedAcrossDesktops() {
         var registry = AXContradictionRegistry()
-        registry.record(windowID: 17776, owner: 89895)
+        registry.record(windowID: 17776, owner: 89895, bundleID: "com.google.Chrome")
         // AX can only contradict from the window's own desktop, so a verdict that expired
         // when the user switched away would be re-admitted on the very next snapshot.
         #expect(registry.refuses(windowID: 17776, owner: 89895))
@@ -192,7 +192,7 @@ struct WindowServiceTests {
     @Test("A remembered contradiction clears the moment AX names the window")
     func contradictionSelfHealsWhenAXCatchesUp() {
         var registry = AXContradictionRegistry()
-        registry.record(windowID: 17776, owner: 89895)
+        registry.record(windowID: 17776, owner: 89895, bundleID: "com.google.Chrome")
         registry.clear(windowIDs: [17776])
         #expect(!registry.refuses(windowID: 17776, owner: 89895))
     }
@@ -200,11 +200,42 @@ struct WindowServiceTests {
     @Test("A recycled window ID does not inherit the previous owner's contradiction")
     func contradictionIsKeyedToItsOwner() {
         var registry = AXContradictionRegistry()
-        registry.record(windowID: 17776, owner: 89895)
+        registry.record(windowID: 17776, owner: 89895, bundleID: "com.google.Chrome")
         #expect(!registry.refuses(windowID: 17776, owner: 90001))
         // Chrome exiting takes its verdicts with it.
         registry.retainOnly(owners: [90001])
         #expect(!registry.refuses(windowID: 17776, owner: 89895))
+    }
+
+    // The verdict has to be at least as durable as the assignment it overrules. Chrome's
+    // omnibox ghost 17776 was parked at 18:25:07 and restored by the next launch's startup
+    // reconcile at 18:37:05, because AX can only contradict a window while its own desktop is
+    // showing and that is rarely the desktop Debut launches onto.
+    @Test("A contradiction survives a Debut restart while its owner keeps running")
+    func contradictionSurvivesARestart() {
+        var registry = AXContradictionRegistry()
+        registry.record(windowID: 17776, owner: 89895, bundleID: "com.google.Chrome")
+        let restored = AXContradictionRegistry(
+            records: registry.records,
+            runningBundleIDsByPID: [89895: "com.google.Chrome"]
+        )
+        #expect(restored.refuses(windowID: 17776, owner: 89895))
+    }
+
+    @Test("A restored contradiction is discarded unless the same process still owns it")
+    func restoredContradictionRequiresTheSameProcess() {
+        var registry = AXContradictionRegistry()
+        registry.record(windowID: 17776, owner: 89895, bundleID: "com.google.Chrome")
+        // macOS reissues PIDs from low numbers on every relaunch, so the number alone does not
+        // identify the owner and a stale verdict would refuse a stranger's real window.
+        #expect(!AXContradictionRegistry(
+            records: registry.records,
+            runningBundleIDsByPID: [89895: "com.apple.Preview"]
+        ).refuses(windowID: 17776, owner: 89895))
+        #expect(!AXContradictionRegistry(
+            records: registry.records,
+            runningBundleIDsByPID: [:]
+        ).refuses(windowID: 17776, owner: 89895))
     }
 
     @Test("Disabled live previews neither enumerate nor capture")

@@ -47,6 +47,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         super.init()
     }
 
+    private static func runningBundleIDsByPID() -> [pid_t: String] {
+        NSWorkspace.shared.runningApplications.reduce(into: [:]) { table, app in
+            table[app.processIdentifier] = app.bundleIdentifier
+        }
+    }
+
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         diag.report("app_launched")
@@ -59,7 +65,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         launchAtLogin.apply(enabled: currentSettings.launchAtLogin)
         setupTelemetry()
 
-        windowService = AccessibilityWindowService()
+        let accessibility = AccessibilityWindowService()
+        accessibility.restoreContradictions(
+            (try? store.loadContradictions()) ?? [],
+            runningBundleIDsByPID: Self.runningBundleIDsByPID()
+        )
+        windowService = accessibility
         keyboardService = EventTapKeyboardService()
 
         overlayWindow = OverlayWindow()
@@ -463,6 +474,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         let debouncedSaver = MainActor.assumeIsolated { self.debouncedSaver }
         if let spaceController, let debouncedSaver {
             debouncedSaver.flushNow(spaceController.spaceManager)
+        }
+        // Written beside the assignments it explains: a ghost's dormant assignment survives a
+        // relaunch, so a verdict that does not is overruled by the startup reconcile.
+        let stateStore = MainActor.assumeIsolated { self.stateStore }
+        let windowService = MainActor.assumeIsolated { self.windowService }
+        if let stateStore, let windowService {
+            try? stateStore.saveContradictions(windowService.contradictionRecords)
         }
         let exporter = MainActor.assumeIsolated { self.telemetryExporter }
         let payload = MainActor.assumeIsolated { self.currentTelemetrySummary() }

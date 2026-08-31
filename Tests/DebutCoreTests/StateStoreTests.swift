@@ -162,6 +162,27 @@ struct StateStoreTests {
         #expect(loaded.spaces.count == 2)
     }
 
+    @Test("AX contradictions round-trip")
+    func contradictionsRoundTrip() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = StateStore(directory: dir)
+        try store.saveContradictions([
+            AXContradictionRecord(windowID: 17776, ownerPID: 89895, ownerBundleID: "com.google.Chrome")
+        ])
+        #expect(try store.loadContradictions() == [
+            AXContradictionRecord(windowID: 17776, ownerPID: 89895, ownerBundleID: "com.google.Chrome")
+        ])
+    }
+
+    @Test("Contradictions load as empty when no file exists")
+    func contradictionsLoadEmpty() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(try StateStore(directory: dir).loadContradictions().isEmpty)
+    }
+
     @Test("Settings round-trip")
     func settingsRoundTrip() throws {
         let dir = try makeTempDirectory()
