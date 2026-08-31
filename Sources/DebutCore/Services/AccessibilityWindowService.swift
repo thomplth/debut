@@ -8,6 +8,41 @@ private struct SendableCaptureWindow: @unchecked Sendable {
     let window: SCWindow
 }
 
+/// Remembers which windows Accessibility has positively contradicted, keyed to the process
+/// that owned them at the time.
+///
+/// The verdict has to outlive the moment that produced it: AX can only contradict a window
+/// while its own desktop is showing, so a judgement scoped to that instant is re-admitted by
+/// the Core Graphics heuristic as soon as the user switches desktops. The window server
+/// recycles IDs, so the owner is half the key — the same ID under a different process is a
+/// different window and must not inherit this verdict.
+///
+/// `clear` is what stops a lasting refusal from becoming a permanent loss: the entry is
+/// dropped as soon as AX does name the window, so a misreport heals itself.
+struct AXContradictionRegistry {
+    private var owners: [CGWindowID: pid_t] = [:]
+
+    var windowIDs: Set<CGWindowID> { Set(owners.keys) }
+
+    mutating func record(windowID: CGWindowID, owner: pid_t) {
+        owners[windowID] = owner
+    }
+
+    mutating func clear(windowIDs: some Sequence<CGWindowID>) {
+        for windowID in windowIDs { owners.removeValue(forKey: windowID) }
+    }
+
+    /// Drops verdicts belonging to processes that are gone, so the table cannot grow without
+    /// bound across a long session of app restarts.
+    mutating func retainOnly(owners liveOwners: Set<pid_t>) {
+        owners = owners.filter { liveOwners.contains($0.value) }
+    }
+
+    func refuses(windowID: CGWindowID, owner: pid_t) -> Bool {
+        owners[windowID] == owner
+    }
+}
+
 public final class AccessibilityWindowService: WindowService, @unchecked Sendable {
     private let windowCaptureEnabled: Bool
 
@@ -23,6 +58,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     /// Space, so an AX-unknown window on another desktop still needs a way to resolve to
     /// exactly one desktop before the CG heuristic in `listWindows()` will trust it.
     public var spaceSwitcher: (any SpaceSwitching)?
+
+    private let contradictionLock = NSLock()
+    private var contradictions = AXContradictionRegistry()
 
     public init(
         windowCaptureEnabled: Bool = ProcessInfo.processInfo.environment["DEBUT_DISABLE_WINDOW_PREVIEWS"] != "1"
@@ -93,6 +131,13 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         let windowDesktops = (spaceSwitcher?.windowLocations() ?? [:]).mapValues(\.index)
         let showingDesktop = spaceSwitcher?.currentDesktopIndex()
 
+        // AX naming a window is the only thing that can overturn a contradiction, so drop
+        // those entries first. A momentary misreport then costs one snapshot, not the window.
+        contradictionLock.withLock {
+            contradictions.clear(windowIDs: classification.trackable)
+            contradictions.retainOnly(owners: regularPIDs)
+        }
+
         var seen = Set<CGWindowID>()
         return infoList.compactMap { dict in
             guard let windowID = dict[kCGWindowNumber] as? CGWindowID,
@@ -121,11 +166,23 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                     bounds: bounds,
                     hasResolvedDesktop: windowDesktop != nil
                 ) else { return nil }
-                guard !Self.accessibilityContradictsWindow(
+                if Self.accessibilityContradictsWindow(
                     windowDesktop: windowDesktop,
                     showingDesktop: showingDesktop,
                     appIsAnsweringAX: classification.answeringPIDs.contains(ownerPID)
-                ) else { return nil }
+                ) {
+                    contradictionLock.withLock {
+                        contradictions.record(windowID: windowID, owner: ownerPID)
+                    }
+                    return nil
+                }
+                // The verdict was reached on a desktop that may no longer be showing, so
+                // without this the heuristic re-admits the window as soon as the user
+                // switches away from it.
+                let remembered = contradictionLock.withLock {
+                    contradictions.refuses(windowID: windowID, owner: ownerPID)
+                }
+                if remembered { return nil }
             }
 
             let title = dict[kCGWindowName] as? String ?? ""
@@ -222,8 +279,13 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                   )
             else { continue }
             contradicted.insert(windowID)
+            contradictionLock.withLock {
+                contradictions.record(windowID: windowID, owner: ownerPID)
+            }
         }
-        return contradicted
+        // Assignments made on another desktop have to be reclaimed too, and the evidence that
+        // condemned them is only visible from the desktop that produced it.
+        return contradicted.union(contradictionLock.withLock { contradictions.windowIDs })
     }
 
     /// Assigned windows Core Graphics now contradicts. Absence from this set is not a claim
