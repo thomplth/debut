@@ -48,15 +48,11 @@ if [[ ! -f "$APP_ICON" ]]; then
 fi
 cp "$APP_ICON" "$RESOURCES/AppIcon.icns"
 
-SIGN_IDENTITY="${DEBUT_SIGNING_IDENTITY:-}"
-if [[ -z "$SIGN_IDENTITY" ]]; then
-    SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Debut Dev" | head -1 | awk '{print $2}' || true)
-fi
-if [ -n "$SIGN_IDENTITY" ]; then
+SIGN_IDENTITY="$("$PROJECT_DIR/scripts/select-signing-identity.sh" "${DEBUT_SIGNING_IDENTITY:-}")"
+if [[ "$SIGN_IDENTITY" != "-" ]]; then
     echo "Code signing with identity $SIGN_IDENTITY..."
 else
     echo "Code signing (ad-hoc — Accessibility permission will reset on each rebuild)..."
-    SIGN_IDENTITY=-
 fi
 
 SIGN_ARGS=(--force --sign "$SIGN_IDENTITY")
