@@ -378,52 +378,37 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         element axElement: AXUIElement?
     ) -> WindowArmingOutcome {
         guard let observer = getOrCreateObserver(for: pid) else { return .observerUnavailable }
-        guard let axElement else { return .elementUnavailable }
+        guard axElement != nil else { return .elementUnavailable }
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        let destroyed = Self.renewNotificationRegistration(
-            add: {
-                AXObserverAddNotification(
-                    observer, axElement, kAXUIElementDestroyedNotification as CFString, selfPtr
-                )
-            },
-            remove: {
-                AXObserverRemoveNotification(
-                    observer, axElement, kAXUIElementDestroyedNotification as CFString
-                )
-            }
+        let lifecycleTarget = Self.lifecycleNotificationTarget(for: pid)
+        let destroyed = AXObserverAddNotification(
+            observer,
+            lifecycleTarget,
+            kAXUIElementDestroyedNotification as CFString,
+            selfPtr
         )
-        guard destroyed == .success else {
+        // Unlike a disposable child-window registration, an existing application-level
+        // registration remains authoritative when macOS recycles a window identity.
+        guard destroyed == .success || destroyed == .notificationAlreadyRegistered else {
             return .notificationRejected(destroyed.rawValue)
         }
         // A stale title is cosmetic, so it never gates tracking.
-        _ = Self.renewNotificationRegistration(
-            add: {
-                AXObserverAddNotification(
-                    observer, axElement, kAXTitleChangedNotification as CFString, selfPtr
-                )
-            },
-            remove: {
-                AXObserverRemoveNotification(
-                    observer, axElement, kAXTitleChangedNotification as CFString
-                )
-            }
+        _ = AXObserverAddNotification(
+            observer,
+            lifecycleTarget,
+            kAXTitleChangedNotification as CFString,
+            selfPtr
         )
         return .armed
     }
 
-    /// A recycled CGWindowID can resolve to an AX element that compares equal to the
-    /// just-destroyed element it replaced. Accessibility then reports the old observer
-    /// registration as already present even though it will not deliver the replacement's
-    /// destruction. Renew that inherited registration instead of treating it as armed.
-    static func renewNotificationRegistration(
-        add: () -> AXError,
-        remove: () -> AXError
-    ) -> AXError {
-        let result = add()
-        guard result == .notificationAlreadyRegistered else { return result }
-        _ = remove()
-        return add()
+    /// Observe descendants through the stable application element. Preview can dispose an
+    /// Open panel, keep its CG backing surface, and immediately reuse the same window ID for
+    /// another panel; tying lifecycle delivery to either transient child misses the second
+    /// disposal. The application-scoped observer survives both child identities.
+    static func lifecycleNotificationTarget(for pid: pid_t) -> AXUIElement {
+        AXUIElementCreateApplication(pid)
     }
 
     /// The AX element for an armed window, or nil when it was never armed or has since been

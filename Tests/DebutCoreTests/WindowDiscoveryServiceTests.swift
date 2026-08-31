@@ -724,26 +724,13 @@ struct WindowDiscoveryServiceTests {
         #expect(service.unarmedWindowIDs.isEmpty)
     }
 
-    @Test("A recycled AX element renews an inherited notification registration")
-    func recycledElementRenewsInheritedNotificationRegistration() {
-        var addResults: [AXError] = [.notificationAlreadyRegistered, .success]
-        var addCount = 0
-        var removeCount = 0
+    @Test("Lifecycle notifications observe the application rather than a recyclable window element")
+    func lifecycleNotificationsUseApplicationScope() {
+        let pid: pid_t = 42
+        let target = WindowDiscoveryService.lifecycleNotificationTarget(for: pid)
 
-        let result = WindowDiscoveryService.renewNotificationRegistration(
-            add: {
-                addCount += 1
-                return addResults.removeFirst()
-            },
-            remove: {
-                removeCount += 1
-                return .success
-            }
-        )
-
-        #expect(result == .success)
-        #expect(addCount == 2)
-        #expect(removeCount == 1)
+        #expect(CFEqual(target, AXUIElementCreateApplication(pid)))
+        #expect(!CFEqual(target, AXUIElementCreateSystemWide()))
     }
 
     @Test("An armed window is not re-armed on every activation")
