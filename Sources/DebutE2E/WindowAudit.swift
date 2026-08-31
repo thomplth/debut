@@ -27,7 +27,7 @@ enum WindowAudit {
 
     private static func emit(sample: Int, spaceService: SpaceService, bundleFilter: String?) {
         let axFacts = accessibilityFacts()
-        let answeringPIDs = accessibilityAnsweringPIDs()
+        let axWindowIDsByPID = accessibilityWindowIDsByPID()
         let cgWindows = coreGraphicsWindows()
         let locations = spaceService.windowLocations()
         let activeDesktop = spaceService.currentDesktopIndex().map(String.init) ?? "-"
@@ -39,6 +39,11 @@ enum WindowAudit {
             uniquingKeysWith: { first, _ in first }
         )
         let regularPIDs = Set(apps.map(\.processIdentifier))
+        let corroboratedPIDs = AccessibilityWindowServiceProbe.pidsWhoseAXAnswerCoversShowingDesktop(
+            axWindowIDsByPID: axWindowIDsByPID,
+            windowDesktops: locations.mapValues(\.index),
+            showingDesktop: spaceService.currentDesktopIndex()
+        )
 
         let allIDs = Set(cgWindows.keys)
             .union(axFacts.keys)
@@ -90,7 +95,7 @@ enum WindowAudit {
                           AccessibilityWindowServiceProbe.accessibilityContradicts(
                               windowDesktop: location?.index,
                               showingDesktop: spaceService.currentDesktopIndex(),
-                              appIsAnsweringAX: answeringPIDs.contains(cgPID)
+                              appAXAnswerCoversShowingDesktop: corroboratedPIDs.contains(cgPID)
                           ) {
                     admitted = "0"          // AX enumerated the app on this desktop and skipped it
                 } else {
@@ -165,20 +170,23 @@ enum WindowAudit {
             }
     }
 
-    /// Apps whose `kAXWindows` answered with at least one window. An app AX says nothing for
-    /// cannot contradict any of its windows, so this is what keeps a silent process from
-    /// having its whole window list disbelieved at once.
-    private static func accessibilityAnsweringPIDs() -> Set<pid_t> {
-        var result = Set<pid_t>()
+    /// Which windows each app's `kAXWindows` actually named. An app AX says nothing for cannot
+    /// contradict any of its windows, and neither can one whose answer still describes the
+    /// desktop being left, so the identities matter and not just the count.
+    private static func accessibilityWindowIDsByPID() -> [pid_t: Set<CGWindowID>] {
+        var result: [pid_t: Set<CGWindowID>] = [:]
         for app in NSWorkspace.shared.runningApplications
         where app.activationPolicy == .regular {
             let axApp = AXUIElementCreateApplication(app.processIdentifier)
             var windowsRef: CFTypeRef?
             guard AXUIElementCopyAttributeValue(
                 axApp, kAXWindowsAttribute as CFString, &windowsRef
-            ) == .success, let windows = windowsRef as? [AXUIElement], !windows.isEmpty
-            else { continue }
-            result.insert(app.processIdentifier)
+            ) == .success, let windows = windowsRef as? [AXUIElement] else { continue }
+            for axWindow in windows {
+                var id: CGWindowID = 0
+                guard _AXUIElementGetWindow(axWindow, &id) == .success, id != 0 else { continue }
+                result[app.processIdentifier, default: []].insert(id)
+            }
         }
         return result
     }
@@ -240,9 +248,21 @@ enum AccessibilityWindowServiceProbe {
     }
 
     static func accessibilityContradicts(
-        windowDesktop: Int?, showingDesktop: Int?, appIsAnsweringAX: Bool
+        windowDesktop: Int?, showingDesktop: Int?, appAXAnswerCoversShowingDesktop: Bool
     ) -> Bool {
-        guard appIsAnsweringAX, let windowDesktop, let showingDesktop else { return false }
+        guard appAXAnswerCoversShowingDesktop, let windowDesktop, let showingDesktop
+        else { return false }
         return windowDesktop == showingDesktop
+    }
+
+    static func pidsWhoseAXAnswerCoversShowingDesktop(
+        axWindowIDsByPID: [pid_t: Set<CGWindowID>],
+        windowDesktops: [CGWindowID: Int],
+        showingDesktop: Int?
+    ) -> Set<pid_t> {
+        guard let showingDesktop else { return [] }
+        return Set(axWindowIDsByPID.compactMap { pid, windowIDs in
+            windowIDs.contains { windowDesktops[$0] == showingDesktop } ? pid : nil
+        })
     }
 }
