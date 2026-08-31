@@ -890,4 +890,82 @@ struct RuntimeWindowReconcilerTests {
         let dormancy = result.events.first { $0.kind == .madeDormant }
         #expect(dormancy?.reason == .idRecycled)
     }
+
+    // MARK: - Preview "Open" ghost regression (KHA-566)
+    //
+    // Reproduces a real session. Preview was quit while an image window and a generic
+    // "Open" panel were both live, dormanting both. On relaunch the "Open" panel reclaimed
+    // its own dormant slot by exact title and was later closed for real. A second, unrelated
+    // "Open" panel then appeared through a routine activation reconcile — not a fresh launch
+    // — and the bundle-only fallback paired it with the *other* remaining dormant slot (the
+    // image window) purely because each was the last one left for the bundle. That silently
+    // discarded the image's dormant assignment and left the panel's transient identity
+    // masquerading as a live window long after the user dismissed it.
+
+    @Test("An activation reconcile does not let a generic dialog steal an unrelated dormant slot")
+    func activationReconcileDoesNotStealUnrelatedDormantSlot() {
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(
+            SpaceWindow(
+                windowID: 14262,
+                ownerBundleID: "com.apple.Preview",
+                ownerName: "Preview",
+                windowTitle: "8B13A465-2069-4A75-AC10-9ECC85310F72.png",
+                ownerPID: 24145
+            ),
+            toSpaceID: spaceID
+        )
+        #expect(manager.makeWindowsDormant(forOwnerPID: 24145) == 1)
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [
+                    liveWindow(14266, bundleID: "com.apple.Preview", ownerName: "Preview", ownerPID: 24500, title: "Open"),
+                ],
+                allWindowIDs: [14266]
+            ),
+            spaceManager: &manager,
+            allowDormantBundleFallback: false
+        )
+
+        #expect(result.reassignedCount == 0)
+        #expect(result.addedCount == 1)
+        #expect(manager.dormantWindowAssignments.count == 1)
+        #expect(manager.dormantWindowAssignments.first?.window.windowTitle == "8B13A465-2069-4A75-AC10-9ECC85310F72.png")
+        #expect(result.events.contains { $0.reason == WindowAssignmentEvent.Reason.dormantRestored } == false)
+    }
+
+    @Test("A launch reconcile still restores a dormant window by bundle fallback")
+    func launchReconcileStillAllowsBundleFallback() {
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(
+            SpaceWindow(
+                windowID: 14262,
+                ownerBundleID: "com.apple.Preview",
+                ownerName: "Preview",
+                windowTitle: "8B13A465-2069-4A75-AC10-9ECC85310F72.png",
+                ownerPID: 24145
+            ),
+            toSpaceID: spaceID
+        )
+        #expect(manager.makeWindowsDormant(forOwnerPID: 24145) == 1)
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [
+                    liveWindow(14266, bundleID: "com.apple.Preview", ownerName: "Preview", ownerPID: 24500, title: "Open"),
+                ],
+                allWindowIDs: [14266]
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(result.reassignedCount == 1)
+        #expect(manager.dormantWindowAssignments.isEmpty)
+        #expect(manager.spaceContainingWindow(windowID: 14266) == spaceID)
+    }
 }
