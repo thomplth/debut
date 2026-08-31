@@ -14,6 +14,9 @@ public struct RuntimeWindowSnapshot: Sendable {
     /// Display-qualified desktop locations. New snapshots use this so desktop 1 on two
     /// displays cannot collapse into the same space.
     public let desktopLocations: [CGWindowID: DesktopLocation]
+    /// Windows Accessibility positively declined to name while their own desktop was the
+    /// showing one. Unlike absence from a list this is a statement, so it may evict.
+    public let axContradictedWindowIDs: Set<CGWindowID>
 
     public init(
         liveWindows: [WindowInfo],
@@ -21,7 +24,8 @@ public struct RuntimeWindowSnapshot: Sendable {
         focusedWindowID: CGWindowID? = nil,
         unarmedWindowIDs: Set<CGWindowID> = [],
         desktopIndexes: [CGWindowID: Int] = [:],
-        desktopLocations: [CGWindowID: DesktopLocation] = [:]
+        desktopLocations: [CGWindowID: DesktopLocation] = [:],
+        axContradictedWindowIDs: Set<CGWindowID> = []
     ) {
         self.liveWindows = liveWindows
         self.allWindowIDs = allWindowIDs
@@ -29,6 +33,7 @@ public struct RuntimeWindowSnapshot: Sendable {
         self.unarmedWindowIDs = unarmedWindowIDs
         self.desktopIndexes = desktopIndexes
         self.desktopLocations = desktopLocations
+        self.axContradictedWindowIDs = axContradictedWindowIDs
     }
 }
 
@@ -52,6 +57,10 @@ public struct WindowAssignmentEvent: Equatable, Sendable {
         /// identity pass, which parks the stale assignment rather than leaving it live under
         /// somebody else's window.
         case idRecycled = "id_recycled"
+        /// Accessibility enumerated the window's app while the window's own desktop was
+        /// showing and did not name it. Only ever available for the showing desktop, so this
+        /// is the one moment such a window can be judged.
+        case axContradicted = "ax_contradicted"
     }
 
     public let kind: Kind
@@ -353,6 +362,25 @@ public struct RuntimeWindowReconciler: Sendable {
                 reason: desktopSpaceID == nil && strandedSpaceID != nil
                     ? .strandedSpaceRecovered
                     : .new
+            ))
+        }
+
+        // Runs after every recovery pass so a window parked here cannot be reclaimed by the
+        // same reconcile that just judged it.
+        for assignment in assignments(in: spaceManager)
+        where snapshot.axContradictedWindowIDs.contains(assignment.window.windowID) {
+            let fromSpace = spaceManager.spaceIndex(id: assignment.spaceID)
+            guard spaceManager.makeWindowDormant(windowID: assignment.window.windowID) != nil
+            else { continue }
+            dormantCount += 1
+            events.append(WindowAssignmentEvent(
+                kind: .madeDormant,
+                windowID: assignment.window.windowID,
+                bundleID: assignment.window.ownerBundleID,
+                windowTitle: assignment.window.windowTitle,
+                fromSpace: fromSpace,
+                toSpace: nil,
+                reason: .axContradicted
             ))
         }
 
