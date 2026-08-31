@@ -17,6 +17,9 @@ public struct RuntimeWindowSnapshot: Sendable {
     /// Windows Accessibility positively declined to name while their own desktop was the
     /// showing one. Unlike absence from a list this is a statement, so it may evict.
     public let axContradictedWindowIDs: Set<CGWindowID>
+    /// Every window SkyLight places on a desktop, not just the assigned ones. Nil when the
+    /// enumeration gave no answer, which must never be read as an empty screen.
+    public let skyLightWindowIDs: Set<CGWindowID>?
 
     public init(
         liveWindows: [WindowInfo],
@@ -25,7 +28,8 @@ public struct RuntimeWindowSnapshot: Sendable {
         unarmedWindowIDs: Set<CGWindowID> = [],
         desktopIndexes: [CGWindowID: Int] = [:],
         desktopLocations: [CGWindowID: DesktopLocation] = [:],
-        axContradictedWindowIDs: Set<CGWindowID> = []
+        axContradictedWindowIDs: Set<CGWindowID> = [],
+        skyLightWindowIDs: Set<CGWindowID>? = nil
     ) {
         self.liveWindows = liveWindows
         self.allWindowIDs = allWindowIDs
@@ -34,6 +38,7 @@ public struct RuntimeWindowSnapshot: Sendable {
         self.desktopIndexes = desktopIndexes
         self.desktopLocations = desktopLocations
         self.axContradictedWindowIDs = axContradictedWindowIDs
+        self.skyLightWindowIDs = skyLightWindowIDs
     }
 }
 
@@ -61,6 +66,9 @@ public struct WindowAssignmentEvent: Equatable, Sendable {
         /// showing and did not name it. Only ever available for the showing desktop, so this
         /// is the one moment such a window can be judged.
         case axContradicted = "ax_contradicted"
+        /// No window source can find it any more — not Core Graphics, not SkyLight. Either
+        /// alone proves nothing, so only their agreement retires an assignment this way.
+        case vanished
     }
 
     public let kind: Kind
@@ -365,10 +373,23 @@ public struct RuntimeWindowReconciler: Sendable {
             ))
         }
 
+        // Absence from one source is a presentation state, so neither list may evict alone:
+        // Core Graphics loses windows SkyLight still places, and SkyLight is what sees the
+        // windows AX cannot. Their agreement is different — it leaves no source that knows the
+        // window at all, which is what a closed window looks like once its AX element is gone
+        // and no destroy notification ever arrived.
+        var vanishedWindowIDs = Set<CGWindowID>()
+        if let allWindowIDs = snapshot.allWindowIDs, let skyLightWindowIDs = snapshot.skyLightWindowIDs {
+            vanishedWindowIDs = Set(assignments(in: spaceManager).map(\.window.windowID))
+                .subtracting(allWindowIDs)
+                .subtracting(skyLightWindowIDs)
+        }
+
         // Runs after every recovery pass so a window parked here cannot be reclaimed by the
         // same reconcile that just judged it.
         for assignment in assignments(in: spaceManager)
-        where snapshot.axContradictedWindowIDs.contains(assignment.window.windowID) {
+        where snapshot.axContradictedWindowIDs.contains(assignment.window.windowID)
+            || vanishedWindowIDs.contains(assignment.window.windowID) {
             let fromSpace = spaceManager.spaceIndex(id: assignment.spaceID)
             guard spaceManager.makeWindowDormant(windowID: assignment.window.windowID) != nil
             else { continue }
@@ -380,7 +401,9 @@ public struct RuntimeWindowReconciler: Sendable {
                 windowTitle: assignment.window.windowTitle,
                 fromSpace: fromSpace,
                 toSpace: nil,
-                reason: .axContradicted
+                reason: vanishedWindowIDs.contains(assignment.window.windowID)
+                    ? .vanished
+                    : .axContradicted
             ))
         }
 

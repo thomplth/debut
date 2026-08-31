@@ -264,7 +264,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 liveWindows: liveWindows,
                 allWindowIDs: windowService.listAllWindowIDs(),
                 desktopIndexes: desktopIndexes(for: liveWindows),
-                desktopLocations: desktopLocations(for: liveWindows)
+                desktopLocations: desktopLocations(for: liveWindows),
+                skyLightWindowIDs: skyLightWindowIDs()
             ),
             spaceManager: &spaceManager,
             newWindowSpaceID: firstSpaceID
@@ -607,6 +608,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         return spaceSwitcher.windowLocations().filter { liveIDs.contains($0.key) }
     }
 
+    /// Every window SkyLight places, unfiltered. Nil without a space switcher, since an
+    /// enumeration that was never made must not read as a screen with nothing on it.
+    private func skyLightWindowIDs() -> Set<CGWindowID>? {
+        spaceSwitcher.map { Set($0.windowLocations().keys) }
+    }
+
     private func discoverLaunchedWindows(for app: AppInfo) {
         let pid = app.pid
         let windows = excludingRetired(windowService.listWindows())
@@ -670,7 +677,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             unarmedWindowIDs: unarmedWindowIDs,
             desktopIndexes: desktopIndexes(for: liveWindows),
             desktopLocations: desktopLocations(for: liveWindows),
-            axContradictedWindowIDs: windowService.listAXContradictedWindowIDs()
+            axContradictedWindowIDs: windowService.listAXContradictedWindowIDs(),
+            skyLightWindowIDs: skyLightWindowIDs()
         ))
     }
 
@@ -732,7 +740,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             focusedWindowID: focusedWindowID,
             unarmedWindowIDs: unarmedWindowIDs,
             desktopIndexes: desktopIndexes(for: liveWindows),
-            desktopLocations: desktopLocations(for: liveWindows)
+            desktopLocations: desktopLocations(for: liveWindows),
+            skyLightWindowIDs: skyLightWindowIDs()
         ))
         if let focusedWindowID {
             onWindowActivated?(focusedWindowID)
