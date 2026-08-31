@@ -4,6 +4,9 @@ public final class StateStore: Sendable {
     private let directory: URL
     private var stateFileURL: URL { directory.appendingPathComponent("state.json") }
     private var settingsFileURL: URL { directory.appendingPathComponent("settings.json") }
+    private var contradictionsFileURL: URL {
+        directory.appendingPathComponent("ax-contradictions.json")
+    }
 
     public init(directory: URL) {
         self.directory = directory
@@ -56,6 +59,21 @@ public final class StateStore: Sendable {
         // so we preserve space names/structure but clear window lists.
         // Windows will be rediscovered on launch via WindowDiscoveryService.
         return SpaceManager()
+    }
+
+    // MARK: - Accessibility contradictions
+
+    func saveContradictions(_ records: [AXContradictionRecord]) throws {
+        try ensureDirectory()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(records).write(to: contradictionsFileURL, options: .atomic)
+    }
+
+    func loadContradictions() throws -> [AXContradictionRecord] {
+        guard FileManager.default.fileExists(atPath: contradictionsFileURL.path) else { return [] }
+        let data = try Data(contentsOf: contradictionsFileURL)
+        return (try? JSONDecoder().decode([AXContradictionRecord].self, from: data)) ?? []
     }
 
     // MARK: - Settings
