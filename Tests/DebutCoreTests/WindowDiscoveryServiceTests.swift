@@ -632,6 +632,62 @@ struct WindowDiscoveryServiceTests {
         #expect(processExitMonitor.monitoredPIDs == [newPID])
     }
 
+    @Test("A window ID reused by a different process is re-armed rather than skipped as already tracked")
+    func reusedWindowIDForNewProcessIsRearmed() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var attempts: [(CGWindowID, pid_t)] = []
+        service.armingOverride = { windowID, pid in
+            attempts.append((windowID, pid))
+            return .armed
+        }
+
+        service.registerTracking(windowID: 101, pid: 10)
+        // The old process's exit was never signaled, so bookkeeping still points at pid 10
+        // when a new process reuses windowID 101.
+        service.registerTracking(windowID: 101, pid: 20)
+
+        #expect(attempts.map(\.1) == [10, 20])
+        #expect(service.diagnosticTrackingSnapshot.windowOwners.first { $0.windowID == 101 }?.ownerPID == 20)
+    }
+
+    @Test("Launch discovery re-tracks a window ID that was already known under a different process")
+    func launchDiscoveryRetracksReusedWindowIDForNewProcess() {
+        let windowService = MockWindowService()
+        let processExitMonitor = MockProcessExitMonitor()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            frontmostPIDProvider: { nil },
+            launchDiscoveryDelay: 0,
+            processExitMonitor: processExitMonitor
+        )
+        var attempts: [(CGWindowID, pid_t)] = []
+        service.armingOverride = { windowID, pid in
+            attempts.append((windowID, pid))
+            return .armed
+        }
+        service.registerTracking(windowID: 101, pid: 10)
+
+        // Old process's exit signal never arrives (missed/delayed), so armedWindowIDs and
+        // windowOwnerPIDs still point at the old PID when the new process reuses windowID 101.
+        windowService.windowList = [WindowInfo(
+            windowID: 101,
+            ownerBundleID: "com.a",
+            ownerName: "A",
+            ownerPID: 20,
+            title: "Document",
+            bounds: .zero,
+            isOnScreen: true
+        )]
+        service.handleAppLaunch(AppInfo(bundleID: "com.a", name: "A", pid: 20, isHidden: false))
+
+        #expect(attempts.map(\.1) == [10, 20])
+        #expect(processExitMonitor.monitoredPIDs.contains(20))
+    }
+
     // MARK: - Lifecycle notification arming
 
     @Test("A window whose notifications were rejected is not treated as tracked")
@@ -724,6 +780,77 @@ struct WindowDiscoveryServiceTests {
         service.registerTracking(windowID: 7, pid: 10)
 
         #expect(service.unarmedWindowIDs == [7])
+    }
+
+    @Test("A window whose AX element is never found is reported untrackable after repeated failures")
+    func persistentElementLookupFailureReportsUntrackable() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.armingOverride = { _, _ in .elementUnavailable }
+        var untrackableWindowIDs: [CGWindowID] = []
+        service.onWindowUntrackable = { untrackableWindowIDs.append($0) }
+
+        service.registerTracking(windowID: 7, pid: 10)
+        service.registerTracking(windowID: 7, pid: 10)
+        #expect(untrackableWindowIDs.isEmpty)
+
+        service.registerTracking(windowID: 7, pid: 10)
+
+        #expect(untrackableWindowIDs == [7])
+        #expect(service.unarmedWindowIDs.isEmpty)
+        #expect(service.persistentlyUnarmableWindowIDs == [7])
+    }
+
+    @Test("Arming successfully resets the element-lookup failure count")
+    func successfulArmResetsElementUnavailableCount() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var attempts = 0
+        service.armingOverride = { _, _ in
+            attempts += 1
+            return attempts <= 2 ? .elementUnavailable : .armed
+        }
+        var untrackableWindowIDs: [CGWindowID] = []
+        service.onWindowUntrackable = { untrackableWindowIDs.append($0) }
+
+        service.registerTracking(windowID: 7, pid: 10)
+        service.registerTracking(windowID: 7, pid: 10)
+        service.registerTracking(windowID: 7, pid: 10)
+
+        #expect(service.armedWindowIDs == [7])
+        #expect(untrackableWindowIDs.isEmpty)
+    }
+
+    @Test("A window flagged untrackable stops being re-discovered as live")
+    func persistentlyUnarmableWindowStopsRetryingAfterThreshold() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        windowService.apps = [AppInfo(bundleID: "com.a", name: "A", pid: 10, isHidden: false)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var attempts = 0
+        service.armingOverride = { _, _ in
+            attempts += 1
+            return .elementUnavailable
+        }
+        var untrackableWindowIDs: [CGWindowID] = []
+        service.onWindowUntrackable = { untrackableWindowIDs.append($0) }
+
+        var spaceManager = SpaceManager()
+        service.reconcileWindows(&spaceManager)
+        service.reconcileWindows(&spaceManager)
+        service.reconcileWindows(&spaceManager)
+        service.reconcileWindows(&spaceManager)
+
+        #expect(attempts == 3)
+        #expect(untrackableWindowIDs == [7])
+        #expect(service.persistentlyUnarmableWindowIDs == [7])
     }
 
     @Test("Process exit clears both armed and unarmed records for that app")
