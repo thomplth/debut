@@ -878,6 +878,18 @@ if CommandLine.arguments.dropFirst().first == "switch-to-desktop" {
     exit(landed ? 0 : 1)
 }
 
+// Read-only audit of AX vs Core Graphics vs SkyLight window enumeration. Launches nothing
+// and mutates nothing, so it can sample a session Debut is already running in.
+if CommandLine.arguments.dropFirst().first == "window-audit" {
+    let arguments = Array(CommandLine.arguments.dropFirst(2))
+    WindowAudit.run(
+        samples: Int(arguments.first ?? "") ?? 1,
+        interval: Double(arguments.dropFirst().first ?? "") ?? 1.0,
+        bundleFilter: arguments.dropFirst(2).first
+    )
+    exit(0)
+}
+
 // MARK: - Main
 
 header("Debut E2E — Screen Interaction Tests")
