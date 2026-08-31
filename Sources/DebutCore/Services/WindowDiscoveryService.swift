@@ -381,19 +381,49 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         guard let axElement else { return .elementUnavailable }
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        let destroyed = AXObserverAddNotification(
-            observer, axElement, kAXUIElementDestroyedNotification as CFString, selfPtr
+        let destroyed = Self.renewNotificationRegistration(
+            add: {
+                AXObserverAddNotification(
+                    observer, axElement, kAXUIElementDestroyedNotification as CFString, selfPtr
+                )
+            },
+            remove: {
+                AXObserverRemoveNotification(
+                    observer, axElement, kAXUIElementDestroyedNotification as CFString
+                )
+            }
         )
-        // A retry after a partial failure reports the notification as already
-        // registered, which is success.
-        guard destroyed == .success || destroyed == .notificationAlreadyRegistered else {
+        guard destroyed == .success else {
             return .notificationRejected(destroyed.rawValue)
         }
         // A stale title is cosmetic, so it never gates tracking.
-        _ = AXObserverAddNotification(
-            observer, axElement, kAXTitleChangedNotification as CFString, selfPtr
+        _ = Self.renewNotificationRegistration(
+            add: {
+                AXObserverAddNotification(
+                    observer, axElement, kAXTitleChangedNotification as CFString, selfPtr
+                )
+            },
+            remove: {
+                AXObserverRemoveNotification(
+                    observer, axElement, kAXTitleChangedNotification as CFString
+                )
+            }
         )
         return .armed
+    }
+
+    /// A recycled CGWindowID can resolve to an AX element that compares equal to the
+    /// just-destroyed element it replaced. Accessibility then reports the old observer
+    /// registration as already present even though it will not deliver the replacement's
+    /// destruction. Renew that inherited registration instead of treating it as armed.
+    static func renewNotificationRegistration(
+        add: () -> AXError,
+        remove: () -> AXError
+    ) -> AXError {
+        let result = add()
+        guard result == .notificationAlreadyRegistered else { return result }
+        _ = remove()
+        return add()
     }
 
     /// The AX element for an armed window, or nil when it was never armed or has since been
