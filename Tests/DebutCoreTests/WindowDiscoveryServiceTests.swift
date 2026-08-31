@@ -287,6 +287,97 @@ struct WindowDiscoveryServiceTests {
         #expect(spaceManager.activeSpace.windows.map(\.windowID) == [101])
     }
 
+    // Plausibility used to gate admission only, so a window admitted while it looked like a
+    // window stayed assigned forever once it stopped being one. Dia window 4797 degraded into
+    // an 84x77 layer-3 surface and sat in space 3 for hours, blank, because CGWindowList still
+    // listed it, its process was alive, and no AX destroy notification ever arrived — every
+    // eviction path Debut had.
+    @Test("Reconciliation parks an assigned window that has degraded into a non-window")
+    func reconciliationParksDisqualifiedLiveWindows() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 40694, isHidden: false),
+        ]
+        windowService.windowList = [WindowInfo(
+            windowID: 4794,
+            ownerBundleID: "company.thebrowser.dia",
+            ownerName: "Dia",
+            ownerPID: 40694,
+            title: "Leisure",
+            bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440),
+            isOnScreen: true
+        )]
+        windowService.disqualifiedWindowIDList = [4797]
+
+        var spaceManager = SpaceManager()
+        let spaceID = spaceManager.activeSpaceID
+        for windowID in [CGWindowID(4794), CGWindowID(4797)] {
+            spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "company.thebrowser.dia",
+                    ownerName: "Dia",
+                    windowTitle: "",
+                    ownerPID: 40694
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        ).reconcileWindows(&spaceManager)
+
+        #expect(spaceManager.activeSpace.windows.map(\.windowID) == [4794])
+        // Dormant, not deleted — the same recoverability the untrackable path preserves.
+        #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [4797])
+    }
+
+    // The counterpart guard. A window can drop out of `listWindows()` for reasons that say
+    // nothing about it — macOS reports no single desktop for an all-Spaces or fullscreen
+    // window — and parking on that would strand real windows every time one goes fullscreen.
+    @Test("An unadmitted window that was never disqualified stays assigned")
+    func reconciliationKeepsUnadmittedButUndisqualifiedWindows() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "com.apple.finder", name: "Finder", pid: 673, isHidden: false),
+        ]
+        windowService.windowList = [WindowInfo(
+            windowID: 64,
+            ownerBundleID: "com.apple.finder",
+            ownerName: "Finder",
+            ownerPID: 673,
+            title: "Developer",
+            bounds: CGRect(x: 0, y: 0, width: 1276, height: 738),
+            isOnScreen: true
+        )]
+        windowService.disqualifiedWindowIDList = []
+
+        var spaceManager = SpaceManager()
+        let spaceID = spaceManager.activeSpaceID
+        for windowID in [CGWindowID(64), CGWindowID(8208)] {
+            spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.apple.finder",
+                    ownerName: "Finder",
+                    windowTitle: "Developer",
+                    ownerPID: 673
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        ).reconcileWindows(&spaceManager)
+
+        #expect(spaceManager.activeSpace.windows.map(\.windowID).contains(8208))
+        #expect(spaceManager.dormantWindowAssignments.isEmpty)
+    }
+
     @Test("Startup reconciliation makes explicitly untrackable AX windows dormant")
     func startupMakesUntrackableWindowsDormant() {
         let windowService = MockWindowService()
@@ -409,7 +500,7 @@ struct WindowDiscoveryServiceTests {
         #expect(dormancy["fromSpace"] == "1")
 
         let summary = try #require(lines.first { $0["event"] == "windows_reconciled" })
-        #expect(summary["untrackable"] == "1")
+        #expect(summary["parked"] == "1")
     }
 
     @Test("Empty window snapshot makes stopped-app assignments dormant")

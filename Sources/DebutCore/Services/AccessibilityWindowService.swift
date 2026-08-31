@@ -154,6 +154,45 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             && bounds.height >= minimumPlausibleWindowDimension
     }
 
+    /// Core Graphics signals that positively contradict a window being user-manageable.
+    /// Deliberately not the inverse of `isPlausibleUntrackedWindow`: admission may refuse a
+    /// window on ambiguous evidence, but eviction may not act on it. A window macOS places on
+    /// no single desktop is unadmittable and yet perfectly real — that is what an all-Spaces
+    /// or fullscreen window looks like — so only layer and size, which cannot be true of a
+    /// window the user can manage, are grounds for parking one that is already assigned.
+    static func isDisqualifiedWindow(layer: Int?, bounds: CGRect) -> Bool {
+        guard let layer else { return false }
+        return layer != 0
+            || bounds.width < minimumPlausibleWindowDimension
+            || bounds.height < minimumPlausibleWindowDimension
+    }
+
+    /// Assigned windows Core Graphics now contradicts. Absence from this set is not a claim
+    /// that a window is fine, only that nothing disproves it.
+    public func listDisqualifiedWindowIDs() -> Set<CGWindowID> {
+        let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
+        guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
+            as? [[CFString: Any]]
+        else { return [] }
+
+        var disqualified = Set<CGWindowID>()
+        for dict in infoList {
+            guard let windowID = dict[kCGWindowNumber] as? CGWindowID,
+                  let boundsDict = dict[kCGWindowBounds] as? [String: CGFloat]
+            else { continue }
+            let bounds = CGRect(
+                x: boundsDict["X"] ?? 0,
+                y: boundsDict["Y"] ?? 0,
+                width: boundsDict["Width"] ?? 0,
+                height: boundsDict["Height"] ?? 0
+            )
+            if Self.isDisqualifiedWindow(layer: dict[kCGWindowLayer] as? Int, bounds: bounds) {
+                disqualified.insert(windowID)
+            }
+        }
+        return disqualified
+    }
+
     /// Returns window IDs that AX explicitly identifies as modal or auxiliary UI
     /// rather than user-manageable standard or non-modal dialog windows. This is
     /// separate from an omitted AX result, which may only mean that an app returned
