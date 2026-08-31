@@ -7,6 +7,7 @@ workflow=".github/workflows/e2e.yml"
 runner="scripts/ci-e2e.sh"
 e2e_source="Sources/DebutE2E/main.swift"
 tart_guest="scripts/tart-e2e-guest.sh"
+signing_selector="scripts/select-signing-identity.sh"
 failures=0
 
 fail() {
@@ -39,6 +40,7 @@ expect_file "$workflow"
 expect_file "$runner"
 expect_file "$e2e_source"
 expect_file "$tart_guest"
+expect_file "$signing_selector"
 
 if [[ -f "$workflow" ]]; then
     expect_contains "$workflow" '^  pull_request:' "E2E must run for pull requests"
@@ -107,8 +109,12 @@ fi
 
 expect_not_contains "scripts/rebuild.sh" 'e2e-test\.sh' \
     "local rebuilds must no longer launch the disruptive E2E suite"
-expect_contains "scripts/build-app.sh" 'SIGN_IDENTITY=.*\|\| true' \
-    "CI builds must fall back to ad-hoc signing when Debut Dev is absent"
+expect_contains "scripts/build-app.sh" 'select-signing-identity\.sh' \
+    "build-app.sh must use the tested signing identity selector"
+expect_contains "$signing_selector" 'find-identity.*\|\| true' \
+    "CI builds must tolerate the absence of signing identities"
+expect_contains "$signing_selector" '\$\{identity:--\}' \
+    "CI builds must fall back to ad-hoc signing when no identity is available"
 
 if (( failures > 0 )); then
     exit 1
