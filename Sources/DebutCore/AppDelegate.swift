@@ -301,7 +301,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
                 guard let self, let controller = self.spaceController else { return }
                 let result = self.runtimeWindowReconciler.reconcile(
                     snapshot,
-                    spaceManager: &controller.spaceManager
+                    spaceManager: &controller.spaceManager,
+                    allowDormantBundleFallback: false
                 )
                 if result.didMutate {
                     self.diag.report("runtime_windows_reconciled", details: [
@@ -319,7 +320,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
                 guard let self, let controller = self.spaceController else { return }
                 let result = self.runtimeWindowReconciler.reconcile(
                     snapshot,
-                    spaceManager: &controller.spaceManager
+                    spaceManager: &controller.spaceManager,
+                    allowDormantBundleFallback: false
                 )
                 guard result.didMutate else { return }
                 self.diag.report("runtime_windows_reconciled", details: [

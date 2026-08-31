@@ -116,7 +116,8 @@ public struct RuntimeWindowReconciler: Sendable {
     public mutating func reconcile(
         _ snapshot: RuntimeWindowSnapshot,
         spaceManager: inout SpaceManager,
-        newWindowSpaceID: UUID? = nil
+        newWindowSpaceID: UUID? = nil,
+        allowDormantBundleFallback: Bool = true
     ) -> RuntimeWindowReconciliationResult {
         var addedCount = 0
         var reassignedCount = 0
@@ -238,7 +239,8 @@ public struct RuntimeWindowReconciler: Sendable {
             liveWindows: snapshot.liveWindows.filter { !consumedLiveWindowIDs.contains($0.windowID) },
             spaceManager: spaceManager,
             allowedAssignedWindowIDs: provisionalWindowIDs,
-            preferredSpaceIDs: preferredSpaceIDs
+            preferredSpaceIDs: preferredSpaceIDs,
+            bundleFallbackEnabled: allowDormantBundleFallback
         )
         for match in sortedBySpacePosition(dormantMatches, spaceManager: spaceManager) {
             let previousSpace = spaceManager.spaceContainingWindow(windowID: match.info.windowID)
@@ -414,7 +416,8 @@ public struct RuntimeWindowReconciler: Sendable {
         liveWindows: [WindowInfo],
         spaceManager: SpaceManager,
         allowedAssignedWindowIDs: Set<CGWindowID> = [],
-        preferredSpaceIDs: [CGWindowID: UUID] = [:]
+        preferredSpaceIDs: [CGWindowID: UUID] = [:],
+        bundleFallbackEnabled: Bool = true
     ) -> [RecoveryMatch] {
         var matches: [RecoveryMatch] = []
         var usedAssignmentIDs = Set<UUID>()
@@ -440,62 +443,73 @@ public struct RuntimeWindowReconciler: Sendable {
         // often reveals one desktop at a time, so requiring every window in a bundle to be
         // present would leave the replacement as a new assignment and strand its old one.
         // Match one-to-one within a desktop when that desktop has an unambiguous set.
-        let remainingAssignmentsAfterExact = assignments.filter {
-            !usedAssignmentIDs.contains($0.window.id)
-        }
-        let remainingLiveWindowsAfterExact = liveWindows.filter {
-            !usedLiveWindowIDs.contains($0.windowID) &&
-                (spaceManager.spaceContainingWindow(windowID: $0.windowID) == nil ||
-                    allowedAssignedWindowIDs.contains($0.windowID))
-        }
-        let spaceIDs = Set(remainingAssignmentsAfterExact.map(\.spaceID))
-        for spaceID in spaceIDs {
-            let spaceAssignments = remainingAssignmentsAfterExact.filter { $0.spaceID == spaceID }
-            let spaceWindows = remainingLiveWindowsAfterExact.filter {
-                preferredSpaceIDs[$0.windowID] == spaceID
+        //
+        // Both title-blind fallback passes below assume the assignments and live windows
+        // they're matching came from the same relaunch batch. That holds for a launch
+        // snapshot, but not for a routine activation reconcile, where a single incidental
+        // window (a generic "Open"/"Save" panel, say) can be the last live candidate for a
+        // bundle that also happens to have one unrelated, older dormant slot left over —
+        // pairing them by count alone silently discards the real dormant window's identity.
+        // Callers restoring against long-dormant assignments outside a fresh launch disable
+        // this fallback and keep only the always-safe exact-title match above.
+        if bundleFallbackEnabled {
+            let remainingAssignmentsAfterExact = assignments.filter {
+                !usedAssignmentIDs.contains($0.window.id)
             }
-            let bundleIDs = Set(spaceAssignments.map { $0.window.ownerBundleID })
+            let remainingLiveWindowsAfterExact = liveWindows.filter {
+                !usedLiveWindowIDs.contains($0.windowID) &&
+                    (spaceManager.spaceContainingWindow(windowID: $0.windowID) == nil ||
+                        allowedAssignedWindowIDs.contains($0.windowID))
+            }
+            let spaceIDs = Set(remainingAssignmentsAfterExact.map(\.spaceID))
+            for spaceID in spaceIDs {
+                let spaceAssignments = remainingAssignmentsAfterExact.filter { $0.spaceID == spaceID }
+                let spaceWindows = remainingLiveWindowsAfterExact.filter {
+                    preferredSpaceIDs[$0.windowID] == spaceID
+                }
+                let bundleIDs = Set(spaceAssignments.map { $0.window.ownerBundleID })
+                for bundleID in bundleIDs.sorted() {
+                    let bundleAssignments = spaceAssignments.filter {
+                        $0.window.ownerBundleID == bundleID && !usedAssignmentIDs.contains($0.window.id)
+                    }
+                    let bundleWindows = spaceWindows.filter {
+                        $0.ownerBundleID == bundleID && !usedLiveWindowIDs.contains($0.windowID)
+                    }
+                    guard !bundleAssignments.isEmpty,
+                          bundleAssignments.count == bundleWindows.count
+                    else { continue }
+                    for (assignment, info) in zip(bundleAssignments, bundleWindows) {
+                        matches.append(RecoveryMatch(
+                            assignment: assignment,
+                            info: info,
+                            reason: .recoveredBundle
+                        ))
+                        usedAssignmentIDs.insert(assignment.window.id)
+                        usedLiveWindowIDs.insert(info.windowID)
+                    }
+                }
+            }
+
+            // Dynamic titles without a desktop answer require a bundle-only fallback. Use it
+            // only when all remaining assignments and unassigned live windows for that bundle
+            // form a complete one-to-one set, avoiding arbitrary partial reassignment.
+            let remainingAssignments = assignments.filter { !usedAssignmentIDs.contains($0.window.id) }
+            let remainingLiveWindows = liveWindows.filter {
+                !usedLiveWindowIDs.contains($0.windowID) &&
+                    (spaceManager.spaceContainingWindow(windowID: $0.windowID) == nil ||
+                        allowedAssignedWindowIDs.contains($0.windowID))
+            }
+            let bundleIDs = Set(remainingAssignments.map { $0.window.ownerBundleID })
             for bundleID in bundleIDs.sorted() {
-                let bundleAssignments = spaceAssignments.filter {
-                    $0.window.ownerBundleID == bundleID && !usedAssignmentIDs.contains($0.window.id)
-                }
-                let bundleWindows = spaceWindows.filter {
-                    $0.ownerBundleID == bundleID && !usedLiveWindowIDs.contains($0.windowID)
-                }
+                let bundleAssignments = remainingAssignments.filter { $0.window.ownerBundleID == bundleID }
+                let bundleWindows = remainingLiveWindows.filter { $0.ownerBundleID == bundleID }
                 guard !bundleAssignments.isEmpty,
                       bundleAssignments.count == bundleWindows.count
                 else { continue }
-                for (assignment, info) in zip(bundleAssignments, bundleWindows) {
-                    matches.append(RecoveryMatch(
-                        assignment: assignment,
-                        info: info,
-                        reason: .recoveredBundle
-                    ))
-                    usedAssignmentIDs.insert(assignment.window.id)
-                    usedLiveWindowIDs.insert(info.windowID)
-                }
+                matches.append(contentsOf: zip(bundleAssignments, bundleWindows).map {
+                    RecoveryMatch(assignment: $0.0, info: $0.1, reason: .recoveredBundle)
+                })
             }
-        }
-
-        // Dynamic titles without a desktop answer require a bundle-only fallback. Use it only
-        // when all remaining assignments and unassigned live windows for that bundle form a
-        // complete one-to-one set, avoiding arbitrary partial reassignment.
-        let remainingAssignments = assignments.filter { !usedAssignmentIDs.contains($0.window.id) }
-        let remainingLiveWindows = liveWindows.filter {
-            !usedLiveWindowIDs.contains($0.windowID) &&
-                (spaceManager.spaceContainingWindow(windowID: $0.windowID) == nil ||
-                    allowedAssignedWindowIDs.contains($0.windowID))
-        }
-        let bundleIDs = Set(remainingAssignments.map { $0.window.ownerBundleID })
-        for bundleID in bundleIDs.sorted() {
-            let bundleAssignments = remainingAssignments.filter { $0.window.ownerBundleID == bundleID }
-            let bundleWindows = remainingLiveWindows.filter { $0.ownerBundleID == bundleID }
-            guard !bundleAssignments.isEmpty,
-                  bundleAssignments.count == bundleWindows.count
-            else { continue }
-            matches.append(contentsOf: zip(bundleAssignments, bundleWindows).map {
-                RecoveryMatch(assignment: $0.0, info: $0.1, reason: .recoveredBundle)
-            })
         }
 
         return matches
