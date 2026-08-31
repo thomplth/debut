@@ -132,6 +132,33 @@ struct WindowServiceTests {
         ))
     }
 
+    @Test("A contradiction outlives the desktop that produced it")
+    func contradictionIsRememberedAcrossDesktops() {
+        var registry = AXContradictionRegistry()
+        registry.record(windowID: 17776, owner: 89895)
+        // AX can only contradict from the window's own desktop, so a verdict that expired
+        // when the user switched away would be re-admitted on the very next snapshot.
+        #expect(registry.refuses(windowID: 17776, owner: 89895))
+    }
+
+    @Test("A remembered contradiction clears the moment AX names the window")
+    func contradictionSelfHealsWhenAXCatchesUp() {
+        var registry = AXContradictionRegistry()
+        registry.record(windowID: 17776, owner: 89895)
+        registry.clear(windowIDs: [17776])
+        #expect(!registry.refuses(windowID: 17776, owner: 89895))
+    }
+
+    @Test("A recycled window ID does not inherit the previous owner's contradiction")
+    func contradictionIsKeyedToItsOwner() {
+        var registry = AXContradictionRegistry()
+        registry.record(windowID: 17776, owner: 89895)
+        #expect(!registry.refuses(windowID: 17776, owner: 90001))
+        // Chrome exiting takes its verdicts with it.
+        registry.retainOnly(owners: [90001])
+        #expect(!registry.refuses(windowID: 17776, owner: 89895))
+    }
+
     @Test("Disabled live previews neither enumerate nor capture")
     func disabledLivePreviewsAvoidCapture() async {
         let service = AccessibilityWindowService(windowCaptureEnabled: false)
