@@ -334,6 +334,49 @@ struct WindowDiscoveryServiceTests {
         #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [4797])
     }
 
+    // A window admitted while its desktop was hidden can only be contradicted once that
+    // desktop shows, so refusing it at admission never reaches the ones already assigned.
+    @Test("Reconciliation parks a live window AX contradicts on its own showing desktop")
+    func reconciliationParksAXContradictedLiveWindows() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "com.google.Chrome", name: "Chrome", pid: 89895, isHidden: false),
+        ]
+        windowService.windowList = [WindowInfo(
+            windowID: 17774,
+            ownerBundleID: "com.google.Chrome",
+            ownerName: "Chrome",
+            ownerPID: 89895,
+            title: "Inbox",
+            bounds: CGRect(x: 0, y: 0, width: 2131, height: 1440),
+            isOnScreen: true
+        )]
+        windowService.axContradictedWindowIDList = [17776]
+
+        var spaceManager = SpaceManager()
+        let spaceID = spaceManager.activeSpaceID
+        for windowID in [CGWindowID(17774), CGWindowID(17776)] {
+            spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.google.Chrome",
+                    ownerName: "Chrome",
+                    windowTitle: "",
+                    ownerPID: 89895
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        ).reconcileWindows(&spaceManager)
+
+        #expect(spaceManager.activeSpace.windows.map(\.windowID) == [17774])
+        #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [17776])
+    }
+
     // The counterpart guard. A window can drop out of `listWindows()` for reasons that say
     // nothing about it — macOS reports no single desktop for an all-Spaces or fullscreen
     // window — and parking on that would strand real windows every time one goes fullscreen.

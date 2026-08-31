@@ -6,6 +6,7 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public var windowList: [WindowInfo] = []
     public var untrackableWindowIDList: Set<CGWindowID> = []
     public var disqualifiedWindowIDList: Set<CGWindowID> = []
+    public var axContradictedWindowIDList: Set<CGWindowID> = []
     public var allWindowIDList: Set<CGWindowID>?
     public var raisedWindowIDs: [CGWindowID] = []
     public var raisedWindowID: CGWindowID?
@@ -31,6 +32,7 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public func listWindows() -> [WindowInfo] { windowList }
     public func listUntrackableWindowIDs() -> Set<CGWindowID> { untrackableWindowIDList }
     public func listDisqualifiedWindowIDs() -> Set<CGWindowID> { disqualifiedWindowIDList }
+    public func listAXContradictedWindowIDs() -> Set<CGWindowID> { axContradictedWindowIDList }
     public func listAllWindowIDs() -> Set<CGWindowID>? { allWindowIDList }
 
     public func captureWindowImages(

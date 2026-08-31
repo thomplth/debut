@@ -890,6 +890,31 @@ if CommandLine.arguments.dropFirst().first == "window-audit" {
     exit(0)
 }
 
+// Walks every desktop and audits from each, so that every window is sampled at least once
+// while its own desktop is the showing one. AX enumerability depends on which desktop is
+// showing, so a single-desktop audit cannot tell an AX-invisible window apart from a
+// genuinely auxiliary one. Drives the running Debut's quick-switch chord rather than
+// launching its own instance, so the session under test is the one being measured.
+//
+// Unlike `window-audit` this takes over the foreground session: it switches the user's
+// desktops. Run it only when the user has asked for it, never as part of a suite.
+if CommandLine.arguments.dropFirst().first == "window-audit-desktops" {
+    let service = SpaceService()
+    let origin = service.currentDesktopIndex() ?? 0
+    let count = service.desktopCount()
+    print("AUDITWALK desktops=\(count) origin=\(origin)")
+    for desktop in 0..<count {
+        postQuickSwitch(to: desktop)
+        let landed = waitFor { service.currentDesktopIndex() == desktop }
+        wait(1.0)
+        print("AUDITDESKTOP \(desktop) landed=\(landed)")
+        WindowAudit.run(samples: 1, interval: 0, bundleFilter: nil)
+    }
+    postQuickSwitch(to: origin)
+    _ = waitFor { service.currentDesktopIndex() == origin }
+    exit(0)
+}
+
 // MARK: - Main
 
 header("Debut E2E — Screen Interaction Tests")

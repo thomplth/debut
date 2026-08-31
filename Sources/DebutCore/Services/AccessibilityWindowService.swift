@@ -90,7 +90,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
         // `kAXWindows` only reports windows on the active Space. This is what lets a window on
         // another desktop resolve to exactly one desktop even though AX has never seen it.
-        let resolvedDesktopWindowIDs = Set((spaceSwitcher?.windowLocations() ?? [:]).keys)
+        let windowDesktops = (spaceSwitcher?.windowLocations() ?? [:]).mapValues(\.index)
+        let showingDesktop = spaceSwitcher?.currentDesktopIndex()
 
         var seen = Set<CGWindowID>()
         return infoList.compactMap { dict in
@@ -113,11 +114,17 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             )
 
             if !classification.trackable.contains(windowID) {
+                let windowDesktop = windowDesktops[windowID]
                 guard Self.isPlausibleUntrackedWindow(
                     layer: dict[kCGWindowLayer] as? Int,
                     isRegularApp: regularPIDs.contains(ownerPID),
                     bounds: bounds,
-                    hasResolvedDesktop: resolvedDesktopWindowIDs.contains(windowID)
+                    hasResolvedDesktop: windowDesktop != nil
+                ) else { return nil }
+                guard !Self.accessibilityContradictsWindow(
+                    windowDesktop: windowDesktop,
+                    showingDesktop: showingDesktop,
+                    appIsAnsweringAX: classification.answeringPIDs.contains(ownerPID)
                 ) else { return nil }
             }
 
@@ -154,6 +161,30 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             && bounds.height >= minimumPlausibleWindowDimension
     }
 
+    /// Whether Accessibility's silence about a window is a verdict rather than a blind spot.
+    ///
+    /// `kAXWindows` cannot see other desktops, which is why silence normally proves nothing and
+    /// the Core Graphics heuristic exists at all. But when the window's own desktop is the one
+    /// showing, and AX is demonstrably answering for its app, silence becomes a positive claim:
+    /// AX enumerated that process and did not list this window. Measured across four desktops,
+    /// 22 of 23 CG-plausible windows were named by AX on their own desktop; the one that was
+    /// not is Chrome's dismissed omnibox popup.
+    ///
+    /// `appIsAnsweringAX` is load-bearing rather than defensive. An app AX returns nothing for
+    /// looks identical to an app with no real windows, so without it a single unresponsive
+    /// process would have every one of its windows refused at once.
+    static func accessibilityContradictsWindow(
+        windowDesktop: Int?,
+        showingDesktop: Int?,
+        appIsAnsweringAX: Bool
+    ) -> Bool {
+        guard appIsAnsweringAX,
+              let windowDesktop,
+              let showingDesktop
+        else { return false }
+        return windowDesktop == showingDesktop
+    }
+
     /// Core Graphics signals that positively contradict a window being user-manageable.
     /// Deliberately not the inverse of `isPlausibleUntrackedWindow`: admission may refuse a
     /// window on ambiguous evidence, but eviction may not act on it. A window macOS places on
@@ -165,6 +196,34 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return layer != 0
             || bounds.width < minimumPlausibleWindowDimension
             || bounds.height < minimumPlausibleWindowDimension
+    }
+
+    /// Assigned windows Accessibility now contradicts. Only windows on the desktop currently
+    /// showing can appear here, so this necessarily says nothing about the rest.
+    public func listAXContradictedWindowIDs() -> Set<CGWindowID> {
+        guard let showingDesktop = spaceSwitcher?.currentDesktopIndex() else { return [] }
+        let classification = classifyAXWindowIDs()
+        let windowDesktops = (spaceSwitcher?.windowLocations() ?? [:]).mapValues(\.index)
+
+        let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
+        guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
+            as? [[CFString: Any]]
+        else { return [] }
+
+        var contradicted = Set<CGWindowID>()
+        for dict in infoList {
+            guard let windowID = dict[kCGWindowNumber] as? CGWindowID,
+                  let ownerPID = dict[kCGWindowOwnerPID] as? pid_t,
+                  !classification.trackable.contains(windowID),
+                  Self.accessibilityContradictsWindow(
+                      windowDesktop: windowDesktops[windowID],
+                      showingDesktop: showingDesktop,
+                      appIsAnsweringAX: classification.answeringPIDs.contains(ownerPID)
+                  )
+            else { continue }
+            contradicted.insert(windowID)
+        }
+        return contradicted
     }
 
     /// Assigned windows Core Graphics now contradicts. Absence from this set is not a claim
@@ -219,9 +278,14 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             !isModal
     }
 
-    private func classifyAXWindowIDs() -> (trackable: Set<CGWindowID>, untrackable: Set<CGWindowID>) {
+    private func classifyAXWindowIDs() -> (
+        trackable: Set<CGWindowID>,
+        untrackable: Set<CGWindowID>,
+        answeringPIDs: Set<pid_t>
+    ) {
         var trackable = Set<CGWindowID>()
         var untrackable = Set<CGWindowID>()
+        var answeringPIDs = Set<pid_t>()
         let runningApps = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular }
 
@@ -230,6 +294,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             var windowsRef: CFTypeRef?
             let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
             guard result == .success, let axWindows = windowsRef as? [AXUIElement] else { continue }
+            if !axWindows.isEmpty { answeringPIDs.insert(app.processIdentifier) }
 
             for axWindow in axWindows {
                 guard let role = stringAttribute(kAXRoleAttribute, of: axWindow),
@@ -249,7 +314,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                 }
             }
         }
-        return (trackable, untrackable)
+        return (trackable, untrackable, answeringPIDs)
     }
 
     private func stringAttribute(_ attribute: String, of element: AXUIElement) -> String? {

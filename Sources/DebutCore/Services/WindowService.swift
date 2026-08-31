@@ -115,6 +115,10 @@ public protocol WindowService: Sendable {
     /// Window IDs Core Graphics positively contradicts being user-manageable windows,
     /// which is a stronger claim than merely failing `listWindows()` admission.
     func listDisqualifiedWindowIDs() -> Set<CGWindowID>
+    /// Window IDs Accessibility positively contradicts, by enumerating their app while their
+    /// own desktop was showing and declining to name them. Kept separate from the Core Graphics
+    /// verdict because it is only ever available for the desktop currently on screen.
+    func listAXContradictedWindowIDs() -> Set<CGWindowID>
     func listAllWindowIDs() -> Set<CGWindowID>?
     /// `onEnumerated` reports which requested windows the shareable-content
     /// snapshot actually matched, before any of them is captured. Without it a
@@ -137,5 +141,6 @@ public protocol WindowService: Sendable {
 public extension WindowService {
     func listUntrackableWindowIDs() -> Set<CGWindowID> { [] }
     func listDisqualifiedWindowIDs() -> Set<CGWindowID> { [] }
+    func listAXContradictedWindowIDs() -> Set<CGWindowID> { [] }
     func closeWindow(windowID: CGWindowID) -> Bool { false }
 }

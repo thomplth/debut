@@ -27,6 +27,7 @@ enum WindowAudit {
 
     private static func emit(sample: Int, spaceService: SpaceService, bundleFilter: String?) {
         let axFacts = accessibilityFacts()
+        let answeringPIDs = accessibilityAnsweringPIDs()
         let cgWindows = coreGraphicsWindows()
         let locations = spaceService.windowLocations()
         let activeDesktop = spaceService.currentDesktopIndex().map(String.init) ?? "-"
@@ -85,6 +86,13 @@ enum WindowAudit {
                     admitted = "0"          // AX says auxiliary
                 } else if ax != nil {
                     admitted = "1"          // AX says standard
+                } else if plausible == "1", let cgPID = pid,
+                          AccessibilityWindowServiceProbe.accessibilityContradicts(
+                              windowDesktop: location?.index,
+                              showingDesktop: spaceService.currentDesktopIndex(),
+                              appIsAnsweringAX: answeringPIDs.contains(cgPID)
+                          ) {
+                    admitted = "0"          // AX enumerated the app on this desktop and skipped it
                 } else {
                     admitted = plausible    // no AX opinion: CG heuristic decides
                 }
@@ -157,6 +165,24 @@ enum WindowAudit {
             }
     }
 
+    /// Apps whose `kAXWindows` answered with at least one window. An app AX says nothing for
+    /// cannot contradict any of its windows, so this is what keeps a silent process from
+    /// having its whole window list disbelieved at once.
+    private static func accessibilityAnsweringPIDs() -> Set<pid_t> {
+        var result = Set<pid_t>()
+        for app in NSWorkspace.shared.runningApplications
+        where app.activationPolicy == .regular {
+            let axApp = AXUIElementCreateApplication(app.processIdentifier)
+            var windowsRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                axApp, kAXWindowsAttribute as CFString, &windowsRef
+            ) == .success, let windows = windowsRef as? [AXUIElement], !windows.isEmpty
+            else { continue }
+            result.insert(app.processIdentifier)
+        }
+        return result
+    }
+
     private static func accessibilityFacts() -> [CGWindowID: AXFacts] {
         var result: [CGWindowID: AXFacts] = [:]
         for app in NSWorkspace.shared.runningApplications
@@ -211,5 +237,12 @@ enum AccessibilityWindowServiceProbe {
     ) -> Bool {
         layer == 0 && isRegularApp && hasResolvedDesktop
             && bounds.width >= 40 && bounds.height >= 40
+    }
+
+    static func accessibilityContradicts(
+        windowDesktop: Int?, showingDesktop: Int?, appIsAnsweringAX: Bool
+    ) -> Bool {
+        guard appIsAnsweringAX, let windowDesktop, let showingDesktop else { return false }
+        return windowDesktop == showingDesktop
     }
 }

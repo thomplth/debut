@@ -180,6 +180,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
         let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
         let disqualifiedWindowIDs = windowService.listDisqualifiedWindowIDs()
+        let axContradictedWindowIDs = windowService.listAXContradictedWindowIDs()
         let runningApps = windowService.listRunningApps()
         _ = PerformanceRecorder.shared.end(discoveryID)
 
@@ -194,6 +195,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // that degraded into a tiny off-layer surface stayed live for as long as its app ran —
         // it is still in CGWindowList, its process is alive, and no destroy notification ever
         // arrives, which is every eviction path there was.
+        //
+        // Accessibility gets a third channel because its evidence only exists for the desktop
+        // on screen. A popup admitted while its desktop was hidden cannot be refused at
+        // admission — there was nothing to contradict it with yet — so it has to be reclaimed
+        // once the user brings that desktop forward.
         let classificationID = PerformanceRecorder.shared.begin(
             .windowClassification,
             workload: .init(windows: liveWindows.count)
@@ -206,6 +212,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     reason = "untrackable"
                 } else if disqualifiedWindowIDs.contains(windowID) {
                     reason = "disqualified"
+                } else if axContradictedWindowIDs.contains(windowID) {
+                    reason = "ax_contradicted"
                 } else {
                     continue
                 }
