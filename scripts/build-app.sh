@@ -38,18 +38,15 @@ fi
 # Sparkle.framework is versioned and symlinked. ditto preserves both its links and executable bits.
 /usr/bin/ditto "$SPARKLE_FRAMEWORK" "$FRAMEWORKS/Sparkle.framework"
 
-# Generate a simple app icon using sips (theater mask from SF Symbols isn't available as icns,
-# so we create a minimal colored icon)
-ICON_DIR="$BUILD_DIR/$APP_NAME.iconset"
-mkdir -p "$ICON_DIR"
-for size in 16 32 64 128 256 512; do
-    /usr/bin/sips -z $size $size -s format png /System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericApplicationIcon.icns --out "$ICON_DIR/icon_${size}x${size}.png" 2>/dev/null || true
-done
-for size in 32 64 128 256 512 1024; do
-    half=$((size / 2))
-    /usr/bin/sips -z $size $size -s format png /System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericApplicationIcon.icns --out "$ICON_DIR/icon_${half}x${half}@2x.png" 2>/dev/null || true
-done
-iconutil -c icns "$ICON_DIR" -o "$RESOURCES/AppIcon.icns" 2>/dev/null && echo "Icon created." || echo "Icon creation skipped (using system default)."
+# The icon is pre-rendered by scripts/make-app-icon.sh and committed, because CI runners have
+# no librsvg to rasterize the SVG with. A missing icon is a packaging bug rather than something
+# to paper over with the generic system icon.
+APP_ICON="$PROJECT_DIR/Resources/AppIcon.icns"
+if [[ ! -f "$APP_ICON" ]]; then
+    echo "Missing $APP_ICON; regenerate it with scripts/make-app-icon.sh" >&2
+    exit 1
+fi
+cp "$APP_ICON" "$RESOURCES/AppIcon.icns"
 
 SIGN_IDENTITY="${DEBUT_SIGNING_IDENTITY:-}"
 if [[ -z "$SIGN_IDENTITY" ]]; then
