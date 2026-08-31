@@ -100,6 +100,38 @@ struct WindowServiceTests {
         #expect(!AccessibilityWindowService.isDisqualifiedWindow(layer: 0, bounds: bounds))
     }
 
+    // Values measured 2026-09-01 across all four desktops, sampling each window while its own
+    // desktop was the showing one: of 23 CG-plausible windows, 22 were listed by AX and the
+    // only exception was Chrome's dismissed omnibox popup.
+    @Test("AX silence about a window on the showing desktop contradicts it")
+    func accessibilitySilenceOnShowingDesktopIsAVerdict() {
+        // Chrome 17776, 1541x89, desktop 3 while desktop 3 showed; Chrome answered with 2 windows.
+        #expect(AccessibilityWindowService.accessibilityContradictsWindow(
+            windowDesktop: 3, showingDesktop: 3, appIsAnsweringAX: true
+        ))
+    }
+
+    @Test("AX silence is not a verdict when AX could not have seen the window")
+    func accessibilitySilenceElsewhereIsNotAVerdict() {
+        // Dia 4794 really is on desktop 0; Dia reports exactly one AX window, the showing one.
+        #expect(!AccessibilityWindowService.accessibilityContradictsWindow(
+            windowDesktop: 0, showingDesktop: 3, appIsAnsweringAX: true
+        ))
+        // An app AX answers nothing for cannot contradict anything, or every one of its
+        // windows would be refused at once.
+        #expect(!AccessibilityWindowService.accessibilityContradictsWindow(
+            windowDesktop: 3, showingDesktop: 3, appIsAnsweringAX: false
+        ))
+        // All-Spaces and fullscreen windows resolve to no desktop, so there is no moment at
+        // which AX is known to have been able to see them.
+        #expect(!AccessibilityWindowService.accessibilityContradictsWindow(
+            windowDesktop: nil, showingDesktop: 3, appIsAnsweringAX: true
+        ))
+        #expect(!AccessibilityWindowService.accessibilityContradictsWindow(
+            windowDesktop: 3, showingDesktop: nil, appIsAnsweringAX: true
+        ))
+    }
+
     @Test("Disabled live previews neither enumerate nor capture")
     func disabledLivePreviewsAvoidCapture() async {
         let service = AccessibilityWindowService(windowCaptureEnabled: false)
