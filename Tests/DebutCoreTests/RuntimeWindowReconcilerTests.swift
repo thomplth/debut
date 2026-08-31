@@ -926,6 +926,82 @@ struct RuntimeWindowReconcilerTests {
         #expect(result.dormantCount == 1)
     }
 
+    // A Dia assignment (18288, empty title) sat in space 4 across restarts while existing in no
+    // source at all. Nothing could evict it: no AX element remained to fire a destroy
+    // notification, its process was still alive, and CG absence alone may not evict.
+    @Test("An assignment no window source can find is parked")
+    func vanishedAssignmentIsParked() {
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        for windowID in [CGWindowID(17059), CGWindowID(18288)] {
+            manager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "company.thebrowser.dia",
+                            ownerName: "Dia", windowTitle: "", ownerPID: 40694),
+                toSpaceID: spaceID
+            )
+        }
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(17059, bundleID: "company.thebrowser.dia",
+                                         ownerName: "Dia", ownerPID: 40694, title: "")],
+                allWindowIDs: [17059],
+                skyLightWindowIDs: [17059]
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(manager.activeSpace.windows.map(\.windowID) == [17059])
+        #expect(manager.dormantWindowAssignments.map(\.window.windowID) == [18288])
+        let dormancy = result.events.first { $0.kind == .madeDormant }
+        #expect(dormancy?.windowID == 18288)
+        #expect(dormancy?.reason == .vanished)
+    }
+
+    // Measured across 240 windows: 9 sat in SkyLight while absent from CG. Hiding an app was
+    // measured too and removes its windows from neither. One source going quiet is still not
+    // evidence, which is why both have to agree before anything is parked.
+    @Test("A window CG lost but SkyLight still places stays assigned")
+    func skyLightPresenceProtectsAgainstCGAbsence() {
+        var manager = SpaceManager()
+        manager.addWindow(
+            SpaceWindow(windowID: 4795, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Develop", ownerPID: 40694),
+            toSpaceID: manager.activeSpaceID
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [], allWindowIDs: [], skyLightWindowIDs: [4795]
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(manager.activeSpace.windows.map(\.windowID) == [4795])
+        #expect(result.events.isEmpty)
+    }
+
+    @Test("A SkyLight enumeration that did not answer parks nothing")
+    func missingSkyLightAnswerParksNothing() {
+        var manager = SpaceManager()
+        manager.addWindow(
+            SpaceWindow(windowID: 4795, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Develop", ownerPID: 40694),
+            toSpaceID: manager.activeSpaceID
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(liveWindows: [], allWindowIDs: [], skyLightWindowIDs: nil),
+            spaceManager: &manager
+        )
+
+        #expect(manager.activeSpace.windows.map(\.windowID) == [4795])
+        #expect(result.events.isEmpty)
+    }
+
     // MARK: - Preview "Open" ghost regression (KHA-566)
     //
     // Reproduces a real session. Preview was quit while an image window and a generic
