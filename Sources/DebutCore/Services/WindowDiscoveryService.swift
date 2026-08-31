@@ -23,6 +23,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onAppActivated: ((RuntimeWindowSnapshot) -> Void)?
     public var onDesktopsChanged: ((RuntimeWindowSnapshot) -> Void)?
     public var onAppTerminated: ((pid_t) -> Void)?
+    /// Fired once a window's AX element has never resolved across several consecutive
+    /// arming attempts. The caller owns the space assignment, so making it dormant
+    /// (rather than deleting it) is left to the callback, matching `onWindowClosed`.
+    public var onWindowUntrackable: ((CGWindowID) -> Void)?
     public var excludedBundleIDs: Set<String> = []
     /// Spaces are desktops, so every snapshot carries the desktop macOS reports for each
     /// window. Without it the reconciler falls back to guessing from the active space.
@@ -43,6 +47,17 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public private(set) var armedWindowIDs: Set<CGWindowID> = []
     public private(set) var unarmedWindowIDs: Set<CGWindowID> = []
     private var windowOwnerPIDs: [CGWindowID: pid_t] = [:]
+
+    /// Consecutive `.elementUnavailable` outcomes per window, since only that failure mode
+    /// means AX has never once found a matching element — as opposed to a rejected
+    /// notification, which means AX found the window and a transient arming step failed.
+    private var elementUnavailableCounts: [CGWindowID: Int] = [:]
+    private static let elementUnavailableThreshold = 3
+
+    /// Windows whose AX element repeatedly failed to resolve. A CG-only heuristic can keep
+    /// admitting a phantom window into every subsequent snapshot, so once flagged here a
+    /// window is excluded from discovery entirely rather than retried forever.
+    public private(set) var persistentlyUnarmableWindowIDs: Set<CGWindowID> = []
 
     public var diagnosticTrackingSnapshot: WindowTrackingDiagnosticSnapshot {
         WindowTrackingDiagnosticSnapshot(
@@ -115,8 +130,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         super.init()
     }
 
+    /// Windows that repeatedly reported no matching AX element are excluded from every
+    /// discovery path, not just the retry loop — otherwise a phantom window the CG-only
+    /// heuristic keeps admitting would flip back to live on the very next snapshot.
+    private func excludingPersistentlyUnarmable(_ windows: [WindowInfo]) -> [WindowInfo] {
+        persistentlyUnarmableWindowIDs.isEmpty
+            ? windows
+            : windows.filter { !persistentlyUnarmableWindowIDs.contains($0.windowID) }
+    }
+
     public func discoverRunningWindows() -> [SpaceWindow] {
-        windowService.listWindows().filter { !excludedBundleIDs.contains($0.ownerBundleID) }.map { info in
+        excludingPersistentlyUnarmable(windowService.listWindows())
+            .filter { !excludedBundleIDs.contains($0.ownerBundleID) }.map { info in
             SpaceWindow(
                 windowID: info.windowID,
                 ownerBundleID: info.ownerBundleID,
@@ -154,7 +179,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Unmatched live windows go to the first space.
     public func reconcileWindows(_ spaceManager: inout SpaceManager) {
         let discoveryID = PerformanceRecorder.shared.begin(.windowDiscovery)
-        let liveWindows = windowService.listWindows().filter {
+        let liveWindows = excludingPersistentlyUnarmable(windowService.listWindows()).filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
         let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
@@ -280,6 +305,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         windowOwnerPIDs.removeAll()
         trackedWindowElements.removeAll()
         monitoredProcessIDs.removeAll()
+        elementUnavailableCounts.removeAll()
+        persistentlyUnarmableWindowIDs.removeAll()
         handledExitedProcessIDs.removeAll()
     }
 
@@ -306,7 +333,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     private func trackWindow(windowID: CGWindowID, pid: pid_t) {
-        if armedWindowIDs.contains(windowID) { return }
+        if persistentlyUnarmableWindowIDs.contains(windowID) { return }
+        // A window ID reused by a different process must still be armed: matching by ID
+        // alone would trust bookkeeping left over from a process whose exit was missed.
+        if armedWindowIDs.contains(windowID), windowOwnerPIDs[windowID] == pid { return }
 
         windowOwnerPIDs[windowID] = pid
         let element = windowElementOverride?(windowID, pid) ?? axWindowElement(for: windowID, pid: pid)
@@ -319,12 +349,27 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             unarmedWindowIDs.insert(windowID)
             knownWindowIDs.remove(windowID)
             reportTrackingFailure(windowID: windowID, pid: pid, outcome: outcome)
+            if outcome == .elementUnavailable {
+                let failureCount = (elementUnavailableCounts[windowID] ?? 0) + 1
+                if failureCount >= Self.elementUnavailableThreshold {
+                    elementUnavailableCounts.removeValue(forKey: windowID)
+                    unarmedWindowIDs.remove(windowID)
+                    windowOwnerPIDs.removeValue(forKey: windowID)
+                    persistentlyUnarmableWindowIDs.insert(windowID)
+                    onWindowUntrackable?(windowID)
+                } else {
+                    elementUnavailableCounts[windowID] = failureCount
+                }
+            } else {
+                elementUnavailableCounts.removeValue(forKey: windowID)
+            }
             return
         }
         if let element { trackedWindowElements[windowID] = element }
         armedWindowIDs.insert(windowID)
         unarmedWindowIDs.remove(windowID)
         knownWindowIDs.insert(windowID)
+        elementUnavailableCounts.removeValue(forKey: windowID)
     }
 
     private func armWindow(
@@ -540,8 +585,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     private func discoverLaunchedWindows(for app: AppInfo) {
         let pid = app.pid
-        let windows = windowService.listWindows().filter { $0.ownerPID == pid }
-        for info in windows where !knownWindowIDs.contains(info.windowID) {
+        let windows = excludingPersistentlyUnarmable(windowService.listWindows())
+            .filter { $0.ownerPID == pid }
+        // Matching by window ID alone would trust stale bookkeeping from a process whose
+        // exit was missed, so a reused ID for a different PID must still be (re-)tracked.
+        for info in windows where windowOwnerPIDs[info.windowID] != pid {
             trackAndRegister(windowID: info.windowID, pid: pid)
         }
 
@@ -589,7 +637,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// until then. Deliberately carries no focused window and registers no AX observers:
     /// nothing was activated, and the only question being asked is where things are now.
     public func refreshDesktopAssignments() {
-        let liveWindows = windowService.listWindows().filter {
+        let liveWindows = excludingPersistentlyUnarmable(windowService.listWindows()).filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
         onDesktopsChanged?(RuntimeWindowSnapshot(
@@ -622,7 +670,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // inserted the newly activated process into runningApplications yet.
         runningPIDs.insert(pid)
         pruneTracking(runningPIDs: runningPIDs)
-        let liveWindows = windowService.listWindows().filter {
+        let liveWindows = excludingPersistentlyUnarmable(windowService.listWindows()).filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
         // The full snapshot drives reconciliation, but only the activated app needs
