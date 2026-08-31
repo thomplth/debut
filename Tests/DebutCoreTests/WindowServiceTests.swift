@@ -63,6 +63,43 @@ struct WindowServiceTests {
         ))
     }
 
+    // Plausibility gates admission, so it may rest on ambiguous evidence: a window macOS
+    // cannot place on one desktop is refused entry but proves nothing, because an all-Spaces
+    // or fullscreen window looks the same. Eviction cannot use that same bar — it needs a
+    // positive statement that the thing is not a window, or it would park real windows.
+    //
+    // The cases below are measured, not invented. Dia window 4797 on 2026-08-31 was an 84x77
+    // surface on layer 3 that CGWindowList kept reporting for hours after it stopped being a
+    // window, while Dia 4794 was a real 2338x1440 browser window on layer 0.
+    @Test("Only a positive Core Graphics verdict disqualifies an assigned window")
+    func disqualifiesWindowsThatCannotBeWindows() {
+        #expect(AccessibilityWindowService.isDisqualifiedWindow(
+            layer: 3, bounds: CGRect(x: 0, y: 0, width: 84, height: 77)
+        ))
+        #expect(AccessibilityWindowService.isDisqualifiedWindow(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 10, height: 10)
+        ))
+        #expect(!AccessibilityWindowService.isDisqualifiedWindow(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440)
+        ))
+        // An absent layer is missing evidence, not a verdict.
+        #expect(!AccessibilityWindowService.isDisqualifiedWindow(
+            layer: nil, bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440)
+        ))
+    }
+
+    // The two predicates deliberately disagree here, and that gap is the whole design: a
+    // fullscreen or all-Spaces window resolves to no single desktop, so it is not plausible
+    // enough to admit, yet nothing about it says it is not a window.
+    @Test("A window with no resolved desktop is unadmitted but not disqualified")
+    func unresolvedDesktopIsNotADisqualification() {
+        let bounds = CGRect(x: 0, y: 0, width: 2338, height: 1440)
+        #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
+            layer: 0, isRegularApp: true, bounds: bounds, hasResolvedDesktop: false
+        ))
+        #expect(!AccessibilityWindowService.isDisqualifiedWindow(layer: 0, bounds: bounds))
+    }
+
     @Test("Disabled live previews neither enumerate nor capture")
     func disabledLivePreviewsAvoidCapture() async {
         let service = AccessibilityWindowService(windowCaptureEnabled: false)

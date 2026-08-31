@@ -179,6 +179,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
         let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
+        let disqualifiedWindowIDs = windowService.listDisqualifiedWindowIDs()
         let runningApps = windowService.listRunningApps()
         _ = PerformanceRecorder.shared.end(discoveryID)
 
@@ -187,21 +188,35 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // warming up can describe a user-manageable window this way, and deleting
         // the assignment would make that momentary misreport permanent. Park the
         // placement instead; a later snapshot reclaims it.
+        //
+        // Core Graphics gets the same treatment for the same reason. Plausibility gates
+        // admission, but nothing re-tested a window once it was already assigned, so a window
+        // that degraded into a tiny off-layer surface stayed live for as long as its app ran —
+        // it is still in CGWindowList, its process is alive, and no destroy notification ever
+        // arrives, which is every eviction path there was.
         let classificationID = PerformanceRecorder.shared.begin(
             .windowClassification,
             workload: .init(windows: liveWindows.count)
         )
-        var untrackableDormantCount = 0
+        var parkedDormantCount = 0
         for space in spaceManager.allSpaces {
-            for windowID in space.windowIDs where untrackableWindowIDs.contains(windowID) {
+            for windowID in space.windowIDs {
+                let reason: String
+                if untrackableWindowIDs.contains(windowID) {
+                    reason = "untrackable"
+                } else if disqualifiedWindowIDs.contains(windowID) {
+                    reason = "disqualified"
+                } else {
+                    continue
+                }
                 guard let assignment = spaceManager.makeWindowDormant(windowID: windowID) else { continue }
-                untrackableDormantCount += 1
+                parkedDormantCount += 1
                 diag.report("window_made_dormant", details: [
                     "windowID": "\(windowID)",
                     "bundleID": assignment.window.ownerBundleID,
                     "windowTitle": assignment.window.windowTitle,
                     "fromSpace": "\(spaceManager.spaceIndex(id: assignment.spaceID) ?? -1)",
-                    "reason": "untrackable",
+                    "reason": reason,
                 ])
             }
         }
@@ -255,7 +270,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             "added": "\(result.addedCount)",
             "reassigned": "\(result.reassignedCount)",
             "dormant": "\(spaceManager.dormantWindowAssignments.count)",
-            "untrackable": "\(untrackableDormantCount)",
+            "parked": "\(parkedDormantCount)",
         ])
         for event in result.events {
             var details = event.diagnosticDetails
