@@ -258,21 +258,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
                 self.spaceController?.handleLiveWindowsRemoved()
             }
         }
-        discovery.onWindowUntrackable = { [weak self] windowID in
-            DispatchQueue.main.async {
-                guard let self, let controller = self.spaceController else { return }
-                guard let assignment = controller.spaceManager.makeWindowDormant(windowID: windowID) else { return }
-                self.diag.report("window_made_dormant", details: [
-                    "windowID": "\(windowID)",
-                    "bundleID": assignment.window.ownerBundleID,
-                    "windowTitle": assignment.window.windowTitle,
-                    "fromSpace": "\(controller.spaceManager.spaceIndex(id: assignment.spaceID) ?? -1)",
-                    "reason": "unarmable",
-                ])
-                self.debouncedSaver?.scheduleSave(controller.spaceManager)
-                controller.handleLiveWindowsRemoved()
-            }
-        }
         discovery.onWindowTitleChanged = { [weak self] windowID, newTitle in
             DispatchQueue.main.async {
                 guard let self else { return }
