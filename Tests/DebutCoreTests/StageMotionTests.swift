@@ -588,18 +588,18 @@ struct StageMotionTests {
         #expect(abs((precedingCenter ?? 0) - 202.4) < 0.001)
     }
 
-    @Test("The default outline selector does not magnify its window")
-    func outlineWindowScale() {
+    @Test("The default filled selector does not magnify its window")
+    func filledWindowScale() {
         #expect(StageMotion.windowScale(
             isSelected: false,
             isDragging: false,
-            style: .outline,
+            style: .filled,
             magnifyScale: 1.12
         ) == 1)
         #expect(StageMotion.windowScale(
             isSelected: true,
             isDragging: false,
-            style: .outline,
+            style: .filled,
             magnifyScale: 1.12
         ) == 1)
     }
@@ -620,17 +620,17 @@ struct StageMotionTests {
         ) == 0.96)
     }
 
-    @Test("The outline appears only on a selected window resting in its stage")
-    func outlineVisibility() {
+    @Test("The fill appears only on a selected window resting in its stage")
+    func filledVisibility() {
         #expect(StageMotion.showsWindowSelector(
             isSelected: true,
             isDragging: false,
-            style: .outline
+            style: .filled
         ))
         #expect(!StageMotion.showsWindowSelector(
             isSelected: true,
             isDragging: true,
-            style: .outline
+            style: .filled
         ))
         #expect(!StageMotion.showsWindowSelector(
             isSelected: true,
@@ -639,10 +639,18 @@ struct StageMotionTests {
         ))
     }
 
-    @Test("The outline uses the specified adaptive grays at full opacity")
-    func outlineColors() {
+    @Test("The fill uses the specified adaptive grays at full opacity")
+    func filledColors() {
         #expect(StageMotion.windowSelectorGray(isDarkMode: true) == 103.0 / 255.0)
         #expect(StageMotion.windowSelectorGray(isDarkMode: false) == 167.0 / 255.0)
+    }
+
+    @Test("The fill expands behind the preview by the configured outset")
+    func filledSelectorSize() {
+        #expect(StageMotion.windowSelectorSize(
+            thumbnailSize: CGSize(width: 160, height: 100),
+            outset: 6
+        ) == CGSize(width: 172, height: 112))
     }
 
     @Test("Only the selected window carries a lift")
@@ -707,13 +715,13 @@ struct StageMotionTests {
         }
     }
 
-    @Test("Outline selection never adds a window lift")
-    func outlineWindowHasNoLift() {
+    @Test("Filled selection never adds a window lift")
+    func filledWindowHasNoLift() {
         #expect(StageMotion.windowLift(
             isSelected: true,
             isDragging: false,
             isDarkMode: true,
-            style: .outline,
+            style: .filled,
             shadowStrength: 2
         ) == .init(shadowOpacity: 0, shadowRadius: 0, shadowY: 0))
     }

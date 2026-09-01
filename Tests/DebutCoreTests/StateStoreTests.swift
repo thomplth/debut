@@ -193,7 +193,7 @@ struct StateStoreTests {
         settings.launchAtLogin = true
         settings.stageCornerRadius = 30
         settings.windowSelectionStyle = .magnify
-        settings.selectorBorderWidth = 2
+        settings.selectorOutset = 3
         settings.selectorCornerRadius = 18
         settings.magnifyScale = 1.14
         settings.magnifyShadowStrength = 1.6
@@ -209,7 +209,7 @@ struct StateStoreTests {
         #expect(loaded.launchAtLogin == true)
         #expect(loaded.stageCornerRadius == 30)
         #expect(loaded.windowSelectionStyle == .magnify)
-        #expect(loaded.selectorBorderWidth == 2)
+        #expect(loaded.selectorOutset == 3)
         #expect(loaded.selectorCornerRadius == 18)
         #expect(loaded.magnifyScale == 1.14)
         #expect(loaded.magnifyShadowStrength == 1.6)
@@ -372,7 +372,7 @@ struct StateStoreTests {
         #expect(AppSettings.defaultStageScale == 1.0)
     }
 
-    @Test("Settings written before selector customization use the macOS outline defaults")
+    @Test("Settings written before selector customization use the macOS filled defaults")
     func legacySettingsDefaultSelector() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
@@ -380,7 +380,7 @@ struct StateStoreTests {
         )
         for key in [
             "windowSelectionStyle",
-            "selectorBorderWidth",
+            "selectorOutset",
             "selectorCornerRadius",
             "magnifyScale",
             "magnifyShadowStrength",
@@ -391,11 +391,30 @@ struct StateStoreTests {
 
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
-        #expect(decoded.windowSelectionStyle == .outline)
-        #expect(decoded.selectorBorderWidth == AppSettings.defaultSelectorBorderWidth)
+        #expect(decoded.windowSelectionStyle == .filled)
+        #expect(decoded.selectorOutset == AppSettings.defaultSelectorOutset)
         #expect(decoded.selectorCornerRadius == AppSettings.defaultSelectorCornerRadius)
         #expect(decoded.magnifyScale == AppSettings.defaultMagnifyScale)
         #expect(decoded.magnifyShadowStrength == AppSettings.defaultMagnifyShadowStrength)
+    }
+
+    @Test("The short-lived outline style migrates to the filled selector")
+    func outlineStyleMigratesToFilled() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object["windowSelectionStyle"] = "Outline"
+        object.removeValue(forKey: "selectorOutset")
+        object["selectorBorderWidth"] = 4
+
+        let decoded = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        #expect(decoded.windowSelectionStyle == .filled)
+        #expect(decoded.selectorOutset == AppSettings.defaultSelectorOutset)
     }
 
     @Test("Settings files written before the option audit still load")
@@ -439,6 +458,6 @@ struct StateStoreTests {
         let settings = try store.loadSettings()
         #expect(settings.launchAtLogin == true)
         #expect(settings.glassStyle == .clear)
-        #expect(settings.windowSelectionStyle == .outline)
+        #expect(settings.windowSelectionStyle == .filled)
     }
 }

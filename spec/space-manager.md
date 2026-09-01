@@ -38,16 +38,16 @@ configurable scale.
 Stages float directly on the desktop — there is no full-screen backdrop or
 backdrop blur. Previews are captured when the overlay opens and cached for
 windows that are hidden. Icon size adapts to screen width, and preview content
-uses fixed preview and title geometry. The default selection outline surrounds
-only the thumbnail, leaving the title centered in the remaining gap to the stage
-edge. Drag previews never carry the outline. Magnification remains available as
-an alternative selection style.
+uses fixed preview and title geometry. The default filled selector sits behind
+the thumbnail and app icon, leaving the title centered in the remaining gap to
+the stage edge. Drag previews never carry the fill. Magnification remains
+available as an alternative selection style.
 
 Space focus changes animate as a low-bounce vertical spring with a subtle lift on
 the active stage. Reduce Motion substitutes a short fade.
 
-Appearance and selector values (stage scale and corner radius, outline thickness
-and radius, magnify scale and shadow strength) are user-configurable; see
+Appearance and selector values (stage scale and corner radius, fill outset and
+radius, magnify scale and shadow strength) are user-configurable; see
 `AppSettings`.
 
 ## Shortcuts
