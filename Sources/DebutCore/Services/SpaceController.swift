@@ -2,6 +2,14 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
+/// Which switcher an overlay session is presenting.
+public enum OverlayMode: Sendable, Equatable {
+    /// Spaces drawn as a stack of stages, each holding the windows assigned to it.
+    case stages
+    /// Every live window across every space, flattened into one activation-ordered list.
+    case altTab
+}
+
 final class PreviewCaptureMetrics: @unchecked Sendable {
     private let lock = NSLock()
     private let batchID: UUID
@@ -189,6 +197,19 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var isSpaceManagerVisible: Bool = false
     public var selectedSpaceIndex: Int = 0
     public var selectedWindowIndex: Int = 0
+
+    /// Which switcher the one overlay session is presenting. The event tap tracks a single
+    /// session, so the two can never be open at once.
+    public private(set) var overlayMode: OverlayMode = .stages
+
+    /// The flat cross-space list the alt-tab switcher is cycling, snapshotted when it opens so
+    /// the order cannot shift under the user mid-cycle as activations land.
+    public private(set) var altTabEntries: [GlobalWindowEntry] = []
+    public private(set) var altTabSelectionIndex: Int = 0
+
+    public var altTabSelection: GlobalWindowEntry? {
+        altTabEntries[safe: altTabSelectionIndex]
+    }
     public private(set) var keyboardServiceStarted: Bool = false
     public var overlayPresentationDelay: TimeInterval
     public var previewRefreshPolicy: PreviewRefreshPolicy
@@ -739,6 +760,14 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             } else {
                 openOverlay(selectPreviousSpace: true)
             }
+        case .altTabHold:
+            openOrCycleAltTab(forward: true)
+        case .altTabShiftHold:
+            openOrCycleAltTab(forward: false)
+        case .altTabHoldRepeat:
+            cycleAltTab(forward: true, wraps: false)
+        case .altTabShiftHoldRepeat:
+            cycleAltTab(forward: false, wraps: false)
         case .cmdBacktick:
             handleCmdBacktick(reverse: false)
         case .cmdBacktickRepeat:
@@ -912,7 +941,67 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
-    private func setupOverlay() {
+    // MARK: - Alt-tab switcher
+
+    private func openOrCycleAltTab(forward: Bool) {
+        // The stage session owns the held Cmd. Reusing its overlay for a second switcher would
+        // leave the user holding a modifier that no longer commits what they are looking at.
+        guard !isSpaceManagerVisible || overlayMode == .altTab else { return }
+        if isSpaceManagerVisible {
+            cycleAltTab(forward: forward)
+        } else {
+            openAltTab(forward: forward)
+        }
+    }
+
+    private func openAltTab(forward: Bool) {
+        setupOverlay(mode: .altTab)
+        altTabEntries = overlaySpaceManager.globalWindowOrder()
+
+        // Entry 0 is the window the user is already on — they opened a switcher to leave it —
+        // so a forward summon lands on the next one down the list.
+        altTabSelectionIndex = if !forward {
+            max(0, altTabEntries.count - 1)
+        } else {
+            altTabEntries.count >= 2 ? 1 : 0
+        }
+        syncStageSelection(toAltTabIndex: altTabSelectionIndex)
+    }
+
+    private func cycleAltTab(forward: Bool, wraps: Bool = true) {
+        guard isSpaceManagerVisible, overlayMode == .altTab, !altTabEntries.isEmpty else { return }
+        let count = altTabEntries.count
+        let step = forward ? 1 : -1
+        altTabSelectionIndex = wraps
+            ? (altTabSelectionIndex + step + count) % count
+            : min(count - 1, max(0, altTabSelectionIndex + step))
+        syncStageSelection(toAltTabIndex: altTabSelectionIndex)
+        notifyOverlayUpdated()
+    }
+
+    /// Keeps the stage cursor pointing at the same window as the alt-tab cursor, so commands
+    /// that resolve a selection — quit, close, commit — need no notion of which switcher is up.
+    private func syncStageSelection(toAltTabIndex index: Int) {
+        guard let entry = altTabEntries[safe: index],
+              let stackID = spaceManager.spaceStackID(containingSpaceID: entry.spaceID)
+        else { return }
+        // A space on another display is only addressable by `selectedSpaceIndex` once its stack
+        // is the selected one; the stage overlay can never reach this, alt-tab routinely does.
+        if stackID != spaceManager.selectedSpaceStackID {
+            spaceManager.selectSpaceStack(id: stackID)
+        }
+        let preview = overlaySpaceManager
+        guard let spaceIndex = preview.spaces.firstIndex(where: { $0.id == entry.spaceID }),
+              let windowIndex = preview.spaces[spaceIndex].windows.firstIndex(where: {
+                  $0.windowID == entry.window.windowID
+              })
+        else { return }
+        selectedSpaceIndex = spaceIndex
+        selectedWindowIndex = windowIndex
+    }
+
+    private func setupOverlay(mode: OverlayMode = .stages) {
+        overlayMode = mode
         let presentation = activeOverlayPresentation
         let focusedWindow = probeFocusedWindow()
         focusedWindowFrame = focusedWindow.frame
