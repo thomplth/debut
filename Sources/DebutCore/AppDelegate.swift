@@ -642,21 +642,30 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         }
 
         let display = overlayDisplay(focusedWindowFrame: spaceController.focusedWindowFrame)
-        if let displayID = display?.displayID {
+        // The flat switcher has already selected the stack holding its own selection, and that
+        // selection is what a commit resolves. Re-pointing it at the focused display would
+        // silently commit a different window than the one under the selector.
+        if let displayID = display?.displayID, spaceController.overlayMode == .stages {
             spaceController.selectSpaceStack(forDisplayID: displayID)
         }
         overlayWindow.targetScreenFrame = display?.frame
-        let vm = StageOverlayViewModel(
-            spaceManager: spaceController.overlaySpaceManager,
-            activeSpaceIndex: spaceController.selectedSpaceIndex,
-            selectedWindowIndex: spaceController.selectedWindowIndex,
-            windowPreviews: spaceController.windowPreviews,
-            appearance: currentSettings,
-            wallpaperLuminance: nil,
-            displayTopContentInset: display?.topContentInset ?? 0,
-            forceDisplayStackIndicator: forceDisplayStackIndicator
-        )
-        let createdHostingView = overlayWindow.update(viewModel: vm)
+        let createdHostingView = if spaceController.overlayMode == .altTab {
+            overlayWindow.update(altTab: altTabViewModel(
+                spaceController: spaceController,
+                topContentInset: display?.topContentInset ?? 0
+            ))
+        } else {
+            overlayWindow.update(viewModel: StageOverlayViewModel(
+                spaceManager: spaceController.overlaySpaceManager,
+                activeSpaceIndex: spaceController.selectedSpaceIndex,
+                selectedWindowIndex: spaceController.selectedWindowIndex,
+                windowPreviews: spaceController.windowPreviews,
+                appearance: currentSettings,
+                wallpaperLuminance: nil,
+                displayTopContentInset: display?.topContentInset ?? 0,
+                forceDisplayStackIndicator: forceDisplayStackIndicator
+            ))
+        }
         if let overlayPresentation {
             spaceController.updateOverlayHostingView(
                 createdHostingView ? .created : .reused,
@@ -727,6 +736,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         if spaceController.spaceManager.connectedSpaceStacks.count <= 1 {
             overlayWindow.targetScreenFrame = display?.frame
         }
+        if spaceController.overlayMode == .altTab {
+            overlayWindow.update(altTab: altTabViewModel(
+                spaceController: spaceController,
+                topContentInset: display?.topContentInset ?? 0
+            ))
+            return
+        }
         let vm = StageOverlayViewModel(
             spaceManager: spaceController.overlaySpaceManager,
             activeSpaceIndex: spaceController.selectedSpaceIndex,
@@ -738,6 +754,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             forceDisplayStackIndicator: forceDisplayStackIndicator
         )
         overlayWindow.update(viewModel: vm)
+    }
+
+    private func altTabViewModel(
+        spaceController: SpaceController,
+        topContentInset: CGFloat
+    ) -> AltTabOverlayViewModel {
+        AltTabOverlayViewModel(
+            entries: spaceController.altTabEntries,
+            selectedIndex: spaceController.altTabSelectionIndex,
+            windowPreviews: spaceController.windowPreviews,
+            appearance: currentSettings,
+            displayTopContentInset: topContentInset
+        )
     }
 
     /// The screen the stages belong on: the one holding the focused window. Accessibility
