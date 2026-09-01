@@ -34,8 +34,8 @@ Individual controls, their ranges, and their default values are defined in
 policy.
 
 **Selector** — selection style and the controls specific to it. Filled is the
-default and exposes surrounding space and corner radius. Its adaptive-gray plate
-sits behind the preview and app icon while leaving the title outside. Magnify
+default and exposes surrounding space and corner radius. Its translucent adaptive
+plate sits behind the preview and app icon while leaving the title outside. Magnify
 preserves the original effect and exposes selected-window scale and shadow
 strength. The fill is not drawn on drag previews.
 

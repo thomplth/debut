@@ -639,10 +639,15 @@ struct StageMotionTests {
         ))
     }
 
-    @Test("The fill uses the specified adaptive grays at full opacity")
+    @Test("The fill uses screenshot-derived translucent adaptive colors")
     func filledColors() {
-        #expect(StageMotion.windowSelectorGray(isDarkMode: true) == 103.0 / 255.0)
-        #expect(StageMotion.windowSelectorGray(isDarkMode: false) == 167.0 / 255.0)
+        let darkFill = StageMotion.windowSelectorFill(isDarkMode: true)
+        #expect(darkFill.white == 1)
+        #expect(darkFill.opacity == 0.30)
+
+        let lightFill = StageMotion.windowSelectorFill(isDarkMode: false)
+        #expect(lightFill.white == 0)
+        #expect(lightFill.opacity == 0.25)
     }
 
     @Test("The fill expands behind the preview by the configured outset")
