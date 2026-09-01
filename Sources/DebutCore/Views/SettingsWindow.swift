@@ -539,36 +539,6 @@ public struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("Command hints")
-                .font(.headline)
-                .padding(.top, 8)
-
-            HStack {
-                Text("Show hints")
-                Spacer()
-                Picker("", selection: $viewModel.settings.commandHintVisibility) {
-                    ForEach(CommandHintVisibility.allCases, id: \.self) { visibility in
-                        Text(visibility.rawValue).tag(visibility)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 250)
-            }
-
-            Text("Automatic hides each hint once you have used that command three times. Never hides every hint; Always keeps them visible.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack {
-                Text("Learned command usage")
-                Spacer()
-                Button("Reset Hint Usage") {
-                    viewModel.settings.resetCommandHintUsage()
-                }
-                .disabled(viewModel.settings.commandUsageCounts.isEmpty)
-            }
-
             Text("Quick switch exclusions")
                 .font(.headline)
                 .padding(.top, 8)

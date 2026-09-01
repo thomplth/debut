@@ -169,12 +169,9 @@ A single scrolling window with a sidebar, opened from the menu bar item.
 - **Privacy** — the anonymous-telemetry switch, with a preview of the exact payload.
 - **Keyboard Shortcuts** — every action is rebindable by clicking a row and pressing
   the combination; conflicts are caught inline. Also holds the overlay hold delay,
-  the command hints, and the quick-switch modifiers and exclusions.
+  and the quick-switch modifiers and exclusions.
 - **Troubleshooting** — export a diagnostic snapshot, or reset the window cache.
 - **About** — icon, name, version.
-
-Command hints label the overlay's available commands and, on `Automatic`, retire
-themselves once you have used a command more than three times.
 
 ## Privacy
 

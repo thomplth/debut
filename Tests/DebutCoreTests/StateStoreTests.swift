@@ -201,8 +201,6 @@ struct StateStoreTests {
         settings.quickSwitchExcludedBundleIDs = ["com.tinyspeck.slackmacgap"]
         settings.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
         settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(command: true)
-        settings.commandHintVisibility = .always
-        _ = settings.recordCommandUsage(.moveWindowLeft)
 
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
@@ -217,29 +215,6 @@ struct StateStoreTests {
         #expect(loaded.quickSwitchExcludedBundleIDs == ["com.tinyspeck.slackmacgap"])
         #expect(loaded.quickSwitchModifiers == ShortcutModifiers(control: true, option: true))
         #expect(loaded.quickSwitchSameApplicationModifiers == ShortcutModifiers(command: true))
-        #expect(loaded.commandHintVisibility == .always)
-        #expect(loaded.commandUsageCounts[.moveWindowLeft] == 1)
-    }
-
-    @Test("Older settings drop usage counts for retired commands")
-    func legacySettingsDropRetiredCommandUsage() throws {
-        var settings = AppSettings()
-        _ = settings.recordCommandUsage(.moveWindowLeft)
-        var object = try #require(
-            JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any]
-        )
-        var counts = try #require(object["commandUsageCounts"] as? [Any])
-        counts.append("swapSpaceUp")
-        counts.append(7)
-        object["commandUsageCounts"] = counts
-
-        let decoded = try JSONDecoder().decode(
-            AppSettings.self,
-            from: JSONSerialization.data(withJSONObject: object)
-        )
-
-        #expect(decoded.commandUsageCounts[.moveWindowLeft] == 1)
-        #expect(decoded.commandUsageCounts.count == 1)
     }
 
     @Test("Older settings use Control and Control-Option quick-switch defaults")
@@ -339,22 +314,6 @@ struct StateStoreTests {
 
         #expect(decoded.heldCycleMinimumInterval == AppSettings.defaultHeldCycleMinimumInterval)
         #expect(AppSettings.defaultHeldCycleMinimumInterval == 0.06)
-    }
-
-    @Test("Older settings default command hints to automatic with no usage")
-    func legacySettingsDefaultCommandHints() throws {
-        let encoded = try JSONEncoder().encode(AppSettings())
-        var object = try #require(
-            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
-        )
-        object.removeValue(forKey: "commandHintVisibility")
-        object.removeValue(forKey: "commandUsageCounts")
-        let legacyData = try JSONSerialization.data(withJSONObject: object)
-
-        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
-
-        #expect(decoded.commandHintVisibility == .automatic)
-        #expect(decoded.commandUsageCounts.isEmpty)
     }
 
     @Test("Settings written before the stage scale existed use the 100 percent default")

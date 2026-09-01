@@ -52,10 +52,8 @@ public struct StageOverlayViewModel: Sendable {
     public var shouldShowDisplayStackIndicator: Bool { displayStackCount > 1 }
 
     public var displayStackShortcut: String {
-        guard appearance.shouldShowCommandHint(for: .nextDisplayStack),
-              let combo = appearance.keyBindings.combo(for: .nextDisplayStack)
-        else { return "" }
-        return combo.commandHintDisplayString
+        guard let combo = appearance.keyBindings.combo(for: .nextDisplayStack) else { return "" }
+        return combo.displayStackShortcutString
     }
 
     public var displayStackShortcutSpacing: CGFloat { 3.5 }

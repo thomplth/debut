@@ -1164,10 +1164,6 @@ let selectedWindowIndexBeforeNext = readState()["selectedWindowIndex"]
 // --- 3. Navigate: Tab to next window ---
 header("3. Navigate windows with Tab")
 info("Pressing Tab (next window)...")
-let nextWindowHintUsageCount = readEvents().filter {
-    $0["event"] == "command_hint_usage_observed"
-        && $0["action"] == "nextWindow"
-}.count
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
 wait(0.5)
 
@@ -1181,13 +1177,6 @@ test("Selection moved") {
     let idx = readState()["selectedWindowIndex"] ?? "nil"
     info("  selectedWindowIndex stayed at \(idx)")
     return false
-}
-
-test("Command hint usage follows real command dispatch") {
-    readEvents().filter {
-        $0["event"] == "command_hint_usage_observed"
-            && $0["action"] == "nextWindow"
-    }.count > nextWindowHintUsageCount
 }
 
 // --- 4. Navigate: Shift+Tab back ---
@@ -1743,7 +1732,6 @@ let stoppedBeforeCustomization = terminateDebutAndWait()
 let originalSettingsData = try? Data(contentsOf: settingsFile)
 let settingsStore = StateStore()
 var customizedSettings = (try? settingsStore.loadSettings()) ?? AppSettings()
-customizedSettings.commandHintVisibility = .always
 customizedSettings.keyBindings.bindings[.activateNextWindow] = KeyCombo(
     keyCode: kVK_ANSI_B,
     command: true
@@ -1768,33 +1756,6 @@ test("A persisted custom shortcut replaces Command-Tab activation") {
         && readEvents().filter {
             $0["event"] == "key_event" && $0["keyEvent"] == "cmdTabHold"
         }.count > customizedActivationCount
-}
-
-func hintLayoutIsContextual() -> Bool {
-    guard let layout = readEvents().last(where: { $0["event"] == "command_hints_laid_out" }),
-          let footerHintCount = Int(layout["footerHintCount"] ?? ""),
-          let footerIconCount = Int(layout["footerIconCount"] ?? ""),
-          let stageLeadingHintCount = Int(layout["stageLeadingHintCount"] ?? "")
-    else { return false }
-    let windowCount = Int(readState()["windowsInActiveSpace"] ?? "0") ?? 0
-    return stageLeadingHintCount > 0
-        && footerHintCount > 0
-        && footerIconCount == footerHintCount
-        && (windowCount < 2 || layout["nextWindowIndex"] != "none")
-}
-
-// The overlay flushes its layout diagnostics asynchronously, so poll instead of
-// reading once after a fixed wait.
-test("Command hints use contextual placements and purpose icons") {
-    for _ in 0..<30 where !hintLayoutIsContextual() {
-        wait(0.1)
-    }
-    if !hintLayoutIsContextual() {
-        info("  Hint layout: \(readEvents().last(where: { $0["event"] == "command_hints_laid_out" }) ?? [:])")
-        info("  Hint layout state: \(readState())")
-        return false
-    }
-    return true
 }
 
 postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
