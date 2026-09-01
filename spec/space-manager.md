@@ -40,7 +40,9 @@ backdrop blur. Previews are captured when the overlay opens and cached for
 windows that are hidden. Icon size adapts to screen width, and preview content
 uses fixed preview and title geometry. The default filled selector sits behind
 the thumbnail and app icon, leaving the title centered in the remaining gap to
-the stage edge. Drag previews never carry the fill. Magnification remains
+the stage edge. The selector uses a translucent adaptive fill so the desktop
+material remains visible through it. Drag previews never carry the fill.
+Magnification remains
 available as an alternative selection style.
 
 Space focus changes animate as a low-bounce vertical spring with a subtle lift on

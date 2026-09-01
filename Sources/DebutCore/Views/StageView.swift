@@ -41,6 +41,11 @@ struct WindowLift: Equatable {
     let shadowY: CGFloat
 }
 
+struct WindowSelectorFill: Equatable {
+    let white: Double
+    let opacity: Double
+}
+
 struct StageStackLayout: Equatable {
     let scales: [CGFloat]
     /// Each stage's own unscaled height. Stages wrap independently, so this is per space rather
@@ -326,8 +331,14 @@ enum StageMotion {
         isSelected && !isDragging && style == .filled
     }
 
-    static func windowSelectorGray(isDarkMode: Bool) -> Double {
-        (isDarkMode ? 103.0 : 167.0) / 255.0
+    static func windowSelectorFill(isDarkMode: Bool) -> WindowSelectorFill {
+        // The screenshots show white at 30% over the dark desktop and black at 25% over
+        // the light desktop. Keeping the overlay translucent lets the desktop material show
+        // through instead of baking its sampled gray into the selector.
+        WindowSelectorFill(
+            white: isDarkMode ? 1 : 0,
+            opacity: isDarkMode ? 0.30 : 0.25
+        )
     }
 
     static func windowSelectorSize(thumbnailSize: CGSize, outset: CGFloat) -> CGSize {
@@ -1823,6 +1834,7 @@ struct WindowPreviewView: View {
             }
             .background {
                 if showsSelector {
+                    let fill = StageMotion.windowSelectorFill(isDarkMode: colorScheme == .dark)
                     let selectorSize = StageMotion.windowSelectorSize(
                         thumbnailSize: CGSize(
                             width: metrics.thumbnailWidth,
@@ -1834,12 +1846,7 @@ struct WindowPreviewView: View {
                         cornerRadius: CGFloat(appearance.selectorCornerRadius)
                             * metrics.scaleFactor
                     )
-                    .fill(Color(
-                        white: StageMotion.windowSelectorGray(
-                            isDarkMode: colorScheme == .dark
-                        ),
-                        opacity: 1
-                    ))
+                    .fill(Color(white: fill.white, opacity: fill.opacity))
                     .frame(width: selectorSize.width, height: selectorSize.height)
                     .allowsHitTesting(false)
                 }
