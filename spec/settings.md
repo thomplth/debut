@@ -33,10 +33,11 @@ Individual controls, their ranges, and their default values are defined in
 **Appearance** — glass style, stage geometry, and the window preview refresh
 policy.
 
-**Selector** — selection style and the controls specific to it. Outline is the
-default and exposes thickness and corner radius. Magnify preserves the original
-effect and exposes selected-window scale and shadow strength. The outline colour
-adapts automatically to the system appearance and is not drawn on drag previews.
+**Selector** — selection style and the controls specific to it. Filled is the
+default and exposes surrounding space and corner radius. Its adaptive-gray plate
+sits behind the preview and app icon while leaving the title outside. Magnify
+preserves the original effect and exposes selected-window scale and shadow
+strength. The fill is not drawn on drag previews.
 
 **Excluded Apps** — a picker over running regular apps and the resulting
 exclusion list. Adding an app removes it from every space and filters it out of

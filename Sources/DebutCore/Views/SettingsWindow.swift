@@ -243,25 +243,25 @@ public struct SettingsView: View {
                 .frame(width: 220)
             }
 
-            if viewModel.settings.windowSelectionStyle == .outline {
+            if viewModel.settings.windowSelectionStyle == .filled {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Outline thickness")
+                        Text("Surrounding space")
                         Spacer()
-                        Text("\(Int(viewModel.settings.selectorBorderWidth.rounded())) pt")
+                        Text("\(Int(viewModel.settings.selectorOutset.rounded())) pt")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
                     Slider(
-                        value: $viewModel.settings.selectorBorderWidth,
-                        in: AppSettings.minimumSelectorBorderWidth...AppSettings.maximumSelectorBorderWidth,
+                        value: $viewModel.settings.selectorOutset,
+                        in: AppSettings.minimumSelectorOutset...AppSettings.maximumSelectorOutset,
                         step: 1
                     )
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Outline corner radius")
+                        Text("Selector corner radius")
                         Spacer()
                         Text("\(Int(viewModel.settings.selectorCornerRadius.rounded())) pt")
                             .foregroundStyle(.secondary)
@@ -274,7 +274,7 @@ public struct SettingsView: View {
                     )
                 }
 
-                Text("The outline follows macOS contrast: RGB 103 on dark appearances and RGB 167 on light appearances. It surrounds only the preview and is hidden while dragging.")
+                Text("The filled selector sits behind the preview and app icon. It follows macOS contrast: RGB 103 on dark appearances and RGB 167 on light appearances, and is hidden while dragging.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
