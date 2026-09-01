@@ -307,9 +307,27 @@ enum StageMotion {
         }
     }
 
-    static func windowScale(isSelected: Bool, isDragging: Bool) -> CGFloat {
+    static func windowScale(
+        isSelected: Bool,
+        isDragging: Bool,
+        style: WindowSelectionStyle = .magnify,
+        magnifyScale: CGFloat = CGFloat(AppSettings.defaultMagnifyScale)
+    ) -> CGFloat {
         if isDragging { return 0.96 }
-        return isSelected ? 1.06 : 1
+        guard isSelected, style == .magnify else { return 1 }
+        return magnifyScale
+    }
+
+    static func showsWindowSelector(
+        isSelected: Bool,
+        isDragging: Bool,
+        style: WindowSelectionStyle
+    ) -> Bool {
+        isSelected && !isDragging && style == .outline
+    }
+
+    static func windowSelectorGray(isDarkMode: Bool) -> Double {
+        (isDarkMode ? 103.0 : 167.0) / 255.0
     }
 
     static func sourceWindowOpacity(isDragging: Bool) -> Double {
@@ -441,14 +459,22 @@ enum StageMotion {
     static func windowLift(
         isSelected: Bool,
         isDragging: Bool,
-        isDarkMode: Bool
+        isDarkMode: Bool,
+        style: WindowSelectionStyle = .magnify,
+        shadowStrength: Double = AppSettings.defaultMagnifyShadowStrength
     ) -> WindowLift {
-        guard isSelected else {
+        guard isSelected, style == .magnify else {
             return WindowLift(shadowOpacity: 0, shadowRadius: 0, shadowY: 0)
         }
-        let lifted = isDarkMode
+        let base = isDarkMode
             ? WindowLift(shadowOpacity: 0.5, shadowRadius: 14, shadowY: 6)
             : WindowLift(shadowOpacity: 0.24, shadowRadius: 8, shadowY: 4)
+        let strength = max(0, shadowStrength)
+        let lifted = WindowLift(
+            shadowOpacity: base.shadowOpacity * strength,
+            shadowRadius: base.shadowRadius * CGFloat(strength),
+            shadowY: base.shadowY * CGFloat(strength)
+        )
         guard !isDragging else {
             return WindowLift(
                 shadowOpacity: 0,
@@ -1728,7 +1754,14 @@ struct WindowPreviewView: View {
         let lift = StageMotion.windowLift(
             isSelected: isWindowSelected,
             isDragging: isDragging,
-            isDarkMode: colorScheme == .dark
+            isDarkMode: colorScheme == .dark,
+            style: appearance.windowSelectionStyle,
+            shadowStrength: appearance.magnifyShadowStrength
+        )
+        let showsSelector = StageMotion.showsWindowSelector(
+            isSelected: isWindowSelected,
+            isDragging: isDragging,
+            style: appearance.windowSelectionStyle
         )
         return VStack(spacing: metrics.titleSpacing) {
             ZStack(alignment: .topLeading) {
@@ -1759,6 +1792,35 @@ struct WindowPreviewView: View {
                     }
                 }
                 .frame(width: metrics.thumbnailWidth, height: metrics.thumbnailHeight)
+                .overlay {
+                    if showsSelector {
+                        GeometryReader { geometry in
+                            RoundedRectangle(
+                                cornerRadius: CGFloat(appearance.selectorCornerRadius)
+                                    * metrics.scaleFactor
+                            )
+                            .strokeBorder(
+                                Color(
+                                    white: StageMotion.windowSelectorGray(
+                                        isDarkMode: colorScheme == .dark
+                                    ),
+                                    opacity: 1
+                                ),
+                                lineWidth: CGFloat(appearance.selectorBorderWidth)
+                                    * metrics.scaleFactor
+                            )
+                            .frame(
+                                width: geometry.size.width + metrics.cardPadding * 2,
+                                height: geometry.size.height + metrics.cardPadding * 2
+                            )
+                            .position(
+                                x: geometry.size.width / 2,
+                                y: geometry.size.height / 2
+                            )
+                        }
+                        .allowsHitTesting(false)
+                    }
+                }
                 .overlay(alignment: .bottomTrailing) {
                     if !commandHints.isEmpty {
                         CommandHintStrip(hints: commandHints, scale: metrics.scaleFactor)
@@ -1789,7 +1851,12 @@ struct WindowPreviewView: View {
                 .frame(width: metrics.thumbnailWidth + metrics.titleWidthAllowance, height: metrics.titleHeight)
         }
         .padding(metrics.cardPadding)
-        .scaleEffect(StageMotion.windowScale(isSelected: isWindowSelected, isDragging: isDragging))
+        .scaleEffect(StageMotion.windowScale(
+            isSelected: isWindowSelected,
+            isDragging: isDragging,
+            style: appearance.windowSelectionStyle,
+            magnifyScale: CGFloat(appearance.magnifyScale)
+        ))
         .shadow(
             color: .black.opacity(lift.shadowOpacity),
             radius: lift.shadowRadius * metrics.scaleFactor,

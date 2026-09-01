@@ -8,6 +8,7 @@ Debut's behavior, appearance, shortcuts, and exclusions.
 ```
 ┌───────────────┬──────────────────────────────────┐
 │ Appearance    │                                  │
+│ Selector      │                                  │
 │ Excluded Apps │   all sections stacked           │
 │ App           │                                  │
 │ Privacy       │                                  │
@@ -30,8 +31,12 @@ Individual controls, their ranges, and their default values are defined in
 `SettingsWindow.swift` and `AppSettings` and are deliberately not restated here.
 
 **Appearance** — glass style, stage geometry, and the window preview refresh
-policy. Selection has no controls of its own: the overlay indicates it by
-magnifying the selected window rather than tinting or outlining it.
+policy.
+
+**Selector** — selection style and the controls specific to it. Outline is the
+default and exposes thickness and corner radius. Magnify preserves the original
+effect and exposes selected-window scale and shadow strength. The outline colour
+adapts automatically to the system appearance and is not drawn on drag previews.
 
 **Excluded Apps** — a picker over running regular apps and the resulting
 exclusion list. Adding an app removes it from every space and filters it out of

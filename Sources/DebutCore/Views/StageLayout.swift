@@ -26,7 +26,9 @@ public struct StageMetrics: Equatable, Sendable {
         thumbnailHeight: 100,
         cardPadding: 6,
         titleWidthAllowance: 8,
-        titleSpacing: 4,
+        // This centers the title in the gap between the preview and the stage's lower edge,
+        // while leaving the selector around the preview clear of the text.
+        titleSpacing: 10,
         titleHeight: 14,
         badgeSize: 40,
         previewPlaceholderIconSize: 32,
@@ -37,7 +39,7 @@ public struct StageMetrics: Equatable, Sendable {
         // The original one-row stage was 164 points high. The card itself is 130 points once
         // its vertical padding is represented explicitly, leaving ten points below the card and
         // preserving the original seven-point downward optical offset inside the stage.
-        bottomPadding: 10,
+        bottomPadding: 4,
         minStageWidth: 300
     )
 

@@ -2,6 +2,7 @@ import Foundation
 
 public enum SettingsSection: String, CaseIterable, Sendable {
     case appearance = "Appearance"
+    case selector = "Selector"
     case excludedApps = "Excluded Apps"
     case app = "App"
     case privacy = "Privacy"

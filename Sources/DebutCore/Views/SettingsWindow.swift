@@ -57,6 +57,8 @@ public struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 32) {
                         appearanceSection
                             .id(SettingsSection.appearance)
+                        selectorSection
+                            .id(SettingsSection.selector)
                         excludedAppsSection
                             .id(SettingsSection.excludedApps)
                         appSection
@@ -116,7 +118,7 @@ public struct SettingsView: View {
             Text("Appearance")
                 .font(.title2.bold())
 
-            Text("The overlay draws one stage per space. The selected window is shown by magnifying it, so there is no separate selection colour to configure.")
+            Text("The overlay draws one stage per space. These controls set the stage surface and preview layout.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -217,6 +219,101 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             .disabled(viewModel.settings.previewRefreshPolicy == .all)
+        }
+    }
+
+    private var selectorSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Selector")
+                .font(.title2.bold())
+
+            Text("Choose how the selected window stands out inside its stage.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("Style")
+                Spacer()
+                Picker("", selection: $viewModel.settings.windowSelectionStyle) {
+                    ForEach(WindowSelectionStyle.allCases, id: \.self) { style in
+                        Text(style.rawValue).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+            }
+
+            if viewModel.settings.windowSelectionStyle == .outline {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Outline thickness")
+                        Spacer()
+                        Text("\(Int(viewModel.settings.selectorBorderWidth.rounded())) pt")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Slider(
+                        value: $viewModel.settings.selectorBorderWidth,
+                        in: AppSettings.minimumSelectorBorderWidth...AppSettings.maximumSelectorBorderWidth,
+                        step: 1
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Outline corner radius")
+                        Spacer()
+                        Text("\(Int(viewModel.settings.selectorCornerRadius.rounded())) pt")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Slider(
+                        value: $viewModel.settings.selectorCornerRadius,
+                        in: AppSettings.minimumSelectorCornerRadius...AppSettings.maximumSelectorCornerRadius,
+                        step: 1
+                    )
+                }
+
+                Text("The outline follows macOS contrast: RGB 103 on dark appearances and RGB 167 on light appearances. It surrounds only the preview and is hidden while dragging.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Selected window size")
+                        Spacer()
+                        Text("\(Int((viewModel.settings.magnifyScale * 100).rounded()))%")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Slider(
+                        value: $viewModel.settings.magnifyScale,
+                        in: AppSettings.minimumMagnifyScale...AppSettings.maximumMagnifyScale,
+                        step: AppSettings.magnifyScaleStep
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Shadow strength")
+                        Spacer()
+                        Text("\(Int((viewModel.settings.magnifyShadowStrength * 100).rounded()))%")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Slider(
+                        value: $viewModel.settings.magnifyShadowStrength,
+                        in: AppSettings.minimumMagnifyShadowStrength...AppSettings.maximumMagnifyShadowStrength,
+                        step: 0.1
+                    )
+                }
+
+                Text("Magnify enlarges the selected preview and casts a depth shadow, matching Debut's original selection treatment.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -683,6 +780,7 @@ public struct SettingsView: View {
     private func sectionIcon(_ section: SettingsSection) -> String {
         switch section {
         case .appearance: "paintbrush"
+        case .selector: "scope"
         case .excludedApps: "eye.slash"
         case .app: "gearshape"
         case .privacy: "hand.raised"
