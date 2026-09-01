@@ -823,6 +823,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         case .closeSelectedWindow:
             closeSelectedWindow()
         }
+
+        // `key_event` above is filed before the handler runs, so it carries the state the
+        // keystroke was about to change. A held-Tab sequence reports nothing else, so without
+        // this the block stays a keystroke behind until the next press publishes it.
+        diag.refreshState()
     }
 
     // MARK: - Quick switch
