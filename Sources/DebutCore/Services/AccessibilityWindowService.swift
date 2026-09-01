@@ -179,11 +179,14 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             windowDesktops: windowDesktops,
             showingDesktop: showingDesktop
         )
+        let axNamedWindowIDs = classification.axWindowIDsByPID.values.reduce(into: Set<CGWindowID>()) {
+            $0.formUnion($1)
+        }
 
         // AX naming a window is the only thing that can overturn a contradiction, so drop
         // those entries first. A momentary misreport then costs one snapshot, not the window.
         contradictionLock.withLock {
-            contradictions.clear(windowIDs: classification.trackable)
+            contradictions.clear(windowIDs: axNamedWindowIDs)
             contradictions.retainOnly(owners: regularPIDs)
         }
 
@@ -216,6 +219,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                     hasResolvedDesktop: windowDesktop != nil
                 ) else { return nil }
                 if Self.accessibilityContradictsWindow(
+                    isNamedByAX: axNamedWindowIDs.contains(windowID),
                     windowDesktop: windowDesktop,
                     showingDesktop: showingDesktop,
                     appAXAnswerCoversShowingDesktop: corroboratedPIDs.contains(ownerPID)
@@ -283,11 +287,13 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     /// answer still describes the desktop being left looks identical to one that saw this
     /// desktop and declined — either would refuse real windows wholesale.
     static func accessibilityContradictsWindow(
+        isNamedByAX: Bool = false,
         windowDesktop: Int?,
         showingDesktop: Int?,
         appAXAnswerCoversShowingDesktop: Bool
     ) -> Bool {
-        guard appAXAnswerCoversShowingDesktop,
+        guard !isNamedByAX,
+              appAXAnswerCoversShowingDesktop,
               let windowDesktop,
               let showingDesktop
         else { return false }
@@ -335,6 +341,12 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             windowDesktops: windowDesktops,
             showingDesktop: showingDesktop
         )
+        let axNamedWindowIDs = classification.axWindowIDsByPID.values.reduce(into: Set<CGWindowID>()) {
+            $0.formUnion($1)
+        }
+        contradictionLock.withLock {
+            contradictions.clear(windowIDs: axNamedWindowIDs)
+        }
 
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
@@ -351,6 +363,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                   let bundleID = pidToBundleID[ownerPID],
                   !classification.trackable.contains(windowID),
                   Self.accessibilityContradictsWindow(
+                      isNamedByAX: axNamedWindowIDs.contains(windowID),
                       windowDesktop: windowDesktops[windowID],
                       showingDesktop: showingDesktop,
                       appAXAnswerCoversShowingDesktop: corroboratedPIDs.contains(ownerPID)
@@ -418,6 +431,20 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             !isModal
     }
 
+    /// Whether Accessibility positively identifies auxiliary UI. `AXUnknown` is not such an
+    /// identification: several apps use it for real borderless viewer windows, so those must
+    /// fall through to the same Core Graphics and SkyLight checks as an AX-unnamed window.
+    static func isPositivelyUntrackableAXWindow(
+        role: String,
+        subrole: String,
+        isModal: Bool
+    ) -> Bool {
+        guard role == kAXWindowRole as String else { return true }
+        guard !isModal else { return true }
+        guard subrole != kAXUnknownSubrole as String else { return false }
+        return !isTrackableAXWindow(role: role, subrole: subrole, isModal: isModal)
+    }
+
     private func classifyAXWindowIDs() -> (
         trackable: Set<CGWindowID>,
         untrackable: Set<CGWindowID>,
@@ -449,7 +476,11 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                 let isModal = boolAttribute(kAXModalAttribute, of: axWindow) ?? false
                 if Self.isTrackableAXWindow(role: role, subrole: subrole, isModal: isModal) {
                     trackable.insert(cgWindowID)
-                } else {
+                } else if Self.isPositivelyUntrackableAXWindow(
+                    role: role,
+                    subrole: subrole,
+                    isModal: isModal
+                ) {
                     untrackable.insert(cgWindowID)
                 }
             }

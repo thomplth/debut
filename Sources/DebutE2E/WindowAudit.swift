@@ -85,14 +85,17 @@ enum WindowAudit {
             // `admitted` is exactly what `listWindows()` would return for this window.
             let admitted: String
             if let cg, pidToBundle[cg.pid] != nil {
-                if let ax, !AccessibilityWindowServiceProbe.isTrackable(
+                if let ax, AccessibilityWindowServiceProbe.isPositivelyUntrackable(
                     role: ax.role, subrole: ax.subrole, isModal: ax.modal
                 ) {
                     admitted = "0"          // AX says auxiliary
-                } else if ax != nil {
+                } else if let ax, AccessibilityWindowServiceProbe.isTrackable(
+                    role: ax.role, subrole: ax.subrole, isModal: ax.modal
+                ) {
                     admitted = "1"          // AX says standard
                 } else if plausible == "1", let cgPID = pid,
                           AccessibilityWindowServiceProbe.accessibilityContradicts(
+                              isNamedByAX: ax != nil,
                               windowDesktop: location?.index,
                               showingDesktop: spaceService.currentDesktopIndex(),
                               appAXAnswerCoversShowingDesktop: corroboratedPIDs.contains(cgPID)
@@ -240,6 +243,13 @@ enum AccessibilityWindowServiceProbe {
             !isModal
     }
 
+    static func isPositivelyUntrackable(role: String, subrole: String, isModal: Bool) -> Bool {
+        guard role == kAXWindowRole as String else { return true }
+        guard !isModal else { return true }
+        guard subrole != kAXUnknownSubrole as String else { return false }
+        return !isTrackable(role: role, subrole: subrole, isModal: isModal)
+    }
+
     static func isPlausibleUntracked(
         layer: Int, isRegularApp: Bool, bounds: CGRect, hasResolvedDesktop: Bool
     ) -> Bool {
@@ -248,9 +258,15 @@ enum AccessibilityWindowServiceProbe {
     }
 
     static func accessibilityContradicts(
-        windowDesktop: Int?, showingDesktop: Int?, appAXAnswerCoversShowingDesktop: Bool
+        isNamedByAX: Bool,
+        windowDesktop: Int?,
+        showingDesktop: Int?,
+        appAXAnswerCoversShowingDesktop: Bool
     ) -> Bool {
-        guard appAXAnswerCoversShowingDesktop, let windowDesktop, let showingDesktop
+        guard !isNamedByAX,
+              appAXAnswerCoversShowingDesktop,
+              let windowDesktop,
+              let showingDesktop
         else { return false }
         return windowDesktop == showingDesktop
     }
