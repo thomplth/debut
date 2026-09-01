@@ -108,6 +108,24 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         }
     }
 
+    /// Republishes the state block for a change that follows the event which reported it.
+    ///
+    /// A key event is reported before its handler runs, so the state filed alongside it is the
+    /// state the keystroke was about to change. No event appended: the event log's order and
+    /// volume are read by E2E too, and a second entry per keystroke would disturb both.
+    public func refreshState() {
+        let state = currentState()
+        let performance = performanceRecorder.snapshot()
+        let overlayPresentation = overlayPresentationRecorder.snapshot()
+        queue.async {
+            self.writeSnapshotFile(
+                state: state,
+                performance: performance,
+                overlayPresentation: overlayPresentation
+            )
+        }
+    }
+
     public func setStateProvider(_ provider: @escaping @Sendable () -> [String: String]) {
         setStateProvider(provider, runsOnMainQueue: false)
     }

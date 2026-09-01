@@ -176,6 +176,47 @@ struct SpaceControllerTests {
         })
     }
 
+    /// E2E observes a running session only through the snapshot's state block, and a held-Tab
+    /// sequence reports nothing else. Filing that block with the `key_event` that precedes the
+    /// handler leaves every reading one keystroke behind, which reads as a selection that never
+    /// moved — and then as one that moves the wrong way when the next keystroke publishes it.
+    @Test("The state block reflects the selection the key event just produced")
+    @MainActor
+    func keyEventPublishesTheSelectionItProduced() throws {
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            focusedWindowSnapshotProvider: { .unfocused }
+        )
+        let spaceID = controller.spaceManager.spaces[0].id
+        for id in 1...3 {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: CGWindowID(id),
+                    ownerBundleID: "com.test.\(id)",
+                    ownerName: "App \(id)",
+                    windowTitle: "W\(id)"
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        controller.handleKeyEvent(.cmdTabHold)
+        controller.handleKeyEvent(.cmdTabHold)
+        DiagnosticReporter.shared.flush()
+
+        #expect(controller.selectedWindowIndex == 2)
+        #expect(publishedState()["selectedWindowIndex"] == "2")
+    }
+
+    private func publishedState() -> [String: String] {
+        guard let data = try? Data(contentsOf: DiagnosticReporter.diagnosticFile),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let state = object["state"] as? [String: String]
+        else { return [:] }
+        return state
+    }
+
     @Test("A fullscreen frontmost app still gets the overlay")
     func fullscreenAppStillPresentsOverlay() throws {
         let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())

@@ -212,6 +212,33 @@ struct DiagnosticReporterTests {
         #expect(state["selectedWindowIndex"] == "3")
     }
 
+    /// A key event is reported before its handler runs, so the state filed with it is the state
+    /// the keystroke was about to change. Refreshing has to republish the block without logging a
+    /// second event, because the event log's order and volume are themselves read by E2E.
+    @Test("Refreshing republishes the state block without appending an event")
+    func refreshStateRepublishesWithoutLogging() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir)
+        let selection = MutableState()
+        reporter.setStateProvider { ["selectedWindowIndex": selection.value] }
+        reporter.report("key_event", level: .transient)
+
+        selection.value = "2"
+        reporter.refreshState()
+        reporter.flush()
+
+        let data = try Data(contentsOf: dir.appendingPathComponent("diagnostic.json"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let state = try #require(object["state"] as? [String: String])
+        let events = try #require(object["events"] as? [[String: String]])
+
+        #expect(state["selectedWindowIndex"] == "2")
+        #expect(events.filter { $0["event"] == "key_event" }.count == 1)
+        #expect(events.count == 1)
+    }
+
     private func snapshotState(in directory: URL) -> [String: String] {
         guard let data = try? Data(contentsOf: directory.appendingPathComponent("diagnostic.json")),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
