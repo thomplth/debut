@@ -1175,4 +1175,141 @@ struct WindowDiscoveryServiceTests {
 
         #expect(service.trackedWindowElement(windowID: 101) == nil)
     }
+
+    // MARK: - Focused-window observer registration
+
+    /// Drives every scheduled retry immediately and records how long each asked to wait.
+    private final class ImmediateRetryScheduler {
+        private(set) var delays: [TimeInterval] = []
+
+        func schedule(after delay: TimeInterval, work: @escaping () -> Void) {
+            delays.append(delay)
+            work()
+        }
+    }
+
+    private func focusObserverService(
+        registration: @escaping (pid_t) -> AXError,
+        scheduler: ImmediateRetryScheduler? = nil
+    ) -> WindowDiscoveryService {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.focusObserverRegistrationOverride = registration
+        if let scheduler {
+            service.focusObserverRetryScheduler = { scheduler.schedule(after: $0, work: $1) }
+        }
+        return service
+    }
+
+    // A freshly launched app refuses the registration until its AX server is up — measured at
+    // -25204 for nine of nine apps, with the server silent for the first 0.8-2.9s. Debut sees
+    // the activation ~0.2s in, so accepting the first answer means never observing focus.
+    @Test("A refused focus-observer registration is retried until the app answers")
+    func refusedFocusObserverRegistrationIsRetried() {
+        let scheduler = ImmediateRetryScheduler()
+        var attempts = 0
+        let service = focusObserverService(
+            registration: { _ in
+                attempts += 1
+                return attempts < 3 ? .cannotComplete : .success
+            },
+            scheduler: scheduler
+        )
+
+        service.installFocusObserver(for: 10)
+
+        #expect(attempts == 3)
+        #expect(service.diagnosticTrackingSnapshot.observedPID == 10)
+        #expect(scheduler.delays.count == 2)
+    }
+
+    // Recording the pid regardless is what made the failure permanent: the `observedPID == pid`
+    // early return then refused every later attempt for as long as the app stayed frontmost.
+    @Test("A registration that never succeeds is not recorded as observed")
+    func failedFocusObserverRegistrationIsNotRecorded() {
+        let scheduler = ImmediateRetryScheduler()
+        var attempts = 0
+        let service = focusObserverService(
+            registration: { _ in
+                attempts += 1
+                return .cannotComplete
+            },
+            scheduler: scheduler
+        )
+
+        service.installFocusObserver(for: 10)
+
+        #expect(attempts > 1)
+        #expect(service.diagnosticTrackingSnapshot.observedPID == nil)
+    }
+
+    // Retries outlive the activation that started them, so one left in flight for an app the
+    // user has already left would otherwise claim the observer back from the app they are in.
+    @Test("Activating another app abandons a retry still pending for the last one")
+    func pendingFocusObserverRetryIsAbandonedOnActivation() {
+        var pending: [() -> Void] = []
+        var attemptedPIDs: [pid_t] = []
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.focusObserverRegistrationOverride = { pid in
+            attemptedPIDs.append(pid)
+            return pid == 10 ? .cannotComplete : .success
+        }
+        service.focusObserverRetryScheduler = { _, work in pending.append(work) }
+
+        service.installFocusObserver(for: 10)
+        service.installFocusObserver(for: 20)
+        for work in pending { work() }
+
+        #expect(service.diagnosticTrackingSnapshot.observedPID == 20)
+        #expect(attemptedPIDs == [10, 20])
+    }
+
+    // An app that dies before its AX server ever answers would otherwise keep the retry chain
+    // running against a dead pid for the rest of the schedule.
+    @Test("A process exit abandons the retry still pending for it")
+    func processExitAbandonsPendingFocusObserverRetry() {
+        var pending: [() -> Void] = []
+        var attempts = 0
+        let service = focusObserverService(registration: { _ in
+            attempts += 1
+            return .cannotComplete
+        })
+        service.focusObserverRetryScheduler = { _, work in pending.append(work) }
+
+        service.installFocusObserver(for: 10)
+        service.handleProcessExit(pid: 10)
+        for work in pending { work() }
+
+        #expect(attempts == 1)
+    }
+
+    // The launch pass asks again 0.5s after the activation already did. Restarting the chain
+    // would reset the backoff the first one is partway through and double every later attempt.
+    @Test("Asking again for an app already being retried does not start a second chain")
+    func repeatedInstallDoesNotDuplicateRetryChain() {
+        var pending: [() -> Void] = []
+        var attempts = 0
+        let service = focusObserverService(registration: { _ in
+            attempts += 1
+            return .cannotComplete
+        })
+        service.focusObserverRetryScheduler = { _, work in pending.append(work) }
+
+        service.installFocusObserver(for: 10)
+        service.installFocusObserver(for: 10)
+
+        #expect(attempts == 1)
+        #expect(pending.count == 1)
+    }
 }
