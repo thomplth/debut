@@ -35,6 +35,39 @@ struct WindowServiceTests {
         ))
     }
 
+    // Phoenix Slides exposes its borderless image viewer as a 2560x1440 layer-0 window on
+    // exactly one desktop, but AX reports AXUnknown for its subrole. "Unknown" is the absence
+    // of a classification, not positive evidence that the viewer is auxiliary UI; treating it
+    // as untrackable made the real Stage 1 window dormant as `ax_contradicted`.
+    @Test("Only a positive AX verdict makes a window untrackable")
+    func unknownAXSubroleIsInconclusive() {
+        #expect(!AccessibilityWindowService.isPositivelyUntrackableAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXUnknownSubrole as String,
+            isModal: false
+        ))
+        #expect(!AccessibilityWindowService.isPositivelyUntrackableAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXDialogSubrole as String,
+            isModal: false
+        ))
+        #expect(AccessibilityWindowService.isPositivelyUntrackableAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXFloatingWindowSubrole as String,
+            isModal: false
+        ))
+        #expect(AccessibilityWindowService.isPositivelyUntrackableAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: true
+        ))
+        #expect(AccessibilityWindowService.isPositivelyUntrackableAXWindow(
+            role: kAXButtonRole as String,
+            subrole: kAXUnknownSubrole as String,
+            isModal: false
+        ))
+    }
+
     // AX role/subrole is a snapshot, not a verdict: an app that hasn't answered AX yet, or a
     // window on a Space that isn't showing (kAXWindows cannot see it there at all), is neither
     // trackable nor untrackable. Only a positively-untrackable window may be dropped outright;
@@ -108,6 +141,15 @@ struct WindowServiceTests {
         // Chrome 17776, 1541x89, desktop 3 while desktop 3 showed; Chrome answered with 2 windows.
         #expect(AccessibilityWindowService.accessibilityContradictsWindow(
             windowDesktop: 3, showingDesktop: 3, appAXAnswerCoversShowingDesktop: true
+        ))
+        // Phoenix Slides explicitly names 31426 but gives its subrole as AXUnknown. The
+        // classification is inconclusive, but it is not AX silence and cannot contradict the
+        // same window AX just returned.
+        #expect(!AccessibilityWindowService.accessibilityContradictsWindow(
+            isNamedByAX: true,
+            windowDesktop: 3,
+            showingDesktop: 3,
+            appAXAnswerCoversShowingDesktop: true
         ))
     }
 
