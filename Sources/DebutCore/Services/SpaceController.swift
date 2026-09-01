@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import AXPrivate
 import CoreGraphics
 
 /// Which switcher an overlay session is presenting.
@@ -235,6 +236,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// Where the frontmost app's focused window sat when the overlay last opened, in Quartz
     /// global coordinates. The delegate resolves it to the display it presents the stages on.
     public private(set) var focusedWindowFrame: CGRect?
+
+    /// The focused window sampled by the same bounded probe. Option-Tab uses it to repair MRU
+    /// before it assumes entry zero is the window the user is leaving.
+    public private(set) var focusedWindowID: CGWindowID?
 
     /// Whether that window owned a fullscreen Space. The stages are presented either way; this
     /// is what tells a diagnostic reader which of the two presentations it is looking at.
@@ -987,6 +992,19 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func openAltTab(forward: Bool) {
         setupOverlay(mode: .altTab)
+
+        // Focus notifications and the shortcut arrive on independent paths. Make the focused
+        // window authoritative at the moment the switcher opens, before relying on entry zero
+        // as the window the user is leaving. This also seeds a launch whose first activation
+        // predated observer registration.
+        if let focusedWindowID,
+           let focusedSpaceID = spaceManager.spaceContainingWindow(windowID: focusedWindowID) {
+            spaceManager.bringWindowToFront(
+                windowID: focusedWindowID,
+                inSpaceID: focusedSpaceID
+            )
+            delegate?.spaceControllerDidMutateState(self)
+        }
         altTabEntries = overlaySpaceManager.globalWindowOrder()
 
         // Entry 0 is the window the user is already on — they opened a switcher to leave it —
@@ -1035,6 +1053,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         overlayMode = mode
         let presentation = activeOverlayPresentation
         let focusedWindow = probeFocusedWindow()
+        focusedWindowID = focusedWindow.windowID
         focusedWindowFrame = focusedWindow.frame
         focusedWindowIsFullscreen = focusedWindow.isFullscreen
         if let presentation {
@@ -1167,10 +1186,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
         let axWindow = windowsRef as! AXUIElement
         AXUIElementSetMessagingTimeout(axWindow, Float(Self.focusProbeTimeout))
+        var windowID: CGWindowID = 0
+        let resolvedWindowID = _AXUIElementGetWindow(axWindow, &windowID) == .success
+            ? windowID
+            : nil
         var fullscreenRef: CFTypeRef?
         let isFullscreen = AXUIElementCopyAttributeValue(axWindow, "AXFullScreen" as CFString, &fullscreenRef) == .success
             && (fullscreenRef as? Bool) == true
         return FocusedWindowSnapshot(
+            windowID: resolvedWindowID,
             frame: axFrame(of: axWindow),
             isFullscreen: isFullscreen
         )

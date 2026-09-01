@@ -63,6 +63,40 @@ struct AltTabSwitcherTests {
         #expect(controller.altTabSelection?.window.windowID == 202)
     }
 
+    /// The activation observer and the shortcut are delivered independently. If the shortcut
+    /// wins that race, the stored timestamp still names the window used before the focused one.
+    /// Entry zero must describe what the user is actually leaving or the switcher skips an
+    /// unrelated window and every subsequent flip appears to change the order arbitrarily.
+    @Test("Opening repairs stale MRU from the focused window")
+    func openingRepairsStaleFocusedWindow() {
+        let now = Date()
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            focusedWindowSnapshotProvider: {
+                FocusedWindowSnapshot(windowID: 303, frame: nil, isFullscreen: false)
+            }
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            window(101, activatedAt: now),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            window(202, activatedAt: now.addingTimeInterval(-1)),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            window(303, activatedAt: now.addingTimeInterval(-2)),
+            toSpaceID: spaceID
+        )
+
+        controller.handleKeyEvent(.altTabHold)
+
+        #expect(controller.altTabEntries.map(\.window.windowID) == [303, 101, 202])
+        #expect(controller.altTabSelection?.window.windowID == 101)
+    }
+
     @Test("Opening backward selects the last window in global order")
     func opensOnLastWindow() {
         let (controller, _) = makeTwoSpaceController()
