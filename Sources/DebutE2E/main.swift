@@ -2303,6 +2303,163 @@ if let coverageGateReason {
     }
 }
 
+// --- 17. Focus inside an app that just launched ---
+// Registering kAXFocusedWindowChanged is refused while the target app is still starting up —
+// measured at -25204 for nine of nine freshly launched apps, with the AX server silent for the
+// first 0.8-2.9s while Debut sees the activation ~0.2s in. Debut recorded the pid regardless,
+// so the observer stayed dead for that app's whole first activation and focus moving between
+// its own windows never reached the MRU order. Unit tests can only fake that refusal; a real
+// launching app is the only thing that produces it.
+header("17. Focus inside an app that just launched")
+
+let launchFocusCheck = "Focus moving inside a just-launched app reaches the MRU order"
+
+func windowTitle(of element: AXUIElement) -> String? {
+    var titleRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef) == .success
+    else { return nil }
+    return titleRef as? String
+}
+
+func focusedWindowTitle(for processIdentifier: pid_t) -> String? {
+    focusedWindowElement(for: processIdentifier).flatMap(windowTitle(of:))
+}
+
+if NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.Debut").isEmpty {
+    clearDiagnosticFile()
+    _ = waitForDebutReady(launchDebut())
+}
+let launchFocusDebutPID = NSRunningApplication
+    .runningApplications(withBundleIdentifier: "com.thomplth.Debut")
+    .first?.processIdentifier ?? -1
+
+// Two files so the app comes up with two windows whose titles cannot be confused with the
+// shared fixture's, and so focus has somewhere to move without leaving the app.
+let launchFocusFixtures = [
+    URL(fileURLWithPath: "/tmp/debut-e2e-fixtures/mru-alpha.txt"),
+    URL(fileURLWithPath: "/tmp/debut-e2e-fixtures/mru-beta.txt"),
+]
+try? FileManager.default.createDirectory(
+    at: launchFocusFixtures[0].deletingLastPathComponent(),
+    withIntermediateDirectories: true
+)
+for fixture in launchFocusFixtures {
+    try? "Debut E2E \(fixture.lastPathComponent)\n".write(to: fixture, atomically: true, encoding: .utf8)
+}
+
+// A new instance, not the shared fixture's: the refusal is per process, so only a pid whose AX
+// server has never answered reproduces it.
+var launchFocusPID: pid_t = -1
+if let editor = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.TextEdit") {
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
+    configuration.createsNewApplicationInstance = true
+    let ready = DispatchSemaphore(value: 0)
+    NSWorkspace.shared.open(
+        launchFocusFixtures,
+        withApplicationAt: editor,
+        configuration: configuration
+    ) { app, _ in
+        launchFocusPID = app?.processIdentifier ?? -1
+        ready.signal()
+    }
+    _ = ready.wait(timeout: .now() + 20)
+}
+
+let launchFocusOpened = launchFocusPID > 0 && waitFor(timeout: 15) {
+    visibleWindowTitles(for: launchFocusPID).count >= 2
+}
+// Debut's launch-discovery pass and the retries this scenario exists to exercise both run on a
+// delay, so the model has to be given time to settle before focus is moved.
+wait(5)
+
+// Focus is moved through AX rather than Command-`, which the VM does not deliver to the app:
+// this has to be an in-app window change, so no synthetic click or app switch will do, and
+// setting kAXMain is the request macOS itself answers with kAXFocusedWindowChanged.
+let launchFocusBefore = focusedWindowTitle(for: launchFocusPID)
+var launchFocusWindowsRef: CFTypeRef?
+_ = AXUIElementCopyAttributeValue(
+    AXUIElementCreateApplication(launchFocusPID),
+    kAXWindowsAttribute as CFString,
+    &launchFocusWindowsRef
+)
+let launchFocusTarget = (launchFocusWindowsRef as? [AXUIElement])?.first {
+    let title = windowTitle(of: $0)
+    return title != nil && title != launchFocusBefore
+}
+if let launchFocusTarget {
+    AXUIElementPerformAction(launchFocusTarget, kAXRaiseAction as CFString)
+    AXUIElementSetAttributeValue(launchFocusTarget, kAXMainAttribute as CFString, kCFBooleanTrue)
+}
+let launchFocusMoved = waitFor(timeout: 5) {
+    let now = focusedWindowTitle(for: launchFocusPID)
+    return now != nil && now != launchFocusBefore
+}
+let launchFocusAfter = focusedWindowTitle(for: launchFocusPID)
+wait(2)
+
+postFlagsChanged(flags: [.maskCommand])
+wait(0.1)
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+_ = waitFor(timeout: 5) { readState()["overlayVisible"] == "true" }
+wait(1)
+let launchFocusCards = accessibilityStrings(for: launchFocusDebutPID)
+postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+postFlagsChanged(flags: [])
+wait(0.5)
+
+let launchFocusBeforeIndex = launchFocusBefore.flatMap { launchFocusCards.firstIndex(of: $0) }
+let launchFocusAfterIndex = launchFocusAfter.flatMap { launchFocusCards.firstIndex(of: $0) }
+let launchFocusEvents = readEvents().filter {
+    ($0["event"] ?? "").hasPrefix("focus_observer_")
+}
+
+info("Launch focus: pid=\(launchFocusPID) opened=\(launchFocusOpened) "
+    + "windows=\(visibleWindowTitles(for: launchFocusPID)) "
+    + "before=\(launchFocusBefore ?? "nil") after=\(launchFocusAfter ?? "nil") "
+    + "moved=\(launchFocusMoved) beforeIndex=\(launchFocusBeforeIndex ?? -1) "
+    + "afterIndex=\(launchFocusAfterIndex ?? -1)")
+for event in launchFocusEvents { info("  \(event)") }
+
+if !launchFocusOpened {
+    skipTest(launchFocusCheck, reason: "A second TextEdit instance did not open two windows")
+} else if !launchFocusMoved {
+    // Debut is not being measured here: macOS never moved focus, so there is nothing it could
+    // have observed. Failing would report a Debut regression for a fixture that did not run.
+    skipTest(launchFocusCheck, reason: "AX did not move focus within the launched app")
+} else {
+    test(launchFocusCheck) {
+        guard let afterIndex = launchFocusAfterIndex else {
+            info("  the newly focused window \(launchFocusAfter ?? "nil") has no card")
+            return false
+        }
+        guard let beforeIndex = launchFocusBeforeIndex else {
+            info("  the previously focused window \(launchFocusBefore ?? "nil") has no card")
+            return false
+        }
+        guard afterIndex < beforeIndex else {
+            info("  \(launchFocusAfter ?? "nil") is still behind \(launchFocusBefore ?? "nil"), "
+                + "so the focus change never reached the model")
+            return false
+        }
+        return true
+    }
+    test("The focused-window observer is never left refused by a launching app") {
+        let failures = launchFocusEvents.filter {
+            $0["event"] == "focus_observer_registration_failed"
+                && $0["pid"] == "\(launchFocusPID)"
+        }
+        guard failures.isEmpty else {
+            info("  registration gave up on pid \(launchFocusPID): \(failures)")
+            return false
+        }
+        return true
+    }
+}
+
+NSRunningApplication(processIdentifier: launchFocusPID)?.forceTerminate()
+
 // --- Summary ---
 header("Results")
 print("")

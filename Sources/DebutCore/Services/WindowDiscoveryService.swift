@@ -78,9 +78,20 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Replaces the AX element lookup in tests. Production leaves this nil.
     var windowElementOverride: ((CGWindowID, pid_t) -> AXUIElement?)?
 
+    /// Replaces the AX focus-observer registration in tests. Production leaves this nil.
+    var focusObserverRegistrationOverride: ((pid_t) -> AXError)?
+
+    /// Replaces retry scheduling in tests so a refused registration can be re-driven
+    /// without waiting on wall time. Production leaves this nil.
+    var focusObserverRetryScheduler: ((TimeInterval, @escaping () -> Void) -> Void)?
+
     // AXObserver for tracking focused window changes within the frontmost app
     private var focusObserver: AXObserver?
     private var observedPID: pid_t?
+
+    /// The app a refused registration is still retrying for, and how many retries it has spent.
+    private var pendingFocusObserverPID: pid_t?
+    private var focusObserverAttempt = 0
 
     // Per-app AXObservers for window lifecycle (destroyed, title changed)
     private var perAppObservers: [pid_t: AXObserver] = [:]
@@ -478,6 +489,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     private func pruneTracking(runningPIDs: Set<pid_t>) {
+        if let pendingFocusObserverPID, !runningPIDs.contains(pendingFocusObserverPID) {
+            self.pendingFocusObserverPID = nil
+        }
         if let observedPID, !runningPIDs.contains(observedPID) {
             removeFocusObserver()
         }
@@ -528,22 +542,82 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     // MARK: - AXObserver for focused window changes
 
-    private func installFocusObserver(for pid: pid_t) {
-        // Skip if already observing this app
-        if observedPID == pid { return }
+    /// An app that is still starting up refuses this registration — measured at -25204 for
+    /// nine of nine freshly launched apps, with the AX server not answering for the first
+    /// 0.8-2.9s while Debut sees the activation ~0.2s in. There is no notification for an AX
+    /// server coming up, so recovery is a bounded retry rather than an event: it stops on the
+    /// first success, on the next activation, and after the last delay below.
+    private static let focusObserverRetryDelays: [TimeInterval] = [0.25, 0.5, 1, 2]
+
+    func installFocusObserver(for pid: pid_t) {
+        // Skip if already observing this app, or already retrying for it — the launch pass
+        // asks again 0.5s after the activation did, and a second chain would only reset the
+        // backoff the first one is already working through.
+        if observedPID == pid || pendingFocusObserverPID == pid { return }
         removeFocusObserver()
 
+        pendingFocusObserverPID = pid
+        focusObserverAttempt = 0
+        attemptFocusObserverInstall()
+    }
+
+    private func attemptFocusObserverInstall() {
+        guard let pid = pendingFocusObserverPID else { return }
+
+        let result = registerFocusObserver(for: pid)
+        guard result != .success else {
+            if focusObserverAttempt > 0 {
+                diag.report("focus_observer_registered", details: [
+                    "pid": "\(pid)",
+                    "attempts": "\(focusObserverAttempt + 1)",
+                ])
+            }
+            pendingFocusObserverPID = nil
+            observedPID = pid
+            return
+        }
+
+        guard focusObserverAttempt < Self.focusObserverRetryDelays.count else {
+            diag.report("focus_observer_registration_failed", details: [
+                "pid": "\(pid)",
+                "error": "\(result.rawValue)",
+                "attempts": "\(focusObserverAttempt + 1)",
+            ])
+            pendingFocusObserverPID = nil
+            return
+        }
+
+        let delay = Self.focusObserverRetryDelays[focusObserverAttempt]
+        focusObserverAttempt += 1
+        let retry: @Sendable () -> Void = { [weak self] in self?.attemptFocusObserverInstall() }
+        if let focusObserverRetryScheduler {
+            focusObserverRetryScheduler(delay, retry)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: retry)
+        }
+    }
+
+    private func registerFocusObserver(for pid: pid_t) -> AXError {
+        if let focusObserverRegistrationOverride {
+            return focusObserverRegistrationOverride(pid)
+        }
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         var observer: AXObserver?
-        let result = AXObserverCreate(pid, focusChangedCallback, &observer)
-        guard result == .success, let observer else { return }
+        let created = AXObserverCreate(pid, focusChangedCallback, &observer)
+        guard created == .success, let observer else { return created }
 
         let axApp = AXUIElementCreateApplication(pid)
-        AXObserverAddNotification(observer, axApp, kAXFocusedWindowChangedNotification as CFString, selfPtr)
-        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
+        let added = AXObserverAddNotification(
+            observer,
+            axApp,
+            kAXFocusedWindowChangedNotification as CFString,
+            selfPtr
+        )
+        guard added == .success else { return added }
 
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
         self.focusObserver = observer
-        self.observedPID = pid
+        return .success
     }
 
     private func removeFocusObserver() {
@@ -554,6 +628,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
         focusObserver = nil
         observedPID = nil
+        pendingFocusObserverPID = nil
     }
 
     fileprivate func handleFocusChanged() {
@@ -763,8 +838,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         monitoredProcessIDs.remove(pid)
         processExitMonitor.stopMonitoring(pid: pid)
 
-        // Clean up focus observer if we were observing this app
-        if pid == observedPID {
+        // Clean up focus observer if we were observing this app, or still trying to
+        if pid == observedPID || pid == pendingFocusObserverPID {
             removeFocusObserver()
         }
 
