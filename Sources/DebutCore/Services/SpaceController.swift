@@ -1508,9 +1508,27 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// the selection is an index, so it has to be pulled back in range before the overlay is
     /// redrawn against the shorter space.
     public func handleLiveWindowsRemoved() {
+        pruneAltTabEntries()
         let windowCount = overlaySpaceManager.spaces[safe: selectedSpaceIndex]?.windows.count ?? 0
         selectedWindowIndex = max(0, min(selectedWindowIndex, windowCount - 1))
         notifyOverlayUpdated()
+    }
+
+    /// Drops removed windows from the flat list by filtering the list the user is looking at,
+    /// rather than re-deriving it: a fresh `globalWindowOrder()` would be free to reshuffle the
+    /// remaining cards under the selector partway through a cycle.
+    private func pruneAltTabEntries() {
+        guard overlayMode == .altTab else { return }
+        let live = Set(overlaySpaceManager.allSpaces.flatMap { $0.windows.map(\.windowID) })
+        let selectedWindowID = altTabSelection?.window.windowID
+        altTabEntries = altTabEntries.filter { live.contains($0.window.windowID) }
+        if let selectedWindowID,
+           let index = altTabEntries.firstIndex(where: { $0.window.windowID == selectedWindowID }) {
+            altTabSelectionIndex = index
+        } else {
+            altTabSelectionIndex = min(altTabSelectionIndex, max(0, altTabEntries.count - 1))
+        }
+        syncStageSelection(toAltTabIndex: altTabSelectionIndex)
     }
 
     /// Whether the space model may record a window changing spaces.
