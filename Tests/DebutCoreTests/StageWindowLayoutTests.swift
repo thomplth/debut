@@ -182,12 +182,12 @@ struct StageWindowLayoutTests {
         #expect(metrics.scaled(by: 1) == metrics)
     }
 
-    @Test("The standard single-row stage preserves the original vertical profile")
+    @Test("The standard stage stays compact while its cards make selector clearance")
     func standardSingleRowVerticalProfile() {
         let stage = layout(3, availableWidth: fourColumnWidth)
 
         #expect(stage.stageSize.height == 164)
-        #expect(stage.cardOffsetFromCenter(at: 0).height == 7)
+        #expect(stage.cardOffsetFromCenter(at: 0).height == 10)
 
         let enlarged = StageWindowLayout(
             windowCount: 3,
@@ -197,6 +197,20 @@ struct StageWindowLayoutTests {
         #expect(enlarged.stageSize.height == stage.stageSize.height * 1.5)
         #expect(enlarged.cardOffsetFromCenter(at: 0).height
             == stage.cardOffsetFromCenter(at: 0).height * 1.5)
+    }
+
+    @Test("The title sits midway between the preview and the stage edge")
+    func titleUsesSelectorClearance() {
+        let previewBottom = metrics.topPadding
+            + metrics.cardPadding
+            + metrics.thumbnailHeight
+        let titleCenter = previewBottom
+            + metrics.titleSpacing
+            + metrics.titleHeight / 2
+        let stageBottom = layout(1, availableWidth: fourColumnWidth).stageSize.height
+
+        #expect(titleCenter == (previewBottom + stageBottom) / 2)
+        #expect(metrics.titleSpacing > 4)
     }
 
     @Test("A larger scale fits fewer cards across the same display")

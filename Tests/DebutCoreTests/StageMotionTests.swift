@@ -588,11 +588,61 @@ struct StageMotionTests {
         #expect(abs((precedingCenter ?? 0) - 202.4) < 0.001)
     }
 
-    @Test("Selected windows magnify instead of using a selection indicator")
-    func selectedWindowScale() {
-        #expect(StageMotion.windowScale(isSelected: false, isDragging: false) == 1)
-        #expect(StageMotion.windowScale(isSelected: true, isDragging: false) == 1.06)
-        #expect(StageMotion.windowScale(isSelected: true, isDragging: true) == 0.96)
+    @Test("The default outline selector does not magnify its window")
+    func outlineWindowScale() {
+        #expect(StageMotion.windowScale(
+            isSelected: false,
+            isDragging: false,
+            style: .outline,
+            magnifyScale: 1.12
+        ) == 1)
+        #expect(StageMotion.windowScale(
+            isSelected: true,
+            isDragging: false,
+            style: .outline,
+            magnifyScale: 1.12
+        ) == 1)
+    }
+
+    @Test("Magnify selection uses the configured scale")
+    func magnifiedWindowScale() {
+        #expect(StageMotion.windowScale(
+            isSelected: true,
+            isDragging: false,
+            style: .magnify,
+            magnifyScale: 1.12
+        ) == 1.12)
+        #expect(StageMotion.windowScale(
+            isSelected: true,
+            isDragging: true,
+            style: .magnify,
+            magnifyScale: 1.12
+        ) == 0.96)
+    }
+
+    @Test("The outline appears only on a selected window resting in its stage")
+    func outlineVisibility() {
+        #expect(StageMotion.showsWindowSelector(
+            isSelected: true,
+            isDragging: false,
+            style: .outline
+        ))
+        #expect(!StageMotion.showsWindowSelector(
+            isSelected: true,
+            isDragging: true,
+            style: .outline
+        ))
+        #expect(!StageMotion.showsWindowSelector(
+            isSelected: true,
+            isDragging: false,
+            style: .magnify
+        ))
+    }
+
+    @Test("The outline uses the specified adaptive grays at full opacity")
+    func outlineColors() {
+        #expect(StageMotion.windowSelectorGray(isDarkMode: true) == 103.0 / 255.0)
+        #expect(StageMotion.windowSelectorGray(isDarkMode: false) == 167.0 / 255.0)
     }
 
     @Test("Only the selected window carries a lift")
@@ -610,15 +660,33 @@ struct StageMotionTests {
     @Test("The selected window keeps its light-mode shadow unchanged")
     func selectedWindowLiftInLightMode() {
         #expect(
-            StageMotion.windowLift(isSelected: true, isDragging: false, isDarkMode: false)
+            StageMotion.windowLift(
+                isSelected: true,
+                isDragging: false,
+                isDarkMode: false,
+                style: .magnify,
+                shadowStrength: 1
+            )
                 == .init(shadowOpacity: 0.24, shadowRadius: 8, shadowY: 4)
         )
     }
 
     @Test("Dark mode deepens the selected window shadow")
     func selectedWindowLiftInDarkMode() {
-        let dark = StageMotion.windowLift(isSelected: true, isDragging: false, isDarkMode: true)
-        let light = StageMotion.windowLift(isSelected: true, isDragging: false, isDarkMode: false)
+        let dark = StageMotion.windowLift(
+            isSelected: true,
+            isDragging: false,
+            isDarkMode: true,
+            style: .magnify,
+            shadowStrength: 1
+        )
+        let light = StageMotion.windowLift(
+            isSelected: true,
+            isDragging: false,
+            isDarkMode: false,
+            style: .magnify,
+            shadowStrength: 1
+        )
 
         #expect(dark.shadowOpacity > light.shadowOpacity)
         #expect(dark.shadowRadius > light.shadowRadius)
@@ -631,10 +699,34 @@ struct StageMotionTests {
                 StageMotion.windowLift(
                     isSelected: true,
                     isDragging: true,
-                    isDarkMode: isDarkMode
+                    isDarkMode: isDarkMode,
+                    style: .magnify,
+                    shadowStrength: 1
                 ).shadowOpacity == 0
             )
         }
+    }
+
+    @Test("Outline selection never adds a window lift")
+    func outlineWindowHasNoLift() {
+        #expect(StageMotion.windowLift(
+            isSelected: true,
+            isDragging: false,
+            isDarkMode: true,
+            style: .outline,
+            shadowStrength: 2
+        ) == .init(shadowOpacity: 0, shadowRadius: 0, shadowY: 0))
+    }
+
+    @Test("Magnify shadow strength scales the existing lift")
+    func magnifyShadowStrength() {
+        #expect(StageMotion.windowLift(
+            isSelected: true,
+            isDragging: false,
+            isDarkMode: false,
+            style: .magnify,
+            shadowStrength: 0.5
+        ) == .init(shadowOpacity: 0.12, shadowRadius: 4, shadowY: 2))
     }
 
     @Test("Window drops allow reordered and cross-space positions")
@@ -899,19 +991,19 @@ struct StageMotionTests {
             stageFrames: stages,
             layouts: layouts,
             scales: [1, 1, 1]
-        ) == CGPoint(x: 320 + stride, y: 89))
+        ) == CGPoint(x: 320 + stride, y: 92))
         #expect(StageMotion.windowDropDestination(
             target: WindowDropTarget(spaceIndex: 1, windowIndex: 1),
             stageFrames: stages,
             layouts: layouts,
             scales: [1, 1, 1]
-        ) == CGPoint(x: 320, y: 289))
+        ) == CGPoint(x: 320, y: 292))
         #expect(StageMotion.windowDropDestination(
             target: WindowDropTarget(spaceIndex: 2, windowIndex: 0),
             stageFrames: stages,
             layouts: layouts,
             scales: [1, 1, 1]
-        ) == CGPoint(x: 250, y: 489))
+        ) == CGPoint(x: 250, y: 492))
     }
 
     @Test("A scaled destination stage lands the preview on its scaled slot")
@@ -925,7 +1017,7 @@ struct StageMotionTests {
             stageFrames: stages,
             layouts: [grid(3, capacity: 4)],
             scales: [0.5]
-        ) == CGPoint(x: 160 + stride / 2, y: 44.5))
+        ) == CGPoint(x: 160 + stride / 2, y: 46))
     }
 
     @Test("A press without meaningful movement selects instead of starting a drag")

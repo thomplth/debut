@@ -5,6 +5,11 @@ public enum GlassStyle: String, Codable, Sendable, CaseIterable {
     case regular = "Regular"
 }
 
+public enum WindowSelectionStyle: String, Codable, Sendable, CaseIterable {
+    case outline = "Outline"
+    case magnify = "Magnify"
+}
+
 public enum CommandHintVisibility: String, Codable, Sendable, CaseIterable {
     case automatic = "Automatic"
     case never = "Never"
@@ -96,10 +101,32 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let maximumStageScale: Double = 2.5
     public static let stageScaleStep: Double = 0.05
 
+    public static let defaultSelectorBorderWidth: Double = 4
+    public static let minimumSelectorBorderWidth: Double = 1
+    /// The selector is drawn inside the card's six-point reserved preview outset.
+    public static let maximumSelectorBorderWidth: Double = 6
+    public static let defaultSelectorCornerRadius: Double = 12
+    public static let minimumSelectorCornerRadius: Double = 0
+    public static let maximumSelectorCornerRadius: Double = 24
+    public static let defaultMagnifyScale: Double = 1.06
+    public static let minimumMagnifyScale: Double = 1
+    public static let maximumMagnifyScale: Double = 1.2
+    public static let magnifyScaleStep: Double = 0.01
+    public static let defaultMagnifyShadowStrength: Double = 1
+    public static let minimumMagnifyShadowStrength: Double = 0
+    public static let maximumMagnifyShadowStrength: Double = 2
+
     public var glassStyle: GlassStyle
     public var stageCornerRadius: Double
     public var inactiveStageScale: Double
     public var stageScale: Double
+
+    // Window selection
+    public var windowSelectionStyle: WindowSelectionStyle
+    public var selectorBorderWidth: Double
+    public var selectorCornerRadius: Double
+    public var magnifyScale: Double
+    public var magnifyShadowStrength: Double
 
     // Keyboard
     public var overlayPresentationDelay: TimeInterval
@@ -129,6 +156,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.stageCornerRadius = 40
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
+        self.windowSelectionStyle = .outline
+        self.selectorBorderWidth = Self.defaultSelectorBorderWidth
+        self.selectorCornerRadius = Self.defaultSelectorCornerRadius
+        self.magnifyScale = Self.defaultMagnifyScale
+        self.magnifyShadowStrength = Self.defaultMagnifyShadowStrength
 
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
         self.heldCycleMinimumInterval = Self.defaultHeldCycleMinimumInterval
@@ -161,6 +193,26 @@ public struct AppSettings: Codable, Sendable, Equatable {
             Double.self,
             forKey: .stageScale
         ) ?? Self.defaultStageScale
+        windowSelectionStyle = try container.decodeIfPresent(
+            WindowSelectionStyle.self,
+            forKey: .windowSelectionStyle
+        ) ?? .outline
+        selectorBorderWidth = try container.decodeIfPresent(
+            Double.self,
+            forKey: .selectorBorderWidth
+        ) ?? Self.defaultSelectorBorderWidth
+        selectorCornerRadius = try container.decodeIfPresent(
+            Double.self,
+            forKey: .selectorCornerRadius
+        ) ?? Self.defaultSelectorCornerRadius
+        magnifyScale = try container.decodeIfPresent(
+            Double.self,
+            forKey: .magnifyScale
+        ) ?? Self.defaultMagnifyScale
+        magnifyShadowStrength = try container.decodeIfPresent(
+            Double.self,
+            forKey: .magnifyShadowStrength
+        ) ?? Self.defaultMagnifyShadowStrength
         overlayPresentationDelay = try container.decodeIfPresent(
             TimeInterval.self,
             forKey: .overlayPresentationDelay
