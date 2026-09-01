@@ -733,6 +733,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
         diag.report("key_event", level: .transient, details: ["keyEvent": "\(event)"])
 
+        if isSpaceManagerVisible, overlayMode == .altTab, Self.isStageOnly(event) {
+            diag.report("alt_tab_ignored_stage_action", level: .transient, details: [
+                "keyEvent": "\(event)",
+            ])
+            return
+        }
+
         switch event {
         case .cmdTabTap:
             handleCmdTabTap()
@@ -942,6 +949,25 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     // MARK: - Alt-tab switcher
+
+    /// Actions that only mean something against a drawn stack of spaces.
+    ///
+    /// The flat switcher shows none, so stepping between them has nothing to point at while
+    /// still moving the stage cursor the selector is mirrored onto — a later commit, quit or
+    /// close would then act on a window other than the one on screen. A window move is worse
+    /// than useless: it reassigns the window's desktop with nothing on screen to say where it
+    /// went.
+    private static func isStageOnly(_ event: DebutKeyEvent) -> Bool {
+        switch event {
+        case .nextWindow, .nextWindowRepeat, .previousWindow, .previousWindowRepeat,
+             .nextSpace, .previousSpace, .nextDisplayStack,
+             .jumpToSpace, .jumpToLastSpace,
+             .moveWindowUp, .moveWindowDown, .moveWindowLeft, .moveWindowRight:
+            true
+        default:
+            false
+        }
+    }
 
     private func openOrCycleAltTab(forward: Bool) {
         // The stage session owns the held Cmd. Reusing its overlay for a second switcher would
