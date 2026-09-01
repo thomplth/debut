@@ -6,8 +6,26 @@ public enum GlassStyle: String, Codable, Sendable, CaseIterable {
 }
 
 public enum WindowSelectionStyle: String, Codable, Sendable, CaseIterable {
-    case outline = "Outline"
+    case filled = "Filled"
     case magnify = "Magnify"
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        switch try container.decode(String.self) {
+        case "Filled", "Outline": self = .filled
+        case "Magnify": self = .magnify
+        default:
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown window selection style"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 public enum CommandHintVisibility: String, Codable, Sendable, CaseIterable {
@@ -101,10 +119,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let maximumStageScale: Double = 2.5
     public static let stageScaleStep: Double = 0.05
 
-    public static let defaultSelectorBorderWidth: Double = 4
-    public static let minimumSelectorBorderWidth: Double = 1
-    /// The selector is drawn inside the card's six-point reserved preview outset.
-    public static let maximumSelectorBorderWidth: Double = 6
+    public static let defaultSelectorOutset: Double = 6
+    public static let minimumSelectorOutset: Double = 2
+    /// The fill stays inside the card's reserved preview outset, clear of the title.
+    public static let maximumSelectorOutset: Double = 6
     public static let defaultSelectorCornerRadius: Double = 12
     public static let minimumSelectorCornerRadius: Double = 0
     public static let maximumSelectorCornerRadius: Double = 24
@@ -123,7 +141,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
 
     // Window selection
     public var windowSelectionStyle: WindowSelectionStyle
-    public var selectorBorderWidth: Double
+    public var selectorOutset: Double
     public var selectorCornerRadius: Double
     public var magnifyScale: Double
     public var magnifyShadowStrength: Double
@@ -156,8 +174,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.stageCornerRadius = 40
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
-        self.windowSelectionStyle = .outline
-        self.selectorBorderWidth = Self.defaultSelectorBorderWidth
+        self.windowSelectionStyle = .filled
+        self.selectorOutset = Self.defaultSelectorOutset
         self.selectorCornerRadius = Self.defaultSelectorCornerRadius
         self.magnifyScale = Self.defaultMagnifyScale
         self.magnifyShadowStrength = Self.defaultMagnifyShadowStrength
@@ -196,11 +214,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
         windowSelectionStyle = try container.decodeIfPresent(
             WindowSelectionStyle.self,
             forKey: .windowSelectionStyle
-        ) ?? .outline
-        selectorBorderWidth = try container.decodeIfPresent(
+        ) ?? .filled
+        selectorOutset = try container.decodeIfPresent(
             Double.self,
-            forKey: .selectorBorderWidth
-        ) ?? Self.defaultSelectorBorderWidth
+            forKey: .selectorOutset
+        ) ?? Self.defaultSelectorOutset
         selectorCornerRadius = try container.decodeIfPresent(
             Double.self,
             forKey: .selectorCornerRadius

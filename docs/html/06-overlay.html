@@ -398,13 +398,15 @@ legacy "has launched before" flag so existing users never see a first-run screen
 <div class="note">
   <span class="label">Selection style is configurable</span>
   <p>
-  The default outline uses RGB 103 in dark appearance and RGB 167 in light
-  appearance at full opacity. It occupies the preview's reserved outset, never
-  covers the title, and is suppressed on drag previews. Magnify retains the
+  The default filled selector uses RGB 103 in dark appearance and RGB 167 in
+  light appearance at full opacity. It sits behind the preview and app icon,
+  occupies the preview's reserved outset, never covers the title, and is
+  suppressed on drag previews. Magnify retains the
   original 1.06× scale and adaptive dark/light shadow as defaults. Selector
-  settings expose outline width and radius or magnify scale and shadow strength,
+  settings expose fill outset and radius or magnify scale and shadow strength,
   depending on the chosen style. Settings files written before these controls
-  decode to the outline defaults.
+  decode to the filled defaults. The short-lived <code>Outline</code> value also
+  migrates to <code>Filled</code>.
   </p>
 </div>
 

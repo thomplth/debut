@@ -323,11 +323,18 @@ enum StageMotion {
         isDragging: Bool,
         style: WindowSelectionStyle
     ) -> Bool {
-        isSelected && !isDragging && style == .outline
+        isSelected && !isDragging && style == .filled
     }
 
     static func windowSelectorGray(isDarkMode: Bool) -> Double {
         (isDarkMode ? 103.0 : 167.0) / 255.0
+    }
+
+    static func windowSelectorSize(thumbnailSize: CGSize, outset: CGFloat) -> CGSize {
+        CGSize(
+            width: thumbnailSize.width + outset * 2,
+            height: thumbnailSize.height + outset * 2
+        )
     }
 
     static func sourceWindowOpacity(isDragging: Bool) -> Double {
@@ -1792,35 +1799,6 @@ struct WindowPreviewView: View {
                     }
                 }
                 .frame(width: metrics.thumbnailWidth, height: metrics.thumbnailHeight)
-                .overlay {
-                    if showsSelector {
-                        GeometryReader { geometry in
-                            RoundedRectangle(
-                                cornerRadius: CGFloat(appearance.selectorCornerRadius)
-                                    * metrics.scaleFactor
-                            )
-                            .strokeBorder(
-                                Color(
-                                    white: StageMotion.windowSelectorGray(
-                                        isDarkMode: colorScheme == .dark
-                                    ),
-                                    opacity: 1
-                                ),
-                                lineWidth: CGFloat(appearance.selectorBorderWidth)
-                                    * metrics.scaleFactor
-                            )
-                            .frame(
-                                width: geometry.size.width + metrics.cardPadding * 2,
-                                height: geometry.size.height + metrics.cardPadding * 2
-                            )
-                            .position(
-                                x: geometry.size.width / 2,
-                                y: geometry.size.height / 2
-                            )
-                        }
-                        .allowsHitTesting(false)
-                    }
-                }
                 .overlay(alignment: .bottomTrailing) {
                     if !commandHints.isEmpty {
                         CommandHintStrip(hints: commandHints, scale: metrics.scaleFactor)
@@ -1842,6 +1820,29 @@ struct WindowPreviewView: View {
                         y: metrics.scaleFactor
                     )
                     .offset(x: -4 * metrics.scaleFactor, y: -4 * metrics.scaleFactor)
+            }
+            .background {
+                if showsSelector {
+                    let selectorSize = StageMotion.windowSelectorSize(
+                        thumbnailSize: CGSize(
+                            width: metrics.thumbnailWidth,
+                            height: metrics.thumbnailHeight
+                        ),
+                        outset: CGFloat(appearance.selectorOutset) * metrics.scaleFactor
+                    )
+                    RoundedRectangle(
+                        cornerRadius: CGFloat(appearance.selectorCornerRadius)
+                            * metrics.scaleFactor
+                    )
+                    .fill(Color(
+                        white: StageMotion.windowSelectorGray(
+                            isDarkMode: colorScheme == .dark
+                        ),
+                        opacity: 1
+                    ))
+                    .frame(width: selectorSize.width, height: selectorSize.height)
+                    .allowsHitTesting(false)
+                }
             }
 
             Text(window.displayTitle)

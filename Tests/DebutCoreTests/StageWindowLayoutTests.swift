@@ -211,6 +211,7 @@ struct StageWindowLayoutTests {
 
         #expect(titleCenter == (previewBottom + stageBottom) / 2)
         #expect(metrics.titleSpacing > 4)
+        #expect(CGFloat(AppSettings.maximumSelectorOutset) <= metrics.cardPadding)
     }
 
     @Test("A larger scale fits fewer cards across the same display")
