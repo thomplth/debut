@@ -19,11 +19,19 @@ final class OverlayScrollRelay {
     var latest: OverlayScrollEvent?
 }
 
+/// Which switcher the one overlay window is currently hosting. A `switch` in the body gives each
+/// case its own structural identity, so changing switcher rebuilds the tree while an update
+/// within one preserves it — which is what keeps the card transitions running.
+private enum OverlayRootView {
+    case stages(StageOverlayView)
+    case altTab(AltTabOverlayView)
+}
+
 @Observable
 private final class OverlayContentState {
-    var rootView: StageOverlayView
+    var rootView: OverlayRootView
 
-    init(rootView: StageOverlayView) {
+    init(rootView: OverlayRootView) {
         self.rootView = rootView
     }
 }
@@ -32,7 +40,10 @@ private struct OverlayContentRootView: View {
     let state: OverlayContentState
 
     var body: some View {
-        state.rootView
+        switch state.rootView {
+        case .stages(let view): view
+        case .altTab(let view): view
+        }
     }
 }
 
@@ -98,6 +109,31 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         view.scrollRelay = scrollRelay
         view.onSpaceScrollSelected = onSpaceScrollSelected
         view.onSpaceScrollRouted = onSpaceScrollRouted
+        return present(
+            .stages(view),
+            removedWindowIDs: removedWindowIDs,
+            generation: generation
+        )
+    }
+
+    /// The flat switcher has no stack to choreograph, so it never animates removals; a window
+    /// that disappears from the global list is simply absent from the next update.
+    @discardableResult
+    public func update(altTab viewModel: AltTabOverlayViewModel) -> Bool {
+        synchronizeFrameToTargetScreen(display: false)
+        renderedWindowIDs = Set(viewModel.windows.map(\.windowID))
+        return present(
+            .altTab(AltTabOverlayView(viewModel: viewModel)),
+            removedWindowIDs: [],
+            generation: renderGeneration
+        )
+    }
+
+    private func present(
+        _ view: OverlayRootView,
+        removedWindowIDs: Set<CGWindowID>,
+        generation: Int
+    ) -> Bool {
         if let hostingView, let contentState {
             // Mutating observable content preserves the SwiftUI tree, so removals run the
             // card transition and animate the surviving cards into their new positions.
