@@ -697,19 +697,31 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     // MARK: - NSWorkspace notifications
 
+    /// Launch Services leaves hosted foreground processes such as CrossOver's Wine children
+    /// bundleless. The window service resolves those children to their signed host identity;
+    /// use the same answer for launch and activation notifications so a window created after
+    /// startup reaches discovery instead of waiting for an unrelated reconciliation event.
+    private func appInfo(for application: NSRunningApplication) -> AppInfo? {
+        guard application.activationPolicy == .regular else { return nil }
+        let pid = application.processIdentifier
+        if let bundleID = application.bundleIdentifier {
+            return AppInfo(
+                bundleID: bundleID,
+                name: application.localizedName ?? bundleID,
+                pid: pid,
+                isHidden: application.isHidden
+            )
+        }
+        return windowService.listRunningApps().first { $0.pid == pid }
+    }
+
     @objc private func appDidLaunch(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              let bundleID = app.bundleIdentifier,
-              !excludedBundleIDs.contains(bundleID),
-              app.activationPolicy == .regular
+              let appInfo = appInfo(for: app),
+              !excludedBundleIDs.contains(appInfo.bundleID)
         else { return }
 
-        handleAppLaunch(AppInfo(
-            bundleID: bundleID,
-            name: app.localizedName ?? bundleID,
-            pid: app.processIdentifier,
-            isHidden: app.isHidden
-        ))
+        handleAppLaunch(appInfo)
     }
 
     func handleAppLaunch(_ app: AppInfo) {
@@ -771,17 +783,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     @objc private func appDidActivate(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let appInfo = appInfo(for: app)
         else { return }
 
-        let pid = app.processIdentifier
-        let bundleID = app.bundleIdentifier ?? ""
-        handleAppActivation(AppInfo(
-            bundleID: bundleID,
-            name: app.localizedName ?? bundleID,
-            pid: pid,
-            isHidden: app.isHidden
-        ))
+        let pid = appInfo.pid
+        let bundleID = appInfo.bundleID
+        handleAppActivation(appInfo)
 
         guard bundleID != "com.thomplth.Debut",
               !excludedBundleIDs.contains(bundleID),

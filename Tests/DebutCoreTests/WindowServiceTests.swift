@@ -68,6 +68,34 @@ struct WindowServiceTests {
         ))
     }
 
+    // CrossOver's Wine child is a foreground Launch Services application with no bundle ID.
+    // Its executable is nevertheless signed as `com.codeweavers.CrossOver.wineloader`, which
+    // names the running CrossOver bundle that owns the child closely enough to give the
+    // window a stable identity without admitting arbitrary bundleless processes.
+    @Test("A bundleless signed child resolves to its running host application")
+    func signedChildResolvesToRunningHost() {
+        #expect(AccessibilityWindowService.hostBundleID(
+            forSigningIdentifier: "com.codeweavers.CrossOver.wineloader",
+            among: ["com.codeweavers.CrossOver", "com.codeweavers"]
+        ) == "com.codeweavers.CrossOver")
+        #expect(AccessibilityWindowService.hostBundleID(
+            forSigningIdentifier: "com.codeweavers.CrossOver",
+            among: ["com.codeweavers.CrossOver"]
+        ) == "com.codeweavers.CrossOver")
+        #expect(AccessibilityWindowService.hostBundleID(
+            forSigningIdentifier: "com.codeweavers.CrossOverHelper",
+            among: ["com.codeweavers.CrossOver"]
+        ) == nil)
+        #expect(AccessibilityWindowService.hostBundleID(
+            forSigningIdentifier: "org.winehq.wine",
+            among: ["com.codeweavers.CrossOver"]
+        ) == nil)
+        #expect(AccessibilityWindowService.hostBundleID(
+            forSigningIdentifier: nil,
+            among: ["com.codeweavers.CrossOver"]
+        ) == nil)
+    }
+
     // AX role/subrole is a snapshot, not a verdict: an app that hasn't answered AX yet, or a
     // window on a Space that isn't showing (kAXWindows cannot see it there at all), is neither
     // trackable nor untrackable. Only a positively-untrackable window may be dropped outright;
