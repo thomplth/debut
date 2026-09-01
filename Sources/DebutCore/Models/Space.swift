@@ -67,9 +67,10 @@ public struct Space: Codable, Identifiable, Equatable, Sendable {
         windows[index].windowTitle = title
     }
 
-    public mutating func bringWindowToFront(windowID: CGWindowID) {
+    public mutating func bringWindowToFront(windowID: CGWindowID, activatedAt: Date = Date()) {
         guard let index = windows.firstIndex(where: { $0.windowID == windowID }) else { return }
-        let window = windows.remove(at: index)
+        var window = windows.remove(at: index)
+        window.lastActivatedAt = activatedAt
         windows.insert(window, at: 0)
     }
 
