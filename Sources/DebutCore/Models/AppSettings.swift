@@ -28,12 +28,6 @@ public enum WindowSelectionStyle: String, Codable, Sendable, CaseIterable {
     }
 }
 
-public enum CommandHintVisibility: String, Codable, Sendable, CaseIterable {
-    case automatic = "Automatic"
-    case never = "Never"
-    case always = "Always"
-}
-
 public enum PreviewRefreshPolicy: String, Codable, Sendable, CaseIterable {
     case lastActiveOnly
     case all
@@ -161,10 +155,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var previewRefreshPolicy: PreviewRefreshPolicy
     public var previewCacheTTL: TimeInterval
 
-    // Command hints
-    public var commandHintVisibility: CommandHintVisibility
-    public var commandUsageCounts: [KeyAction: Int]
-
     public init() {
         self.launchAtLogin = true
         self.excludedBundleIDs = []
@@ -192,8 +182,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.spaceSwitchDuration = Self.defaultSpaceSwitchDuration
         self.previewRefreshPolicy = .lastActiveOnly
         self.previewCacheTTL = Self.defaultPreviewCacheTTL
-        self.commandHintVisibility = .automatic
-        self.commandUsageCounts = [:]
     }
 
     public init(from decoder: Decoder) throws {
@@ -264,14 +252,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
             TimeInterval.self,
             forKey: .previewCacheTTL
         ) ?? Self.defaultPreviewCacheTTL
-        commandHintVisibility = try container.decodeIfPresent(
-            CommandHintVisibility.self,
-            forKey: .commandHintVisibility
-        ) ?? .automatic
-        commandUsageCounts = try container.decodeIfPresent(
-            DecodedKeyActionDictionary<Int>.self,
-            forKey: .commandUsageCounts
-        )?.values ?? [:]
     }
 
     public func isExcluded(bundleID: String) -> Bool {
@@ -280,35 +260,5 @@ public struct AppSettings: Codable, Sendable, Equatable {
 
     public func isQuickSwitchExcluded(bundleID: String) -> Bool {
         quickSwitchExcludedBundleIDs.contains(bundleID)
-    }
-
-    /// Each command is counted on its own, so a shortcut the user never reaches for keeps its
-    /// hint even after its neighbour in the same footer group has retired.
-    public static let commandHintRetirementUses = 3
-
-    public func shouldShowCommandHint(for action: KeyAction) -> Bool {
-        guard !action.isTransitive else { return false }
-        switch commandHintVisibility {
-        case .automatic:
-            return (commandUsageCounts[action] ?? 0) < Self.commandHintRetirementUses
-        case .never:
-            return false
-        case .always:
-            return true
-        }
-    }
-
-    /// Records only the uses needed by automatic mode. Returns whether state changed.
-    @discardableResult
-    public mutating func recordCommandUsage(_ action: KeyAction) -> Bool {
-        guard !action.isTransitive else { return false }
-        let currentCount = commandUsageCounts[action] ?? 0
-        guard currentCount < Self.commandHintRetirementUses else { return false }
-        commandUsageCounts[action] = currentCount + 1
-        return true
-    }
-
-    public mutating func resetCommandHintUsage() {
-        commandUsageCounts.removeAll()
     }
 }

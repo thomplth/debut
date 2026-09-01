@@ -198,11 +198,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         )
         controller.delegate = self
         controller.spaceSwitcher = spaceService
-        controller.onCommandUsed = { [weak self] action in
-            DispatchQueue.main.async {
-                self?.recordCommandUsage(action)
-            }
-        }
         controller.onDesktopReveal = { [weak self] in
             DispatchQueue.main.async {
                 NSWorkspace.shared.hideOtherApplications()
@@ -661,7 +656,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             displayTopContentInset: display?.topContentInset ?? 0,
             forceDisplayStackIndicator: forceDisplayStackIndicator
         )
-        reportCommandHintLayout(viewModel: vm)
         let createdHostingView = overlayWindow.update(viewModel: vm)
         if let overlayPresentation {
             spaceController.updateOverlayHostingView(
@@ -707,34 +701,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             _ = PerformanceRecorder.shared.end(renderSubmissionID)
         }
         diag.report("overlay_shown")
-    }
-
-    private func reportCommandHintLayout(viewModel: StageOverlayViewModel) {
-        let leadingHintCount = viewModel.stages.indices.compactMap { index in
-            CommandHintCatalog.spaceNumberHint(spaceIndex: index, settings: currentSettings)
-        }.count
-        guard viewModel.stages.indices.contains(viewModel.activeSpaceIndex) else { return }
-        let activeStage = viewModel.stages[viewModel.activeSpaceIndex]
-        let footerHints = CommandHintCatalog.stageFooterHints(
-            spaceIndex: viewModel.activeSpaceIndex,
-            isActive: true,
-            hasSelectedWindow: activeStage.windows.indices.contains(viewModel.selectedWindowIndex),
-            settings: currentSettings
-        )
-        let nextWindowIndex = activeStage.windows.indices.first { index in
-            !CommandHintCatalog.windowHints(
-                windowIndex: index,
-                selectedWindowIndex: viewModel.selectedWindowIndex,
-                windowCount: activeStage.windows.count,
-                settings: currentSettings
-            ).isEmpty
-        }
-        diag.report("command_hints_laid_out", details: [
-            "footerHintCount": "\(footerHints.count)",
-            "footerIconCount": "\(footerHints.compactMap(\.iconSystemName).count)",
-            "nextWindowIndex": nextWindowIndex.map(String.init) ?? "none",
-            "stageLeadingHintCount": "\(leadingHintCount)",
-        ])
     }
 
     private func hideSpaceManagerOverlay(
@@ -796,20 +762,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             menuBarHeight: NSStatusBar.system.thickness
         )
         return (displayID, screen.frame, topContentInset)
-    }
-
-    private func recordCommandUsage(_ action: KeyAction) {
-        let didChange = currentSettings.recordCommandUsage(action)
-        diag.report("command_hint_usage_observed", details: [
-            "action": action.rawValue,
-            "count": "\(currentSettings.commandUsageCounts[action] ?? 0)",
-            "didChange": "\(didChange)",
-        ])
-        guard didChange else { return }
-        try? stateStore?.saveSettings(currentSettings)
-        if spaceController?.isSpaceManagerVisible == true {
-            updateOverlay()
-        }
     }
 
     // MARK: - Menu Bar

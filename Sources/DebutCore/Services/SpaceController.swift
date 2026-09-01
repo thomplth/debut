@@ -175,7 +175,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public let windowService: any WindowService
     public let keyboardService: any KeyboardService
     public weak var delegate: SpaceControllerDelegate?
-    public var onCommandUsed: (@Sendable (KeyAction) -> Void)?
     public var onDesktopReveal: (() -> Void)?
 
     private var pendingSpaceFocus: (spaceID: UUID, windowID: CGWindowID)?
@@ -712,9 +711,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             )
         }
         diag.report("key_event", level: .transient, details: ["keyEvent": "\(event)"])
-        if let action = event.commandHintAction {
-            onCommandUsed?(action)
-        }
 
         switch event {
         case .cmdTabTap:

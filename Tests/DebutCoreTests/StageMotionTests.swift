@@ -585,7 +585,7 @@ struct StageMotionTests {
         )
 
         #expect(activeCenter == 384)
-        #expect(abs((precedingCenter ?? 0) - 202.4) < 0.001)
+        #expect(abs((precedingCenter ?? 0) - 222.4) < 0.001)
     }
 
     @Test("The default filled selector does not magnify its window")

@@ -153,10 +153,10 @@ struct OverlayViewModelTests {
         #expect(vm.displayStackShortcutSpacing == 3.5)
     }
 
-    @Test("Display stack shortcut retires through the standard command hint policy")
-    func displayStackShortcutRetires() {
+    @Test("Display stack shortcut is empty only when no key binding exists")
+    func displayStackShortcutRequiresBinding() {
         var settings = AppSettings()
-        settings.commandUsageCounts[.nextDisplayStack] = AppSettings.commandHintRetirementUses
+        settings.keyBindings.bindings[.nextDisplayStack] = nil
         let vm = StageOverlayViewModel(
             spaceManager: multiDisplayManager(),
             activeSpaceIndex: 0,
