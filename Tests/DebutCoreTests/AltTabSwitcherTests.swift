@@ -144,6 +144,40 @@ struct AltTabSwitcherTests {
         #expect(windowService.terminatedPIDs == [22])
     }
 
+    /// The flat list shows no spaces, so an action that steps between them has nothing to point
+    /// at — and it would move the stage cursor the selector is mirrored onto, leaving a later
+    /// close or commit acting on a window other than the one on screen.
+    @Test("Space and window navigation is inert while the flat switcher is open")
+    func stageNavigationIsInert() {
+        let (controller, windowService) = makeTwoSpaceController()
+
+        controller.handleKeyEvent(.altTabHold)
+        controller.handleKeyEvent(.nextWindow)
+        controller.handleKeyEvent(.nextSpace)
+        controller.handleKeyEvent(.jumpToSpace(1))
+
+        #expect(controller.altTabSelection?.window.windowID == 202)
+
+        controller.handleKeyEvent(.closeSelectedWindow)
+
+        #expect(windowService.closedWindowIDs == [202])
+    }
+
+    /// Moving a window reassigns its desktop. With no spaces drawn there is nothing to say where
+    /// it went, so the flat switcher must not offer an invisible cross-desktop move.
+    @Test("Moving a window between spaces is inert while the flat switcher is open")
+    func windowMovesAreInert() {
+        let (controller, _) = makeTwoSpaceController()
+        let spaceB = controller.spaceManager.spaces[1].id
+
+        controller.handleKeyEvent(.altTabHold)
+        controller.handleKeyEvent(.moveWindowUp)
+
+        // A move is staged in the overlay transaction, not the committed model, so the preview
+        // is the only place a staged reassignment is visible before release.
+        #expect(controller.overlaySpaceManager.spaceContainingWindow(windowID: 202) == spaceB)
+    }
+
     private var twoDisplayTopology: SpaceTopology {
         SpaceTopology(separateSpaces: true, stacks: [
             SpaceStackDescriptor(
