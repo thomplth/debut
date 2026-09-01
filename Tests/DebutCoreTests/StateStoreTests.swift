@@ -183,6 +183,31 @@ struct StateStoreTests {
         #expect(try StateStore(directory: dir).loadContradictions().isEmpty)
     }
 
+    @Test("Retired windows round-trip")
+    func retiredWindowsRoundTrip() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = StateStore(directory: dir)
+        try store.saveRetiredWindows([
+            RetiredWindowRecord(
+                windowID: 28846, ownerPID: 89848, ownerBundleID: "com.omnigroup.OmniDiskSweeper"
+            )
+        ])
+        #expect(try store.loadRetiredWindows() == [
+            RetiredWindowRecord(
+                windowID: 28846, ownerPID: 89848, ownerBundleID: "com.omnigroup.OmniDiskSweeper"
+            )
+        ])
+    }
+
+    @Test("Retired windows load as empty when no file exists")
+    func retiredWindowsLoadEmpty() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(try StateStore(directory: dir).loadRetiredWindows().isEmpty)
+    }
+
     @Test("Settings round-trip")
     func settingsRoundTrip() throws {
         let dir = try makeTempDirectory()

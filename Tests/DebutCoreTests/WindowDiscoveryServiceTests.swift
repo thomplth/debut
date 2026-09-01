@@ -1051,6 +1051,86 @@ struct WindowDiscoveryServiceTests {
         #expect(service.retiredWindowIDs.isEmpty)
     }
 
+    @Test("A destroyed window stays retired across a relaunch")
+    func retirementSurvivesRelaunch() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 7, pid: 10)
+        service.handleWindowDestroyed(element: element)
+
+        #expect(service.retiredWindowRecords == [
+            RetiredWindowRecord(windowID: 7, ownerPID: 10, ownerBundleID: "notion.id")
+        ])
+
+        // The next launch sees the same still-running process still listing the dead surface.
+        let relaunched = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        relaunched.restoreRetiredWindows(
+            service.retiredWindowRecords,
+            runningBundleIDsByPID: [10: "notion.id"]
+        )
+
+        #expect(relaunched.discoverRunningWindows().isEmpty)
+    }
+
+    @Test("A restored retirement is ignored when its PID now runs a different app")
+    func restoredRetirementIgnoredForReissuedPID() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.restoreRetiredWindows(
+            [RetiredWindowRecord(windowID: 7, ownerPID: 10, ownerBundleID: "com.other")],
+            runningBundleIDsByPID: [10: "notion.id"]
+        )
+
+        #expect(service.discoverRunningWindows().map(\.windowID) == [7])
+    }
+
+    @Test("A restored retirement evicts the assignment the state file brought back")
+    func restoredRetirementEvictsPersistedAssignment() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.restoreRetiredWindows(
+            [RetiredWindowRecord(windowID: 7, ownerPID: 10, ownerBundleID: "notion.id")],
+            runningBundleIDsByPID: [10: "notion.id"]
+        )
+
+        var spaceManager = SpaceManager()
+        spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 7,
+                ownerBundleID: "notion.id",
+                ownerName: "Notion",
+                windowTitle: "Window 7",
+                ownerPID: 10
+            ),
+            toSpaceID: spaceManager.spaces[0].id
+        )
+
+        service.reconcileWindows(&spaceManager)
+
+        #expect(spaceManager.allSpaces.flatMap(\.windowIDs).isEmpty)
+        #expect(spaceManager.dormantWindowAssignments.isEmpty)
+    }
+
     @Test("A missing AX element never fails arming, since lifecycle registers on the app")
     func missingAXElementNeverFailsArming() throws {
         let dir = FileManager.default.temporaryDirectory
