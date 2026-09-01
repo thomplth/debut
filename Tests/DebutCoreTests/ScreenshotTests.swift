@@ -234,6 +234,49 @@ struct ScreenshotTests {
         #expect(vm.stages.count == 9)
     }
 
+    @Test("The flat switcher draws every space's windows on one plate")
+    func altTabFlatList() throws {
+        let stages = makeSampleViewModel(spaceCount: 3, windowsPerSpace: [3, 4, 2], activeIndex: 1)
+        let entries = stages.spaceManager.globalWindowOrder()
+        let viewModel = AltTabOverlayViewModel(entries: entries, selectedIndex: 2)
+
+        guard let image = renderSwiftUI(
+            AltTabOverlayView(viewModel: viewModel),
+            size: NSSize(width: 1200, height: 600)
+        ) else { throw ScreenshotError.renderFailed }
+        try saveImage(image, name: "10_alt_tab_flat_list")
+
+        #expect(viewModel.windows.count == 9)
+        #expect(viewModel.selectedWindow?.windowID == entries[2].window.windowID)
+    }
+
+    /// The global list is the first thing in the app that routinely outgrows the display, so the
+    /// crowded case is worth a picture rather than only a number.
+    @Test("A crowded flat switcher wraps and shrinks to fit")
+    func altTabCrowdedList() throws {
+        let stages = makeSampleViewModel(
+            spaceCount: 6,
+            windowsPerSpace: [7, 8, 6],
+            activeIndex: 0
+        )
+        let entries = stages.spaceManager.globalWindowOrder()
+        let viewModel = AltTabOverlayViewModel(entries: entries, selectedIndex: 0)
+        let container = CGSize(width: 1440, height: 900)
+
+        guard let image = renderSwiftUI(
+            AltTabOverlayView(viewModel: viewModel),
+            size: NSSize(width: container.width, height: container.height)
+        ) else { throw ScreenshotError.renderFailed }
+        try saveImage(image, name: "10_alt_tab_crowded_list")
+
+        let layout = viewModel.layout(containerSize: container)
+        #expect(layout.rowCount > 1)
+        #expect(
+            layout.stageSize.height
+                <= StageConstants.availableStageHeight(screenHeight: container.height)
+        )
+    }
+
     @Test("Selection on second window")
     func selectionState() throws {
         let vm = StageOverlayViewModel(
