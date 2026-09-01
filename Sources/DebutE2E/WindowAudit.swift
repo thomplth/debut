@@ -27,23 +27,19 @@ enum WindowAudit {
 
     private static func emit(sample: Int, spaceService: SpaceService, bundleFilter: String?) {
         let axFacts = accessibilityFacts()
-        let axWindowIDsByPID = accessibilityWindowIDsByPID()
         let cgWindows = coreGraphicsWindows()
         let locations = spaceService.windowLocations()
         let activeDesktop = spaceService.currentDesktopIndex().map(String.init) ?? "-"
+        let windowService = AccessibilityWindowService(windowCaptureEnabled: false)
+        windowService.spaceSwitcher = spaceService
+        let admittedWindowIDs = Set(windowService.listWindows().map(\.windowID))
 
-        let apps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil }
+        let apps = windowService.listRunningApps()
         let pidToBundle = Dictionary(
-            apps.map { ($0.processIdentifier, $0.bundleIdentifier!) },
+            apps.map { ($0.pid, $0.bundleID) },
             uniquingKeysWith: { first, _ in first }
         )
-        let regularPIDs = Set(apps.map(\.processIdentifier))
-        let corroboratedPIDs = AccessibilityWindowServiceProbe.pidsWhoseAXAnswerCoversShowingDesktop(
-            axWindowIDsByPID: axWindowIDsByPID,
-            windowDesktops: locations.mapValues(\.index),
-            showingDesktop: spaceService.currentDesktopIndex()
-        )
+        let regularPIDs = Set(apps.map(\.pid))
 
         let allIDs = Set(cgWindows.keys)
             .union(axFacts.keys)
@@ -82,31 +78,9 @@ enum WindowAudit {
             } else {
                 plausible = "-"
             }
-            // `admitted` is exactly what `listWindows()` would return for this window.
-            let admitted: String
-            if let cg, pidToBundle[cg.pid] != nil {
-                if let ax, AccessibilityWindowServiceProbe.isPositivelyUntrackable(
-                    role: ax.role, subrole: ax.subrole, isModal: ax.modal
-                ) {
-                    admitted = "0"          // AX says auxiliary
-                } else if let ax, AccessibilityWindowServiceProbe.isTrackable(
-                    role: ax.role, subrole: ax.subrole, isModal: ax.modal
-                ) {
-                    admitted = "1"          // AX says standard
-                } else if plausible == "1", let cgPID = pid,
-                          AccessibilityWindowServiceProbe.accessibilityContradicts(
-                              isNamedByAX: ax != nil,
-                              windowDesktop: location?.index,
-                              showingDesktop: spaceService.currentDesktopIndex(),
-                              appAXAnswerCoversShowingDesktop: corroboratedPIDs.contains(cgPID)
-                          ) {
-                    admitted = "0"          // AX enumerated the app on this desktop and skipped it
-                } else {
-                    admitted = plausible    // no AX opinion: CG heuristic decides
-                }
-            } else {
-                admitted = "0"
-            }
+            // Ask the production service rather than duplicating its ownership and AX rules;
+            // this audit is specifically where policy drift needs to be visible.
+            let admitted = admittedWindowIDs.contains(id) ? "1" : "0"
 
             print("WIN id=\(id) pid=\(pid.map(String.init) ?? "-") bundle=\(bundle) " +
                   "cg=\(inCG) ax=\(inAX) sls=\(inSLS) desk=\(location?.index.description ?? "-") " +
@@ -173,27 +147,6 @@ enum WindowAudit {
             }
     }
 
-    /// Which windows each app's `kAXWindows` actually named. An app AX says nothing for cannot
-    /// contradict any of its windows, and neither can one whose answer still describes the
-    /// desktop being left, so the identities matter and not just the count.
-    private static func accessibilityWindowIDsByPID() -> [pid_t: Set<CGWindowID>] {
-        var result: [pid_t: Set<CGWindowID>] = [:]
-        for app in NSWorkspace.shared.runningApplications
-        where app.activationPolicy == .regular {
-            let axApp = AXUIElementCreateApplication(app.processIdentifier)
-            var windowsRef: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(
-                axApp, kAXWindowsAttribute as CFString, &windowsRef
-            ) == .success, let windows = windowsRef as? [AXUIElement] else { continue }
-            for axWindow in windows {
-                var id: CGWindowID = 0
-                guard _AXUIElementGetWindow(axWindow, &id) == .success, id != 0 else { continue }
-                result[app.processIdentifier, default: []].insert(id)
-            }
-        }
-        return result
-    }
-
     private static func accessibilityFacts() -> [CGWindowID: AXFacts] {
         var result: [CGWindowID: AXFacts] = [:]
         for app in NSWorkspace.shared.runningApplications
@@ -232,22 +185,14 @@ enum WindowAudit {
     }
 }
 
-/// Mirrors the two decision rules in `AccessibilityWindowService` so the audit reports what
-/// discovery would actually do. Kept here rather than exported from DebutCore, since these
-/// are internal policy and the audit is a diagnostic, not a caller.
+/// Mirrors explanatory decision fields from `AccessibilityWindowService`. The final admitted
+/// verdict above comes from the production service itself.
 enum AccessibilityWindowServiceProbe {
     static func isTrackable(role: String, subrole: String, isModal: Bool) -> Bool {
         role == kAXWindowRole as String &&
             (subrole == kAXStandardWindowSubrole as String ||
                 subrole == kAXDialogSubrole as String) &&
             !isModal
-    }
-
-    static func isPositivelyUntrackable(role: String, subrole: String, isModal: Bool) -> Bool {
-        guard role == kAXWindowRole as String else { return true }
-        guard !isModal else { return true }
-        guard subrole != kAXUnknownSubrole as String else { return false }
-        return !isTrackable(role: role, subrole: subrole, isModal: isModal)
     }
 
     static func isPlausibleUntracked(
@@ -257,28 +202,4 @@ enum AccessibilityWindowServiceProbe {
             && bounds.width >= 40 && bounds.height >= 40
     }
 
-    static func accessibilityContradicts(
-        isNamedByAX: Bool,
-        windowDesktop: Int?,
-        showingDesktop: Int?,
-        appAXAnswerCoversShowingDesktop: Bool
-    ) -> Bool {
-        guard !isNamedByAX,
-              appAXAnswerCoversShowingDesktop,
-              let windowDesktop,
-              let showingDesktop
-        else { return false }
-        return windowDesktop == showingDesktop
-    }
-
-    static func pidsWhoseAXAnswerCoversShowingDesktop(
-        axWindowIDsByPID: [pid_t: Set<CGWindowID>],
-        windowDesktops: [CGWindowID: Int],
-        showingDesktop: Int?
-    ) -> Set<pid_t> {
-        guard let showingDesktop else { return [] }
-        return Set(axWindowIDsByPID.compactMap { pid, windowIDs in
-            windowIDs.contains { windowDesktops[$0] == showingDesktop } ? pid : nil
-        })
-    }
 }

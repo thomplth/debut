@@ -3,9 +3,15 @@ import ApplicationServices
 import AXPrivate
 import CoreGraphics
 import ScreenCaptureKit
+import Security
 
 private struct SendableCaptureWindow: @unchecked Sendable {
     let window: SCWindow
+}
+
+private struct ResolvedRunningApplication {
+    let application: NSRunningApplication
+    let bundleID: String
 }
 
 /// One window Accessibility contradicted, named together with the process that owned it. The
@@ -115,13 +121,11 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     // MARK: - App-level
 
     public func listRunningApps() -> [AppInfo] {
-        NSWorkspace.shared.runningApplications.compactMap { app in
-            guard let bundleID = app.bundleIdentifier,
-                  app.activationPolicy == .regular
-            else { return nil }
+        resolvedRunningApplications().map { resolved in
+            let app = resolved.application
             return AppInfo(
-                bundleID: bundleID,
-                name: app.localizedName ?? bundleID,
+                bundleID: resolved.bundleID,
+                name: app.localizedName ?? resolved.bundleID,
                 pid: app.processIdentifier,
                 isHidden: app.isHidden
             )
@@ -158,17 +162,18 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             return []
         }
 
-        let runningApps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil }
+        let runningApps = resolvedRunningApplications()
         let pidToBundleID: [pid_t: String] = Dictionary(
-            runningApps.map { ($0.processIdentifier, $0.bundleIdentifier!) },
+            runningApps.map { ($0.application.processIdentifier, $0.bundleID) },
             uniquingKeysWith: { first, _ in first }
         )
         let pidToName: [pid_t: String] = Dictionary(
-            runningApps.map { ($0.processIdentifier, $0.localizedName ?? $0.bundleIdentifier!) },
+            runningApps.map {
+                ($0.application.processIdentifier, $0.application.localizedName ?? $0.bundleID)
+            },
             uniquingKeysWith: { first, _ in first }
         )
-        let regularPIDs = Set(runningApps.map(\.processIdentifier))
+        let regularPIDs = Set(runningApps.map(\.application.processIdentifier))
 
         // `kAXWindows` only reports windows on the active Space. This is what lets a window on
         // another desktop resolve to exactly one desktop even though AX has never seen it.
@@ -353,8 +358,12 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             as? [[CFString: Any]]
         else { return [] }
 
-        let pidToBundleID: [pid_t: String] = NSWorkspace.shared.runningApplications
-            .reduce(into: [:]) { table, app in table[app.processIdentifier] = app.bundleIdentifier }
+        let pidToBundleID: [pid_t: String] = Dictionary(
+            resolvedRunningApplications().map {
+                ($0.application.processIdentifier, $0.bundleID)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         var contradicted = Set<CGWindowID>()
         for dict in infoList {
@@ -431,6 +440,23 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             !isModal
     }
 
+    /// A bundleless foreground process may still be code owned by a running host app. Wine
+    /// child executables launched by CrossOver are the measured case: Launch Services reports
+    /// no bundle ID, while their signature identifier is
+    /// `com.codeweavers.CrossOver.wineloader`. Require a whole identifier component and pick
+    /// the longest running match so a broad vendor prefix cannot steal a more specific host.
+    static func hostBundleID(
+        forSigningIdentifier signingIdentifier: String?,
+        among runningBundleIDs: some Sequence<String>
+    ) -> String? {
+        guard let signingIdentifier, !signingIdentifier.isEmpty else { return nil }
+        return runningBundleIDs
+            .filter {
+                signingIdentifier == $0 || signingIdentifier.hasPrefix($0 + ".")
+            }
+            .max { $0.count < $1.count }
+    }
+
     /// Whether Accessibility positively identifies auxiliary UI. `AXUnknown` is not such an
     /// identification: several apps use it for real borderless viewer windows, so those must
     /// fall through to the same Core Graphics and SkyLight checks as an AX-unnamed window.
@@ -502,6 +528,41 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             return nil
         }
         return value as? Bool
+    }
+
+    /// Regular Launch Services applications with stable ownership. An ordinary app supplies
+    /// its bundle ID directly. A bundleless hosted child is admitted only when its signed code
+    /// identifier is namespaced beneath another regular app that is running right now.
+    private func resolvedRunningApplications() -> [ResolvedRunningApplication] {
+        let applications = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular
+        }
+        let directBundleIDs = Set(applications.compactMap(\.bundleIdentifier))
+        return applications.compactMap { application in
+            let bundleID = application.bundleIdentifier ?? Self.hostBundleID(
+                forSigningIdentifier: Self.signingIdentifier(of: application),
+                among: directBundleIDs
+            )
+            guard let bundleID else { return nil }
+            return ResolvedRunningApplication(application: application, bundleID: bundleID)
+        }
+    }
+
+    private static func signingIdentifier(of application: NSRunningApplication) -> String? {
+        guard let executableURL = application.executableURL else { return nil }
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(executableURL as CFURL, [], &staticCode) == errSecSuccess,
+              let staticCode
+        else { return nil }
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &information
+        ) == errSecSuccess,
+        let dictionary = information as? [CFString: Any]
+        else { return nil }
+        return dictionary[kSecCodeInfoIdentifier] as? String
     }
 
     // MARK: - Window capture
