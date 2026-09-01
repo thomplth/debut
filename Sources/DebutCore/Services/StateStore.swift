@@ -7,6 +7,9 @@ public final class StateStore: Sendable {
     private var contradictionsFileURL: URL {
         directory.appendingPathComponent("ax-contradictions.json")
     }
+    private var retiredWindowsFileURL: URL {
+        directory.appendingPathComponent("retired-windows.json")
+    }
 
     public init(directory: URL) {
         self.directory = directory
@@ -74,6 +77,21 @@ public final class StateStore: Sendable {
         guard FileManager.default.fileExists(atPath: contradictionsFileURL.path) else { return [] }
         let data = try Data(contentsOf: contradictionsFileURL)
         return (try? JSONDecoder().decode([AXContradictionRecord].self, from: data)) ?? []
+    }
+
+    // MARK: - Retired windows
+
+    func saveRetiredWindows(_ records: [RetiredWindowRecord]) throws {
+        try ensureDirectory()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(records).write(to: retiredWindowsFileURL, options: .atomic)
+    }
+
+    func loadRetiredWindows() throws -> [RetiredWindowRecord] {
+        guard FileManager.default.fileExists(atPath: retiredWindowsFileURL.path) else { return [] }
+        let data = try Data(contentsOf: retiredWindowsFileURL)
+        return (try? JSONDecoder().decode([RetiredWindowRecord].self, from: data)) ?? []
     }
 
     // MARK: - Settings
