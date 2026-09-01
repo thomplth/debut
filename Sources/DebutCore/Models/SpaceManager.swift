@@ -102,6 +102,32 @@ public struct SpaceManager: Codable, Sendable {
     public var liveWindowCount: Int {
         allSpaces.reduce(into: 0) { $0 += $1.windows.count }
     }
+    /// Every live window on every display, most recently activated first.
+    ///
+    /// Dormant assignments are held separately from `Space.windows`, so they are excluded here
+    /// for the same reason the stage overlay never draws them: there is no window left to raise.
+    /// Windows that have never been activated keep their discovery order behind everything that
+    /// has a stamp, rather than taking an arbitrary place among each other.
+    public func globalWindowOrder() -> [GlobalWindowEntry] {
+        let entries = spaceStacks.flatMap { stack in
+            stack.spaces.flatMap { space in
+                space.windows.map { GlobalWindowEntry(spaceID: space.id, window: $0) }
+            }
+        }
+        return entries.enumerated().sorted { lhs, rhs in
+            switch (lhs.element.window.lastActivatedAt, rhs.element.window.lastActivatedAt) {
+            case let (left?, right?):
+                left == right ? lhs.offset < rhs.offset : left > right
+            case (_?, nil):
+                true
+            case (nil, _?):
+                false
+            case (nil, nil):
+                lhs.offset < rhs.offset
+            }
+        }.map(\.element)
+    }
+
     public var allWindowOwnerBundleIDs: [String] {
         var seen: Set<String> = []
         let live = allSpaces.flatMap(\.windows).map(\.ownerBundleID)
@@ -515,9 +541,16 @@ public struct SpaceManager: Codable, Sendable {
             spaceStacks[destination.stack].spaces[destination.space].addWindow(window)
         }
     }
-    public mutating func bringWindowToFront(windowID: CGWindowID, inSpaceID id: UUID) {
+    public mutating func bringWindowToFront(
+        windowID: CGWindowID,
+        inSpaceID id: UUID,
+        activatedAt: Date = Date()
+    ) {
         guard let location = spaceLocation(id: id) else { return }
-        spaceStacks[location.stack].spaces[location.space].bringWindowToFront(windowID: windowID)
+        spaceStacks[location.stack].spaces[location.space].bringWindowToFront(
+            windowID: windowID,
+            activatedAt: activatedAt
+        )
     }
     public mutating func updateWindowTitle(windowID: CGWindowID, title: String) {
         for stack in spaceStacks.indices {

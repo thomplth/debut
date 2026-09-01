@@ -8,6 +8,11 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case cmdOptionShiftTabHold  // Cmd+Shift+Option+Tab — open overlay (space mode, select previous)
     case cmdRelease             // Cmd key lifted while overlay open
 
+    case altTabHold             // Option+Tab — open alt-tab switcher (select next)
+    case altTabShiftHold        // Option+Shift+Tab — open alt-tab switcher (select previous)
+    case altTabHoldRepeat       // Held Option+Tab auto-repeat (stops at the last window)
+    case altTabShiftHoldRepeat  // Held Option+Shift+Tab auto-repeat (stops at the first window)
+
     case nextWindow             // Tab
     case nextWindowRepeat       // Held Tab auto-repeat (stops at the last window)
     case previousWindow         // Shift+Tab
