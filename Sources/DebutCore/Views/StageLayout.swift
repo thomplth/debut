@@ -1,10 +1,15 @@
 import CoreGraphics
 
-/// The fixed sizes every window card is drawn at.
+/// The sizes every window card on one display is drawn at.
 ///
 /// Cards never shrink to fit: a space with more windows than fit across the display wraps into
 /// extra rows instead. Keeping the metrics in one value means the grid geometry, the rendered
 /// view, and the drag projection cannot disagree about how big a card is.
+///
+/// The card takes the shape of the display it is drawn on, since a window nearly always has
+/// roughly the shape of the screen it lives on and a card of some other shape would letterbox
+/// its preview. Cards stay uniform within one overlay — the shape comes from the display, not
+/// from the individual window.
 public struct StageMetrics: Equatable, Sendable {
     public let thumbnailWidth: CGFloat
     public let thumbnailHeight: CGFloat
@@ -20,6 +25,10 @@ public struct StageMetrics: Equatable, Sendable {
     public let topPadding: CGFloat
     public let bottomPadding: CGFloat
     public let minStageWidth: CGFloat
+
+    /// The visual scale these metrics were built at. Stored rather than derived, because the
+    /// thumbnail's width also moves with the display's shape and so cannot stand in for it.
+    public let scale: CGFloat
 
     public static let standard = StageMetrics(
         thumbnailWidth: 160,
@@ -40,8 +49,42 @@ public struct StageMetrics: Equatable, Sendable {
         // its vertical padding is represented explicitly, leaving ten points below the card and
         // preserving the original seven-point downward optical offset inside the stage.
         bottomPadding: 4,
-        minStageWidth: 300
+        minStageWidth: 300,
+        scale: 1
     )
+
+    /// The card shape for a display of the given size, at scale 1.
+    ///
+    /// Area is preserved rather than width. Holding the width at its standard 160 points would
+    /// make a 9:16 monitor's card 284 points tall, which `fittedStageScale` then has to shrink
+    /// the whole overlay to absorb; holding the area instead gives a portrait card the same
+    /// visual weight as a landscape one, so only the shape changes.
+    public static func shaped(forDisplay displaySize: CGSize) -> StageMetrics {
+        let standard = Self.standard
+        guard displaySize.width > 0, displaySize.height > 0 else { return standard }
+
+        let aspect = displaySize.width / displaySize.height
+        let area = standard.thumbnailWidth * standard.thumbnailHeight
+        let width = (area * aspect).squareRoot()
+
+        return StageMetrics(
+            thumbnailWidth: width,
+            thumbnailHeight: width / aspect,
+            cardPadding: standard.cardPadding,
+            titleWidthAllowance: standard.titleWidthAllowance,
+            titleSpacing: standard.titleSpacing,
+            titleHeight: standard.titleHeight,
+            badgeSize: standard.badgeSize,
+            previewPlaceholderIconSize: standard.previewPlaceholderIconSize,
+            windowSpacing: standard.windowSpacing,
+            rowSpacing: standard.rowSpacing,
+            padding: standard.padding,
+            topPadding: standard.topPadding,
+            bottomPadding: standard.bottomPadding,
+            minStageWidth: standard.minStageWidth,
+            scale: standard.scale
+        )
+    }
 
     public var cardWidth: CGFloat {
         thumbnailWidth + titleWidthAllowance + cardPadding * 2
@@ -51,15 +94,17 @@ public struct StageMetrics: Equatable, Sendable {
         thumbnailHeight + titleSpacing + titleHeight + cardPadding * 2
     }
 
+    /// Taken from the scale, not the thumbnail's width: an ultrawide display widens the card
+    /// and a portrait display narrows it, and neither should move the title's size.
     public var titleFontSize: CGFloat {
-        max(9, thumbnailWidth * 0.065)
+        max(9, Self.standard.thumbnailWidth * 0.065 * scale)
     }
 
     public var thumbnailCornerRadius: CGFloat { cardPadding }
 
     /// The visual scale represented by these metrics. Rendering code uses this for the few
     /// non-layout details that belong to a stage, such as its corner radius and command hints.
-    public var scaleFactor: CGFloat { thumbnailWidth / Self.standard.thumbnailWidth }
+    public var scaleFactor: CGFloat { scale }
 
     /// Every dimension scales together, so a card only ever grows or shrinks — it never changes
     /// shape, and the title stays legible against the thumbnail it labels.
@@ -78,7 +123,8 @@ public struct StageMetrics: Equatable, Sendable {
             padding: padding * scale,
             topPadding: topPadding * scale,
             bottomPadding: bottomPadding * scale,
-            minStageWidth: minStageWidth * scale
+            minStageWidth: minStageWidth * scale,
+            scale: self.scale * scale
         )
     }
 }

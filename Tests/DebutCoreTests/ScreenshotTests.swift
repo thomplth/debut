@@ -325,7 +325,6 @@ struct ScreenshotTests {
 
     @Test("A stage too wide for the display renders its windows in balanced rows")
     func wideStageWrapsIntoRows() throws {
-        let metrics = StageMetrics.standard
         let vm = makeSampleViewModel(
             spaceCount: 1,
             windowsPerSpace: [8],
@@ -333,6 +332,13 @@ struct ScreenshotTests {
             appearance: unscaledAppearance()
         )
         let size = NSSize(width: 1200, height: 700)
+        // The card takes the container's shape, so the geometry this checks against has to come
+        // from the container too rather than from the standard 16:10 card.
+        let metrics = StageConstants.drawnMetrics(
+            stageScale: 1,
+            windowCounts: [8],
+            containerSize: size
+        )
 
         guard let img = renderSwiftUI(StageOverlayView(viewModel: vm), size: size) else {
             throw ScreenshotError.renderFailed
