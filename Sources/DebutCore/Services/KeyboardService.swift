@@ -33,44 +33,6 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case cmdShiftBacktickRepeat // Held Cmd+Shift+` auto-repeat (stops at the first window)
 
     case escape
-
-    public var commandHintAction: KeyAction? {
-        switch self {
-        case .cmdTabHold, .nextWindow:
-            .nextWindow
-        case .cmdShiftTabHold, .previousWindow:
-            .previousWindow
-        case .cmdOptionTabHold, .nextSpace:
-            .nextSpace
-        case .cmdOptionShiftTabHold, .previousSpace:
-            .previousSpace
-        case .nextDisplayStack:
-            .nextDisplayStack
-        case .jumpToSpace(let position):
-            KeyAction.jumpAction(forSpaceIndex: position - 1)
-        case .jumpToLastSpace:
-            .jumpToSpace9
-        case .moveWindowUp:
-            .moveWindowUp
-        case .moveWindowDown:
-            .moveWindowDown
-        case .moveWindowLeft:
-            .moveWindowLeft
-        case .moveWindowRight:
-            .moveWindowRight
-        case .quitSelectedApp:
-            .quitSelectedApp
-        case .closeSelectedWindow:
-            .closeSelectedWindow
-        case .escape:
-            .dismissOverlay
-        case .cmdTabTap, .cmdRelease, .nextWindowRepeat, .previousWindowRepeat,
-             .switchToSpace, .switchToSpaceKeepingCurrentApplication,
-             .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick,
-             .cmdShiftBacktickRepeat:
-            nil
-        }
-    }
 }
 
 public protocol KeyboardEventDelegate: AnyObject, Sendable {

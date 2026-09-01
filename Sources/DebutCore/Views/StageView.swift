@@ -826,8 +826,6 @@ struct PointerMovementGate {
 public struct StageConstants {
     public static let screenMargin: CGFloat = 80
     public static let compactStageSpacing: CGFloat = 14
-    public static let stageSpacing: CGFloat = 34
-    public static let commandHintFooterOffset: CGFloat = 24
     public static let edgeHoverRegion: CGFloat = 56
     public static let edgeScrollMargin: CGFloat = 28
     public static let spaceScrollTravelPerSpace: CGFloat = 30
@@ -906,13 +904,6 @@ public struct StageConstants {
         }
     }
 
-    public static func stageSpacing(
-        hasVisibleFooterHints: Bool,
-        scale: CGFloat = 1
-    ) -> CGFloat {
-        (hasVisibleFooterHints ? stageSpacing : compactStageSpacing) * scale
-    }
-
     public static func stageCenterY(
         spaceIndex: Int,
         stageHeights: [CGFloat],
@@ -928,7 +919,7 @@ public struct StageConstants {
         let layout = StageMotion.stackLayout(
             stageHeights: stageHeights,
             focusIndex: activeSpaceIndex,
-            spacing: stageSpacing * stageScale,
+            spacing: compactStageSpacing * stageScale,
             inactiveScale: inactiveScale
         )
         return containerHeight / 2
@@ -1067,20 +1058,6 @@ public struct StageOverlayView: View {
             actual: stages.map(\.windows.count),
             drag: layoutWindowDrag
         )
-        let activeSpaceIndex = viewModel.activeSpaceIndex
-        let activeStage = stages[safe: activeSpaceIndex]
-        let activeSelectedWindowIndex = pointerSelection?.spaceIndex == activeSpaceIndex
-            ? pointerSelection?.windowIndex
-            : viewModel.selectedWindowIndex
-        let activeFooterHints = activeStage.map { stage in
-            CommandHintCatalog.stageFooterHints(
-                spaceIndex: activeSpaceIndex,
-                isActive: true,
-                hasSelectedWindow: activeSelectedWindowIndex != nil
-                    && !stage.windows.isEmpty,
-                settings: viewModel.appearance
-            )
-        } ?? []
 
         GeometryReader { geo in
             // Fitted against the resting window counts, not the displaced ones: a drag that
@@ -1103,10 +1080,7 @@ public struct StageOverlayView: View {
             let tallestStageHeight = stageHeights.max() ?? 0
 
             let inactiveScale = CGFloat(viewModel.appearance.inactiveStageScale)
-            let spacing = StageConstants.stageSpacing(
-                hasVisibleFooterHints: !activeFooterHints.isEmpty,
-                scale: metrics.scaleFactor
-            )
+            let spacing = StageConstants.compactStageSpacing * metrics.scaleFactor
             let focusTransition = StageMotion.focusTransition(reduceMotion: reduceMotion)
             let layoutAnimationKey = StageMotion.layoutAnimationKey(
                 spaceIDs: stages.map(\.id),
@@ -1183,11 +1157,6 @@ public struct StageOverlayView: View {
                         let selectedWindowIndex = pointerSelection?.spaceIndex == index
                             ? pointerSelection?.windowIndex
                             : (isActive ? viewModel.selectedWindowIndex : nil)
-                        let spaceNumberHint = CommandHintCatalog.spaceNumberHint(
-                            spaceIndex: index,
-                            settings: viewModel.appearance
-                        )
-                        let footerHints = isActive ? activeFooterHints : []
 
                         StageSwiftUIView(
                             stage: stage,
@@ -1195,8 +1164,6 @@ public struct StageOverlayView: View {
                             layout: displayedLayouts[index],
                             appearance: viewModel.appearance,
                             wallpaperLuminance: viewModel.wallpaperLuminance,
-                            spaceNumberHint: spaceNumberHint,
-                            footerHints: footerHints,
                             windowDrag: $windowDrag,
                             layoutWindowDrag: layoutWindowDrag,
                             settlingWindowID: settlingWindowDrop?.request.windowID,
@@ -1534,8 +1501,6 @@ struct StageSwiftUIView: View {
     let layout: StageWindowLayout
     let appearance: AppSettings
     let wallpaperLuminance: Double?
-    let spaceNumberHint: CommandHintPresentation?
-    let footerHints: [CommandHintPresentation]
     @Binding var windowDrag: WindowDragState?
     let layoutWindowDrag: WindowDragState?
     let settlingWindowID: CGWindowID?
@@ -1590,13 +1555,7 @@ struct StageSwiftUIView: View {
                             isWindowSelected: selectedWindowIndex == index,
                             isDragging: isDragging,
                             metrics: layout.metrics,
-                            appearance: appearance,
-                            commandHints: CommandHintCatalog.windowHints(
-                                windowIndex: index,
-                                selectedWindowIndex: selectedWindowIndex ?? -1,
-                                windowCount: stage.windows.count,
-                                settings: appearance
-                            )
+                            appearance: appearance
                         )
                         .opacity(StageMotion.sourceWindowOpacity(
                             isDragging: isDragging || isSettling
@@ -1661,18 +1620,6 @@ struct StageSwiftUIView: View {
         // Keyed on the count, not the IDs: a drag reorder keeps the count and must keep
         // its own motion, while an arrival or departure is what this animates.
         .animation(removalTransition.animation, value: stage.windows.count)
-        .overlay(alignment: .leading) {
-            if let spaceNumberHint {
-                CommandHintStrip(hints: [spaceNumberHint], scale: visualScale)
-                    .offset(x: -18 * visualScale)
-            }
-        }
-        .overlay(alignment: .bottom) {
-            if !footerHints.isEmpty {
-                CommandHintStrip(hints: footerHints, scale: visualScale)
-                    .offset(y: StageConstants.commandHintFooterOffset * visualScale)
-            }
-        }
     }
 
     private func windowDragGesture(window: StageWindowData, windowIndex: Int) -> some Gesture {
@@ -1765,7 +1712,6 @@ struct WindowPreviewView: View {
     var isDragging: Bool = false
     let metrics: StageMetrics
     let appearance: AppSettings
-    var commandHints: [CommandHintPresentation] = []
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -1810,12 +1756,6 @@ struct WindowPreviewView: View {
                     }
                 }
                 .frame(width: metrics.thumbnailWidth, height: metrics.thumbnailHeight)
-                .overlay(alignment: .bottomTrailing) {
-                    if !commandHints.isEmpty {
-                        CommandHintStrip(hints: commandHints, scale: metrics.scaleFactor)
-                            .padding(6 * metrics.scaleFactor)
-                    }
-                }
 
                 AppIconImage(
                     bundleID: window.ownerBundleID,
@@ -1872,45 +1812,6 @@ struct WindowPreviewView: View {
         )
         .animation(.spring(duration: 0.18, bounce: 0.08), value: isWindowSelected)
         .animation(.easeOut(duration: 0.12), value: isDragging)
-    }
-}
-
-struct CommandHintStrip: View {
-    let hints: [CommandHintPresentation]
-    var scale: CGFloat = 1
-
-    var body: some View {
-        HStack(spacing: 4 * scale) {
-            ForEach(hints) { hint in
-                HStack(spacing: 3 * scale) {
-                    if let iconSystemName = hint.iconSystemName {
-                        Image(systemName: iconSystemName)
-                            .font(.system(size: 8 * scale, weight: .semibold))
-                    }
-                    Text(hint.shortcut)
-                        .font(.system(
-                            size: 9 * scale,
-                            weight: .semibold,
-                            design: .monospaced
-                        ))
-                }
-                    .foregroundStyle(.white.opacity(0.92))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .padding(.horizontal, 5 * scale)
-                    .padding(.vertical, 3 * scale)
-                    .background(.black.opacity(0.55), in: Capsule())
-                    .overlay {
-                        Capsule().stroke(.white.opacity(0.14), lineWidth: 0.5 * scale)
-                    }
-                    .help("\(hint.label): \(hint.shortcut)")
-            }
-        }
-        .allowsHitTesting(false)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            hints.map { "\($0.label), \($0.shortcut)" }.joined(separator: "; ")
-        )
     }
 }
 

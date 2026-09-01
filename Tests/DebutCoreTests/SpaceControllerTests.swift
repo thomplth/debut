@@ -146,19 +146,6 @@ private func waitUntil(
     return condition()
 }
 
-private final class CommandUsageRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedActions: [KeyAction] = []
-
-    var actions: [KeyAction] {
-        lock.withLock { storedActions }
-    }
-
-    func record(_ action: KeyAction) {
-        lock.withLock { storedActions.append(action) }
-    }
-}
-
 @Suite("SpaceController", .serialized)
 struct SpaceControllerTests {
 
@@ -356,18 +343,6 @@ struct SpaceControllerTests {
 
         #expect(windowSvc.raisedWindowIDs.contains(202))
         #expect(!windowSvc.raisedWindowIDs.contains(303))
-    }
-
-    @Test("Dispatched commands report hint usage")
-    func reportsCommandUsage() {
-        let (controller, _, keyboardService) = makeController()
-        let recorder = CommandUsageRecorder()
-        controller.onCommandUsed = { recorder.record($0) }
-
-        keyboardService.simulateEvent(.moveWindowLeft)
-        keyboardService.simulateEvent(.nextWindowRepeat)
-
-        #expect(recorder.actions == [.moveWindowLeft])
     }
 
     @Test("Window switch raises selected window")
