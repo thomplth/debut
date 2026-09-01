@@ -11,6 +11,15 @@ public enum WindowArmingOutcome: Equatable, Sendable {
     case notificationRejected(Int32)
 }
 
+/// One window a destroy notification proved gone, named together with the process that owned
+/// it. The bundle ID is only there to survive being written to disk: on reload it is what
+/// distinguishes the original owner from whatever process inherited its PID.
+struct RetiredWindowRecord: Codable, Equatable, Sendable {
+    let windowID: CGWindowID
+    let ownerPID: pid_t
+    let ownerBundleID: String
+}
+
 public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private let diag: DiagnosticReporter
     private let windowService: any WindowService
@@ -51,9 +60,29 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// something remembers the destruction. The owner is kept because the window server
     /// recycles IDs: the same ID under a different process is a different window and must not
     /// inherit this one's tombstone.
-    private var retiredWindowOwners: [CGWindowID: pid_t] = [:]
+    private var retiredWindowOwners: [CGWindowID: RetiredWindowRecord] = [:]
 
     public var retiredWindowIDs: Set<CGWindowID> { Set(retiredWindowOwners.keys) }
+
+    /// The tombstones worth carrying to the next launch. The leaked surface outlives Debut, not
+    /// just the window, so a verdict scoped to one run lets the startup reconcile bind the dead
+    /// surface to a dormant assignment and the ghost returns on every launch.
+    var retiredWindowRecords: [RetiredWindowRecord] { Array(retiredWindowOwners.values) }
+
+    /// Restores tombstones written by an earlier run. A window ID and a PID both mean nothing on
+    /// their own across a relaunch — macOS reissues both from low numbers — so a record is only
+    /// honoured while the PID it names is still running the app it named. Anything else is a
+    /// different window that must not inherit this verdict.
+    func restoreRetiredWindows(
+        _ records: [RetiredWindowRecord],
+        runningBundleIDsByPID: [pid_t: String]
+    ) {
+        retiredWindowOwners = Dictionary(
+            uniqueKeysWithValues: records
+                .filter { runningBundleIDsByPID[$0.ownerPID] == $0.ownerBundleID }
+                .map { ($0.windowID, $0) }
+        )
+    }
 
     public var diagnosticTrackingSnapshot: WindowTrackingDiagnosticSnapshot {
         WindowTrackingDiagnosticSnapshot(
@@ -143,7 +172,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private func excludingRetired(_ windows: [WindowInfo]) -> [WindowInfo] {
         retiredWindowOwners.isEmpty
             ? windows
-            : windows.filter { retiredWindowOwners[$0.windowID] != $0.ownerPID }
+            : windows.filter { retiredWindowOwners[$0.windowID]?.ownerPID != $0.ownerPID }
     }
 
     public func discoverRunningWindows() -> [SpaceWindow] {
@@ -215,6 +244,26 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             .windowClassification,
             workload: .init(windows: liveWindows.count)
         )
+        // A restored tombstone has to evict, not just refuse. Excluding the dead surface from
+        // the snapshot stops it being re-admitted, but the assignment the state file brought
+        // back is already live, and no later evidence can reach it: its process is alive, Core
+        // Graphics still lists the surface, and the destroy notification it would need has
+        // already been and gone.
+        for space in spaceManager.allSpaces {
+            for window in space.windows where window.ownerPID != nil
+                && retiredWindowOwners[window.windowID]?.ownerPID == window.ownerPID {
+                spaceManager.removeWindow(windowID: window.windowID, fromSpaceID: space.id)
+                diag.report("window_retired", details: [
+                    "windowID": "\(window.windowID)",
+                    "bundleID": window.ownerBundleID,
+                    "windowTitle": window.windowTitle,
+                    "fromSpace": "\(spaceManager.spaceIndex(id: space.id) ?? -1)",
+                    "reason": "destroyed",
+                    "trigger": "startup_restore",
+                ])
+            }
+        }
+
         var parkedDormantCount = 0
         for space in spaceManager.allSpaces {
             for windowID in space.windowIDs {
@@ -363,7 +412,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     private func trackWindow(windowID: CGWindowID, pid: pid_t) {
-        if retiredWindowOwners[windowID] == pid { return }
+        if retiredWindowOwners[windowID]?.ownerPID == pid { return }
         // A window ID reused by a different process must still be armed: matching by ID
         // alone would trust bookkeeping left over from a process whose exit was missed.
         // An armed window with no element yet must also fall through, because a destroy
@@ -472,7 +521,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // cleared even when no observer was ever created for this app.
         // The tombstones go too: the process that leaked those surfaces is gone, so any
         // future window carrying one of its IDs belongs to something else.
-        for windowID in retiredWindowOwners.filter({ $0.value == pid }).keys {
+        for windowID in retiredWindowOwners.filter({ $0.value.ownerPID == pid }).keys {
             retiredWindowOwners.removeValue(forKey: windowID)
         }
         let ownedWindowIDs = Set(windowOwnerPIDs.filter { $0.value == pid }.keys)
@@ -517,7 +566,14 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     func handleWindowDestroyed(element: AXUIElement) {
         guard let windowID = trackedWindowID(for: element) else { return }
-        if let owner = windowOwnerPIDs[windowID] { retiredWindowOwners[windowID] = owner }
+        if let owner = windowOwnerPIDs[windowID] {
+            retiredWindowOwners[windowID] = RetiredWindowRecord(
+                windowID: windowID,
+                ownerPID: owner,
+                ownerBundleID: windowService.listRunningApps()
+                    .first { $0.pid == owner }?.bundleID ?? ""
+            )
+        }
         trackedWindowElements.removeValue(forKey: windowID)
         knownWindowIDs.remove(windowID)
         armedWindowIDs.remove(windowID)

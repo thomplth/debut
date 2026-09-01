@@ -116,6 +116,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
 
         let discovery = WindowDiscoveryService(windowService: windowService)
         self.windowDiscovery = discovery
+        // Restored before the first reconcile, which is the one that would otherwise bind a
+        // dead surface its owner still lists to a dormant assignment and resurrect the ghost.
+        discovery.restoreRetiredWindows(
+            (try? stateStore?.loadRetiredWindows()) ?? [],
+            runningBundleIDsByPID: Self.runningBundleIDsByPID()
+        )
         windowService.windowElementResolver = { [weak discovery] windowID in
             discovery?.trackedWindowElement(windowID: windowID)
         }
@@ -476,6 +482,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         let windowService = MainActor.assumeIsolated { self.windowService }
         if let stateStore, let windowService {
             try? stateStore.saveContradictions(windowService.contradictionRecords)
+        }
+        let windowDiscovery = MainActor.assumeIsolated { self.windowDiscovery }
+        if let stateStore, let windowDiscovery {
+            try? stateStore.saveRetiredWindows(windowDiscovery.retiredWindowRecords)
         }
         let exporter = MainActor.assumeIsolated { self.telemetryExporter }
         let payload = MainActor.assumeIsolated { self.currentTelemetrySummary() }
