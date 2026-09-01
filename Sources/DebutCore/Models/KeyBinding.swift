@@ -8,6 +8,10 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case activatePreviousSpace
     case activatePreviousSpaceAlternate
 
+    // Global alt-tab switcher activation
+    case activateAltTabNext
+    case activateAltTabPrevious
+
     // Global space switching
     case quickSwitchSpace1, quickSwitchSpace2, quickSwitchSpace3
     case quickSwitchSpace4, quickSwitchSpace5, quickSwitchSpace6
@@ -42,6 +46,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .activateNextSpace: "Open / cycle spaces"
         case .activatePreviousSpace: "Open / cycle spaces backward"
         case .activatePreviousSpaceAlternate: "Open / cycle spaces backward (alternate)"
+        case .activateAltTabNext: "Open / cycle all windows"
+        case .activateAltTabPrevious: "Open / cycle all windows backward"
         case .quickSwitchSpace1: "Quick switch to space 1"
         case .quickSwitchSpace2: "Quick switch to space 2"
         case .quickSwitchSpace3: "Quick switch to space 3"
@@ -85,6 +91,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .activateNextSpace: .cmdOptionTabHold
         case .activatePreviousSpace: .cmdOptionShiftTabHold
         case .activatePreviousSpaceAlternate: .cmdOptionShiftTabHold
+        case .activateAltTabNext: .altTabHold
+        case .activateAltTabPrevious: .altTabShiftHold
         case .quickSwitchSpace1: .switchToSpace(1)
         case .quickSwitchSpace2: .switchToSpace(2)
         case .quickSwitchSpace3: .switchToSpace(3)
@@ -131,6 +139,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
             .previousWindowRepeat
         case .nextAppWindow: .cmdBacktickRepeat
         case .previousAppWindow: .cmdShiftBacktickRepeat
+        case .activateAltTabNext: .altTabHoldRepeat
+        case .activateAltTabPrevious: .altTabShiftHoldRepeat
         default: toKeyEvent()
         }
     }
@@ -139,6 +149,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
              .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate,
+             .activateAltTabNext, .activateAltTabPrevious,
              .quickSwitchSpace1, .quickSwitchSpace2, .quickSwitchSpace3,
              .quickSwitchSpace4, .quickSwitchSpace5, .quickSwitchSpace6,
              .quickSwitchSpace7, .quickSwitchSpace8, .quickSwitchSpace9,
@@ -152,11 +163,17 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     public var isOverlayActivation: Bool {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
-             .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate:
+             .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate,
+             .activateAltTabNext, .activateAltTabPrevious:
             true
         default:
             false
         }
+    }
+
+    /// Opens the flat cross-space switcher rather than the stage overlay.
+    public var opensAltTabSwitcher: Bool {
+        self == .activateAltTabNext || self == .activateAltTabPrevious
     }
 
     public var quickSwitchPosition: Int? {
@@ -184,6 +201,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
              .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate,
+             .activateAltTabNext, .activateAltTabPrevious,
              .nextAppWindow, .previousAppWindow,
              .nextWindow, .previousWindow, .previousWindowAlternate,
              .nextSpace, .previousSpace:
@@ -210,7 +228,12 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         .nextAppWindow, .previousAppWindow,
     ]
 
-    public static let globalActions = activationActions + quickSwitchActions + sameAppActions
+    public static let altTabActions: [KeyAction] = [
+        .activateAltTabNext, .activateAltTabPrevious,
+    ]
+
+    public static let globalActions =
+        activationActions + altTabActions + quickSwitchActions + sameAppActions
     public static let sessionActions = allCases.filter { $0.shortcutScope == .session }
 
     public static func jumpAction(forSpaceIndex index: Int) -> KeyAction? {
@@ -366,6 +389,8 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
                 command: true,
                 option: true
             ),
+            .activateAltTabNext: KeyCombo(keyCode: kVK_Tab, option: true),
+            .activateAltTabPrevious: KeyCombo(keyCode: kVK_Tab, shift: true, option: true),
             .quickSwitchSpace1: KeyCombo(keyCode: kVK_ANSI_1, control: true),
             .quickSwitchSpace2: KeyCombo(keyCode: kVK_ANSI_2, control: true),
             .quickSwitchSpace3: KeyCombo(keyCode: kVK_ANSI_3, control: true),
