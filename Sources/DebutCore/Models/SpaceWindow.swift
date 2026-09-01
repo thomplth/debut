@@ -1,6 +1,18 @@
 import Foundation
 import CoreGraphics
 
+/// A live window paired with the space holding it, for consumers that flatten every space into
+/// one list and so cannot use a space-relative index to say which window they mean.
+public struct GlobalWindowEntry: Equatable, Sendable {
+    public let spaceID: UUID
+    public let window: SpaceWindow
+
+    public init(spaceID: UUID, window: SpaceWindow) {
+        self.spaceID = spaceID
+        self.window = window
+    }
+}
+
 public struct SpaceWindow: Codable, Identifiable, Equatable, Sendable {
     public let id: UUID
     public var windowID: CGWindowID
@@ -9,13 +21,20 @@ public struct SpaceWindow: Codable, Identifiable, Equatable, Sendable {
     public var windowTitle: String
     public var ownerPID: pid_t?
 
-    public init(windowID: CGWindowID, ownerBundleID: String, ownerName: String, windowTitle: String, ownerPID: pid_t? = nil) {
+    /// When this window was last brought to the front of its space, or `nil` if it never has
+    /// been. Written only by `Space.bringWindowToFront`, which is also what rotates the space's
+    /// array — so an ordering derived from this field across spaces cannot disagree with any
+    /// one space's own MRU order.
+    public var lastActivatedAt: Date?
+
+    public init(windowID: CGWindowID, ownerBundleID: String, ownerName: String, windowTitle: String, ownerPID: pid_t? = nil, lastActivatedAt: Date? = nil) {
         self.id = UUID()
         self.windowID = windowID
         self.ownerBundleID = ownerBundleID
         self.ownerName = ownerName
         self.windowTitle = windowTitle
         self.ownerPID = ownerPID
+        self.lastActivatedAt = lastActivatedAt
     }
 
     public static func == (lhs: SpaceWindow, rhs: SpaceWindow) -> Bool {
