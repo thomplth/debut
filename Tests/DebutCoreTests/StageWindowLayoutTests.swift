@@ -247,6 +247,125 @@ struct StageWindowLayoutTests {
     }
 }
 
+@Suite("Display-shaped stage metrics")
+struct DisplayShapedMetricsTests {
+
+    private let standardArea = StageMetrics.standard.thumbnailWidth
+        * StageMetrics.standard.thumbnailHeight
+
+    private func shaped(_ width: CGFloat, _ height: CGFloat) -> StageMetrics {
+        StageMetrics.shaped(forDisplay: CGSize(width: width, height: height))
+    }
+
+    @Test("A card takes the shape of the display it is drawn on")
+    func cardMatchesDisplayAspect() {
+        for display in [
+            CGSize(width: 1_920, height: 1_080),
+            CGSize(width: 3_440, height: 1_440),
+            CGSize(width: 1_080, height: 1_920),
+            CGSize(width: 1_512, height: 982),
+        ] {
+            let metrics = StageMetrics.shaped(forDisplay: display)
+            let displayAspect = display.width / display.height
+            let cardAspect = metrics.thumbnailWidth / metrics.thumbnailHeight
+            #expect(abs(cardAspect - displayAspect) < 0.0001,
+                    "\(display) drew a \(cardAspect) card")
+        }
+    }
+
+    @Test("Reshaping preserves card area, so a portrait display does not inflate the card")
+    func areaIsPreservedAcrossAspects() {
+        for display in [
+            CGSize(width: 1_920, height: 1_080),
+            CGSize(width: 3_440, height: 1_440),
+            CGSize(width: 1_080, height: 1_920),
+            CGSize(width: 1_000, height: 1_000),
+        ] {
+            let metrics = StageMetrics.shaped(forDisplay: display)
+            let area = metrics.thumbnailWidth * metrics.thumbnailHeight
+            #expect(abs(area - standardArea) < 0.5, "\(display) drew a \(area)pt card")
+        }
+    }
+
+    @Test("A 16:10 display reproduces the standard card exactly")
+    func sixteenTenIsUnchanged() {
+        let metrics = shaped(1_680, 1_050)
+        #expect(abs(metrics.thumbnailWidth - StageMetrics.standard.thumbnailWidth) < 0.0001)
+        #expect(abs(metrics.thumbnailHeight - StageMetrics.standard.thumbnailHeight) < 0.0001)
+    }
+
+    @Test("A portrait display makes a taller card than a landscape one")
+    func portraitIsTallerThanLandscape() {
+        let portrait = shaped(1_080, 1_920)
+        let landscape = shaped(1_920, 1_080)
+
+        #expect(portrait.thumbnailHeight > portrait.thumbnailWidth)
+        #expect(landscape.thumbnailWidth > landscape.thumbnailHeight)
+        #expect(portrait.thumbnailHeight > landscape.thumbnailHeight)
+        #expect(portrait.thumbnailWidth < landscape.thumbnailWidth)
+    }
+
+    /// A container arrives as `.zero` on SwiftUI's first layout pass, and an aspect cannot be
+    /// taken from it. The standard card is the honest answer until a real size arrives.
+    @Test("A display with no area falls back to the standard card")
+    func degenerateDisplayFallsBack() {
+        #expect(shaped(0, 0) == StageMetrics.standard)
+        #expect(shaped(1_920, 0) == StageMetrics.standard)
+        #expect(shaped(-100, 500) == StageMetrics.standard)
+    }
+
+    @Test("Scale is what these metrics report, not a width the aspect also moved")
+    func scaleFactorIsIndependentOfAspect() {
+        #expect(StageMetrics.standard.scaleFactor == 1)
+
+        for display in [CGSize(width: 3_440, height: 1_440), CGSize(width: 1_080, height: 1_920)] {
+            let metrics = StageMetrics.shaped(forDisplay: display)
+            #expect(metrics.scaleFactor == 1)
+            #expect(metrics.scaled(by: 1.5).scaleFactor == 1.5)
+        }
+    }
+
+    /// A portrait card is under 160pt wide and an ultrawide card is over it, so a font taken
+    /// from the thumbnail width would shrink and swell with the monitor rather than the slider.
+    @Test("Title size follows the scale, not the display's shape")
+    func titleSizeFollowsScaleOnly() {
+        let ultrawide = shaped(3_440, 1_440)
+        let portrait = shaped(1_080, 1_920)
+
+        #expect(ultrawide.titleFontSize == StageMetrics.standard.titleFontSize)
+        #expect(portrait.titleFontSize == StageMetrics.standard.titleFontSize)
+        #expect(ultrawide.scaled(by: 1.5).titleFontSize
+            == StageMetrics.standard.scaled(by: 1.5).titleFontSize)
+    }
+
+    @Test("Scaling a reshaped card keeps its shape")
+    func scalingPreservesShape() {
+        let portrait = shaped(1_080, 1_920)
+        let enlarged = portrait.scaled(by: 1.5)
+
+        #expect(abs(enlarged.thumbnailWidth / enlarged.thumbnailHeight
+            - portrait.thumbnailWidth / portrait.thumbnailHeight) < 0.0001)
+        #expect(enlarged.thumbnailWidth == portrait.thumbnailWidth * 1.5)
+    }
+
+    @Test("The metrics the overlay draws at are shaped by the display it draws on")
+    func drawnMetricsFollowTheContainer() {
+        let portrait = StageConstants.drawnMetrics(
+            stageScale: 1,
+            windowCounts: [3],
+            containerSize: CGSize(width: 1_080, height: 1_920)
+        )
+        #expect(portrait.thumbnailHeight > portrait.thumbnailWidth)
+
+        let widescreen = StageConstants.drawnMetrics(
+            stageScale: 1,
+            windowCounts: [3],
+            containerSize: CGSize(width: 1_920, height: 1_080)
+        )
+        #expect(abs(widescreen.thumbnailWidth / widescreen.thumbnailHeight - 16.0 / 9.0) < 0.0001)
+    }
+}
+
 @Suite("Fitted stage scale")
 struct FittedStageScaleTests {
 

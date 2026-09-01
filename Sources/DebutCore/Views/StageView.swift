@@ -849,9 +849,9 @@ public struct StageConstants {
     public static func fittedStageScale(
         requested: CGFloat,
         windowCounts: [Int],
-        containerSize: CGSize,
-        metrics: StageMetrics = .standard
+        containerSize: CGSize
     ) -> CGFloat {
+        let metrics = StageMetrics.shaped(forDisplay: containerSize)
         let floor = CGFloat(AppSettings.minimumStageScale)
         let ceiling = CGFloat(AppSettings.maximumStageScale)
         let step = CGFloat(AppSettings.stageScaleStep)
@@ -882,7 +882,7 @@ public struct StageConstants {
         windowCounts: [Int],
         containerSize: CGSize
     ) -> StageMetrics {
-        StageMetrics.standard.scaled(by: fittedStageScale(
+        StageMetrics.shaped(forDisplay: containerSize).scaled(by: fittedStageScale(
             requested: stageScale,
             windowCounts: windowCounts,
             containerSize: containerSize
