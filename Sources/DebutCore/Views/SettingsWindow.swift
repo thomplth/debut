@@ -444,6 +444,22 @@ public struct SettingsView: View {
                 )
             }
 
+            Text("All-windows switcher")
+                .font(.headline)
+                .padding(.top, 4)
+
+            Text("Opens one flat list of every window on every space, in the order you last used them.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(KeyAction.altTabActions, id: \.self) { action in
+                ShortcutRecorderRow(
+                    action: action,
+                    keyBindings: $viewModel.settings.keyBindings,
+                    recordingService: shortcutRecordingService
+                )
+            }
+
             Text("Same-app window cycling")
                 .font(.headline)
                 .padding(.top, 4)
