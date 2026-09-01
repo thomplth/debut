@@ -395,22 +395,21 @@ legacy "has launched before" flag so existing users never see a first-run screen
 
 <h2>Things that will surprise you</h2>
 
-<div class="warn">
-  <span class="label">There is no selection colour to configure</span>
+<div class="note">
+  <span class="label">Selection style is configurable</span>
   <p>
-  Selection is drawn as a 1.06× magnification plus a shadow — the test is
-  literally named "selected windows magnify instead of using a selection
-  indicator". Earlier builds shipped <code>selectionOpacity</code>,
-  <code>selectionBorderWidth</code> and <code>selectionBorderOpacity</code>
-  sliders that nothing ever read; they were removed in the settings audit, along
-  with <code>animationsEnabled</code>, because the render path honours the system
-  Reduce Motion environment value instead. Old <code>settings.json</code> files
-  still carry the keys and still decode — the decoder simply ignores them.
+  The default outline uses RGB 103 in dark appearance and RGB 167 in light
+  appearance at full opacity. It occupies the preview's reserved outset, never
+  covers the title, and is suppressed on drag previews. Magnify retains the
+  original 1.06× scale and adaptive dark/light shadow as defaults. Selector
+  settings expose outline width and radius or magnify scale and shadow strength,
+  depending on the chosen style. Settings files written before these controls
+  decode to the outline defaults.
   </p>
 </div>
 
 <ul>
-  <li><strong>Dark mode shadows are not just inverted.</strong> Dark uses 0.5
+  <li><strong>Magnify shadows are not just inverted in dark mode.</strong> Dark uses 0.5
   opacity / 14 radius / 6 offset against light's 0.24 / 8 / 4, with the comment
   that "a black shadow over the dark stage behind it needs more density and spread
   to read as depth than it does in light mode."</li>

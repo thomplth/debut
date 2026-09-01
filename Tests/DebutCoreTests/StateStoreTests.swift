@@ -192,6 +192,11 @@ struct StateStoreTests {
         var settings = AppSettings()
         settings.launchAtLogin = true
         settings.stageCornerRadius = 30
+        settings.windowSelectionStyle = .magnify
+        settings.selectorBorderWidth = 2
+        settings.selectorCornerRadius = 18
+        settings.magnifyScale = 1.14
+        settings.magnifyShadowStrength = 1.6
         settings.overlayPresentationDelay = 0.25
         settings.quickSwitchExcludedBundleIDs = ["com.tinyspeck.slackmacgap"]
         settings.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
@@ -203,6 +208,11 @@ struct StateStoreTests {
         let loaded = try store.loadSettings()
         #expect(loaded.launchAtLogin == true)
         #expect(loaded.stageCornerRadius == 30)
+        #expect(loaded.windowSelectionStyle == .magnify)
+        #expect(loaded.selectorBorderWidth == 2)
+        #expect(loaded.selectorCornerRadius == 18)
+        #expect(loaded.magnifyScale == 1.14)
+        #expect(loaded.magnifyShadowStrength == 1.6)
         #expect(loaded.overlayPresentationDelay == 0.25)
         #expect(loaded.quickSwitchExcludedBundleIDs == ["com.tinyspeck.slackmacgap"])
         #expect(loaded.quickSwitchModifiers == ShortcutModifiers(control: true, option: true))
@@ -362,6 +372,32 @@ struct StateStoreTests {
         #expect(AppSettings.defaultStageScale == 1.0)
     }
 
+    @Test("Settings written before selector customization use the macOS outline defaults")
+    func legacySettingsDefaultSelector() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        for key in [
+            "windowSelectionStyle",
+            "selectorBorderWidth",
+            "selectorCornerRadius",
+            "magnifyScale",
+            "magnifyShadowStrength",
+        ] {
+            object.removeValue(forKey: key)
+        }
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+
+        #expect(decoded.windowSelectionStyle == .outline)
+        #expect(decoded.selectorBorderWidth == AppSettings.defaultSelectorBorderWidth)
+        #expect(decoded.selectorCornerRadius == AppSettings.defaultSelectorCornerRadius)
+        #expect(decoded.magnifyScale == AppSettings.defaultMagnifyScale)
+        #expect(decoded.magnifyShadowStrength == AppSettings.defaultMagnifyShadowStrength)
+    }
+
     @Test("Settings files written before the option audit still load")
     func legacySettingsIgnoreRemovedOptions() throws {
         let dir = try makeTempDirectory()
@@ -403,5 +439,6 @@ struct StateStoreTests {
         let settings = try store.loadSettings()
         #expect(settings.launchAtLogin == true)
         #expect(settings.glassStyle == .clear)
+        #expect(settings.windowSelectionStyle == .outline)
     }
 }

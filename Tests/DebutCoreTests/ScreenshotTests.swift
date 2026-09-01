@@ -247,6 +247,31 @@ struct ScreenshotTests {
         #expect(vm.selectedWindowIndex == 2)
     }
 
+    @Test("Magnify remains available as a selection style")
+    func magnifySelectionState() throws {
+        var appearance = AppSettings()
+        appearance.windowSelectionStyle = .magnify
+        appearance.magnifyScale = 1.12
+        appearance.magnifyShadowStrength = 1.5
+        let vm = StageOverlayViewModel(
+            spaceManager: makeSampleViewModel(
+                spaceCount: 1,
+                windowsPerSpace: [3],
+                activeIndex: 0
+            ).spaceManager,
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 1,
+            appearance: appearance
+        )
+        guard let image = renderSwiftUI(
+            StageOverlayView(viewModel: vm),
+            size: NSSize(width: 900, height: 300)
+        ) else { throw ScreenshotError.renderFailed }
+
+        try saveImage(image, name: "05_magnify_selection_state")
+        #expect(vm.appearance.windowSelectionStyle == .magnify)
+    }
+
     /// Pins the scale so the wrap threshold under test is a property of the width, not of
     /// whatever the stage-scale default happens to be.
     private func unscaledAppearance() -> AppSettings {
