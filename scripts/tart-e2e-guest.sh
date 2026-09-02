@@ -174,6 +174,21 @@ grant_post_event "$E2E_SOURCE" "$E2E_SOURCE"
 grant_screen_capture "$E2E_SOURCE" 1 "$E2E_SOURCE"
 sudo killall tccd 2>/dev/null || true
 
+# A warm VM is reused across runs, and macOS's periodic screen-recording reminder is modal to
+# nothing: the alerts simply stay on the desktop. They had stacked seven deep, covering the region
+# every pixel-sampling check reads. Suppressing the reminder stops new ones, and quitting the
+# presenter clears whatever an earlier run left behind.
+# macOS keys this store by whatever it holds responsible for the capture: a bundle ID for Debut, and
+# for the suite the ssh session that launched it rather than the binary itself.
+screen_capture_approvals="$console_home/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
+for approval_client in "$bundle_id" "$E2E_SOURCE" "/usr/libexec/sshd-keygen-wrapper"; do
+    as_console env HOME="$console_home" defaults write \
+        "$screen_capture_approvals" "$approval_client" -date "3024-01-01 00:00:00 +0000"
+done
+as_console killall cfprefsd 2>/dev/null || true
+as_console killall UserNotificationCenter 2>/dev/null || true
+as_console killall replayd 2>/dev/null || true
+
 # Under Reduce Motion the removal transition is a 0.12s fade rather than a 0.36s spring, which is
 # correct behaviour but too brief to sample as motion. The fade branch is covered by unit tests, so
 # the disposable guest is pinned to the spring instead of the E2E check guessing which one it drew.
