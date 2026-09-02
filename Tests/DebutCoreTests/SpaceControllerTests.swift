@@ -1689,4 +1689,30 @@ struct SpaceControllerWindowSizeTests {
         #expect(controller.windowSizes[101] == CGSize(width: 1_600, height: 800))
         #expect(controller.windowSizes[999] == nil)
     }
+
+    @Test("Resizing a window reshapes its card without waiting for an app switch")
+    func resizeUpdatesTheRecordedSize() {
+        let (controller, _) = makeController()
+        controller.recordWindowSizes([info(101, CGSize(width: 1_600, height: 800))])
+
+        controller.recordWindowSize(windowID: 101, size: CGSize(width: 600, height: 1_200))
+
+        #expect(controller.windowSizes[101] == CGSize(width: 600, height: 1_200))
+    }
+
+    @Test("A resize that lands while the overlay is up is dropped")
+    func resizeFreezesWhileOverlayIsVisible() {
+        let (controller, keyboardService) = makeController()
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W101"),
+            toSpaceID: controller.spaceManager.spaces[0].id
+        )
+        controller.recordWindowSizes([info(101, CGSize(width: 1_600, height: 800))])
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(controller.isSpaceManagerVisible)
+        controller.recordWindowSize(windowID: 101, size: CGSize(width: 400, height: 400))
+
+        #expect(controller.windowSizes[101] == CGSize(width: 1_600, height: 800))
+    }
 }

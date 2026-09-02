@@ -27,6 +27,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onWindowClosed: ((CGWindowID) -> Void)?
     public var onWindowActivated: ((CGWindowID) -> Void)?
     public var onWindowTitleChanged: ((CGWindowID, String) -> Void)?
+    public var onWindowResized: ((CGWindowID, CGSize) -> Void)?
     public var onFrontmostAppChanged: ((String?) -> Void)?
     public var onAppActivated: ((RuntimeWindowSnapshot) -> Void)?
     public var onDesktopsChanged: ((RuntimeWindowSnapshot) -> Void)?
@@ -106,6 +107,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     /// Replaces the AX element lookup in tests. Production leaves this nil.
     var windowElementOverride: ((CGWindowID, pid_t) -> AXUIElement?)?
+
+    /// Replaces the AX size read in tests. Production leaves this nil.
+    var windowSizeReader: ((AXUIElement) -> CGSize?)?
 
     /// Replaces the AX focus-observer registration in tests. Production leaves this nil.
     var focusObserverRegistrationOverride: ((pid_t) -> AXError)?
@@ -458,11 +462,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         guard destroyed == .success || destroyed == .notificationAlreadyRegistered else {
             return .notificationRejected(destroyed.rawValue)
         }
-        // A stale title is cosmetic, so it never gates tracking.
+        // A stale title is cosmetic, so it never gates tracking. Neither is a stale size,
+        // which only decides how wide the window's card is drawn.
         _ = AXObserverAddNotification(
             observer,
             lifecycleTarget,
             kAXTitleChangedNotification as CFString,
+            selfPtr
+        )
+        _ = AXObserverAddNotification(
+            observer,
+            lifecycleTarget,
+            kAXWindowResizedNotification as CFString,
             selfPtr
         )
         return .armed
@@ -594,6 +605,30 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         guard AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef) == .success,
               let title = titleRef as? String else { return }
         onWindowTitleChanged?(windowID, title)
+    }
+
+    /// A window's size only ever reaches the model through discovery, and resizing a window
+    /// runs none of it — the card kept the shape the window had at the last app switch.
+    func handleWindowResized(element: AXUIElement) {
+        // The notification hands over the window itself, so ask it which window it is rather
+        // than looking it up. A stored element is only ever recorded when `kAXWindows` could
+        // see the window, which depends on the desktop showing at the time it was armed.
+        var windowID: CGWindowID = 0
+        if _AXUIElementGetWindow(element, &windowID) != .success {
+            guard let tracked = trackedWindowID(for: element) else { return }
+            windowID = tracked
+        }
+        guard let size = windowSizeReader?(element) ?? Self.axSize(of: element) else { return }
+        onWindowResized?(windowID, size)
+    }
+
+    private static func axSize(of element: AXUIElement) -> CGSize? {
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success,
+              let value = sizeRef, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var size = CGSize.zero
+        guard AXValueGetValue(value as! AXValue, .cgSize, &size) else { return nil }
+        return size
     }
 
     // MARK: - AXObserver for focused window changes
@@ -932,7 +967,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
 }
 
-// AXObserver C callback — per-window lifecycle (destroyed, title changed)
+// AXObserver C callback — per-window lifecycle (destroyed, title changed, resized)
 private func windowLifecycleCallback(
     observer: AXObserver,
     element: AXUIElement,
@@ -946,6 +981,8 @@ private func windowLifecycleCallback(
         service.handleWindowDestroyed(element: element)
     } else if name == kAXTitleChangedNotification {
         service.handleWindowTitleChanged(element: element)
+    } else if name == kAXWindowResizedNotification {
+        service.handleWindowResized(element: element)
     }
 }
 
