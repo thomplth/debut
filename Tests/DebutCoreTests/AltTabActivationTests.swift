@@ -30,6 +30,18 @@ struct AltTabActivationTests {
         #expect(KeyAction.activateAltTabNext.isCycling)
     }
 
+    @Test("Option+backtick is exposed as the alternate backward binding")
+    func alternateBackwardBinding() {
+        let bindings = KeyBindings()
+
+        #expect(
+            bindings.combo(for: .activateAltTabPreviousAlternate)
+                == KeyCombo(keyCode: kVK_ANSI_Grave, option: true)
+        )
+        #expect(KeyAction.altTabActions.contains(.activateAltTabPreviousAlternate))
+        #expect(KeyAction.sessionActions.contains(.previousWindowAlternate))
+    }
+
     @Test("Option+Tab opens the alt-tab switcher and is consumed")
     func opensSwitcher() {
         let service = EventTapKeyboardService()
@@ -53,6 +65,25 @@ struct AltTabActivationTests {
         #expect(service.handleCGEvent(type: .keyDown, event: key(kVK_Tab, flags)) == nil)
 
         #expect(delegate.receivedEvents == [.altTabShiftHold])
+    }
+
+    @Test("Option+backtick cycles backward while the switcher is open")
+    func alternateCyclesBackward() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        _ = service.handleCGEvent(type: .keyDown, event: key(kVK_Tab, .maskAlternate))
+        service.overlayVisible = true
+        #expect(
+            service.handleCGEvent(
+                type: .keyDown,
+                event: key(kVK_ANSI_Grave, .maskAlternate)
+            ) == nil
+        )
+
+        #expect(delegate.receivedEvents == [.altTabHold, .altTabShiftHold])
     }
 
     /// Option is the session's primary modifier, so lifting it commits the selection through the

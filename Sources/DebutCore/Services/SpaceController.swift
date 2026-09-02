@@ -1563,6 +1563,19 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         commitSelection()
     }
 
+    /// Commit a card from the flat all-windows list. The flat index is resolved back into the
+    /// stage cursor first so the existing cross-space and cross-display commit path stays the
+    /// single source of truth for activation.
+    public func commitAltTabSelection(index: Int) {
+        guard isSpaceManagerVisible, overlayMode == .altTab,
+              altTabEntries.indices.contains(index)
+        else { return }
+
+        altTabSelectionIndex = index
+        syncStageSelection(toAltTabIndex: index)
+        commitSelection()
+    }
+
     /// Close the switcher and expose Finder's real desktop surface.
     public func revealDesktop() {
         guard isSpaceManagerVisible, !isStageStackCommitInFlight else { return }

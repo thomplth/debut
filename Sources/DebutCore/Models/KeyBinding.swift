@@ -11,6 +11,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     // Global alt-tab switcher activation
     case activateAltTabNext
     case activateAltTabPrevious
+    case activateAltTabPreviousAlternate
 
     // Global space switching
     case quickSwitchSpace1, quickSwitchSpace2, quickSwitchSpace3
@@ -48,6 +49,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .activatePreviousSpaceAlternate: "Open / cycle spaces backward (alternate)"
         case .activateAltTabNext: "Open / cycle all windows"
         case .activateAltTabPrevious: "Open / cycle all windows backward"
+        case .activateAltTabPreviousAlternate: "Open / cycle all windows backward (alternate)"
         case .quickSwitchSpace1: "Quick switch to space 1"
         case .quickSwitchSpace2: "Quick switch to space 2"
         case .quickSwitchSpace3: "Quick switch to space 3"
@@ -93,6 +95,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .activatePreviousSpaceAlternate: .cmdOptionShiftTabHold
         case .activateAltTabNext: .altTabHold
         case .activateAltTabPrevious: .altTabShiftHold
+        case .activateAltTabPreviousAlternate: .altTabShiftHold
         case .quickSwitchSpace1: .switchToSpace(1)
         case .quickSwitchSpace2: .switchToSpace(2)
         case .quickSwitchSpace3: .switchToSpace(3)
@@ -140,7 +143,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .nextAppWindow: .cmdBacktickRepeat
         case .previousAppWindow: .cmdShiftBacktickRepeat
         case .activateAltTabNext: .altTabHoldRepeat
-        case .activateAltTabPrevious: .altTabShiftHoldRepeat
+        case .activateAltTabPrevious, .activateAltTabPreviousAlternate: .altTabShiftHoldRepeat
         default: toKeyEvent()
         }
     }
@@ -149,7 +152,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
              .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate,
-             .activateAltTabNext, .activateAltTabPrevious,
+             .activateAltTabNext, .activateAltTabPrevious, .activateAltTabPreviousAlternate,
              .quickSwitchSpace1, .quickSwitchSpace2, .quickSwitchSpace3,
              .quickSwitchSpace4, .quickSwitchSpace5, .quickSwitchSpace6,
              .quickSwitchSpace7, .quickSwitchSpace8, .quickSwitchSpace9,
@@ -164,7 +167,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
              .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate,
-             .activateAltTabNext, .activateAltTabPrevious:
+             .activateAltTabNext, .activateAltTabPrevious, .activateAltTabPreviousAlternate:
             true
         default:
             false
@@ -201,7 +204,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         switch self {
         case .activateNextWindow, .activatePreviousWindow,
              .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate,
-             .activateAltTabNext, .activateAltTabPrevious,
+             .activateAltTabNext, .activateAltTabPrevious, .activateAltTabPreviousAlternate,
              .nextAppWindow, .previousAppWindow,
              .nextWindow, .previousWindow, .previousWindowAlternate,
              .nextSpace, .previousSpace:
@@ -229,7 +232,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     ]
 
     public static let altTabActions: [KeyAction] = [
-        .activateAltTabNext, .activateAltTabPrevious,
+        .activateAltTabNext, .activateAltTabPrevious, .activateAltTabPreviousAlternate,
     ]
 
     public static let globalActions =
@@ -391,6 +394,10 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             ),
             .activateAltTabNext: KeyCombo(keyCode: kVK_Tab, option: true),
             .activateAltTabPrevious: KeyCombo(keyCode: kVK_Tab, shift: true, option: true),
+            .activateAltTabPreviousAlternate: KeyCombo(
+                keyCode: kVK_ANSI_Grave,
+                option: true
+            ),
             .quickSwitchSpace1: KeyCombo(keyCode: kVK_ANSI_1, control: true),
             .quickSwitchSpace2: KeyCombo(keyCode: kVK_ANSI_2, control: true),
             .quickSwitchSpace3: KeyCombo(keyCode: kVK_ANSI_3, control: true),
