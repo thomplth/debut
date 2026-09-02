@@ -58,8 +58,10 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     public var onSpaceScrollSelected: ((Int) -> Void)?
     var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     public var onWindowSelected: ((Int, Int) -> Void)?
+    public var onAltTabWindowSelected: ((Int) -> Void)?
     public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
+    public var onAltTabPointerSelectionChanged: ((Int?) -> Void)?
     public var onDesktopSelected: (() -> Void)?
     var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
     var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
@@ -123,7 +125,11 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         synchronizeFrameToTargetScreen(display: false)
         renderedWindowIDs = Set(viewModel.windows.map(\.windowID))
         return present(
-            .altTab(AltTabOverlayView(viewModel: viewModel)),
+            .altTab(AltTabOverlayView(
+                viewModel: viewModel,
+                onWindowSelected: onAltTabWindowSelected,
+                onPointerSelectionChanged: onAltTabPointerSelectionChanged
+            )),
             removedWindowIDs: [],
             generation: renderGeneration
         )

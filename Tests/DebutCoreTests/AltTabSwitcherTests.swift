@@ -155,6 +155,19 @@ struct AltTabSwitcherTests {
         #expect(controller.spaceManager.activeSpaceID == spaceB)
     }
 
+    @Test("Clicking a flat-list card commits that exact window")
+    func pointerCommitSelectsClickedWindow() {
+        let (controller, windowService) = makeTwoSpaceController()
+        let spaceA = controller.spaceManager.spaces[0].id
+
+        controller.handleKeyEvent(.altTabHold)
+        controller.commitAltTabSelection(index: 0)
+
+        #expect(!controller.isSpaceManagerVisible)
+        #expect(controller.spaceManager.activeSpaceID == spaceA)
+        #expect(windowService.raisedWindowIDs.contains(101))
+    }
+
     /// Quit and close read the stage cursor, so this is the check that the alt-tab cursor is
     /// mirrored onto it — otherwise they would act on whichever window the stage happened to
     /// have selected, on a different space entirely.
