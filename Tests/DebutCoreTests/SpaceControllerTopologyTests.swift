@@ -589,6 +589,38 @@ struct SpaceControllerSpaceTests {
         #expect(departed.lastActivatedAt == oldDate)
     }
 
+    /// AX focus delivery is asynchronous. An intermediate desktop can report after the final
+    /// desktop is already showing; its positive location then proves the callback is stale.
+    @Test("A late focus callback from a departed desktop does not change MRU")
+    func lateIntermediateFocusDoesNotChangeMRU() throws {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.spaceManager.createSpace(position: .below)
+        let oldDate = Date(timeIntervalSinceReferenceDate: 10)
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 11,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "A",
+                lastActivatedAt: oldDate
+            ),
+            toSpaceID: controller.spaceManager.spaces[0].id
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 22, ownerBundleID: "com.b", ownerName: "B", windowTitle: "B"),
+            toSpaceID: controller.spaceManager.spaces[1].id
+        )
+        spaces.windowDesktops = [11: 0, 22: 1]
+
+        controller.recordWindowActivation(windowID: 11)
+
+        let departed = try #require(
+            controller.spaceManager.allSpaces[0].windows.first { $0.windowID == 11 }
+        )
+        #expect(departed.lastActivatedAt == oldDate)
+    }
+
     /// An unexpected landing stops the coordinator instead of fighting the user. The focus on
     /// that desktop is therefore the real result, not an intermediate side effect to discard.
     @Test("An unexpected landing keeps its focused window as MRU")

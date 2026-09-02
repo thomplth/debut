@@ -716,6 +716,21 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
 
+        // AX callbacks are asynchronous and can arrive after a route has already left the
+        // desktop where focus changed. A positively located window cannot genuinely be
+        // focused unless its desktop is showing, so this mismatch identifies stale delivery.
+        if let desktopLocation,
+           let showingDesktopID = spaceSwitcher?.spaceTopology()
+               .stack(id: desktopLocation.stackID)?.currentDesktopID,
+           showingDesktopID != desktopLocation.desktopID {
+            diag.report("window_activation_ignored", level: .transient, details: [
+                "reason": "desktop_not_showing",
+                "stackID": desktopLocation.stackID,
+                "windowID": "\(windowID)",
+            ])
+            return
+        }
+
         if let ownerPID = spaceManager.allSpaces.lazy.flatMap(\.windows)
             .first(where: { $0.windowID == windowID })?.ownerPID,
            terminationPendingProcessIDs.remove(ownerPID) != nil {
