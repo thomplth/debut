@@ -689,6 +689,45 @@ struct SpaceControllerSpaceTests {
         #expect(controller.spaceManager.spaces[1].windows.map(\.windowID) == [22, 21])
     }
 
+    /// The window macOS flashes on the destination while the transition settles never becomes
+    /// the second-most-recent window globally. Space 1 holds A then B, space 2 holds C then D,
+    /// and Option-Tab from C commits B: A merely appeared, so C keeps its place behind B.
+    @Test("Passive focus on the destination does not outrank the space left behind")
+    func passiveDestinationFocusDoesNotOutrankOriginMRU() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
+        spaces.switchChangesDesktop = false
+        let (controller, _) = makeController(spaces: spaces)
+        controller.spaceManager.createSpace(position: .below)
+        let stamps: [(CGWindowID, Int, TimeInterval)] = [
+            (11, 0, 20), (22, 0, 10), (33, 1, 40), (44, 1, 30),
+        ]
+        for (windowID, spaceIndex, stamp) in stamps {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.app.\(windowID)",
+                    ownerName: "App \(windowID)",
+                    windowTitle: "Window \(windowID)",
+                    lastActivatedAt: Date(timeIntervalSinceReferenceDate: stamp)
+                ),
+                toSpaceID: controller.spaceManager.spaces[spaceIndex].id
+            )
+            spaces.windowDesktops[windowID] = spaceIndex
+        }
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[1].id)
+
+        controller.switchToSpace(id: controller.spaceManager.spaces[0].id, raiseWindowID: 22)
+        spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
+        spaces.current = 0
+        controller.recordWindowActivation(windowID: 11)
+
+        spaces.switchingStackIDs = []
+        controller.desktopDidChange()
+
+        #expect(controller.spaceManager.globalWindowOrder().map(\.window.windowID)
+            == [22, 33, 44, 11])
+    }
+
     // The settling path is where the race lives: Debut's deferred focus lands within a few
     // milliseconds of macOS restoring the destination's remembered app. Plain quick switch
     // must queue nothing, so the desktop settles on whatever macOS chose.
