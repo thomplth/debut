@@ -13,8 +13,24 @@ public struct DesktopScreenDescriptor: Hashable, Sendable {
 }
 
 extension NSScreen {
-    var displayID: CGDirectDisplayID {
+    public var displayID: CGDirectDisplayID {
         let key = NSDeviceDescriptionKey("NSScreenNumber")
         return (deviceDescription[key] as? NSNumber)?.uint32Value ?? 0
+    }
+
+    public var overlayTopContentInset: CGFloat {
+        OverlayDisplayResolver.topContentInset(
+            frame: frame,
+            visibleFrame: visibleFrame,
+            safeAreaTopInset: safeAreaInsets.top,
+            menuBarHeight: NSStatusBar.system.thickness
+        )
+    }
+
+    public var overlayFrame: CGRect {
+        OverlayDisplayResolver.overlayFrame(
+            displayFrame: frame,
+            topContentInset: overlayTopContentInset
+        )
     }
 }

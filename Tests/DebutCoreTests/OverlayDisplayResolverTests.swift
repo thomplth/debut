@@ -116,4 +116,34 @@ struct OverlayDisplayResolverTests {
 
         #expect(inset == 38)
     }
+
+    @Test("The overlay frame gives the reserved strip back to the display")
+    func overlayFrameReservesTopInset() {
+        let frame = OverlayDisplayResolver.overlayFrame(
+            displayFrame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
+            topContentInset: 38
+        )
+
+        #expect(frame == CGRect(x: 0, y: 0, width: 1728, height: 1079))
+    }
+
+    @Test("The overlay frame reserves the top of whichever display it is given")
+    func overlayFrameFollowsDisplayOrigin() {
+        let frame = OverlayDisplayResolver.overlayFrame(
+            displayFrame: CGRect(x: -1920, y: 300, width: 1920, height: 1080),
+            topContentInset: 25
+        )
+
+        #expect(frame == CGRect(x: -1920, y: 300, width: 1920, height: 1055))
+    }
+
+    @Test("Quartz overlay bounds move the origin down rather than the bottom edge up")
+    func overlayBoundsReserveTopInset() {
+        let bounds = OverlayDisplayResolver.overlayBounds(
+            displayBounds: CGRect(x: 0, y: 0, width: 1728, height: 1117),
+            topContentInset: 38
+        )
+
+        #expect(bounds == CGRect(x: 0, y: 38, width: 1728, height: 1079))
+    }
 }

@@ -8,16 +8,13 @@ public struct AltTabOverlayViewModel: Sendable {
     public let windows: [StageWindowData]
     public var selectedIndex: Int
     public var appearance: AppSettings
-    /// The inset macOS reserves at the top of the display for the menu bar or hardware.
-    public var displayTopContentInset: CGFloat
 
     public init(
         entries: [GlobalWindowEntry],
         selectedIndex: Int,
         windowPreviews: [CGWindowID: CGImage] = [:],
         windowSizes: [CGWindowID: CGSize] = [:],
-        appearance: AppSettings = AppSettings(),
-        displayTopContentInset: CGFloat = 0
+        appearance: AppSettings = AppSettings()
     ) {
         self.windows = entries.map {
             StageWindowData.card(
@@ -29,7 +26,6 @@ public struct AltTabOverlayViewModel: Sendable {
         }
         self.selectedIndex = selectedIndex
         self.appearance = appearance
-        self.displayTopContentInset = displayTopContentInset
     }
 
     public var selectedWindow: StageWindowData? { windows[safe: selectedIndex] }
