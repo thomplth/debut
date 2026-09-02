@@ -45,6 +45,7 @@ private final class DelayedCaptureWindowService: WindowService, @unchecked Senda
     }
 
     func raiseWindow(windowID: CGWindowID) -> Bool { true }
+    func activateApp(pid: pid_t) -> Bool { true }
     func activateApp(bundleID: String) -> Bool { true }
     func terminateApp(pid: pid_t) -> Bool { true }
     func isAccessibilityEnabled() -> Bool { true }
@@ -396,6 +397,28 @@ struct SpaceControllerTests {
         controller.switchToSpace(id: spaceID, raiseWindowID: 202)
 
         #expect(windowSvc.raisedWindowID == 202)
+    }
+
+    @Test("A hosted window activates its owning process instead of its host bundle")
+    func hostedWindowActivatesOwnerProcess() {
+        let (controller, windowService, _) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 31117,
+                ownerBundleID: "com.codeweavers.CrossOver",
+                ownerName: "王様恋愛【体験版】.exe",
+                windowTitle: "王様恋愛 Ver1.00",
+                ownerPID: 79240
+            ),
+            toSpaceID: spaceID
+        )
+
+        controller.switchToSpace(id: spaceID, raiseWindowID: 31117)
+
+        #expect(windowService.raisedWindowID == 31117)
+        #expect(windowService.activatedPID == 79240)
+        #expect(windowService.activatedBundleID == nil)
     }
 
     @Test("Clicking a window immediately switches to its space and window")
@@ -1155,7 +1178,7 @@ struct SpaceControllerTests {
         keyboardService.simulateEvent(.cmdRelease)
 
         #expect(windowService.raisedWindowID == 404)
-        #expect(windowService.activatedBundleID == "com.c")
+        #expect(windowService.activatedPID == 33)
     }
 
     @Test("A rejected quit leaves the selected app available")
@@ -1180,7 +1203,7 @@ struct SpaceControllerTests {
         keyboardService.simulateEvent(.cmdRelease)
 
         #expect(windowService.raisedWindowID == 202)
-        #expect(windowService.activatedBundleID == "com.b")
+        #expect(windowService.activatedPID == 22)
     }
 
     @Test("External activation restores an app whose quit is still pending")
