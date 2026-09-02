@@ -1032,7 +1032,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             // No z-order to rebuild — the windows of the active space are the windows on
             // the current desktop, and macOS is already showing them.
             if let firstWindow = controller.spaceManager.activeSpace.windows.first {
-                _ = controller.windowService.activateApp(bundleID: firstWindow.ownerBundleID)
+                if let ownerPID = firstWindow.ownerPID {
+                    _ = controller.windowService.activateApp(pid: ownerPID)
+                } else {
+                    _ = controller.windowService.activateApp(bundleID: firstWindow.ownerBundleID)
+                }
             }
 
             debouncedSaver?.flushNow(controller.spaceManager)

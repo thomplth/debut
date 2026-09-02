@@ -131,6 +131,10 @@ public protocol WindowService: Sendable {
     func raiseWindow(windowID: CGWindowID) -> Bool
     /// Performs the target window's accessibility close action when the app exposes one.
     func closeWindow(windowID: CGWindowID) -> Bool
+    /// Activates one exact running application instance. Window focus must prefer this over a
+    /// bundle lookup because hosted foreground applications can own windows without having a
+    /// bundle identifier of their own.
+    func activateApp(pid: pid_t) -> Bool
     func activateApp(bundleID: String) -> Bool
     /// Addressed by PID, not bundle ID, so a second instance of the same app is not quit
     /// alongside the one the user selected.

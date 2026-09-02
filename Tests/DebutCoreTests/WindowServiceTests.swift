@@ -416,6 +416,14 @@ struct WindowServiceTests {
         #expect(svc.activatedBundleID == "com.a")
     }
 
+    @Test("Activate an exact running application process")
+    func activateAppProcess() {
+        let svc = MockWindowService()
+        #expect(svc.activateApp(pid: 79240))
+        #expect(svc.activatedPID == 79240)
+        #expect(svc.activatedBundleID == nil)
+    }
+
     @Test("A resolved window element skips the running-app scan")
     func resolvedElementSkipsScan() {
         let service = AccessibilityWindowService()
