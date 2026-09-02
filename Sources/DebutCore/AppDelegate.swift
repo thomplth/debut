@@ -591,6 +591,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             )
         }
 
+        overlayWindow.onAltTabWindowSelected = { [weak self] index in
+            self?.diag.report("overlay_window_selected_by_pointer", level: .transient, details: [
+                "altTabIndex": "\(index)",
+            ])
+            self?.spaceController?.commitAltTabSelection(index: index)
+        }
+
         overlayWindow.onWindowMoved = {
             [weak self] windowID, fromIndex, fromWindowIndex, toIndex, toWindowIndex in
             guard let self, let ctrl = self.spaceController else { return }
@@ -652,6 +659,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             self?.diag.report("overlay_pointer_selection_changed", level: .transient, details: [
                 "spaceIndex": spaceIndex.map(String.init) ?? "none",
                 "windowIndex": windowIndex.map(String.init) ?? "none",
+            ])
+        }
+
+        overlayWindow.onAltTabPointerSelectionChanged = { [weak self] index in
+            self?.diag.report("overlay_pointer_selection_changed", level: .transient, details: [
+                "altTabIndex": index.map(String.init) ?? "none",
             ])
         }
 

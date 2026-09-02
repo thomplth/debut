@@ -97,6 +97,32 @@ struct AltTabOverlayViewModelTests {
         #expect(model.selectedWindow == nil)
     }
 
+    @Test("The flat overlay uses the active Command-Tab stage lift")
+    func usesActiveStageLift() {
+        let model = AltTabOverlayViewModel(entries: [], selectedIndex: 0)
+
+        #expect(model.overlayLift == StageMotion.lift(isActive: true))
+    }
+
+    @Test("Hover follows a card and leaving only clears that card")
+    func hoverSelection() {
+        #expect(AltTabInteraction.pointerSelection(
+            current: nil,
+            target: 2,
+            isHovering: true
+        ) == 2)
+        #expect(AltTabInteraction.pointerSelection(
+            current: 2,
+            target: 2,
+            isHovering: false
+        ) == nil)
+        #expect(AltTabInteraction.pointerSelection(
+            current: 3,
+            target: 2,
+            isHovering: false
+        ) == 3)
+    }
+
     /// The flat list is one stage holding every window, so it reuses the stage grid rather than
     /// growing a second layout that could disagree about how big a card is.
     @Test("The flat list wraps into one balanced grid")

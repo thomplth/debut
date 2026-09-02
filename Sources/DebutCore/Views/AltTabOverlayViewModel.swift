@@ -38,6 +38,12 @@ public struct AltTabOverlayViewModel: Sendable {
         index == selectedIndex && windows.indices.contains(index)
     }
 
+    /// The flat plate is the active stage for the whole session, so it carries the same depth
+    /// treatment as the focused stage in the Command-Tab overlay.
+    var overlayLift: StageLift {
+        StageMotion.lift(isActive: true)
+    }
+
     /// The list is one stage holding every window, so it fits itself the same way a stack of
     /// stages does — by walking the scale slider's own steps down until the grid fits.
     public func metrics(containerSize: CGSize) -> StageMetrics {
@@ -54,5 +60,16 @@ public struct AltTabOverlayViewModel: Sendable {
             availableWidth: StageConstants.availableStageWidth(screenWidth: containerSize.width),
             metrics: metrics(containerSize: containerSize)
         )
+    }
+}
+
+enum AltTabInteraction {
+    static func pointerSelection(
+        current: Int?,
+        target: Int,
+        isHovering: Bool
+    ) -> Int? {
+        if isHovering { return target }
+        return current == target ? nil : current
     }
 }
