@@ -516,6 +516,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// landing, `recordWindowActivation` validates the candidate against the desktop now
     /// showing before it is allowed to touch MRU. Explicit pending focus runs afterwards and
     /// therefore wins over macOS's passive final focus.
+    ///
+    /// A candidate the explicit focus is about to overrule is dropped rather than recorded.
+    /// Applying both left the flashed window stamped just under the target, so a window the
+    /// user only saw during the transition outranked the space they came from in the global
+    /// Option-Tab order.
     private func applyDeferredSwitchActivations() {
         guard let switcher = spaceSwitcher else {
             deferredSwitchActivations.removeAll()
@@ -537,8 +542,27 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 ])
                 continue
             }
+            if pendingFocusSupersedes(windowID: windowID, onStack: stackID) {
+                diag.report("window_activation_ignored", level: .transient, details: [
+                    "reason": "explicit_focus_pending",
+                    "stackID": stackID,
+                    "windowID": "\(windowID)",
+                ])
+                continue
+            }
             recordWindowActivation(windowID: windowID)
         }
+    }
+
+    /// True when `applyPendingSpaceFocus` is about to focus a different window on this stack.
+    /// A pending focus whose desktop is not showing is still travelling or already lost, so it
+    /// cannot overrule anything and the held candidate stands on its own evidence.
+    private func pendingFocusSupersedes(windowID: CGWindowID, onStack stackID: String) -> Bool {
+        guard let pending = pendingSpaceFocus, pending.windowID != windowID,
+              spaceManager.spaceStackID(containingSpaceID: pending.spaceID) == stackID,
+              let index = spaceManager.spaceIndex(id: pending.spaceID)
+        else { return false }
+        return spaceSwitcher?.spaceTopology().stack(id: stackID)?.currentDesktopIndex == index
     }
 
     /// Focuses the window a space switch asked for, now that its desktop is showing.
