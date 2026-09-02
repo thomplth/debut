@@ -576,34 +576,45 @@ func spaceWindowCounts(in state: [String: String]) -> [Int] {
         .compactMap { Int($0) }
 }
 
+/// The shape of every card the overlay is drawing, by space. Cards no longer all have the same
+/// width, so the counts alone no longer say where one is. A window the running app never
+/// measured, or a session with the setting off, leaves the card on the display's own shape.
+func spaceCardAspects(in state: [String: String]) -> [[CGFloat?]] {
+    let counts = spaceWindowCounts(in: state)
+    let uniform = counts.map { [CGFloat?](repeating: nil, count: $0) }
+    guard interactionSettings.adaptiveCardSizing else { return uniform }
+    let aspects = SpaceController.decodeWindowAspects(state["windowAspectsBySpace"] ?? "")
+    return aspects.map(\.count) == counts ? aspects : uniform
+}
+
 // Read before any geometry helper runs: top-level declarations in main.swift initialize in
 // source order, so the hit tests below cannot reach a setting declared beneath them.
 let interactionSettings = (try? StateStore().loadSettings()) ?? AppSettings()
 
 /// The card metrics the running overlay is drawing at, which depend on both the stage-scale
 /// setting and how many windows the display has to hold.
-func drawnMetrics(windowCounts: [Int]) -> StageMetrics {
+func drawnMetrics(cardAspects: [[CGFloat?]]) -> StageMetrics {
     StageConstants.drawnMetrics(
         stageScale: CGFloat(interactionSettings.stageScale),
-        windowCounts: windowCounts,
+        contentAspects: cardAspects,
         containerSize: CGDisplayBounds(CGMainDisplayID()).size
     )
 }
 
 func stageCenter(
     spaceIndex: Int,
-    windowCounts: [Int],
+    cardAspects: [[CGFloat?]],
     activeSpaceIndex: Int,
     inactiveScale: CGFloat
 ) -> CGPoint? {
-    guard windowCounts.indices.contains(spaceIndex),
-          windowCounts.indices.contains(activeSpaceIndex)
+    guard cardAspects.indices.contains(spaceIndex),
+          cardAspects.indices.contains(activeSpaceIndex)
     else { return nil }
 
     let screen = CGDisplayBounds(CGMainDisplayID())
-    let metrics = drawnMetrics(windowCounts: windowCounts)
+    let metrics = drawnMetrics(cardAspects: cardAspects)
     let stageHeights = StageConstants.stageLayouts(
-        forWindowCounts: windowCounts,
+        forContentAspects: cardAspects,
         screenWidth: screen.width,
         metrics: metrics
     ).map(\.stageSize.height)
@@ -624,7 +635,7 @@ func stageCenter(
 func windowCenter(
     spaceIndex: Int,
     windowIndex: Int,
-    windowCounts: [Int],
+    cardAspects: [[CGFloat?]],
     activeSpaceIndex: Int,
     inactiveScale: CGFloat
 ) -> CGPoint? {
@@ -633,26 +644,35 @@ func windowCenter(
     StageConstants.windowCardCenter(
         spaceIndex: spaceIndex,
         windowIndex: windowIndex,
-        windowCounts: windowCounts,
+        contentAspects: cardAspects,
         activeSpaceIndex: activeSpaceIndex,
         inactiveScale: inactiveScale,
         containerSize: CGDisplayBounds(CGMainDisplayID()).size,
-        metrics: drawnMetrics(windowCounts: windowCounts)
+        metrics: drawnMetrics(cardAspects: cardAspects)
     )
 }
 
+/// The active space's own card shapes, on their own. The stack collapses to one stage here
+/// because the caller only wants a point within it, not where it sits in the stack.
+func activeSpaceCardAspects(in state: [String: String]) -> [CGFloat?] {
+    let aspects = spaceCardAspects(in: state)
+    guard let index = Int(state["activeSpaceIndex"] ?? ""), aspects.indices.contains(index)
+    else { return [] }
+    return aspects[index]
+}
+
 func firstWindowCenter(in state: [String: String]) -> CGPoint? {
-    guard let activeWindows = Int(state["windowsInActiveSpace"] ?? ""), activeWindows > 0
-    else { return nil }
+    let aspects = activeSpaceCardAspects(in: state)
+    guard !aspects.isEmpty else { return nil }
 
     return StageConstants.windowCardCenter(
         spaceIndex: 0,
         windowIndex: 0,
-        windowCounts: [activeWindows],
+        contentAspects: [aspects],
         activeSpaceIndex: 0,
         inactiveScale: 1,
         containerSize: CGDisplayBounds(CGMainDisplayID()).size,
-        metrics: drawnMetrics(windowCounts: [activeWindows])
+        metrics: drawnMetrics(cardAspects: [aspects])
     )
 }
 
@@ -1409,6 +1429,7 @@ wait(0.8)
 
 let preparedDropState = readState()
 let preparedWindowCounts = spaceWindowCounts(in: preparedDropState)
+let preparedCardAspects = spaceCardAspects(in: preparedDropState)
 // Stage geometry scales around whichever space is selected, and nothing selects the
 // destination for us now that it is not freshly created.
 let stageActiveSpaceIndex = Int(preparedDropState["selectedSpaceIndex"] ?? "") ?? 0
@@ -1440,13 +1461,13 @@ if preparedWindowCounts.indices.contains(sourceSpaceIndex),
    let sourcePoint = windowCenter(
         spaceIndex: sourceSpaceIndex,
         windowIndex: 0,
-        windowCounts: preparedWindowCounts,
+        cardAspects: preparedCardAspects,
         activeSpaceIndex: stageActiveSpaceIndex,
         inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
    ),
    let destinationPoint = stageCenter(
         spaceIndex: destinationSpaceIndex,
-        windowCounts: preparedWindowCounts,
+        cardAspects: preparedCardAspects,
         activeSpaceIndex: stageActiveSpaceIndex,
         inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
    ) {
@@ -1459,7 +1480,9 @@ if preparedWindowCounts.indices.contains(sourceSpaceIndex),
         wait(0.1)
     }
 
-    let movedWindowCounts = spaceWindowCounts(in: readState())
+    let movedDropState = readState()
+    let movedWindowCounts = spaceWindowCounts(in: movedDropState)
+    let movedCardAspects = spaceCardAspects(in: movedDropState)
     info("  State after drop: windows=\(movedWindowCounts)")
     let _ = takeScreenshot("11_window_drop_refreshed")
     test("Dropping a window updates the source and destination space models") {
@@ -1473,12 +1496,12 @@ if preparedWindowCounts.indices.contains(sourceSpaceIndex),
     if let returnedWindowPoint = windowCenter(
         spaceIndex: destinationSpaceIndex,
         windowIndex: 0,
-        windowCounts: movedWindowCounts,
+        cardAspects: movedCardAspects,
         activeSpaceIndex: stageActiveSpaceIndex,
         inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
     ), let returnedSpacePoint = stageCenter(
         spaceIndex: sourceSpaceIndex,
-        windowCounts: movedWindowCounts,
+        cardAspects: movedCardAspects,
         activeSpaceIndex: stageActiveSpaceIndex,
         inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
     ) {
@@ -1857,7 +1880,7 @@ let dismissalStateBefore = readState()
 let windowsBeforeDismissal = Int(dismissalStateBefore["windowsInActiveSpace"] ?? "0") ?? 0
 let selectedCardCenter = firstWindowCenter(in: dismissalStateBefore)
 let dismissalScreen = CGDisplayBounds(CGMainDisplayID())
-let dismissalMetrics = drawnMetrics(windowCounts: [windowsBeforeDismissal])
+let dismissalMetrics = drawnMetrics(cardAspects: [activeSpaceCardAspects(in: dismissalStateBefore)])
 postMouseMove(to: CGPoint(x: dismissalScreen.maxX - 20, y: dismissalScreen.maxY - 20))
 _ = takeScreenshot("14_selected_window_before_dismissal")
 let accessibleBeforeDismissal = dismissalPID.map(accessibilityStrings(for:)) ?? []

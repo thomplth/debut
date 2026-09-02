@@ -8,9 +8,55 @@ public struct StageWindowData: Sendable, Identifiable {
     public let ownerName: String
     public let windowTitle: String
     public let previewImage: CGImage?
+    /// The window's own width over its height, when it has been measured. The card takes this
+    /// shape; `nil` leaves it on the display's, which is what every card had before.
+    public let contentAspect: CGFloat?
+
+    public init(
+        id: CGWindowID,
+        windowID: CGWindowID,
+        ownerBundleID: String,
+        ownerName: String,
+        windowTitle: String,
+        previewImage: CGImage?,
+        contentAspect: CGFloat? = nil
+    ) {
+        self.id = id
+        self.windowID = windowID
+        self.ownerBundleID = ownerBundleID
+        self.ownerName = ownerName
+        self.windowTitle = windowTitle
+        self.previewImage = previewImage
+        self.contentAspect = contentAspect
+    }
 
     public var displayTitle: String {
         SpaceWindow.displayTitle(windowTitle: windowTitle, ownerName: ownerName)
+    }
+
+    /// One card for a window, taking its own shape when the overlay knows the window's size and
+    /// the user has left adaptive sizing on.
+    static func card(
+        for window: SpaceWindow,
+        previews: [CGWindowID: CGImage],
+        sizes: [CGWindowID: CGSize],
+        adaptive: Bool
+    ) -> StageWindowData {
+        StageWindowData(
+            id: window.windowID,
+            windowID: window.windowID,
+            ownerBundleID: window.ownerBundleID,
+            ownerName: window.ownerName,
+            windowTitle: window.windowTitle,
+            previewImage: previews[window.windowID],
+            contentAspect: adaptive ? contentAspect(of: sizes[window.windowID]) : nil
+        )
+    }
+
+    /// A window with no area has no shape to take, so it falls back to the display's.
+    static func contentAspect(of size: CGSize?) -> CGFloat? {
+        guard let size, size.width > 0, size.height > 0 else { return nil }
+        return size.width / size.height
     }
 }
 
@@ -26,6 +72,9 @@ public struct StageOverlayViewModel: Sendable {
     public var activeSpaceIndex: Int
     public var selectedWindowIndex: Int
     public let windowPreviews: [CGWindowID: CGImage]
+    /// The size each window was last discovered at. Read from `WindowInfo.bounds` rather than
+    /// from a preview, which arrives asynchronously and would reshape the grid mid-overlay.
+    public let windowSizes: [CGWindowID: CGSize]
     public var appearance: AppSettings
     /// Mean brightness of the wallpaper the overlay is drawn over, when it could be measured.
     public var wallpaperLuminance: Double?
@@ -62,11 +111,12 @@ public struct StageOverlayViewModel: Sendable {
         max(0, displayTopContentInset) + 18
     }
 
-    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, displayTopContentInset: CGFloat = 0, forceDisplayStackIndicator: Bool = false) {
+    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], windowSizes: [CGWindowID: CGSize] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, displayTopContentInset: CGFloat = 0, forceDisplayStackIndicator: Bool = false) {
         self.spaceManager = spaceManager
         self.activeSpaceIndex = activeSpaceIndex
         self.selectedWindowIndex = selectedWindowIndex
         self.windowPreviews = windowPreviews
+        self.windowSizes = windowSizes
         self.appearance = appearance
         self.wallpaperLuminance = wallpaperLuminance
         self.displayTopContentInset = displayTopContentInset
@@ -77,35 +127,27 @@ public struct StageOverlayViewModel: Sendable {
         spaceManager.spaces.enumerated().map { index, space in
             StageData(
                 id: space.id,
-                windows: space.windows.map { window in
-                    StageWindowData(
-                        id: window.windowID,
-                        windowID: window.windowID,
-                        ownerBundleID: window.ownerBundleID,
-                        ownerName: window.ownerName,
-                        windowTitle: window.windowTitle,
-                        previewImage: windowPreviews[window.windowID]
-                    )
-                },
+                windows: space.windows.map(card(for:)),
                 isActive: index == activeSpaceIndex,
                 index: index
             )
         }
     }
 
+    private func card(for window: SpaceWindow) -> StageWindowData {
+        StageWindowData.card(
+            for: window,
+            previews: windowPreviews,
+            sizes: windowSizes,
+            adaptive: appearance.adaptiveCardSizing
+        )
+    }
+
     public var selectedWindow: StageWindowData? {
         guard spaceManager.spaces.indices.contains(activeSpaceIndex) else { return nil }
         let space = spaceManager.spaces[activeSpaceIndex]
         guard space.windows.indices.contains(selectedWindowIndex) else { return nil }
-        let window = space.windows[selectedWindowIndex]
-        return StageWindowData(
-            id: window.windowID,
-            windowID: window.windowID,
-            ownerBundleID: window.ownerBundleID,
-            ownerName: window.ownerName,
-            windowTitle: window.windowTitle,
-            previewImage: windowPreviews[window.windowID]
-        )
+        return card(for: space.windows[selectedWindowIndex])
     }
 
     public func isSelected(spaceIndex: Int, windowIndex: Int) -> Bool {

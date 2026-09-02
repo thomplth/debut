@@ -1624,3 +1624,68 @@ struct SpaceControllerTests {
         #expect(SpaceController.focusProbeTimeout <= 0.1)
     }
 }
+
+/// Card shapes come from the sizes discovery reports, and stop coming while the overlay is up:
+/// a window resized behind the overlay must not reflow the grid under the cursor.
+@Suite("Window sizes behind the card shapes")
+struct SpaceControllerWindowSizeTests {
+
+    private func info(_ id: CGWindowID, _ size: CGSize) -> WindowInfo {
+        WindowInfo(
+            windowID: id,
+            ownerBundleID: "com.a",
+            ownerName: "A",
+            ownerPID: 1,
+            title: "W\(id)",
+            bounds: CGRect(origin: .zero, size: size),
+            isOnScreen: true
+        )
+    }
+
+    private func makeController() -> (SpaceController, MockKeyboardService) {
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused }
+        )
+        return (controller, keyboardService)
+    }
+
+    @Test("Discovery records the size each window was found at")
+    func recordsDiscoveredSizes() {
+        let (controller, _) = makeController()
+
+        controller.recordWindowSizes([
+            info(101, CGSize(width: 1_600, height: 800)),
+            info(102, CGSize(width: 600, height: 1_200)),
+        ])
+
+        #expect(controller.windowSizes[101] == CGSize(width: 1_600, height: 800))
+        #expect(controller.windowSizes[102] == CGSize(width: 600, height: 1_200))
+    }
+
+    @Test("Sizes freeze for as long as the overlay is up")
+    func sizesFreezeWhileOverlayIsVisible() {
+        let (controller, keyboardService) = makeController()
+        // Both windows are assigned, so a size that goes missing went missing to the freeze
+        // rather than to the pruning that follows every window a space no longer holds.
+        for id in [CGWindowID(101), CGWindowID(999)] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: id, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W\(id)"),
+                toSpaceID: controller.spaceManager.spaces[0].id
+            )
+        }
+        controller.recordWindowSizes([info(101, CGSize(width: 1_600, height: 800))])
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(controller.isSpaceManagerVisible)
+        controller.recordWindowSizes([
+            info(101, CGSize(width: 400, height: 400)),
+            info(999, CGSize(width: 500, height: 500)),
+        ])
+
+        #expect(controller.windowSizes[101] == CGSize(width: 1_600, height: 800))
+        #expect(controller.windowSizes[999] == nil)
+    }
+}

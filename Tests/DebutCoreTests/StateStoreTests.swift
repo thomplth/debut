@@ -382,6 +382,23 @@ struct StateStoreTests {
         #expect(decoded.magnifyShadowStrength == AppSettings.defaultMagnifyShadowStrength)
     }
 
+    /// Adaptive sizing is the new default, so a settings file written before it existed opts
+    /// into it rather than staying on the uniform grid it was saved under.
+    @Test("Settings written before adaptive sizing still get it on")
+    func legacySettingsDefaultAdaptiveCardSizing() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "adaptiveCardSizing")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+
+        #expect(decoded.adaptiveCardSizing)
+        #expect(AppSettings().adaptiveCardSizing)
+    }
+
     @Test("The short-lived outline style migrates to the filled selector")
     func outlineStyleMigratesToFilled() throws {
         let encoded = try JSONEncoder().encode(AppSettings())

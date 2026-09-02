@@ -228,6 +228,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         discovery.onWindowsDiscovered = { [weak self] windows in
             DispatchQueue.main.async {
                 guard let self, let controller = self.spaceController else { return }
+                controller.recordWindowSizes(windows)
                 let result = self.runtimeWindowReconciler.reconcile(
                     RuntimeWindowSnapshot(
                         liveWindows: windows,
@@ -296,6 +297,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         discovery.onAppActivated = { [weak self] snapshot in
             DispatchQueue.main.async {
                 guard let self, let controller = self.spaceController else { return }
+                controller.recordWindowSizes(snapshot.liveWindows)
                 let result = self.runtimeWindowReconciler.reconcile(
                     snapshot,
                     spaceManager: &controller.spaceManager,
@@ -315,6 +317,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         discovery.onDesktopsChanged = { [weak self] snapshot in
             DispatchQueue.main.async {
                 guard let self, let controller = self.spaceController else { return }
+                controller.recordWindowSizes(snapshot.liveWindows)
                 let result = self.runtimeWindowReconciler.reconcile(
                     snapshot,
                     spaceManager: &controller.spaceManager,
@@ -670,6 +673,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
                 activeSpaceIndex: spaceController.selectedSpaceIndex,
                 selectedWindowIndex: spaceController.selectedWindowIndex,
                 windowPreviews: spaceController.windowPreviews,
+                windowSizes: spaceController.windowSizes,
                 appearance: currentSettings,
                 wallpaperLuminance: nil,
                 displayTopContentInset: display?.topContentInset ?? 0,
@@ -758,6 +762,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             activeSpaceIndex: spaceController.selectedSpaceIndex,
             selectedWindowIndex: spaceController.selectedWindowIndex,
             windowPreviews: spaceController.windowPreviews,
+            windowSizes: spaceController.windowSizes,
             appearance: currentSettings,
             wallpaperLuminance: nil,
             displayTopContentInset: display?.topContentInset ?? 0,
@@ -774,6 +779,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             entries: spaceController.altTabEntries,
             selectedIndex: spaceController.altTabSelectionIndex,
             windowPreviews: spaceController.windowPreviews,
+            windowSizes: spaceController.windowSizes,
             appearance: currentSettings,
             displayTopContentInset: topContentInset
         )

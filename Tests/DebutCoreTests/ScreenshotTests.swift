@@ -167,7 +167,8 @@ struct ScreenshotTests {
         spaceCount: Int = 3,
         windowsPerSpace: [Int] = [3, 4, 2],
         activeIndex: Int = 1,
-        appearance: AppSettings = AppSettings()
+        appearance: AppSettings = AppSettings(),
+        windowSizes: [CGWindowID: CGSize] = [:]
     ) -> StageOverlayViewModel {
         var sm = SpaceManager()
         let windowData: [(String, String, String)] = [
@@ -203,8 +204,22 @@ struct ScreenshotTests {
             spaceManager: sm,
             activeSpaceIndex: activeIndex,
             selectedWindowIndex: 1,
+            windowSizes: windowSizes,
             appearance: appearance
         )
+    }
+
+    /// A spread of window shapes to draw a stage from: a couple of ultrawides, a couple of
+    /// portraits, and display-shaped windows between them.
+    private func assortedWindowSizes(count: Int) -> [CGWindowID: CGSize] {
+        let shapes = [
+            CGSize(width: 2_560, height: 1_080), CGSize(width: 700, height: 1_100),
+            CGSize(width: 1_440, height: 900), CGSize(width: 520, height: 1_000),
+            CGSize(width: 1_920, height: 1_080),
+        ]
+        return Dictionary(uniqueKeysWithValues: (0..<count).map {
+            (CGWindowID(100 + $0), shapes[$0 % shapes.count])
+        })
     }
 
     @Test("Three stages render correctly")
@@ -215,6 +230,44 @@ struct ScreenshotTests {
         }
         try saveImage(img, name: "02_three_stages")
         #expect(vm.stages.count == 3)
+    }
+
+    /// Each card takes its own window's shape, which is the shipping default. A narrow window
+    /// then takes less of the row than the widest one beside it.
+    @Test("Adaptive cards draw at the width of the window each one shows")
+    func adaptiveCardsRenderAtTheirOwnWidths() throws {
+        let size = NSSize(width: 1_600, height: 1_000)
+        let vm = makeSampleViewModel(
+            spaceCount: 3,
+            windowsPerSpace: [5, 5, 5],
+            activeIndex: 1,
+            windowSizes: assortedWindowSizes(count: 15)
+        )
+        guard let img = renderSwiftUI(StageOverlayView(viewModel: vm), size: size) else {
+            throw ScreenshotError.renderFailed
+        }
+        try saveImage(img, name: "02_adaptive_card_sizing")
+
+        // The drawn card has to be the size the grid measured its slot at, or the drop
+        // projection and the E2E hit tests aim at a card that is not there.
+        let aspects = vm.stages.map { $0.windows.map(\.contentAspect) }
+        let metrics = StageConstants.drawnMetrics(
+            stageScale: CGFloat(vm.appearance.stageScale),
+            contentAspects: aspects,
+            containerSize: size
+        )
+        let layout = StageConstants.stageLayouts(
+            forContentAspects: aspects,
+            screenWidth: size.width,
+            metrics: metrics
+        )[1]
+        let frames = renderWindowFrames(StageOverlayView(viewModel: vm), size: size)
+        let widths = (0..<5).map { frames[WindowFrameID(spaceIndex: 1, windowIndex: $0)]!.width }
+
+        for (index, width) in widths.enumerated() {
+            #expect(abs(width - layout.cardWidth(at: index)) < 0.5)
+        }
+        #expect(Set(widths).count > 1)
     }
 
     @Test("Many stages render with a depth gradient")

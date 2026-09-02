@@ -24,7 +24,7 @@ public struct AltTabOverlayView: View {
                     WindowPreviewView(
                         window: window,
                         isWindowSelected: viewModel.isSelected(index),
-                        metrics: metrics,
+                        metrics: layout.cardMetrics(at: index),
                         appearance: viewModel.appearance
                     )
                     .offset(layout.cardOffsetFromCenter(at: index))

@@ -358,22 +358,37 @@ enum StageMotion {
 
     static let cursorPreviewOpacity: Double = 1
 
-    static func displayedWindowCounts(
-        actual: [Int],
+    /// The card shapes each stage rests in while a drag is in flight. A card leaving its space
+    /// takes its shape with it, so the gap the destination opens is the width of the card about
+    /// to land in it. A reorder within one space changes no stage's contents, and must not move
+    /// the anchors the drop target is resolved against.
+    static func displayedWindowAspects(
+        actual: [[CGFloat?]],
         drag: WindowDragState?
-    ) -> [Int] {
+    ) -> [[CGFloat?]] {
         guard let drag,
               let target = drag.dropTarget,
               target.spaceIndex != drag.sourceSpaceIndex,
               actual.indices.contains(drag.sourceSpaceIndex),
               actual.indices.contains(target.spaceIndex),
-              actual[drag.sourceSpaceIndex] > 0
+              actual[drag.sourceSpaceIndex].indices.contains(drag.sourceWindowIndex)
         else { return actual }
 
         var displayed = actual
-        displayed[drag.sourceSpaceIndex] -= 1
-        displayed[target.spaceIndex] += 1
+        let moved = displayed[drag.sourceSpaceIndex].remove(at: drag.sourceWindowIndex)
+        let slot = min(max(0, target.windowIndex), displayed[target.spaceIndex].count)
+        displayed[target.spaceIndex].insert(moved, at: slot)
         return displayed
+    }
+
+    static func displayedWindowCounts(
+        actual: [Int],
+        drag: WindowDragState?
+    ) -> [Int] {
+        displayedWindowAspects(
+            actual: actual.map { Array(repeating: nil, count: $0) },
+            drag: drag
+        ).map(\.count)
     }
 
     /// The slot a card holds while a drag is in flight, or `nil` if the drag takes it off this
@@ -848,7 +863,7 @@ public struct StageConstants {
     /// scale that fits, and staying on those steps keeps the setting and the drawn size in step.
     public static func fittedStageScale(
         requested: CGFloat,
-        windowCounts: [Int],
+        contentAspects: [[CGFloat?]],
         containerSize: CGSize
     ) -> CGFloat {
         let metrics = StageMetrics.shaped(forDisplay: containerSize)
@@ -863,7 +878,7 @@ public struct StageConstants {
         for candidateStep in stride(from: steps, through: 0, by: -1) {
             let candidate = floor + CGFloat(candidateStep) * step
             let fits = stageLayouts(
-                forWindowCounts: windowCounts,
+                forContentAspects: contentAspects,
                 screenWidth: containerSize.width,
                 metrics: metrics.scaled(by: candidate)
             ).allSatisfy {
@@ -874,19 +889,63 @@ public struct StageConstants {
         return floor
     }
 
+    public static func fittedStageScale(
+        requested: CGFloat,
+        windowCounts: [Int],
+        containerSize: CGSize
+    ) -> CGFloat {
+        fittedStageScale(
+            requested: requested,
+            contentAspects: contentAspects(forWindowCounts: windowCounts),
+            containerSize: containerSize
+        )
+    }
+
     /// The metrics the overlay actually draws at. E2E aims at real screen coordinates, so a
     /// second derivation of the scale there would put its clicks somewhere the overlay never
     /// drew without either side failing.
     public static func drawnMetrics(
         stageScale: CGFloat,
-        windowCounts: [Int],
+        contentAspects: [[CGFloat?]],
         containerSize: CGSize
     ) -> StageMetrics {
         StageMetrics.shaped(forDisplay: containerSize).scaled(by: fittedStageScale(
             requested: stageScale,
-            windowCounts: windowCounts,
+            contentAspects: contentAspects,
             containerSize: containerSize
         ))
+    }
+
+    public static func drawnMetrics(
+        stageScale: CGFloat,
+        windowCounts: [Int],
+        containerSize: CGSize
+    ) -> StageMetrics {
+        drawnMetrics(
+            stageScale: stageScale,
+            contentAspects: contentAspects(forWindowCounts: windowCounts),
+            containerSize: containerSize
+        )
+    }
+
+    /// Stages of windows whose shapes are not known, which take the display's own.
+    public static func contentAspects(forWindowCounts counts: [Int]) -> [[CGFloat?]] {
+        counts.map { Array(repeating: nil, count: $0) }
+    }
+
+    public static func stageLayouts(
+        forContentAspects aspects: [[CGFloat?]],
+        screenWidth: CGFloat,
+        metrics: StageMetrics = .standard
+    ) -> [StageWindowLayout] {
+        let availableWidth = availableStageWidth(screenWidth: screenWidth)
+        return aspects.map {
+            StageWindowLayout(
+                contentAspects: $0,
+                availableWidth: availableWidth,
+                metrics: metrics
+            )
+        }
     }
 
     public static func stageLayouts(
@@ -894,14 +953,11 @@ public struct StageConstants {
         screenWidth: CGFloat,
         metrics: StageMetrics = .standard
     ) -> [StageWindowLayout] {
-        let availableWidth = availableStageWidth(screenWidth: screenWidth)
-        return counts.map {
-            StageWindowLayout(
-                windowCount: $0,
-                availableWidth: availableWidth,
-                metrics: metrics
-            )
-        }
+        stageLayouts(
+            forContentAspects: contentAspects(forWindowCounts: counts),
+            screenWidth: screenWidth,
+            metrics: metrics
+        )
     }
 
     public static func stageCenterY(
@@ -939,13 +995,33 @@ public struct StageConstants {
         containerSize: CGSize,
         metrics: StageMetrics = .standard
     ) -> CGPoint? {
+        windowCardCenter(
+            spaceIndex: spaceIndex,
+            windowIndex: windowIndex,
+            contentAspects: contentAspects(forWindowCounts: windowCounts),
+            activeSpaceIndex: activeSpaceIndex,
+            inactiveScale: inactiveScale,
+            containerSize: containerSize,
+            metrics: metrics
+        )
+    }
+
+    public static func windowCardCenter(
+        spaceIndex: Int,
+        windowIndex: Int,
+        contentAspects: [[CGFloat?]],
+        activeSpaceIndex: Int,
+        inactiveScale: CGFloat,
+        containerSize: CGSize,
+        metrics: StageMetrics = .standard
+    ) -> CGPoint? {
         let layouts = stageLayouts(
-            forWindowCounts: windowCounts,
+            forContentAspects: contentAspects,
             screenWidth: containerSize.width,
             metrics: metrics
         )
         guard layouts.indices.contains(spaceIndex),
-              (0..<windowCounts[spaceIndex]).contains(windowIndex),
+              (0..<contentAspects[spaceIndex].count).contains(windowIndex),
               let centerY = stageCenterY(
                   spaceIndex: spaceIndex,
                   stageHeights: layouts.map(\.stageSize.height),
@@ -1054,24 +1130,25 @@ public struct StageOverlayView: View {
             StageMotion.isWindowDropApplied($0.request, to: windowLayoutKey)
         } ?? false
         let layoutWindowDrag = hasCommittedSettlingDrop ? nil : windowDrag
-        let displayedWindowCounts = StageMotion.displayedWindowCounts(
-            actual: stages.map(\.windows.count),
+        let restingAspects = stages.map { $0.windows.map(\.contentAspect) }
+        let displayedAspects = StageMotion.displayedWindowAspects(
+            actual: restingAspects,
             drag: layoutWindowDrag
         )
 
         GeometryReader { geo in
-            // Fitted against the resting window counts, not the displaced ones: a drag that
+            // Fitted against the resting window shapes, not the displaced ones: a drag that
             // moves a card between spaces must not resize every other card while it is in
             // flight.
             let metrics = StageConstants.drawnMetrics(
                 stageScale: CGFloat(viewModel.appearance.stageScale),
-                windowCounts: stages.map(\.windows.count),
+                contentAspects: restingAspects,
                 containerSize: geo.size
             )
             // Two grids per space: the one its own cards rest in, and the one the drag would
             // give it. A card's drag offset is the delta between them.
             let displayedLayouts = StageConstants.stageLayouts(
-                forWindowCounts: displayedWindowCounts,
+                forContentAspects: displayedAspects,
                 screenWidth: geo.size.width,
                 metrics: metrics
             )
@@ -1271,7 +1348,9 @@ public struct StageOverlayView: View {
                         window: settlingWindowDrop.window,
                         isWindowSelected: true,
                         isDragging: true,
-                        metrics: metrics,
+                        metrics: metrics.adapted(
+                            toContentAspect: settlingWindowDrop.window.contentAspect
+                        ),
                         appearance: viewModel.appearance
                     )
                     .opacity(StageMotion.cursorPreviewOpacity)
@@ -1284,7 +1363,7 @@ public struct StageOverlayView: View {
                         window: window,
                         isWindowSelected: true,
                         isDragging: true,
-                        metrics: metrics,
+                        metrics: metrics.adapted(toContentAspect: window.contentAspect),
                         appearance: viewModel.appearance
                     )
                     .opacity(StageMotion.cursorPreviewOpacity)
@@ -1550,11 +1629,15 @@ struct StageSwiftUIView: View {
                             drag: layoutWindowDrag,
                             layout: layout
                         )
+                        // Shaped from the window rather than from its slot: a drag in flight
+                        // displaces which slot a card is drawn in, and a card that changed
+                        // width on the way past its neighbours would be the wrong size for
+                        // both the gap it left and the one it is heading for.
                         WindowPreviewView(
                             window: window,
                             isWindowSelected: selectedWindowIndex == index,
                             isDragging: isDragging,
-                            metrics: layout.metrics,
+                            metrics: layout.metrics.adapted(toContentAspect: window.contentAspect),
                             appearance: appearance
                         )
                         .opacity(StageMotion.sourceWindowOpacity(
