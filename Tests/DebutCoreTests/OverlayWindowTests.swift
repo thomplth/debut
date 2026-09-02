@@ -28,7 +28,7 @@ struct OverlayWindowTests {
             selectedWindowIndex: 0
         ))
 
-        #expect(window.frame == screen.frame)
+        #expect(window.frame == screen.overlayFrame)
         #expect(created)
     }
 
@@ -136,7 +136,24 @@ struct OverlayWindowTests {
             selectedWindowIndex: 0
         ))
 
-        #expect(window.frame == screen.frame)
+        #expect(window.frame == screen.overlayFrame)
+    }
+
+    @Test("The overlay stops short of the menu bar and any camera housing")
+    func overlayClearsTheDisplayTopInset() throws {
+        let screen = try #require(NSScreen.main ?? NSScreen.screens.first)
+        let window = OverlayWindow()
+
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0
+        ))
+
+        #expect(screen.overlayTopContentInset > 0)
+        #expect(window.frame.maxY == screen.frame.maxY - screen.overlayTopContentInset)
+        #expect(window.frame.minY == screen.frame.minY)
+        #expect(window.frame.width == screen.frame.width)
     }
 
     @Test("Reveal completion is delivered after ordering and rendering")

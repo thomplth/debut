@@ -681,10 +681,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         }
         overlayWindow.targetScreenFrame = display?.frame
         let createdHostingView = if spaceController.overlayMode == .altTab {
-            overlayWindow.update(altTab: altTabViewModel(
-                spaceController: spaceController,
-                topContentInset: display?.topContentInset ?? 0
-            ))
+            overlayWindow.update(altTab: altTabViewModel(spaceController: spaceController))
         } else {
             overlayWindow.update(viewModel: StageOverlayViewModel(
                 spaceManager: spaceController.overlaySpaceManager,
@@ -694,7 +691,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
                 windowSizes: spaceController.windowSizes,
                 appearance: currentSettings,
                 wallpaperLuminance: nil,
-                displayTopContentInset: display?.topContentInset ?? 0,
                 forceDisplayStackIndicator: forceDisplayStackIndicator
             ))
         }
@@ -769,10 +765,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             overlayWindow.targetScreenFrame = display?.frame
         }
         if spaceController.overlayMode == .altTab {
-            overlayWindow.update(altTab: altTabViewModel(
-                spaceController: spaceController,
-                topContentInset: display?.topContentInset ?? 0
-            ))
+            overlayWindow.update(altTab: altTabViewModel(spaceController: spaceController))
             return
         }
         let vm = StageOverlayViewModel(
@@ -783,23 +776,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             windowSizes: spaceController.windowSizes,
             appearance: currentSettings,
             wallpaperLuminance: nil,
-            displayTopContentInset: display?.topContentInset ?? 0,
             forceDisplayStackIndicator: forceDisplayStackIndicator
         )
         overlayWindow.update(viewModel: vm)
     }
 
-    private func altTabViewModel(
-        spaceController: SpaceController,
-        topContentInset: CGFloat
-    ) -> AltTabOverlayViewModel {
+    private func altTabViewModel(spaceController: SpaceController) -> AltTabOverlayViewModel {
         AltTabOverlayViewModel(
             entries: spaceController.altTabEntries,
             selectedIndex: spaceController.altTabSelectionIndex,
             windowPreviews: spaceController.windowPreviews,
             windowSizes: spaceController.windowSizes,
-            appearance: currentSettings,
-            displayTopContentInset: topContentInset
+            appearance: currentSettings
         )
     }
 
@@ -808,7 +796,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
     /// only the winner is translated back into Cocoa's.
     private func overlayDisplay(
         focusedWindowFrame: CGRect?
-    ) -> (displayID: CGDirectDisplayID, frame: CGRect, topContentInset: CGFloat)? {
+    ) -> (displayID: CGDirectDisplayID, frame: CGRect)? {
         let displays = NSScreen.screens.map {
             DesktopScreenDescriptor(displayID: $0.displayID, frame: CGDisplayBounds($0.displayID))
         }
@@ -818,13 +806,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
             mainDisplayID: NSScreen.main?.displayID
         ), let screen = NSScreen.screens.first(where: { $0.displayID == displayID })
         else { return nil }
-        let topContentInset = OverlayDisplayResolver.topContentInset(
-            frame: screen.frame,
-            visibleFrame: screen.visibleFrame,
-            safeAreaTopInset: screen.safeAreaInsets.top,
-            menuBarHeight: NSStatusBar.system.thickness
-        )
-        return (displayID, screen.frame, topContentInset)
+        return (displayID, screen.overlayFrame)
     }
 
     // MARK: - Menu Bar

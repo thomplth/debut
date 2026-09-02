@@ -66,14 +66,14 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
     var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
 
-    /// The display the overlay should cover, in Cocoa screen coordinates. `nil` keeps it on the
-    /// main screen.
+    /// The rectangle the overlay should cover, in Cocoa screen coordinates, already clear of its
+    /// display's reserved top strip. `nil` keeps it on the main screen.
     public var targetScreenFrame: CGRect?
 
     public init() {
         let screen = NSScreen.main ?? NSScreen.screens[0]
         super.init(
-            contentRect: screen.frame,
+            contentRect: screen.overlayFrame,
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -247,7 +247,7 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
     }
 
     private func synchronizeFrameToTargetScreen(display: Bool) {
-        guard let frame = targetScreenFrame ?? NSScreen.main?.frame else { return }
+        guard let frame = targetScreenFrame ?? NSScreen.main?.overlayFrame else { return }
         setFrame(frame, display: display)
     }
 
