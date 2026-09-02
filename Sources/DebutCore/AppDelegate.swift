@@ -4,7 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor
-public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceControllerDelegate {
+public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SpaceControllerDelegate {
     private var spaceController: SpaceController?
     private var overlayWindow: OverlayWindow?
     private var settingsWindow: NSWindow?
@@ -18,6 +18,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
     private let diag = DiagnosticReporter.shared
     private let onboardingPermissionClient = SystemOnboardingPermissionClient()
     private let launchAtLogin = LaunchAtLoginCoordinator()
+    private let activationPolicy = ActivationPolicyCoordinator()
     private let applicationUpdater: any ApplicationUpdating
 
     private var windowService: AccessibilityWindowService?
@@ -56,12 +57,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         diag.report("app_launched")
+        NSApp.mainMenu = Self.makeMainMenu(target: self)
 
         let store = StateStore()
         stateStore = store
         debouncedSaver = DebouncedSaver(store: store)
         pendingSpaceManager = (try? store.load()) ?? SpaceManager()
         currentSettings = (try? store.loadSettings()) ?? AppSettings()
+        activationPolicy.apply(showsDockIcon: currentSettings.showsDockIcon)
         launchAtLogin.apply(enabled: currentSettings.launchAtLogin)
         setupTelemetry()
 
@@ -105,6 +108,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
 
         diag.report("app_ready")
         hiddenIdlePerformanceID = PerformanceRecorder.shared.begin(.hiddenIdle)
+    }
+
+    /// Settings is the only window a Dock icon can lead back to, so clicking the icon opens it
+    /// rather than doing nothing.
+    public func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows: Bool
+    ) -> Bool {
+        guard !hasVisibleWindows else { return true }
+        openSettings()
+        return true
     }
 
     private func setupController() {
@@ -832,6 +846,63 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         statusItem?.menu = menu
     }
 
+    /// As a regular application Debut owns the menu bar while it is frontmost, and an app with
+    /// no main menu leaves the user without Quit, Close, or their key equivalents.
+    static func makeMainMenu(target: AnyObject?) -> NSMenu {
+        let mainMenu = NSMenu()
+
+        let appMenu = NSMenu()
+        appMenu.addItem(NSMenuItem(
+            title: "About Debut",
+            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+            keyEquivalent: ""
+        ))
+        appMenu.addItem(.separator())
+        for item in [
+            NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","),
+            NSMenuItem(title: "Tutorial...", action: #selector(openTutorial), keyEquivalent: ""),
+            NSMenuItem(
+                title: "Check for Updates...",
+                action: #selector(checkForUpdates(_:)),
+                keyEquivalent: ""
+            ),
+        ] {
+            item.target = target
+            appMenu.addItem(item)
+        }
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(
+            title: "Hide Debut",
+            action: #selector(NSApplication.hide(_:)),
+            keyEquivalent: "h"
+        ))
+        appMenu.addItem(NSMenuItem(
+            title: "Quit Debut",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        ))
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(NSMenuItem(
+            title: "Close",
+            action: #selector(NSWindow.performClose(_:)),
+            keyEquivalent: "w"
+        ))
+        windowMenu.addItem(NSMenuItem(
+            title: "Minimize",
+            action: #selector(NSWindow.performMiniaturize(_:)),
+            keyEquivalent: "m"
+        ))
+        let windowItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+
+        return mainMenu
+    }
+
     @objc private func openSettings() {
         let settings = (try? stateStore?.loadSettings()) ?? AppSettings()
         showSettings(settings: settings)
@@ -938,6 +1009,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
                 guard let self else { return }
                 let telemetryChanged = self.currentSettings.shareAnonymousTelemetry != newSettings.shareAnonymousTelemetry
                 self.launchAtLogin.apply(enabled: newSettings.launchAtLogin)
+                self.activationPolicy.apply(showsDockIcon: newSettings.showsDockIcon)
                 self.currentSettings = newSettings
                 try? self.stateStore?.saveSettings(newSettings)
                 self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
@@ -996,6 +1068,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        admitSettingsWindowToSpaceManager(window)
 
         diag.report("settings_shown", details: [
             "fullSizeContentView": "\(window.styleMask.contains(.fullSizeContentView))",
@@ -1005,6 +1078,27 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
         ])
 
         self.settingsWindow = window
+    }
+
+    /// The Settings window is the only window of Debut's own that the space manager may hold.
+    /// Consent is withdrawn on close so the closed window's surface cannot be re-admitted.
+    ///
+    /// Debut's own activation is deliberately not an app activation, so the window is discovered
+    /// the way a launched app's windows are rather than waiting for an unrelated reconcile.
+    private func admitSettingsWindowToSpaceManager(_ window: NSWindow) {
+        window.delegate = self
+        windowService?.setOwnWindowConsent(true, windowID: CGWindowID(window.windowNumber))
+        windowDiscovery?.handleAppLaunch(AppInfo(
+            bundleID: "com.thomplth.Debut",
+            name: "Debut",
+            pid: ProcessInfo.processInfo.processIdentifier,
+            isHidden: false
+        ))
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        windowService?.setOwnWindowConsent(false, windowID: CGWindowID(window.windowNumber))
     }
 
     private func resetWindowCache() {

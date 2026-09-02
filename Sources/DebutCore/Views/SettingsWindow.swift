@@ -418,7 +418,14 @@ public struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 settingsToggle("Launch at login", isOn: $viewModel.settings.launchAtLogin)
-                Text("Debut has no Dock icon and only manages windows while it is running, so it is worth starting with your session. Reach it any time from the menu bar icon.")
+                Text("Debut only manages windows while it is running, so it is worth starting with your session. Reach it any time from the menu bar icon.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                settingsToggle("Show in Dock", isOn: $viewModel.settings.showsDockIcon)
+                Text("Turn this off to run Debut from the menu bar alone. Debut manages the windows of Dock applications only, so its own Settings window leaves the space manager with it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
