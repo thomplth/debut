@@ -43,6 +43,24 @@ private let slsCopyWindowsWithOptionsAndTags: (@convention(c) (
     UnsafeMutablePointer<UInt64>, UnsafeMutablePointer<UInt64>
 ) -> Unmanaged<CFArray>?)? = skyLightSymbol("SLSCopyWindowsWithOptionsAndTags")
 
+// Every Space remembers which process it shows as frontmost when it is revealed. Unlike
+// `_SLPSSetFrontProcessWithOptions`, this writes that memory for one Space only: it does not set
+// the global front and does not disturb the other Spaces where the app has windows. That is what
+// makes it safe to aim at a desktop the user is not looking at yet.
+private let slsSpaceSetFrontPSN: (@convention(c)
+    (CGSConnectionID, CGSSpaceID, ProcessSerialNumber) -> CGError)? =
+    skyLightSymbol("SLSSpaceSetFrontPSN")
+
+// A PSN is not derivable from a pid — measured on macOS 26.5.2, `Finder` at pid 673 answered
+// psn (0, 118813) — so it has to be asked for. `GetProcessForPID` is marked unavailable in the
+// macOS 26 SDK and cannot be called directly from Swift, but the symbol is still exported, so it
+// is resolved the same way the SkyLight ones are.
+private let getProcessForPID: (@convention(c)
+    (pid_t, UnsafeMutablePointer<ProcessSerialNumber>) -> OSStatus)? =
+    dlsym(UnsafeMutableRawPointer(bitPattern: -2), "GetProcessForPID")
+        .map { unsafeBitCast($0, to: (@convention(c)
+            (pid_t, UnsafeMutablePointer<ProcessSerialNumber>) -> OSStatus).self) }
+
 /// Selector for `SLSCopySpacesForWindows` meaning "all spaces the window belongs to".
 private let kSpaceSelectorAll: Int32 = 7
 
@@ -494,11 +512,18 @@ public protocol SpaceSwitching: AnyObject {
                     completion: (@Sendable (Bool) -> Void)?)
     func moveWindow(windowID: CGWindowID, to location: DesktopLocation,
                     completion: (@Sendable (Bool) -> Void)?)
+    /// Sets which process a desktop shows as frontmost the next time it is revealed.
+    ///
+    /// Aimed at a desktop that is not showing, so that a switch can land with the right app
+    /// already forward instead of reordering in front of the user once the transition ends.
+    @discardableResult
+    func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool
 }
 
 public extension SpaceSwitching {
     func isSwitchInFlight(stackID: String) -> Bool { false }
     func spaceDidChange() {}
+    func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool { false }
 
     func spaceTopology() -> SpaceTopology {
         let count = desktopCount()
@@ -943,6 +968,20 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         moveQueue.async { [self] in
             completion(waitForWindow(windowID, toReachSpace: location.desktopID))
         }
+    }
+
+    /// Writes the destination desktop's front-process memory ahead of a switch.
+    ///
+    /// Returns whether the window server accepted the write. A refusal is not worth recovering
+    /// from: the switch still happens, and the only cost is the reorder becoming visible again.
+    @discardableResult
+    public func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool {
+        guard let getProcessForPID, let slsSpaceSetFrontPSN,
+              let connection = cgsMainConnectionID?()
+        else { return false }
+        var psn = ProcessSerialNumber()
+        guard getProcessForPID(pid, &psn) == noErr else { return false }
+        return slsSpaceSetFrontPSN(connection, desktopID, psn) == .success
     }
 
     /// Polls the window server until `windowID` reports `space`.

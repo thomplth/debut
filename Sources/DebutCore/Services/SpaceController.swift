@@ -668,6 +668,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let previousID = spaceManager.activeSpaceID
         var desktopIsSettling = false
 
+        // Resolved before the switch because the destination's front process has to be seeded
+        // while its desktop is still hidden — see `seedFrontProcess`.
+        let fallbackFocusWindowID = targetSpace?.windows.first(where: {
+            !isTerminationPending($0)
+        })?.windowID
+        let focusWindowID = focusesWindow ? raiseWindowID ?? fallbackFocusWindowID : nil
+
         if previousID != targetID {
             let fromLabel = spaceLabel(forID: previousID)
             let toLabel = spaceLabel(forID: targetID)
@@ -688,6 +695,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                let stackID = spaceManager.spaceStackID(containingSpaceID: targetID),
                let location = spaceSwitcher?.spaceTopology().stack(id: stackID)?.location(at: index),
                let switcher = spaceSwitcher {
+                if let focusWindowID {
+                    seedFrontProcess(forWindow: focusWindowID, inSpaceID: targetID,
+                                     desktopID: location.desktopID, switcher: switcher)
+                }
                 desktopIsSettling = switcher.switchToDesktop(location)
             }
             _ = PerformanceRecorder.shared.end(raiseID)
@@ -701,10 +712,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         // Focus the selected window and activate its app (single activation, no flash).
         // A desktop still settling cannot be focused yet — see `applyPendingSpaceFocus`.
-        let fallbackFocusWindowID = targetSpace?.windows.first(where: {
-            !isTerminationPending($0)
-        })?.windowID
-        if focusesWindow, let focusWindowID = raiseWindowID ?? fallbackFocusWindowID {
+        if let focusWindowID {
             if desktopIsSettling {
                 pendingSpaceFocus = (spaceID: targetID, windowID: focusWindowID)
             } else {
@@ -718,6 +726,35 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         delegate?.spaceControllerDidMutateState(self)
         delegate?.spaceControllerDidSwitchSpace(self)
+    }
+
+    /// Tells the destination desktop which app to show forward, before it is revealed.
+    ///
+    /// A Space keeps its own front-process memory, so a switch reveals whichever app was last
+    /// frontmost *there* and Debut's focus then reorders in front of the user — the window the
+    /// user chose arrives second, after a visible flash of the one they did not. Focus itself
+    /// still cannot be moved early: it would land on the desktop being left, and macOS would
+    /// overwrite it as the transition settles. Seeding the memory the reveal reads from is the
+    /// part that can happen in advance.
+    ///
+    /// This names a process, not a window, so two windows of the same app still flash. There is
+    /// no bridged window-ordering operation to do better with, and AX cannot reach a window on a
+    /// desktop that is not showing.
+    private func seedFrontProcess(forWindow windowID: CGWindowID, inSpaceID spaceID: UUID,
+                                  desktopID: CGSSpaceID, switcher: any SpaceSwitching) {
+        guard let window = spaceManager.allSpaces.first(where: { $0.id == spaceID })?
+            .windows.first(where: { $0.windowID == windowID }),
+              !isTerminationPending(window),
+              let ownerPID = window.ownerPID
+        else { return }
+        let seeded = switcher.setFrontProcess(pid: ownerPID, onDesktop: desktopID)
+        // Durable: a rejected seed fails silently and shows up only as the flash it was meant to
+        // remove, so a live session has to be able to answer this after the fact.
+        diag.report("space_front_process_seeded", details: [
+            "windowID": "\(windowID)",
+            "ownerPID": "\(ownerPID)",
+            "accepted": "\(seeded)",
+        ])
     }
 
     // MARK: - Window ownership
