@@ -181,6 +181,23 @@ struct WindowServiceTests {
         ))
     }
 
+    // Dia can return an incomplete kAXWindows list while kAXFocusedWindow still identifies
+    // the real browser window. Focus is a positive AX statement and must protect that window
+    // from being mistaken for an abandoned same-process surface.
+    @Test("The AX-focused window is confirmed when the AX window list omits it")
+    func focusedWindowAugmentsAXNames() {
+        let listed: [pid_t: Set<CGWindowID>] = [40694: [47452]]
+
+        #expect(AccessibilityWindowService.confirmedAXWindowIDs(
+            listedByPID: listed,
+            focusedWindowID: 4794
+        ) == [47452, 4794])
+        #expect(AccessibilityWindowService.confirmedAXWindowIDs(
+            listedByPID: listed,
+            focusedWindowID: nil
+        ) == [47452])
+    }
+
     @Test("AX silence is not a verdict when AX could not have seen the window")
     func accessibilitySilenceElsewhereIsNotAVerdict() {
         // Dia 4794 really is on desktop 0; Dia reports exactly one AX window, the showing one.
