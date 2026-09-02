@@ -230,6 +230,48 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
     public private(set) var variedWindowPreviewIDs: Set<CGWindowID> = []
 
+    /// The size each window was last discovered at, which is the shape its card takes. Read from
+    /// `WindowInfo.bounds` rather than from a preview: bounds arrive with discovery, while a
+    /// capture arrives later and would resize a card the user is already looking at.
+    public private(set) var windowSizes: [CGWindowID: CGSize] = [:]
+
+    /// Takes the sizes discovery just reported, unless the overlay is up. A window resized behind
+    /// the overlay must not reflow the grid under the cursor, so the shapes an overlay session
+    /// opens with are the shapes it closes with.
+    public func recordWindowSizes(_ windows: [WindowInfo]) {
+        guard !isSpaceManagerVisible else { return }
+        for window in windows {
+            windowSizes[window.windowID] = window.bounds.size
+        }
+    }
+
+    /// The shape of every window the overlay is showing, by space. Cards no longer all have the
+    /// same width, so a count alone no longer locates one for a caller outside the process. The
+    /// stage-scale setting is already applied by such callers, and so is this one.
+    public var windowAspectsBySpace: [[CGFloat?]] {
+        let visibleSpaceManager = isSpaceManagerVisible ? overlaySpaceManager : spaceManager
+        return visibleSpaceManager.spaces.map { space in
+            space.windows.map { StageWindowData.contentAspect(of: windowSizes[$0.windowID]) }
+        }
+    }
+
+    /// Spaces separated by `;`, windows within one by `,`, an unmeasured window by `?`. A
+    /// diagnostic value is a string, and an empty space has to survive the round trip as an
+    /// empty space rather than disappearing from the list.
+    static func encode(_ aspects: [[CGFloat?]]) -> String {
+        aspects
+            .map { $0.map { $0.map { String(format: "%.4f", $0) } ?? "?" }.joined(separator: ",") }
+            .joined(separator: ";")
+    }
+
+    public static func decodeWindowAspects(_ encoded: String) -> [[CGFloat?]] {
+        encoded.split(separator: ";", omittingEmptySubsequences: false).map { space in
+            space.isEmpty ? [] : space.split(separator: ",", omittingEmptySubsequences: false).map {
+                Double($0).map { CGFloat($0) }
+            }
+        }
+    }
+
     /// The macOS desktops that back the spaces. The space at index N is desktop N.
     public var spaceSwitcher: (any SpaceSwitching)?
 
@@ -324,6 +366,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             "windowCountsBySpace": visibleSpaceManager.spaces
                 .map { String($0.windows.count) }
                 .joined(separator: ","),
+            "windowAspectsBySpace": Self.encode(windowAspectsBySpace),
             "windowPreviewCount": "\(windowPreviews.count)",
             "variedWindowPreviewCount": "\(variedWindowPreviewIDs.count)",
         ]
@@ -1222,6 +1265,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// destruction.
     private func pruneWindowPreviews(assignedWindowIDs: Set<CGWindowID>) {
         windowPreviews = windowPreviews.filter { assignedWindowIDs.contains($0.key) }
+        windowSizes = windowSizes.filter { assignedWindowIDs.contains($0.key) }
         variedWindowPreviewIDs.formIntersection(assignedWindowIDs)
         previewCacheEntries = previewCacheEntries.filter { assignedWindowIDs.contains($0.key) }
     }

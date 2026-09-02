@@ -8,8 +8,8 @@ import CoreGraphics
 ///
 /// The card takes the shape of the display it is drawn on, since a window nearly always has
 /// roughly the shape of the screen it lives on and a card of some other shape would letterbox
-/// its preview. Cards stay uniform within one overlay — the shape comes from the display, not
-/// from the individual window.
+/// its preview. `adapted(toContentAspect:)` reshapes one card to its own window instead, which
+/// is the display's shape again for a window that fills its screen.
 public struct StageMetrics: Equatable, Sendable {
     public let thumbnailWidth: CGFloat
     public let thumbnailHeight: CGFloat
@@ -86,6 +86,47 @@ public struct StageMetrics: Equatable, Sendable {
         )
     }
 
+    /// How far a card may stray from the display's own shape. One very tall window would
+    /// otherwise set the height of every row it appears in, and one very wide one would push
+    /// its row off the display.
+    public static let minimumAdaptiveWidthRatio: CGFloat = 0.6
+    public static let maximumAdaptiveWidthRatio: CGFloat = 1.6
+
+    /// These metrics with the card narrowed or widened to one window's shape.
+    ///
+    /// The height is what the row shares, so only the width moves: a narrow window then takes
+    /// less horizontal room than the widest one beside it. An aspect of `nil` is a window whose
+    /// size has not been discovered, and the display's shape is the honest answer for it.
+    public func adapted(toContentAspect aspect: CGFloat?) -> StageMetrics {
+        guard let aspect, aspect > 0, thumbnailWidth > 0 else { return self }
+        return withThumbnailWidth(min(
+            max(thumbnailHeight * aspect, thumbnailWidth * Self.minimumAdaptiveWidthRatio),
+            thumbnailWidth * Self.maximumAdaptiveWidthRatio
+        ))
+    }
+
+    /// These metrics with the thumbnail set to an already-decided width. The grid measures a
+    /// card once and the renderer draws it from the same number, rather than reshaping twice.
+    func withThumbnailWidth(_ width: CGFloat) -> StageMetrics {
+        StageMetrics(
+            thumbnailWidth: width,
+            thumbnailHeight: thumbnailHeight,
+            cardPadding: cardPadding,
+            titleWidthAllowance: titleWidthAllowance,
+            titleSpacing: titleSpacing,
+            titleHeight: titleHeight,
+            badgeSize: badgeSize,
+            previewPlaceholderIconSize: previewPlaceholderIconSize,
+            windowSpacing: windowSpacing,
+            rowSpacing: rowSpacing,
+            padding: padding,
+            topPadding: topPadding,
+            bottomPadding: bottomPadding,
+            minStageWidth: minStageWidth,
+            scale: scale
+        )
+    }
+
     public var cardWidth: CGFloat {
         thumbnailWidth + titleWidthAllowance + cardPadding * 2
     }
@@ -146,45 +187,134 @@ public struct StageGridSlot: Equatable, Sendable {
 /// does not expect it. Positions are unscaled and measured from the stage's centre, which is the
 /// one point that survives the focus-distance scale transform.
 public struct StageWindowLayout: Equatable, Sendable {
-    public let windowCount: Int
-    public let columnCapacity: Int
+    /// Every card's own thumbnail width, in model order. A card is as wide as its window is
+    /// shaped, so this is what the grid, the renderer and the drop projection all measure
+    /// against; none of them may re-derive a width of their own.
+    public let thumbnailWidths: [CGFloat]
     public let rowSizes: [Int]
     public let metrics: StageMetrics
 
-    public init(windowCount: Int, availableWidth: CGFloat, metrics: StageMetrics) {
-        let capacity = Self.columnCapacity(availableWidth: availableWidth, metrics: metrics)
-        self.windowCount = max(0, windowCount)
-        self.columnCapacity = capacity
-        self.rowSizes = Self.rowSizes(windowCount: max(0, windowCount), capacity: capacity)
+    /// A stage whose cards each take their own window's shape. `nil` is a window whose size is
+    /// not known, which takes the display's shape like every card did before.
+    public init(contentAspects: [CGFloat?], availableWidth: CGFloat, metrics: StageMetrics) {
+        let thumbnailWidths = contentAspects.map {
+            metrics.adapted(toContentAspect: $0).thumbnailWidth
+        }
+        self.thumbnailWidths = thumbnailWidths
+        self.rowSizes = Self.rowSizes(
+            cardWidths: thumbnailWidths.map {
+                $0 + metrics.titleWidthAllowance + metrics.cardPadding * 2
+            },
+            contentWidth: availableWidth - metrics.padding * 2,
+            spacing: metrics.windowSpacing
+        )
         self.metrics = metrics
     }
 
-    /// How many cards fit across the display. Always at least one, so a display too narrow for a
-    /// single card lays out a column of one rather than no columns at all.
-    public static func columnCapacity(availableWidth: CGFloat, metrics: StageMetrics) -> Int {
-        let contentWidth = availableWidth - metrics.padding * 2
-        let stride = metrics.cardWidth + metrics.windowSpacing
-        guard stride > 0 else { return 1 }
-        let fitting = (contentWidth + metrics.windowSpacing) / stride
-        return max(1, Int(fitting.rounded(.down)))
+    /// A stage of uniform, display-shaped cards.
+    public init(windowCount: Int, availableWidth: CGFloat, metrics: StageMetrics) {
+        self.init(
+            contentAspects: Array(repeating: nil, count: max(0, windowCount)),
+            availableWidth: availableWidth,
+            metrics: metrics
+        )
     }
 
-    /// Balanced rows: the fewest rows that hold the windows, filled evenly, with any remainder
-    /// going to the earlier rows. Five windows at a capacity of four are 3 + 2, not 4 + 1.
-    public static func rowSizes(windowCount: Int, capacity: Int) -> [Int] {
-        guard windowCount > 0, capacity > 0 else { return [] }
-        let rowCount = Int((Double(windowCount) / Double(capacity)).rounded(.up))
-        let base = windowCount / rowCount
-        let remainder = windowCount % rowCount
-        return (0..<rowCount).map { $0 < remainder ? base + 1 : base }
+    public var windowCount: Int { thumbnailWidths.count }
+
+    /// Balanced rows: the fewest rows that hold the cards, chosen so their widths come out as
+    /// even as the order allows, with any surplus going to the earlier rows. Cards keep their
+    /// model order, so a row is always a run of consecutive cards.
+    ///
+    /// Balance is by width rather than by count because a row of narrow cards and a row of wide
+    /// ones are only the same length by accident. Equal-width cards make the two the same
+    /// question again: five of them at a capacity of four are still 3 + 2, not 4 + 1.
+    static func rowSizes(
+        cardWidths: [CGFloat],
+        contentWidth: CGFloat,
+        spacing: CGFloat
+    ) -> [Int] {
+        let count = cardWidths.count
+        guard count > 0 else { return [] }
+
+        // Running row widths, so any row's width is one subtraction. `prefix[i]` is the width of
+        // the first `i` cards laid end to end with a gap after each.
+        var prefix = [CGFloat](repeating: 0, count: count + 1)
+        for index in 0..<count {
+            prefix[index + 1] = prefix[index] + cardWidths[index] + spacing
+        }
+        func width(_ start: Int, _ end: Int) -> CGFloat { prefix[end] - prefix[start] - spacing }
+        // A single card that overflows on its own has nowhere else to go.
+        func fits(_ start: Int, _ end: Int) -> Bool {
+            end - start == 1 || width(start, end) <= contentWidth
+        }
+
+        // Greedily filling rows uses the fewest of them, which is the row count to then balance
+        // within: wrapping earlier would only make the stage taller.
+        var rowCount = 1
+        var rowStart = 0
+        for index in 1..<count where !fits(rowStart, index + 1) {
+            rowCount += 1
+            rowStart = index
+        }
+
+        // Minimising the sum of the squared row widths is what evens them out. Ties are broken
+        // towards a shorter last row, which is what puts the surplus in the earlier rows.
+        let unreachable = CGFloat.greatestFiniteMagnitude
+        var cost = [[CGFloat]](
+            repeating: [CGFloat](repeating: unreachable, count: count + 1),
+            count: rowCount + 1
+        )
+        var split = [[Int]](repeating: [Int](repeating: 0, count: count + 1), count: rowCount + 1)
+        cost[0][0] = 0
+        for row in 1...rowCount {
+            for end in row...count {
+                for start in (row - 1)..<end where cost[row - 1][start] < unreachable {
+                    guard fits(start, end) else { continue }
+                    let rowWidth = width(start, end)
+                    let candidate = cost[row - 1][start] + rowWidth * rowWidth
+                    if candidate <= cost[row][end] {
+                        cost[row][end] = candidate
+                        split[row][end] = start
+                    }
+                }
+            }
+        }
+
+        var sizes = [Int](repeating: 0, count: rowCount)
+        var end = count
+        for row in stride(from: rowCount, through: 1, by: -1) {
+            let start = split[row][end]
+            sizes[row - 1] = end - start
+            end = start
+        }
+        return sizes
     }
 
     public var rowCount: Int { rowSizes.count }
 
+    /// How wide one row of cards is drawn, gaps included.
+    public func rowWidth(_ row: Int) -> CGFloat {
+        guard rowSizes.indices.contains(row) else { return 0 }
+        let start = rowStartIndex(row)
+        let size = rowSizes[row]
+        return (start..<(start + size)).reduce(0) { $0 + cardWidth(at: $1) }
+            + CGFloat(size - 1) * metrics.windowSpacing
+    }
+
     public var contentWidth: CGFloat {
-        guard let widest = rowSizes.max() else { return 0 }
-        return CGFloat(widest) * metrics.cardWidth
-            + CGFloat(widest - 1) * metrics.windowSpacing
+        (0..<rowCount).map { rowWidth($0) }.max() ?? 0
+    }
+
+    public func cardWidth(at index: Int) -> CGFloat {
+        cardMetrics(at: index).cardWidth
+    }
+
+    /// The metrics one card is drawn with. Taken from the width its own slot was measured at, so
+    /// the drawn card cannot be a different size from the space the grid left for it.
+    public func cardMetrics(at index: Int) -> StageMetrics {
+        guard thumbnailWidths.indices.contains(index) else { return metrics }
+        return metrics.withThumbnailWidth(thumbnailWidths[index])
     }
 
     /// An empty space is still a space: it keeps one row of height so the stack does not
@@ -216,15 +346,17 @@ public struct StageWindowLayout: Equatable, Sendable {
     }
 
     /// The card's centre relative to the stage's centre. Rows are individually centred, so a
-    /// short final row sits under the middle of the row above it.
+    /// short final row sits under the middle of the row above it. Cards have their own widths,
+    /// so the horizontal position is the running width of the row up to this card rather than a
+    /// multiple of one card's stride.
     public func cardOffsetFromCenter(at index: Int) -> CGSize {
         guard let slot = slot(at: index) else { return .zero }
-        let rowWidth = CGFloat(rowSizes[slot.row]) * metrics.cardWidth
-            + CGFloat(rowSizes[slot.row] - 1) * metrics.windowSpacing
+        let start = rowStartIndex(slot.row)
+        let precedingWidth = (start..<index).reduce(0) { $0 + cardWidth(at: $1) }
+            + CGFloat(slot.column) * metrics.windowSpacing
         let rowStride = metrics.cardHeight + metrics.rowSpacing
         return CGSize(
-            width: -rowWidth / 2 + metrics.cardWidth / 2
-                + CGFloat(slot.column) * (metrics.cardWidth + metrics.windowSpacing),
+            width: -rowWidth(slot.row) / 2 + precedingWidth + cardWidth(at: index) / 2,
             height: -contentHeight / 2 + metrics.cardHeight / 2
                 + CGFloat(slot.row) * rowStride
                 + (metrics.topPadding - metrics.bottomPadding) / 2

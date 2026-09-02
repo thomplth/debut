@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import CoreGraphics
 @testable import DebutCore
 
 @Suite("StageOverlayViewModel")
@@ -198,5 +199,176 @@ struct OverlayViewModelTests {
 
         #expect(vm.displayStackCount == 2)
         #expect(vm.shouldShowDisplayStackIndicator)
+    }
+}
+
+/// Cards are shaped from the window sizes the overlay was handed, not from the previews, which
+/// arrive later and would reflow the grid under the cursor.
+@Suite("Adaptive card shapes from window sizes")
+struct AdaptiveCardShapeTests {
+
+    private func manager() -> SpaceManager {
+        var sm = SpaceManager()
+        sm.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "AppA", windowTitle: "Wide"),
+            toSpaceID: sm.spaces[0].id
+        )
+        sm.addWindow(
+            SpaceWindow(windowID: 102, ownerBundleID: "com.b", ownerName: "AppB", windowTitle: "Tall"),
+            toSpaceID: sm.spaces[0].id
+        )
+        sm.addWindow(
+            SpaceWindow(windowID: 103, ownerBundleID: "com.c", ownerName: "AppC", windowTitle: "Unmeasured"),
+            toSpaceID: sm.spaces[0].id
+        )
+        return sm
+    }
+
+    private let sizes: [CGWindowID: CGSize] = [
+        101: CGSize(width: 1_600, height: 800),
+        102: CGSize(width: 600, height: 1_200),
+    ]
+
+    @Test("A card's aspect comes from its own window's bounds")
+    func aspectComesFromWindowSize() {
+        let vm = StageOverlayViewModel(
+            spaceManager: manager(),
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0,
+            windowSizes: sizes
+        )
+
+        #expect(vm.stages[0].windows.map(\.contentAspect) == [2.0, 0.5, nil])
+        #expect(vm.selectedWindow?.contentAspect == 2.0)
+    }
+
+    @Test("A window measured as empty has no shape to take")
+    func degenerateSizeIsUnknown() {
+        let vm = StageOverlayViewModel(
+            spaceManager: manager(),
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0,
+            windowSizes: [101: CGSize(width: 1_600, height: 0), 102: .zero]
+        )
+
+        #expect(vm.stages[0].windows.allSatisfy { $0.contentAspect == nil })
+    }
+
+    @Test("Turning adaptive sizing off puts every card back on the display's shape")
+    func settingSuppressesAspects() {
+        var appearance = AppSettings()
+        appearance.adaptiveCardSizing = false
+        let vm = StageOverlayViewModel(
+            spaceManager: manager(),
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0,
+            windowSizes: sizes,
+            appearance: appearance
+        )
+
+        #expect(vm.stages[0].windows.allSatisfy { $0.contentAspect == nil })
+        #expect(vm.selectedWindow?.contentAspect == nil)
+    }
+}
+
+/// The geometry entry points outside the view hierarchy — the ones E2E aims real clicks with —
+/// have to see the same card shapes the overlay draws.
+@Suite("Adaptive stage geometry")
+struct AdaptiveStageGeometryTests {
+
+    private let container = CGSize(width: 1_600, height: 1_000)
+
+    /// Every stage the overlay has drawn until now is a stage of display-shaped cards, so the
+    /// count-taking entry points must keep answering exactly what they did before.
+    @Test("Unmeasured windows put every geometry helper back on the fixed grid")
+    func countHelpersMatchUnknownAspects() {
+        let counts = [1, 4, 9]
+        let aspects: [[CGFloat?]] = counts.map { Array(repeating: nil, count: $0) }
+
+        #expect(StageConstants.fittedStageScale(requested: 1.2, contentAspects: aspects, containerSize: container)
+            == StageConstants.fittedStageScale(requested: 1.2, windowCounts: counts, containerSize: container))
+        let metrics = StageConstants.drawnMetrics(
+            stageScale: 1.2, windowCounts: counts, containerSize: container
+        )
+        #expect(StageConstants.stageLayouts(
+            forContentAspects: aspects, screenWidth: container.width, metrics: metrics
+        ) == StageConstants.stageLayouts(
+            forWindowCounts: counts, screenWidth: container.width, metrics: metrics
+        ))
+
+        for (space, count) in counts.enumerated() {
+            for window in 0..<count {
+                #expect(StageConstants.windowCardCenter(
+                    spaceIndex: space, windowIndex: window, contentAspects: aspects,
+                    activeSpaceIndex: 1, inactiveScale: 0.8, containerSize: container,
+                    metrics: metrics
+                ) == StageConstants.windowCardCenter(
+                    spaceIndex: space, windowIndex: window, windowCounts: counts,
+                    activeSpaceIndex: 1, inactiveScale: 0.8, containerSize: container,
+                    metrics: metrics
+                ))
+            }
+        }
+    }
+
+    /// A narrow card is drawn narrow, so the point an outside caller clicks has to move with it
+    /// rather than staying on the fixed grid's stride.
+    @Test("A card's center follows its own shape")
+    func centerFollowsShape() {
+        let aspects: [[CGFloat?]] = [[0.5, 4.0]]
+        let metrics = StageConstants.drawnMetrics(
+            stageScale: 1, windowCounts: [2], containerSize: container
+        )
+        let layout = StageConstants.stageLayouts(
+            forContentAspects: aspects, screenWidth: container.width, metrics: metrics
+        )[0]
+
+        let center = try? #require(StageConstants.windowCardCenter(
+            spaceIndex: 0, windowIndex: 0, contentAspects: aspects,
+            activeSpaceIndex: 0, inactiveScale: 0.8, containerSize: container, metrics: metrics
+        ))
+        let uniform = StageConstants.windowCardCenter(
+            spaceIndex: 0, windowIndex: 0, windowCounts: [2],
+            activeSpaceIndex: 0, inactiveScale: 0.8, containerSize: container, metrics: metrics
+        )
+
+        #expect(layout.cardWidth(at: 0) < layout.cardWidth(at: 1))
+        #expect(center?.x == container.width / 2 + layout.cardOffsetFromCenter(at: 0).width)
+        #expect(center?.x != uniform?.x)
+    }
+
+    /// A drag across spaces carries the card's shape with it, or the gap the destination opens
+    /// is the wrong width for the card about to land in it.
+    @Test("A cross-space drag moves the card's shape, not just a count")
+    func dragCarriesTheShape() {
+        let actual: [[CGFloat?]] = [[1.0, 2.0, nil], [0.5]]
+        let drag = WindowDragState(
+            windowID: 2,
+            sourceSpaceIndex: 0,
+            sourceWindowIndex: 1,
+            location: .zero,
+            dropTarget: WindowDropTarget(spaceIndex: 1, windowIndex: 0)
+        )
+
+        let displayed = StageMotion.displayedWindowAspects(actual: actual, drag: drag)
+
+        #expect(displayed[0] == [1.0, nil])
+        #expect(displayed[1] == [2.0, 0.5])
+        #expect(displayed.map { $0.count }
+            == StageMotion.displayedWindowCounts(actual: actual.map { $0.count }, drag: drag))
+    }
+
+    @Test("A reorder inside one space leaves the resting shapes alone")
+    func reorderKeepsRestingShapes() {
+        let actual: [[CGFloat?]] = [[1.0, 2.0, 3.0]]
+        let drag = WindowDragState(
+            windowID: 1,
+            sourceSpaceIndex: 0,
+            sourceWindowIndex: 0,
+            location: .zero,
+            dropTarget: WindowDropTarget(spaceIndex: 0, windowIndex: 2)
+        )
+
+        #expect(StageMotion.displayedWindowAspects(actual: actual, drag: drag) == actual)
     }
 }
