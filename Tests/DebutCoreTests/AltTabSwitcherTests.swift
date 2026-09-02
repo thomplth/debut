@@ -194,12 +194,11 @@ struct AltTabSwitcherTests {
     /// The flat list shows no spaces, so an action that steps between them has nothing to point
     /// at — and it would move the stage cursor the selector is mirrored onto, leaving a later
     /// close or commit acting on a window other than the one on screen.
-    @Test("Space and window navigation is inert while the flat switcher is open")
+    @Test("Space navigation is inert while the flat switcher is open")
     func stageNavigationIsInert() {
         let (controller, windowService) = makeTwoSpaceController()
 
         controller.handleKeyEvent(.altTabHold)
-        controller.handleKeyEvent(.nextWindow)
         controller.handleKeyEvent(.nextSpace)
         controller.handleKeyEvent(.jumpToSpace(1))
 
@@ -208,6 +207,34 @@ struct AltTabSwitcherTests {
         controller.handleKeyEvent(.closeSelectedWindow)
 
         #expect(windowService.closedWindowIDs == [202])
+    }
+
+    /// Stepping a window is the one thing the flat list does show, so the session bindings for it
+    /// — bare Tab and bare backtick, reached as Option+Tab and Option+backtick — drive its cursor
+    /// rather than the stage's per-space list.
+    @Test("Window stepping moves the flat cursor")
+    func windowSteppingMovesTheFlatCursor() {
+        let (controller, _) = makeTwoSpaceController()
+
+        controller.handleKeyEvent(.altTabHold)
+        controller.handleKeyEvent(.previousWindow)
+
+        #expect(controller.altTabSelection?.window.windowID == 101)
+
+        controller.handleKeyEvent(.nextWindow)
+
+        #expect(controller.altTabSelection?.window.windowID == 202)
+    }
+
+    @Test("A held backward repeat clamps at the start of the flat list")
+    func heldBackwardRepeatClamps() {
+        let (controller, _) = makeTwoSpaceController()
+
+        controller.handleKeyEvent(.altTabHold)
+        controller.handleKeyEvent(.previousWindowRepeat)
+        controller.handleKeyEvent(.previousWindowRepeat)
+
+        #expect(controller.altTabSelection?.window.windowID == 101)
     }
 
     /// Moving a window reassigns its desktop. With no spaces drawn there is nothing to say where

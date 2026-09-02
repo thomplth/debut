@@ -993,13 +993,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         case .escape:
             discardOverlay()
         case .nextWindow:
-            cycleWindow(forward: true)
+            stepWindow(forward: true)
         case .nextWindowRepeat:
-            cycleWindow(forward: true, wraps: false)
+            stepWindow(forward: true, wraps: false)
         case .previousWindow:
-            cycleWindow(forward: false)
+            stepWindow(forward: false)
         case .previousWindowRepeat:
-            cycleWindow(forward: false, wraps: false)
+            stepWindow(forward: false, wraps: false)
         case .nextSpace:
             cycleSpace(forward: true)
         case .previousSpace:
@@ -1170,13 +1170,24 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// went.
     private static func isStageOnly(_ event: DebutKeyEvent) -> Bool {
         switch event {
-        case .nextWindow, .nextWindowRepeat, .previousWindow, .previousWindowRepeat,
-             .nextSpace, .previousSpace, .nextDisplayStack,
+        case .nextSpace, .previousSpace, .nextDisplayStack,
              .jumpToSpace, .jumpToLastSpace,
              .moveWindowUp, .moveWindowDown, .moveWindowLeft, .moveWindowRight:
             true
         default:
             false
+        }
+    }
+
+    /// The session's window-stepping bindings — bare Tab and bare backtick — are matched with the
+    /// held primary modifier stripped, so the flat switcher reaches them as Option+Tab and
+    /// Option+backtick without either needing a global chord of its own. Both switchers show
+    /// windows, so the step lands on whichever cursor is drawn.
+    private func stepWindow(forward: Bool, wraps: Bool = true) {
+        if isSpaceManagerVisible, overlayMode == .altTab {
+            cycleAltTab(forward: forward, wraps: wraps)
+        } else {
+            cycleWindow(forward: forward, wraps: wraps)
         }
     }
 
