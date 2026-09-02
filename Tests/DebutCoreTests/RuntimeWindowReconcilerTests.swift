@@ -571,6 +571,81 @@ struct RuntimeWindowReconcilerTests {
         #expect(manager.spaceContainingWindow(windowID: 101) == activeSpace)
     }
 
+    // Reproduces the 2026-09-03 Dia incident. Dia 4794 was the focused MRU window, then a
+    // desktop refresh parked it after AX omitted it and admitted the empty-title surface 47452
+    // in its place. When Ghostty activated, 47452 had vanished and 4794 was visible again. A
+    // bundle-only match from the missing live assignment claimed 4794 before its exact dormant
+    // identity could, replacing the real window's timestamp and position with the transient's.
+    @Test("Exact dormant identity beats a missing same-bundle assignment")
+    func exactDormantIdentityBeatsMissingBundleRecovery() throws {
+        let activatedAt = Date(timeIntervalSinceReferenceDate: 810_060_979.396371)
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(
+            SpaceWindow(
+                windowID: 100,
+                ownerBundleID: "com.other",
+                ownerName: "Other",
+                windowTitle: "Other",
+                ownerPID: 20
+            ),
+            toSpaceID: spaceID
+        )
+        let dia = SpaceWindow(
+            windowID: 4794,
+            ownerBundleID: "company.thebrowser.dia",
+            ownerName: "Dia",
+            windowTitle: "Leisure: focused tab",
+            ownerPID: 40694
+        )
+        let diaAssignmentID = dia.id
+        manager.addWindow(dia, toSpaceID: spaceID)
+        manager.bringWindowToFront(
+            windowID: dia.windowID,
+            inSpaceID: spaceID,
+            activatedAt: activatedAt
+        )
+        _ = manager.makeWindowDormant(windowID: dia.windowID)
+
+        manager.addWindow(
+            SpaceWindow(
+                windowID: 47452,
+                ownerBundleID: dia.ownerBundleID,
+                ownerName: dia.ownerName,
+                windowTitle: "",
+                ownerPID: dia.ownerPID
+            ),
+            toSpaceID: spaceID
+        )
+
+        var reconciler = RuntimeWindowReconciler()
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [
+                    liveWindow(100, bundleID: "com.other", ownerName: "Other", ownerPID: 20,
+                               title: "Other"),
+                    liveWindow(4794, bundleID: dia.ownerBundleID, ownerName: dia.ownerName,
+                               ownerPID: 40694, title: "Leisure: new tab"),
+                ],
+                allWindowIDs: [100, 4794],
+                skyLightWindowIDs: [100, 4794]
+            ),
+            spaceManager: &manager,
+            allowDormantBundleFallback: false
+        )
+
+        let restored = try #require(manager.activeSpace.windows.first)
+        #expect(restored.id == diaAssignmentID)
+        #expect(restored.windowID == 4794)
+        #expect(restored.lastActivatedAt == activatedAt)
+        #expect(manager.activeSpace.windows.map(\.windowID) == [4794, 100])
+        #expect(!manager.dormantWindowAssignments.contains { $0.id == diaAssignmentID })
+        #expect(manager.dormantWindowAssignments.contains { $0.window.windowID == 47452 })
+        #expect(result.events.contains {
+            $0.kind == .reassigned && $0.windowID == 4794 && $0.reason == .dormantRestored
+        })
+    }
+
     // MARK: - Assignment events
 
     @Test("Adding a new window reports which window landed in which space")

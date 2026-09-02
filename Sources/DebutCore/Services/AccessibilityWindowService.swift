@@ -189,9 +189,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             windowDesktops: windowDesktops,
             showingDesktop: showingDesktop
         )
-        let axNamedWindowIDs = classification.axWindowIDsByPID.values.reduce(into: Set<CGWindowID>()) {
-            $0.formUnion($1)
-        }
+        let axNamedWindowIDs = Self.confirmedAXWindowIDs(
+            listedByPID: classification.axWindowIDsByPID,
+            focusedWindowID: classification.focusedWindowID
+        )
 
         // AX naming a window is the only thing that can overturn a contradiction, so drop
         // those entries first. A momentary misreport then costs one snapshot, not the window.
@@ -327,6 +328,23 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         })
     }
 
+    /// `kAXWindows` is allowed to return a partial presentation snapshot, but
+    /// `kAXFocusedWindow` is a direct positive statement about one window. Dia has been
+    /// observed omitting its focused browser window from the former while returning it from
+    /// the latter, so both answers must clear or prevent an AX contradiction.
+    static func confirmedAXWindowIDs(
+        listedByPID: [pid_t: Set<CGWindowID>],
+        focusedWindowID: CGWindowID?
+    ) -> Set<CGWindowID> {
+        var confirmed = listedByPID.values.reduce(into: Set<CGWindowID>()) {
+            $0.formUnion($1)
+        }
+        if let focusedWindowID {
+            confirmed.insert(focusedWindowID)
+        }
+        return confirmed
+    }
+
     /// Core Graphics signals that positively contradict a window being user-manageable.
     /// Deliberately not the inverse of `isPlausibleUntrackedWindow`: admission may refuse a
     /// window on ambiguous evidence, but eviction may not act on it. A window macOS places on
@@ -351,9 +369,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             windowDesktops: windowDesktops,
             showingDesktop: showingDesktop
         )
-        let axNamedWindowIDs = classification.axWindowIDsByPID.values.reduce(into: Set<CGWindowID>()) {
-            $0.formUnion($1)
-        }
+        let axNamedWindowIDs = Self.confirmedAXWindowIDs(
+            listedByPID: classification.axWindowIDsByPID,
+            focusedWindowID: classification.focusedWindowID
+        )
         contradictionLock.withLock {
             contradictions.clear(windowIDs: axNamedWindowIDs)
         }
@@ -479,7 +498,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     private func classifyAXWindowIDs() -> (
         trackable: Set<CGWindowID>,
         untrackable: Set<CGWindowID>,
-        axWindowIDsByPID: [pid_t: Set<CGWindowID>]
+        axWindowIDsByPID: [pid_t: Set<CGWindowID>],
+        focusedWindowID: CGWindowID?
     ) {
         var trackable = Set<CGWindowID>()
         var untrackable = Set<CGWindowID>()
@@ -516,7 +536,31 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                 }
             }
         }
-        return (trackable, untrackable, axWindowIDsByPID)
+        let focusedWindowID: CGWindowID?
+        if let frontmost = NSWorkspace.shared.frontmostApplication {
+            focusedWindowID = self.focusedWindowID(for: frontmost.processIdentifier)
+        } else {
+            focusedWindowID = nil
+        }
+        return (trackable, untrackable, axWindowIDsByPID, focusedWindowID)
+    }
+
+    private func focusedWindowID(for pid: pid_t) -> CGWindowID? {
+        let app = AXUIElementCreateApplication(pid)
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            app,
+            kAXFocusedWindowAttribute as CFString,
+            &focusedRef
+        ) == .success,
+        let focusedRef
+        else { return nil }
+
+        var windowID: CGWindowID = 0
+        guard _AXUIElementGetWindow((focusedRef as! AXUIElement), &windowID) == .success,
+              windowID != 0
+        else { return nil }
+        return windowID
     }
 
     private func stringAttribute(_ attribute: String, of element: AXUIElement) -> String? {

@@ -317,6 +317,48 @@ struct SpaceManagerTests {
         #expect(sm.spaces.first(where: { $0.id == space1 })?.windows.isEmpty == true)
     }
 
+    @Test("Repeated dormancy replaces an older record for the same runtime window")
+    func repeatedDormancyCoalescesRuntimeIdentity() throws {
+        let older = Date(timeIntervalSinceReferenceDate: 100)
+        let newer = Date(timeIntervalSinceReferenceDate: 200)
+        var sm = SpaceManager()
+        let spaceID = sm.activeSpaceID
+
+        sm.addWindow(
+            SpaceWindow(windowID: 4794, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Old tab", ownerPID: 40694),
+            toSpaceID: spaceID
+        )
+        sm.bringWindowToFront(windowID: 4794, inSpaceID: spaceID, activatedAt: older)
+        _ = sm.makeWindowDormant(windowID: 4794)
+
+        sm.addWindow(
+            SpaceWindow(windowID: 4794, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "New tab", ownerPID: 40694),
+            toSpaceID: spaceID
+        )
+        sm.bringWindowToFront(windowID: 4794, inSpaceID: spaceID, activatedAt: newer)
+        _ = sm.makeWindowDormant(windowID: 4794)
+
+        let assignment = try #require(sm.dormantWindowAssignments.first)
+        #expect(sm.dormantWindowAssignments.count == 1)
+        #expect(assignment.window.windowTitle == "New tab")
+        #expect(assignment.window.lastActivatedAt == newer)
+
+        // A later false admission with no activation stamp must not erase the real MRU record.
+        sm.addWindow(
+            SpaceWindow(windowID: 4794, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Unstamped duplicate", ownerPID: 40694),
+            toSpaceID: spaceID
+        )
+        _ = sm.makeWindowDormant(windowID: 4794)
+
+        let retained = try #require(sm.dormantWindowAssignments.first)
+        #expect(sm.dormantWindowAssignments.count == 1)
+        #expect(retained.window.windowTitle == "New tab")
+        #expect(retained.window.lastActivatedAt == newer)
+    }
+
     @Test("Dormant assignments survive persistence and legacy state still decodes")
     func dormantAssignmentsAreCodableAndForwardCompatible() throws {
         var sm = SpaceManager()
@@ -332,6 +374,40 @@ struct SpaceManagerTests {
         let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
         let legacyDecoded = try JSONDecoder().decode(SpaceManager.self, from: legacyData)
         #expect(legacyDecoded.dormantWindowAssignments.isEmpty)
+    }
+
+    @Test("Decoding coalesces duplicate dormant runtime identities")
+    func decodingCoalescesDormantRuntimeIdentities() throws {
+        let older = Date(timeIntervalSinceReferenceDate: 100)
+        let newer = Date(timeIntervalSinceReferenceDate: 200)
+        var sm = SpaceManager()
+        sm.addWindow(
+            SpaceWindow(windowID: 4794, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Old tab", ownerPID: 40694),
+            toSpaceID: sm.activeSpaceID
+        )
+        sm.bringWindowToFront(windowID: 4794, inSpaceID: sm.activeSpaceID, activatedAt: older)
+        _ = sm.makeWindowDormant(windowID: 4794)
+
+        let encoded = try JSONEncoder().encode(sm)
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var dormant = try #require(object["dormantWindowAssignments"] as? [[String: Any]])
+        var duplicate = try #require(dormant.first)
+        var duplicateWindow = try #require(duplicate["window"] as? [String: Any])
+        duplicateWindow["id"] = UUID().uuidString
+        duplicateWindow["windowTitle"] = "New tab"
+        duplicateWindow["lastActivatedAt"] = newer.timeIntervalSinceReferenceDate
+        duplicate["window"] = duplicateWindow
+        dormant.append(duplicate)
+        object["dormantWindowAssignments"] = dormant
+
+        let duplicatedData = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(SpaceManager.self, from: duplicatedData)
+        let assignment = try #require(decoded.dormantWindowAssignments.first)
+
+        #expect(decoded.dormantWindowAssignments.count == 1)
+        #expect(assignment.window.windowTitle == "New tab")
+        #expect(assignment.window.lastActivatedAt == newer)
     }
 
     @Test("Explicit removal purges a dormant assignment")

@@ -78,6 +78,7 @@ public struct SpaceManager: Codable, Sendable {
         }
         let spaceIDs = Set(allSpaces.map(\.id))
         dormantWindowAssignments.removeAll { !spaceIDs.contains($0.spaceID) }
+        coalesceDormantRuntimeIdentities()
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -472,9 +473,9 @@ public struct SpaceManager: Codable, Sendable {
             }
         }
         guard !assignments.isEmpty else { return 0 }
-        let ids = Set(assignments.map(\.id))
-        dormantWindowAssignments.removeAll { ids.contains($0.id) }
-        dormantWindowAssignments.append(contentsOf: assignments)
+        for assignment in assignments {
+            replaceDormantAssignment(assignment)
+        }
         for stack in spaceStacks.indices {
             for space in spaceStacks[stack].spaces.indices {
                 _ = spaceStacks[stack].spaces[space].removeAllWindows(forOwnerPID: pid)
@@ -496,12 +497,94 @@ public struct SpaceManager: Codable, Sendable {
                     window: current.windows[index]
                 )
                 spaceStacks[stack].spaces[space].removeWindow(windowID: windowID)
-                dormantWindowAssignments.removeAll { $0.id == assignment.id }
-                dormantWindowAssignments.append(assignment)
+                replaceDormantAssignment(assignment)
                 return assignment
             }
         }
         return nil
+    }
+
+    /// A runtime window can be parked more than once when a transient AX verdict makes it
+    /// disappear and later reconciliation admits it with a new persisted UUID. The window
+    /// server identity is only meaningful while its owning process lives, so use the complete
+    /// `(PID, bundle, windowID)` tuple and never merge legacy assignments whose PID is absent.
+    private static func hasSameRuntimeIdentity(
+        _ lhs: DormantWindowAssignment,
+        _ rhs: DormantWindowAssignment
+    ) -> Bool {
+        guard let lhsPID = lhs.window.ownerPID, let rhsPID = rhs.window.ownerPID else {
+            return false
+        }
+        return lhsPID == rhsPID
+            && lhs.window.ownerBundleID == rhs.window.ownerBundleID
+            && lhs.window.windowID == rhs.window.windowID
+    }
+
+    private mutating func replaceDormantAssignment(_ assignment: DormantWindowAssignment) {
+        let connectedSpaceIDs = Set(
+            spaceStacks.filter(\.isConnected).flatMap(\.spaces).map(\.id)
+        )
+        let sameIdentity = dormantWindowAssignments.filter {
+            Self.hasSameRuntimeIdentity($0, assignment)
+        }
+        let candidates = sameIdentity + [assignment]
+        let retained = candidates.dropFirst().reduce(candidates[0]) { current, candidate in
+            Self.prefersDormantAssignment(
+                candidate,
+                over: current,
+                connectedSpaceIDs: connectedSpaceIDs
+            ) ? candidate : current
+        }
+        dormantWindowAssignments.removeAll {
+            $0.id == assignment.id || Self.hasSameRuntimeIdentity($0, assignment)
+        }
+        dormantWindowAssignments.append(retained)
+    }
+
+    private static func prefersDormantAssignment(
+        _ candidate: DormantWindowAssignment,
+        over existing: DormantWindowAssignment,
+        connectedSpaceIDs: Set<UUID>
+    ) -> Bool {
+        let existingDate = existing.window.lastActivatedAt
+        let candidateDate = candidate.window.lastActivatedAt
+        if existingDate != candidateDate {
+            return candidateDate.map { date in
+                existingDate.map { date > $0 } ?? true
+            } ?? false
+        }
+        let existingConnected = connectedSpaceIDs.contains(existing.spaceID)
+        let candidateConnected = connectedSpaceIDs.contains(candidate.spaceID)
+        if existingConnected != candidateConnected {
+            return candidateConnected
+        }
+        return true
+    }
+
+    /// Repairs state written before runtime identities were unique. The latest activation is
+    /// the authoritative MRU record; ties prefer a connected display, then the last-written
+    /// entry because dormancy appends replacements in observation order.
+    private mutating func coalesceDormantRuntimeIdentities() {
+        let connectedSpaceIDs = Set(
+            spaceStacks.filter(\.isConnected).flatMap(\.spaces).map(\.id)
+        )
+        var coalesced: [DormantWindowAssignment] = []
+        for candidate in dormantWindowAssignments {
+            guard let existingIndex = coalesced.firstIndex(where: {
+                Self.hasSameRuntimeIdentity($0, candidate)
+            }) else {
+                coalesced.append(candidate)
+                continue
+            }
+            if Self.prefersDormantAssignment(
+                candidate,
+                over: coalesced[existingIndex],
+                connectedSpaceIDs: connectedSpaceIDs
+            ) {
+                coalesced[existingIndex] = candidate
+            }
+        }
+        dormantWindowAssignments = coalesced
     }
     @discardableResult
     public mutating func restoreDormantWindow(
