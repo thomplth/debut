@@ -583,7 +583,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
         _ = windowService.raiseWindow(windowID: windowID)
         spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: spaceID)
-        _ = windowService.activateApp(bundleID: window.ownerBundleID)
+        activateOwner(of: window)
+    }
+
+    private func activateOwner(of window: SpaceWindow) {
+        if let ownerPID = window.ownerPID {
+            _ = windowService.activateApp(pid: ownerPID)
+        } else {
+            _ = windowService.activateApp(bundleID: window.ownerBundleID)
+        }
     }
 
     /// Adopts the desktop currently showing as the active space.
@@ -1033,7 +1041,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         let targetID = backtickCycleWindows[backtickCycleIndex]
         _ = windowService.raiseWindow(windowID: targetID)
-        _ = windowService.activateApp(bundleID: bundleID)
+        if let targetWindow = sameAppWindows.first(where: { $0.windowID == targetID }) {
+            activateOwner(of: targetWindow)
+        }
     }
 
     private func commitBacktickCycle() {
