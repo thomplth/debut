@@ -280,6 +280,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, SpaceController
                 }
             }
         }
+        discovery.onWindowResized = { [weak self] windowID, size in
+            DispatchQueue.main.async {
+                self?.spaceController?.recordWindowSize(windowID: windowID, size: size)
+            }
+        }
         discovery.onWindowActivated = { [weak self] windowID in
             DispatchQueue.main.async {
                 guard let self else { return }
