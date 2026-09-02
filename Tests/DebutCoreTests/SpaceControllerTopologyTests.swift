@@ -440,6 +440,223 @@ struct SpaceControllerSpaceTests {
         #expect(windowService.activatedBundleID == "com.c")
     }
 
+    /// A 1 -> 4 switch is three real Dock gestures. macOS restores a focused window on each
+    /// desktop as it appears, but spaces 2 and 3 were only crossed — the user never chose
+    /// either window, so neither may jump ahead in the global Option-Tab order.
+    @Test("Intermediate switch focus does not change MRU")
+    func intermediateSwitchFocusDoesNotChangeMRU() throws {
+        let spaces = MockSpaceSwitcher(desktops: 4, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, _) = makeController(spaces: spaces)
+        for _ in 1..<4 { controller.spaceManager.createSpace(position: .below) }
+        let ids = [11, 22, 33, 44] as [CGWindowID]
+        let oldDates = ids.enumerated().map { index, _ in
+            Date(timeIntervalSinceReferenceDate: TimeInterval(40 - index * 10))
+        }
+        for index in ids.indices {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: ids[index],
+                    ownerBundleID: "com.app.\(ids[index])",
+                    ownerName: "App \(ids[index])",
+                    windowTitle: "Window \(ids[index])",
+                    lastActivatedAt: oldDates[index]
+                ),
+                toSpaceID: controller.spaceManager.spaces[index].id
+            )
+            spaces.windowDesktops[ids[index]] = index
+        }
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
+
+        controller.switchToSpace(id: controller.spaceManager.spaces[3].id)
+        spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
+
+        spaces.current = 1
+        controller.recordWindowActivation(windowID: 22)
+        controller.desktopDidChange()
+
+        spaces.current = 2
+        controller.recordWindowActivation(windowID: 33)
+        controller.desktopDidChange()
+
+        spaces.current = 3
+        controller.recordWindowActivation(windowID: 44)
+        spaces.switchingStackIDs = []
+        controller.desktopDidChange()
+
+        let second = try #require(
+            controller.spaceManager.allSpaces[1].windows.first { $0.windowID == 22 }
+        )
+        let third = try #require(
+            controller.spaceManager.allSpaces[2].windows.first { $0.windowID == 33 }
+        )
+        #expect(second.lastActivatedAt == oldDates[1])
+        #expect(third.lastActivatedAt == oldDates[2])
+        #expect(controller.spaceManager.globalWindowOrder().map(\.window.windowID)
+            == [44, 11, 22, 33])
+    }
+
+    /// Plain Control+number deliberately leaves the final choice to macOS. If its focus event
+    /// arrives before the last desktop notification, suppressing every in-flight event would
+    /// also suppress the one activation that should count.
+    @Test("A final passive focus deferred during switching becomes MRU")
+    func finalPassiveFocusBecomesMRU() throws {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, _) = makeController(spaces: spaces)
+        for _ in 1..<3 { controller.spaceManager.createSpace(position: .below) }
+        let oldDate = Date(timeIntervalSinceReferenceDate: 10)
+        for index in 0..<3 {
+            let windowID = CGWindowID((index + 1) * 10)
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.app.\(windowID)",
+                    ownerName: "App \(windowID)",
+                    windowTitle: "Window \(windowID)",
+                    lastActivatedAt: oldDate
+                ),
+                toSpaceID: controller.spaceManager.spaces[index].id
+            )
+            spaces.windowDesktops[windowID] = index
+        }
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
+
+        controller.switchToSpace(
+            id: controller.spaceManager.spaces[2].id,
+            focusesWindow: false
+        )
+        spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
+
+        spaces.current = 1
+        controller.recordWindowActivation(windowID: 20)
+        controller.desktopDidChange()
+
+        spaces.current = 2
+        controller.recordWindowActivation(windowID: 30)
+        spaces.switchingStackIDs = []
+        controller.desktopDidChange()
+
+        let intermediate = try #require(
+            controller.spaceManager.allSpaces[1].windows.first { $0.windowID == 20 }
+        )
+        let final = try #require(
+            controller.spaceManager.allSpaces[2].windows.first { $0.windowID == 30 }
+        )
+        #expect(intermediate.lastActivatedAt == oldDate)
+        #expect(final.lastActivatedAt.map { $0 > oldDate } == true)
+        #expect(controller.spaceManager.globalWindowOrder().first?.window.windowID == 30)
+    }
+
+    /// The final desktop notification can arrive before its restored focus callback. The last
+    /// held candidate still belongs to the desktop just crossed and must be discarded rather
+    /// than treated as the destination's MRU window.
+    @Test("A held focus from a departed intermediate desktop does not change MRU")
+    func departedIntermediateFocusDoesNotChangeMRU() throws {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, _) = makeController(spaces: spaces)
+        for _ in 1..<3 { controller.spaceManager.createSpace(position: .below) }
+        let oldDate = Date(timeIntervalSinceReferenceDate: 10)
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 22,
+                ownerBundleID: "com.b",
+                ownerName: "B",
+                windowTitle: "B",
+                lastActivatedAt: oldDate
+            ),
+            toSpaceID: controller.spaceManager.spaces[1].id
+        )
+        spaces.windowDesktops = [22: 1]
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
+
+        controller.switchToSpace(
+            id: controller.spaceManager.spaces[2].id,
+            focusesWindow: false
+        )
+        spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
+        spaces.current = 1
+        controller.recordWindowActivation(windowID: 22)
+
+        spaces.current = 2
+        spaces.switchingStackIDs = []
+        controller.desktopDidChange()
+
+        let departed = try #require(
+            controller.spaceManager.allSpaces[1].windows.first { $0.windowID == 22 }
+        )
+        #expect(departed.lastActivatedAt == oldDate)
+    }
+
+    /// An unexpected landing stops the coordinator instead of fighting the user. The focus on
+    /// that desktop is therefore the real result, not an intermediate side effect to discard.
+    @Test("An unexpected landing keeps its focused window as MRU")
+    func unexpectedLandingKeepsFocusedWindow() throws {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, _) = makeController(spaces: spaces)
+        for _ in 1..<3 { controller.spaceManager.createSpace(position: .below) }
+        let oldDate = Date(timeIntervalSinceReferenceDate: 10)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 22, ownerBundleID: "com.b", ownerName: "B", windowTitle: "B",
+                        lastActivatedAt: oldDate),
+            toSpaceID: controller.spaceManager.spaces[1].id
+        )
+        spaces.windowDesktops = [22: 1]
+
+        controller.switchToSpace(
+            id: controller.spaceManager.spaces[2].id,
+            focusesWindow: false
+        )
+        spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
+        spaces.current = 1
+        controller.recordWindowActivation(windowID: 22)
+
+        // Models the coordinator stopping after an unexpected or user-overtaken landing.
+        spaces.switchingStackIDs = []
+        controller.desktopDidChange()
+
+        let landed = try #require(
+            controller.spaceManager.allSpaces[1].windows.first { $0.windowID == 22 }
+        )
+        #expect(landed.lastActivatedAt.map { $0 > oldDate } == true)
+    }
+
+    /// A stage or Option-Tab commit names the desired target. macOS may restore another window
+    /// on the final desktop first, but Debut's explicit focus runs after deferred passive focus
+    /// and must be the MRU head when the switch completes.
+    @Test("Explicit target focus wins over passive final focus")
+    func explicitTargetWinsOverPassiveFinalFocus() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, _) = makeController(spaces: spaces)
+        controller.spaceManager.createSpace(position: .below)
+        let target = controller.spaceManager.spaces[1]
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 21, ownerBundleID: "com.passive", ownerName: "Passive",
+                        windowTitle: "Passive"),
+            toSpaceID: target.id
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 22, ownerBundleID: "com.explicit", ownerName: "Explicit",
+                        windowTitle: "Explicit"),
+            toSpaceID: target.id
+        )
+        spaces.windowDesktops = [21: 1, 22: 1]
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
+
+        controller.switchToSpace(id: target.id, raiseWindowID: 22)
+        spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
+        spaces.current = 1
+        controller.recordWindowActivation(windowID: 21)
+
+        spaces.switchingStackIDs = []
+        controller.desktopDidChange()
+
+        #expect(controller.spaceManager.spaces[1].windows.map(\.windowID) == [22, 21])
+    }
+
     // The settling path is where the race lives: Debut's deferred focus lands within a few
     // milliseconds of macOS restoring the destination's remembered app. Plain quick switch
     // must queue nothing, so the desktop settles on whatever macOS chose.

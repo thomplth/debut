@@ -187,6 +187,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public var onDesktopReveal: (() -> Void)?
 
     private var pendingSpaceFocus: (spaceID: UUID, windowID: CGWindowID)?
+    /// Focus restored by macOS while Debut is traversing adjacent desktops is passive. Keep
+    /// only the latest positively located candidate per display stack until the coordinator
+    /// says the switch stopped; intermediate candidates then fail the showing-desktop check,
+    /// while an early final candidate is applied once.
+    private var deferredSwitchActivations: [String: CGWindowID] = [:]
     private var stageStackTransaction = StageStackTransaction()
     private var isStageStackCommitInFlight = false
     /// A successful terminate request is only a request: the process can remain alive while
@@ -486,7 +491,40 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             delegate?.spaceControllerDidMutateState(self)
             delegate?.spaceControllerDidSwitchSpace(self)
         }
+        applyDeferredSwitchActivations()
         applyPendingSpaceFocus()
+    }
+
+    /// Resolves focus events held while a Debut-initiated switch was in flight.
+    ///
+    /// This runs after `spaceDidChange()` advances or completes the route. An intermediate hop
+    /// still has another gesture in flight and remains deferred. At the final or unexpected
+    /// landing, `recordWindowActivation` validates the candidate against the desktop now
+    /// showing before it is allowed to touch MRU. Explicit pending focus runs afterwards and
+    /// therefore wins over macOS's passive final focus.
+    private func applyDeferredSwitchActivations() {
+        guard let switcher = spaceSwitcher else {
+            deferredSwitchActivations.removeAll()
+            return
+        }
+        for stackID in Array(deferredSwitchActivations.keys)
+        where !switcher.isSwitchInFlight(stackID: stackID) {
+            guard let windowID = deferredSwitchActivations.removeValue(forKey: stackID) else {
+                continue
+            }
+            if let desktopLocation = switcher.desktopLocation(forWindow: windowID),
+               let showingDesktopID = switcher.spaceTopology()
+                   .stack(id: desktopLocation.stackID)?.currentDesktopID,
+               showingDesktopID != desktopLocation.desktopID {
+                diag.report("window_activation_ignored", level: .transient, details: [
+                    "reason": "transient_desktop_departed",
+                    "stackID": desktopLocation.stackID,
+                    "windowID": "\(windowID)",
+                ])
+                continue
+            }
+            recordWindowActivation(windowID: windowID)
+        }
     }
 
     /// Focuses the window a space switch asked for, now that its desktop is showing.
@@ -656,6 +694,28 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     public func recordWindowActivation(windowID: CGWindowID) {
+        let ownerSpaceID = spaceOwningWindow(windowID: windowID)
+        let desktopLocation = spaceSwitcher?.desktopLocation(forWindow: windowID)
+        let stackID = desktopLocation?.stackID ?? ownerSpaceID.flatMap {
+            spaceManager.spaceStackID(containingSpaceID: $0)
+        }
+
+        // Window focus and the active-space notification are delivered independently. While
+        // Debut is chaining adjacent Dock gestures, macOS briefly focuses the leading window
+        // on every desktop it crosses. Those are transition side effects, not user choices.
+        // A positively located candidate is retained because it may be the final desktop's
+        // real focus arriving just before the completion notification.
+        if let stackID, spaceSwitcher?.isSwitchInFlight(stackID: stackID) == true {
+            if desktopLocation != nil {
+                deferredSwitchActivations[stackID] = windowID
+            }
+            diag.report("window_activation_deferred", level: .transient, details: [
+                "stackID": stackID,
+                "windowID": "\(windowID)",
+            ])
+            return
+        }
+
         if let ownerPID = spaceManager.allSpaces.lazy.flatMap(\.windows)
             .first(where: { $0.windowID == windowID })?.ownerPID,
            terminationPendingProcessIDs.remove(ownerPID) != nil {
@@ -683,8 +743,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // every desktop — Finder's, typically — resolves to no single one, and reading that
         // silence as "the desktop showing" dragged its stage onto whichever space was last
         // visited. Silence leaves the assignment for a later real answer to correct.
-        let ownerSpaceID = spaceOwningWindow(windowID: windowID)
-        let desktopLocation = spaceSwitcher?.desktopLocation(forWindow: windowID)
         let desktopSpaceID = desktopLocation.flatMap {
             spaceManager.spaceID(stackID: $0.stackID, at: $0.index)
         }
