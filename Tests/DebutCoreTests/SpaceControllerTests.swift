@@ -1405,6 +1405,7 @@ struct SpaceControllerTests {
         controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceBID)
 
         spaces.windowDesktops = [101: 1, 202: 1]
+        controller.spaceManager.activateSpace(id: spaceAID)
         controller.switchToSpace(id: spaceBID)
         #expect(controller.spaceManager.activeSpaceID == spaceBID)
 
