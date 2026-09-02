@@ -15,17 +15,16 @@ public struct AltTabOverlayViewModel: Sendable {
         entries: [GlobalWindowEntry],
         selectedIndex: Int,
         windowPreviews: [CGWindowID: CGImage] = [:],
+        windowSizes: [CGWindowID: CGSize] = [:],
         appearance: AppSettings = AppSettings(),
         displayTopContentInset: CGFloat = 0
     ) {
-        self.windows = entries.map { entry in
-            StageWindowData(
-                id: entry.window.windowID,
-                windowID: entry.window.windowID,
-                ownerBundleID: entry.window.ownerBundleID,
-                ownerName: entry.window.ownerName,
-                windowTitle: entry.window.windowTitle,
-                previewImage: windowPreviews[entry.window.windowID]
+        self.windows = entries.map {
+            StageWindowData.card(
+                for: $0.window,
+                previews: windowPreviews,
+                sizes: windowSizes,
+                adaptive: appearance.adaptiveCardSizing
             )
         }
         self.selectedIndex = selectedIndex
@@ -44,14 +43,14 @@ public struct AltTabOverlayViewModel: Sendable {
     public func metrics(containerSize: CGSize) -> StageMetrics {
         StageConstants.drawnMetrics(
             stageScale: CGFloat(appearance.stageScale),
-            windowCounts: [windows.count],
+            contentAspects: [windows.map(\.contentAspect)],
             containerSize: containerSize
         )
     }
 
     public func layout(containerSize: CGSize) -> StageWindowLayout {
         StageWindowLayout(
-            windowCount: windows.count,
+            contentAspects: windows.map(\.contentAspect),
             availableWidth: StageConstants.availableStageWidth(screenWidth: containerSize.width),
             metrics: metrics(containerSize: containerSize)
         )

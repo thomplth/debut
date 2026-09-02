@@ -168,6 +168,17 @@ public struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
+                settingsToggle(
+                    "Match each preview to its window",
+                    isOn: $viewModel.settings.adaptiveCardSizing
+                )
+                Text("Previews share a height and take the width of the window they show, so a narrow window takes less room than a wide one. Turn this off to draw every preview at the shape of the display.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Inactive stage scale")
                     Spacer()

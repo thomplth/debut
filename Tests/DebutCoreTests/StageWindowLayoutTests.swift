@@ -23,29 +23,23 @@ struct StageWindowLayoutTests {
             + metrics.windowSpacing * 3
     }
 
-    @Test("Column capacity comes from the available width and the fixed card width")
-    func columnCapacity() {
-        #expect(StageWindowLayout.columnCapacity(
-            availableWidth: fourColumnWidth,
-            metrics: metrics
-        ) == 4)
-        #expect(StageWindowLayout.columnCapacity(
-            availableWidth: fourColumnWidth + metrics.cardWidth + metrics.windowSpacing,
-            metrics: metrics
-        ) == 5)
-        #expect(StageWindowLayout.columnCapacity(
-            availableWidth: fourColumnWidth - 1,
-            metrics: metrics
-        ) == 3)
+    /// A row holds as many cards as the width has room for, which is what the available width
+    /// buys: one card more and the row breaks a card earlier.
+    @Test("A row fills the available width and no further")
+    func rowFillsTheAvailableWidth() {
+        #expect(layout(4, availableWidth: fourColumnWidth).rowSizes == [4])
+        #expect(layout(5, availableWidth: fourColumnWidth).rowSizes == [3, 2])
+        #expect(layout(
+            5,
+            availableWidth: fourColumnWidth + metrics.cardWidth + metrics.windowSpacing
+        ).rowSizes == [5])
+        #expect(layout(4, availableWidth: fourColumnWidth - 1).rowSizes == [2, 2])
     }
 
     @Test("A width too narrow for even one card still lays out one column")
     func minimumOneColumn() {
-        #expect(StageWindowLayout.columnCapacity(availableWidth: 0, metrics: metrics) == 1)
-        #expect(StageWindowLayout.columnCapacity(availableWidth: -500, metrics: metrics) == 1)
-
-        let single = layout(3, availableWidth: 0)
-        #expect(single.rowSizes == [1, 1, 1])
+        #expect(layout(3, availableWidth: 0).rowSizes == [1, 1, 1])
+        #expect(layout(3, availableWidth: -500).rowSizes == [1, 1, 1])
     }
 
     @Test("Rows are balanced rather than greedily filled")
@@ -216,12 +210,12 @@ struct StageWindowLayoutTests {
 
     @Test("A larger scale fits fewer cards across the same display")
     func scaleReducesColumnCapacity() {
-        let width: CGFloat = 1_200
         let capacities = [1.0, 1.5, 2.0].map { scale in
-            StageWindowLayout.columnCapacity(
-                availableWidth: width,
+            StageWindowLayout(
+                windowCount: 12,
+                availableWidth: 1_200,
                 metrics: metrics.scaled(by: CGFloat(scale))
-            )
+            ).rowSizes[0]
         }
 
         #expect(capacities == capacities.sorted(by: >))
@@ -449,5 +443,182 @@ struct FittedStageScaleTests {
                 / CGFloat(AppSettings.stageScaleStep)
             #expect(abs(steps - steps.rounded()) < 0.0001, "\(scale) is off the step grid")
         }
+    }
+}
+
+@Suite("Adaptive card sizing")
+struct AdaptiveCardSizingTests {
+
+    /// A 16:10 display, so its shaped metrics are the standard card exactly and every width
+    /// below can be read against `StageMetrics.standard`.
+    private let metrics = StageMetrics.shaped(forDisplay: CGSize(width: 1_680, height: 1_050))
+
+    private func layout(
+        _ aspects: [CGFloat?],
+        availableWidth: CGFloat
+    ) -> StageWindowLayout {
+        StageWindowLayout(
+            contentAspects: aspects,
+            availableWidth: availableWidth,
+            metrics: metrics
+        )
+    }
+
+    private var displayAspect: CGFloat { metrics.thumbnailWidth / metrics.thumbnailHeight }
+
+    private var fourColumnWidth: CGFloat {
+        metrics.padding * 2 + metrics.cardWidth * 4 + metrics.windowSpacing * 3
+    }
+
+    @Test("A card takes its own window's shape, at the row's fixed height")
+    func cardFollowsItsOwnWindow() {
+        let narrow = metrics.adapted(toContentAspect: 1.2)
+        #expect(narrow.thumbnailHeight == metrics.thumbnailHeight)
+        #expect(narrow.thumbnailWidth == metrics.thumbnailHeight * 1.2)
+        #expect(narrow.thumbnailWidth < metrics.thumbnailWidth)
+
+        let wide = metrics.adapted(toContentAspect: 2)
+        #expect(wide.thumbnailHeight == metrics.thumbnailHeight)
+        #expect(wide.thumbnailWidth == metrics.thumbnailHeight * 2)
+        #expect(wide.thumbnailWidth > metrics.thumbnailWidth)
+    }
+
+    @Test("A window shaped like the display draws the card the display already asked for")
+    func displayShapedWindowIsUnchanged() {
+        #expect(metrics.adapted(toContentAspect: displayAspect) == metrics)
+    }
+
+    /// Nothing announces a window's size before it has been discovered, and a card with no
+    /// answer must still be drawn.
+    @Test("An unknown shape falls back to the display's own")
+    func unknownAspectFallsBack() {
+        #expect(metrics.adapted(toContentAspect: nil) == metrics)
+        #expect(metrics.adapted(toContentAspect: 0) == metrics)
+        #expect(metrics.adapted(toContentAspect: -2) == metrics)
+    }
+
+    /// One very tall window would otherwise set the height of every row it appears in, and one
+    /// very wide one would push its whole row off the display.
+    @Test("Card width is clamped to a band around the display's own card")
+    func widthIsClamped() {
+        let sliver = metrics.adapted(toContentAspect: 0.05)
+        let banner = metrics.adapted(toContentAspect: 40)
+
+        #expect(sliver.thumbnailWidth
+            == metrics.thumbnailWidth * StageMetrics.minimumAdaptiveWidthRatio)
+        #expect(banner.thumbnailWidth
+            == metrics.thumbnailWidth * StageMetrics.maximumAdaptiveWidthRatio)
+    }
+
+    @Test("Narrow cards leave room for more of them on a row")
+    func narrowCardsPackTighter() {
+        let uniform = layout(Array(repeating: nil, count: 5), availableWidth: fourColumnWidth)
+        let narrow = layout(Array(repeating: 1.0, count: 5), availableWidth: fourColumnWidth)
+
+        #expect(uniform.rowSizes == [3, 2])
+        #expect(narrow.rowSizes == [5])
+        #expect(narrow.stageSize.height < uniform.stageSize.height)
+    }
+
+    @Test("A stage of adaptive cards still never grows past the width it was laid out for")
+    func adaptiveStagesStayWithinAvailableWidth() {
+        var generator = SystemRandomNumberGenerator()
+        for windowCount in 1...30 {
+            let aspects: [CGFloat?] = (0..<windowCount).map { _ in
+                CGFloat.random(in: 0.2...4, using: &generator)
+            }
+            let stage = layout(aspects, availableWidth: fourColumnWidth)
+            #expect(stage.rowSizes.reduce(0, +) == windowCount)
+            #expect(stage.stageSize.width <= fourColumnWidth)
+        }
+    }
+
+    /// The rows are chosen by the width they take, so a stage of mixed shapes does not split
+    /// evenly by count into a row that then overflows.
+    @Test("Rows balance by width, not by card count")
+    func rowsBalanceByWidth() {
+        // Three cards at the widest the clamp allows, then three at the narrowest. Splitting
+        // three and three would overflow the first row; splitting by width does not.
+        let aspects: [CGFloat?] = [2.56, 2.56, 2.56, 0.5, 0.5, 0.5]
+        let stage = layout(aspects, availableWidth: fourColumnWidth)
+        let contentWidth = fourColumnWidth - metrics.padding * 2
+
+        #expect(stage.rowSizes == [2, 4])
+        for row in 0..<stage.rowCount {
+            #expect(stage.rowWidth(row) <= contentWidth)
+        }
+    }
+
+    @Test("Cards sit at their row's running width, and every row stays centered")
+    func offsetsArePrefixSums() {
+        let aspects: [CGFloat?] = [0.5, 2.0, 1.0]
+        let stage = layout(aspects, availableWidth: fourColumnWidth * 2)
+
+        #expect(stage.rowSizes == [3])
+        let offsets = (0..<3).map { stage.cardOffsetFromCenter(at: $0).width }
+        let widths = (0..<3).map { stage.cardWidth(at: $0) }
+
+        let rowWidth = widths.reduce(0, +) + metrics.windowSpacing * 2
+        var edge = -rowWidth / 2
+        for index in 0..<3 {
+            #expect(abs(offsets[index] - (edge + widths[index] / 2)) < 0.0001)
+            edge += widths[index] + metrics.windowSpacing
+        }
+    }
+
+    @Test("The stage is as wide as its widest row")
+    func stageWidthFollowsWidestRow() {
+        let aspects: [CGFloat?] = [1.6, 1.6, 1.6, 0.5]
+        let stage = layout(aspects, availableWidth: fourColumnWidth)
+        let widest = (0..<stage.rowCount).map { stage.rowWidth($0) }.max() ?? 0
+
+        #expect(stage.contentWidth == widest)
+    }
+
+    /// The per-card metrics the renderer draws with have to be the ones the grid measured, or
+    /// a card is drawn at a width its own slot was never sized for.
+    @Test("The metrics a card is drawn with are the ones its slot was measured at")
+    func cardMetricsMatchTheGrid() {
+        let aspects: [CGFloat?] = [0.5, 2.0, nil]
+        let stage = layout(aspects, availableWidth: fourColumnWidth * 2)
+
+        for index in 0..<3 {
+            #expect(stage.cardMetrics(at: index).cardWidth == stage.cardWidth(at: index))
+        }
+        #expect(stage.cardMetrics(at: 2).thumbnailWidth == metrics.thumbnailWidth)
+    }
+
+    /// Every existing stage is a stage of display-shaped cards, so the adaptive grid has to
+    /// reproduce the uniform one exactly rather than merely approximate it.
+    @Test("Uniform shapes reproduce the fixed-width grid exactly")
+    func uniformShapesMatchTheFixedGrid() {
+        for windowCount in 0...40 {
+            let fixed = StageWindowLayout(
+                windowCount: windowCount,
+                availableWidth: fourColumnWidth,
+                metrics: metrics
+            )
+            let adaptive = layout(
+                Array(repeating: displayAspect, count: windowCount),
+                availableWidth: fourColumnWidth
+            )
+
+            #expect(fixed.rowSizes == adaptive.rowSizes)
+            #expect(fixed.stageSize == adaptive.stageSize)
+            for index in 0..<windowCount {
+                #expect(fixed.cardOffsetFromCenter(at: index)
+                    == adaptive.cardOffsetFromCenter(at: index))
+            }
+        }
+    }
+
+    /// A card wider than the stage can hold has nowhere else to go, and dropping it or wrapping
+    /// it into an empty row would lose it.
+    @Test("A card too wide for the stage still gets a row of its own")
+    func oversizedCardKeepsItsRow() {
+        let narrowStage = metrics.padding * 2 + metrics.cardWidth / 2
+        let stage = layout([2.0, 2.0], availableWidth: narrowStage)
+
+        #expect(stage.rowSizes == [1, 1])
     }
 }

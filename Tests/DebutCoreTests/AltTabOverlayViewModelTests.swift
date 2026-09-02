@@ -107,17 +107,15 @@ struct AltTabOverlayViewModelTests {
             selectedIndex: 0
         )
         let metrics = StageMetrics.standard
-        let width = StageWindowLayout.columnCapacity(availableWidth: 900, metrics: metrics)
 
         // A card takes the shape of its display, so a 16:10 container is what makes the standard
-        // card — and this worked capacity — the one the list is actually laid out with.
+        // card — and the four-per-row capacity below — the one the list is laid out with.
         let containerWidth = 900 + StageConstants.screenMargin * 2
         let layout = model.layout(containerSize: CGSize(
             width: containerWidth,
             height: containerWidth / (metrics.thumbnailWidth / metrics.thumbnailHeight)
         ))
 
-        #expect(width == 4)
         #expect(layout.windowCount == 5)
         #expect(layout.rowSizes == [3, 2])
     }

@@ -132,6 +132,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var stageCornerRadius: Double
     public var inactiveStageScale: Double
     public var stageScale: Double
+    /// Whether each card takes its own window's shape rather than the display's.
+    public var adaptiveCardSizing: Bool
 
     // Window selection
     public var windowSelectionStyle: WindowSelectionStyle
@@ -164,6 +166,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.stageCornerRadius = 40
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
+        self.adaptiveCardSizing = true
         self.windowSelectionStyle = .filled
         self.selectorOutset = Self.defaultSelectorOutset
         self.selectorCornerRadius = Self.defaultSelectorCornerRadius
@@ -199,6 +202,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
             Double.self,
             forKey: .stageScale
         ) ?? Self.defaultStageScale
+        adaptiveCardSizing = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .adaptiveCardSizing
+        ) ?? true
         windowSelectionStyle = try container.decodeIfPresent(
             WindowSelectionStyle.self,
             forKey: .windowSelectionStyle
