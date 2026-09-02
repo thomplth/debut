@@ -1084,9 +1084,32 @@ if userDesktopCount < 2 {
              reason: "This host has one desktop, so there is nothing to switch to")
     skipTest("Quick-switching back returns to the original desktop",
              reason: "This host has one desktop, so there is nothing to switch to")
+    skipTest("The window server accepts a destination Space's front process being seeded",
+             reason: "This host has one desktop, so there is no destination Space to seed")
 } else if let startingDesktop = switchSpaceService.currentDesktopIndex() {
     let targetDesktop = startingDesktop == 0 ? 1 : 0
     info("  Switching from desktop \(startingDesktop) to \(targetDesktop)")
+
+    // Whether the window server honours SLSSpaceSetFrontPSN cannot be established off-device:
+    // it is resolved by dlsym and fails by returning an error, never by failing to build. The
+    // seed runs here against the desktop the following switch reveals, which is the production
+    // ordering, so a rejected write and a disrupted switch both surface in this section.
+    let desktopIDs = switchSpaceService.userDesktops()
+    let seedTargetDesktopID = desktopIDs.indices.contains(targetDesktop)
+        ? desktopIDs[targetDesktop] : nil
+    let seedPID = NSRunningApplication
+        .runningApplications(withBundleIdentifier: "com.apple.TextEdit")
+        .first?.processIdentifier
+    let seedAccepted = seedTargetDesktopID.flatMap { desktopID in
+        seedPID.map { switchSpaceService.setFrontProcess(pid: $0, onDesktop: desktopID) }
+    }
+    info("  Front-process seed: pid=\(seedPID.map(String.init) ?? "none") "
+        + "desktop=\(seedTargetDesktopID.map(String.init) ?? "none") "
+        + "accepted=\(seedAccepted.map(String.init) ?? "not attempted")")
+
+    test("The window server accepts a destination Space's front process being seeded") {
+        seedAccepted == true
+    }
 
     let switched = quickSwitch(to: targetDesktop, using: switchSpaceService)
     let _ = takeScreenshot("00_space_switch_desktop_2")
@@ -1183,6 +1206,8 @@ if userDesktopCount < 2 {
     skipTest("Debut's active space follows the desktop it switched to", reason: reason)
     skipTest("Quick-switching back returns to the original desktop", reason: reason)
     skipTest("A jump across two desktops lands on the far desktop", reason: reason)
+    skipTest("The window server accepts a destination Space's front process being seeded",
+             reason: reason)
 }
 
 // --- 2. Open overlay with Cmd+Tab ---

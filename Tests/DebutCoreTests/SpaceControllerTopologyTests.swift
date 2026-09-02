@@ -14,6 +14,14 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     var canMoveWindows = true
     var completesMovesImmediately = true
     var switchingStackIDs: Set<String> = []
+    var canSetFrontProcess = true
+    /// Ordered because seeding the destination's front process is only worth anything before
+    /// the swipe is posted: afterwards the desktop has already been revealed.
+    enum Operation: Equatable {
+        case setFrontProcess(pid: pid_t, desktop: CGSSpaceID)
+        case switchToDesktop(Int)
+    }
+    private(set) var operations: [Operation] = []
     private(set) var spaceDidChangeCount = 0
     private var pendingMoveCompletions: [(@Sendable () -> Void)] = []
 
@@ -72,9 +80,15 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
 
     func switchToDesktop(index: Int) -> Bool {
         switchRequests.append(index)
+        operations.append(.switchToDesktop(index))
         guard (0..<desktops).contains(index) else { return false }
         if switchChangesDesktop { current = index }
         return true
+    }
+
+    func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool {
+        operations.append(.setFrontProcess(pid: pid, desktop: desktopID))
+        return canSetFrontProcess
     }
 
     func moveWindow(windowID: CGWindowID, toDesktop: Int,
@@ -687,6 +701,101 @@ struct SpaceControllerSpaceTests {
         controller.desktopDidChange()
 
         #expect(controller.spaceManager.spaces[1].windows.map(\.windowID) == [22, 21])
+    }
+
+    /// A Space remembers which process it shows as frontmost, so the desktop is revealed with
+    /// that app forward and only then does Debut's deferred focus raise the target — the flash
+    /// the user sees. Seeding the destination first is only worth anything before the swipe.
+    @Test("A switch seeds the destination's front process before posting the swipe")
+    func switchSeedsDestinationFrontProcessBeforeSwiping() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
+        spaces.switchChangesDesktop = false
+        let (controller, _) = makeController(spaces: spaces)
+        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 11, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A",
+                        ownerPID: 4141),
+            toSpaceID: controller.spaceManager.spaces[0].id
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 22, ownerBundleID: "com.b", ownerName: "B", windowTitle: "B",
+                        ownerPID: 4242),
+            toSpaceID: controller.spaceManager.spaces[0].id
+        )
+        spaces.windowDesktops = [11: 0, 22: 0]
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[1].id)
+
+        controller.switchToSpace(id: controller.spaceManager.spaces[0].id, raiseWindowID: 22)
+
+        // Desktop 0 is id 100 in the mock's topology.
+        #expect(spaces.operations == [
+            .setFrontProcess(pid: 4242, desktop: 100),
+            .switchToDesktop(0),
+        ])
+    }
+
+    /// Plain quick switch deliberately leaves the final choice of app to macOS, so there is no
+    /// target to seed and seeding one would overrule the desktop's own memory.
+    @Test("A switch that focuses nothing seeds no front process")
+    func switchWithoutFocusSeedsNoFrontProcess() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
+        spaces.switchChangesDesktop = false
+        let (controller, _) = makeController(spaces: spaces)
+        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 11, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A",
+                        ownerPID: 4141),
+            toSpaceID: controller.spaceManager.spaces[0].id
+        )
+        spaces.windowDesktops = [11: 0]
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[1].id)
+
+        controller.switchToSpace(
+            id: controller.spaceManager.spaces[0].id,
+            focusesWindow: false
+        )
+
+        #expect(spaces.operations == [.switchToDesktop(0)])
+    }
+
+    /// Raising a window on the desktop already showing reveals nothing, so there is no seam to
+    /// cover and the write would only overrule macOS on a desktop the user is looking at.
+    @Test("Raising a window on the desktop already showing seeds no front process")
+    func sameSpaceSwitchSeedsNoFrontProcess() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 11, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A",
+                        ownerPID: 4141),
+            toSpaceID: controller.spaceManager.spaces[0].id
+        )
+        spaces.windowDesktops = [11: 0]
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
+
+        controller.switchToSpace(id: controller.spaceManager.spaces[0].id, raiseWindowID: 11)
+
+        #expect(spaces.operations.isEmpty)
+    }
+
+    /// A PSN can only be resolved from a live pid, and `GetProcessForPID` will not invent one.
+    /// A window Debut never learned an owner for must still switch rather than refuse.
+    @Test("A window with no known owner still switches, without seeding")
+    func unknownOwnerStillSwitches() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
+        spaces.switchChangesDesktop = false
+        let (controller, _) = makeController(spaces: spaces)
+        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 11, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A"),
+            toSpaceID: controller.spaceManager.spaces[0].id
+        )
+        spaces.windowDesktops = [11: 0]
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[1].id)
+
+        controller.switchToSpace(id: controller.spaceManager.spaces[0].id, raiseWindowID: 11)
+
+        #expect(spaces.operations == [.switchToDesktop(0)])
     }
 
     /// The window macOS flashes on the destination while the transition settles never becomes
