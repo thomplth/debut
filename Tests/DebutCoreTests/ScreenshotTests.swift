@@ -660,8 +660,8 @@ struct ScreenshotTests {
         #expect(abs(sourceBounds.midX - sourceSurface.midX) < 0.5)
     }
 
-    @Test("Display stack indicator clears the menu bar")
-    func displayStackIndicatorClearsMenuBar() throws {
+    @Test("Display stack indicator sits at the top of the overlay")
+    func displayStackIndicator() throws {
         var manager = makeSampleViewModel(
             spaceCount: 3,
             windowsPerSpace: [3, 2, 1],
@@ -680,8 +680,7 @@ struct ScreenshotTests {
         let vm = StageOverlayViewModel(
             spaceManager: manager,
             activeSpaceIndex: 1,
-            selectedWindowIndex: 1,
-            displayTopContentInset: 22
+            selectedWindowIndex: 1
         )
 
         guard let image = renderSwiftUI(
@@ -690,10 +689,9 @@ struct ScreenshotTests {
         ) else {
             throw ScreenshotError.renderFailed
         }
-        try saveImage(image, name: "07_display_stack_indicator_below_menu_bar")
+        try saveImage(image, name: "07_display_stack_indicator")
 
         #expect(vm.displayStackCount == 2)
-        #expect(vm.displayStackIndicatorTopPadding == 40)
     }
 
     @Test("Onboarding welcome screen")

@@ -591,13 +591,23 @@ func spaceCardAspects(in state: [String: String]) -> [[CGFloat?]] {
 // source order, so the hit tests below cannot reach a setting declared beneath them.
 let interactionSettings = (try? StateStore().loadSettings()) ?? AppSettings()
 
+/// The rectangle the overlay actually occupies, which stops short of the menu bar and any camera
+/// housing. Every card coordinate below is measured in it and then translated back to the screen,
+/// because aiming at the display instead would miss by the reserved strip.
+let overlayBounds = OverlayDisplayResolver.overlayBounds(
+    displayBounds: CGDisplayBounds(CGMainDisplayID()),
+    topContentInset: NSScreen.screens
+        .first { $0.displayID == CGMainDisplayID() }?
+        .overlayTopContentInset ?? 0
+)
+
 /// The card metrics the running overlay is drawing at, which depend on both the stage-scale
 /// setting and how many windows the display has to hold.
 func drawnMetrics(cardAspects: [[CGFloat?]]) -> StageMetrics {
     StageConstants.drawnMetrics(
         stageScale: CGFloat(interactionSettings.stageScale),
         contentAspects: cardAspects,
-        containerSize: CGDisplayBounds(CGMainDisplayID()).size
+        containerSize: overlayBounds.size
     )
 }
 
@@ -611,11 +621,10 @@ func stageCenter(
           cardAspects.indices.contains(activeSpaceIndex)
     else { return nil }
 
-    let screen = CGDisplayBounds(CGMainDisplayID())
     let metrics = drawnMetrics(cardAspects: cardAspects)
     let stageHeights = StageConstants.stageLayouts(
         forContentAspects: cardAspects,
-        screenWidth: screen.width,
+        screenWidth: overlayBounds.width,
         metrics: metrics
     ).map(\.stageSize.height)
     guard let visualCenterY = StageConstants.stageCenterY(
@@ -623,12 +632,12 @@ func stageCenter(
         stageHeights: stageHeights,
         activeSpaceIndex: activeSpaceIndex,
         inactiveScale: inactiveScale,
-        containerHeight: screen.height,
+        containerHeight: overlayBounds.height,
         stageScale: metrics.scaleFactor
     ) else { return nil }
     return CGPoint(
-        x: screen.midX,
-        y: visualCenterY
+        x: overlayBounds.midX,
+        y: overlayBounds.minY + visualCenterY
     )
 }
 
@@ -647,8 +656,16 @@ func windowCenter(
         contentAspects: cardAspects,
         activeSpaceIndex: activeSpaceIndex,
         inactiveScale: inactiveScale,
-        containerSize: CGDisplayBounds(CGMainDisplayID()).size,
+        containerSize: overlayBounds.size,
         metrics: drawnMetrics(cardAspects: cardAspects)
+    ).map(onScreen)
+}
+
+/// Lifts a point from the overlay's own coordinate space into the screen's.
+func onScreen(_ pointInOverlay: CGPoint) -> CGPoint {
+    CGPoint(
+        x: overlayBounds.minX + pointInOverlay.x,
+        y: overlayBounds.minY + pointInOverlay.y
     )
 }
 
@@ -671,9 +688,9 @@ func firstWindowCenter(in state: [String: String]) -> CGPoint? {
         contentAspects: [aspects],
         activeSpaceIndex: 0,
         inactiveScale: 1,
-        containerSize: CGDisplayBounds(CGMainDisplayID()).size,
+        containerSize: overlayBounds.size,
         metrics: drawnMetrics(cardAspects: [aspects])
-    )
+    ).map(onScreen)
 }
 
 final class LockedApplicationResult: @unchecked Sendable {

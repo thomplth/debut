@@ -16,6 +16,31 @@ public enum OverlayDisplayResolver {
         max(0, frame.maxY - visibleFrame.maxY, safeAreaTopInset, menuBarHeight)
     }
 
+    /// The rectangle the overlay window covers on a display, in Cocoa coordinates. The overlay
+    /// sits above the menu bar's window level, so the reserved strip is excluded from the window
+    /// rather than drawn over — which also keeps content out of a camera housing, where those
+    /// pixels would be hidden rather than merely overlapping. Cocoa's origin is bottom-left, so
+    /// reserving the top shortens the rectangle and leaves its origin where it was.
+    public static func overlayFrame(displayFrame: CGRect, topContentInset: CGFloat) -> CGRect {
+        CGRect(
+            x: displayFrame.minX,
+            y: displayFrame.minY,
+            width: displayFrame.width,
+            height: displayFrame.height - topContentInset
+        )
+    }
+
+    /// The same rectangle in the Quartz display coordinates that Accessibility and synthetic
+    /// events use. That space runs top-down, so the reserved strip moves the origin as well.
+    public static func overlayBounds(displayBounds: CGRect, topContentInset: CGFloat) -> CGRect {
+        CGRect(
+            x: displayBounds.minX,
+            y: displayBounds.minY + topContentInset,
+            width: displayBounds.width,
+            height: displayBounds.height - topContentInset
+        )
+    }
+
     /// `focusedWindowFrame` and the display frames must share a coordinate space; pass
     /// `CGDisplayBounds` for the displays, since that is the space Accessibility reports in.
     public static func resolve(

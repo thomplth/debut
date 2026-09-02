@@ -168,18 +168,6 @@ struct OverlayViewModelTests {
         #expect(vm.displayStackShortcut.isEmpty)
     }
 
-    @Test("Display stack indicator starts below the screen safe area")
-    func displayStackIndicatorSafeArea() {
-        let vm = StageOverlayViewModel(
-            spaceManager: multiDisplayManager(),
-            activeSpaceIndex: 0,
-            selectedWindowIndex: 0,
-            displayTopContentInset: 38
-        )
-
-        #expect(vm.displayStackIndicatorTopPadding == 56)
-    }
-
     @Test("The VM preview can show a display indicator with one connected stack")
     func vmDisplayIndicatorPreview() {
         let normal = StageOverlayViewModel(

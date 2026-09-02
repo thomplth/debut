@@ -1327,7 +1327,7 @@ public struct StageOverlayView: View {
                     .padding(.vertical, 8)
                     .background(.regularMaterial, in: Capsule())
                     .frame(width: geo.size.width)
-                    .padding(.top, viewModel.displayStackIndicatorTopPadding)
+                    .padding(.top, 18)
                     .allowsHitTesting(false)
                     .accessibilityLabel(
                         "\(viewModel.displayStackName), display stack "
