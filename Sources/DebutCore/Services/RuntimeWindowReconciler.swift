@@ -184,6 +184,39 @@ public struct RuntimeWindowReconciler: Sendable {
             ))
         }
 
+        // A dormant assignment carrying the same window-server ID under the same running
+        // process is stronger than title or bundle recovery. Restore it before a vanished
+        // transient assignment from that bundle can claim the live ID and overwrite its MRU
+        // timestamp and position. This is deliberately process-scoped: window IDs are reused.
+        for info in snapshot.liveWindows where
+            spaceManager.spaceContainingWindow(windowID: info.windowID) == nil {
+            guard let dormant = spaceManager.dormantWindowAssignments.first(where: {
+                $0.window.windowID == info.windowID
+                    && $0.window.ownerPID == info.ownerPID
+                    && $0.window.ownerBundleID == info.ownerBundleID
+            }) else { continue }
+            let previousSpace = spaceManager.spaceContainingWindow(windowID: info.windowID)
+                .flatMap(spaceManager.spaceIndex(id:))
+            guard spaceManager.restoreDormantWindow(
+                assignmentID: dormant.id,
+                windowID: info.windowID,
+                ownerPID: info.ownerPID,
+                windowTitle: info.title
+            ) else { continue }
+            consumedLiveWindowIDs.insert(info.windowID)
+            provisionalWindowIDs.remove(info.windowID)
+            reassignedCount += 1
+            events.append(WindowAssignmentEvent(
+                kind: .reassigned,
+                windowID: info.windowID,
+                bundleID: info.ownerBundleID,
+                windowTitle: info.title,
+                fromSpace: previousSpace,
+                toSpace: spaceManager.spaceIndex(id: dormant.spaceID),
+                reason: .dormantRestored
+            ))
+        }
+
         // Spaces still holding an assignment whose window vanished and could not
         // be recovered, keyed by bundle. A replacement belongs with them rather
         // than wherever the user happens to be standing.
