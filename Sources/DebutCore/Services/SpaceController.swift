@@ -250,6 +250,20 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
+    /// Takes the size one window was just resized to. Discovery reports sizes only when windows
+    /// are found, an app is activated or the desktops change, and a resize is none of those, so
+    /// without this a card kept its shape until the user switched apps.
+    public func recordWindowSize(windowID: CGWindowID, size: CGSize) {
+        guard !isSpaceManagerVisible else { return }
+        windowSizes[windowID] = size
+        // Transient, so a drag that reports every frame refreshes the observable state block
+        // without any of it reaching durable storage.
+        diag.report("window_resized", level: .transient, details: [
+            "windowID": "\(windowID)",
+            "size": "\(Int(size.width))x\(Int(size.height))",
+        ])
+    }
+
     /// The shape of every window the overlay is showing, by space. Cards no longer all have the
     /// same width, so a count alone no longer locates one for a caller outside the process. The
     /// stage-scale setting is already applied by such callers, and so is this one.

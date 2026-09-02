@@ -773,6 +773,26 @@ func focusedWindowElement(for processIdentifier: pid_t) -> AXUIElement? {
     return (element as! AXUIElement)
 }
 
+func windowSize(_ window: AXUIElement) -> CGSize? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &value) == .success,
+          let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+    var size = CGSize.zero
+    guard AXValueGetValue(value as! AXValue, .cgSize, &size) else { return nil }
+    return size
+}
+
+/// Requests a size and reports the one the window settled on. An app clamps either axis to its
+/// own limits — TextEdit held a 945pt width against a 1100pt request while taking the height —
+/// so the settled size is the fixture and the requested size is only an intent.
+func resizeWindow(_ window: AXUIElement, to size: CGSize, from before: CGSize) -> CGSize? {
+    var requested = size
+    guard let value = AXValueCreate(.cgSize, &requested) else { return nil }
+    AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
+    _ = waitFor(timeout: 3) { windowSize(window) != before }
+    return windowSize(window)
+}
+
 func windowIsFullscreen(_ window: AXUIElement) -> Bool {
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &value) == .success
@@ -2443,6 +2463,67 @@ if !launchFocusOpened {
 }
 
 NSRunningApplication(processIdentifier: launchFocusPID)?.forceTerminate()
+
+// --- 18. A resized window reshapes its card ---
+// Sizes reach the model from discovery alone, and resizing a window runs none of it. The card
+// then keeps the shape the window had at the last app switch, which is what this catches: no
+// app is activated between the resize and the reading, so only a resize notification can
+// account for the new shape.
+header("18. A resized window reshapes its card")
+
+let resizeFixture = NSRunningApplication
+    .runningApplications(withBundleIdentifier: "com.apple.TextEdit")
+    .first
+let resizeFixtureWindow = resizeFixture.flatMap { fixture -> AXUIElement? in
+    fixture.activate()
+    wait(1)
+    return focusedWindowElement(for: fixture.processIdentifier)
+}
+
+/// Every aspect the state block reports, flattened: which card is which does not matter here,
+/// only that a shape this distinctive turns up at all.
+func reportedAspects() -> [CGFloat] {
+    SpaceController.decodeWindowAspects(readState()["windowAspectsBySpace"] ?? "")
+        .flatMap { $0 }
+        .compactMap { $0 }
+}
+
+if let resizeFixtureWindow, let originalSize = windowSize(resizeFixtureWindow) {
+    // Activating the fixture above is the last app switch in this scenario, so the aspects read
+    // here are the ones discovery can account for. Anything new after the resize is not.
+    let aspectsBefore = reportedAspects()
+    let settledSize = resizeWindow(
+        resizeFixtureWindow,
+        to: CGSize(width: 700, height: 480),
+        from: originalSize
+    ) ?? originalSize
+    let originalAspect = originalSize.width / originalSize.height
+    let wanted = settledSize.width / settledSize.height
+    // The state block refreshes on any reported event, so poll rather than read once.
+    let matched = waitFor(timeout: 5) {
+        reportedAspects().contains { abs($0 - wanted) < 0.05 }
+    }
+    info("Resize fixture: from=\(Int(originalSize.width))x\(Int(originalSize.height)) "
+        + "to=\(Int(settledSize.width))x\(Int(settledSize.height)) "
+        + "wantedAspect=\(String(format: "%.3f", wanted)) before=\(aspectsBefore) "
+        + "after=\(reportedAspects())")
+
+    if abs(wanted - originalAspect) > 0.1 {
+        test("A resized window reports its new shape without an app switch") { matched }
+    } else {
+        skipTest(
+            "A resized window reports its new shape without an app switch",
+            reason: "The fixture window kept its shape, so there is nothing to observe"
+        )
+    }
+
+    _ = resizeWindow(resizeFixtureWindow, to: originalSize, from: settledSize)
+} else {
+    skipTest(
+        "A resized window reports its new shape without an app switch",
+        reason: "The TextEdit fixture is not running"
+    )
+}
 
 // --- Summary ---
 header("Results")

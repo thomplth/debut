@@ -1031,6 +1031,51 @@ struct WindowDiscoveryServiceTests {
         #expect(service.discoverRunningWindows().map(\.windowID) == [7])
     }
 
+    @Test("A resized window reports the size it was resized to")
+    func resizeReportsTheNewSize() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.windowSizeReader = { _ in CGSize(width: 900, height: 600) }
+        var reported: [CGWindowID: CGSize] = [:]
+        service.onWindowResized = { reported[$0] = $1 }
+        service.registerTracking(windowID: 7, pid: 10)
+
+        service.handleWindowResized(element: element)
+
+        #expect(reported == [7: CGSize(width: 900, height: 600)])
+    }
+
+    @Test("A resize Accessibility cannot measure reports nothing")
+    func unreadableResizeReportsNothing() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.windowSizeReader = { _ in nil }
+        var reported = false
+        service.onWindowResized = { _, _ in reported = true }
+        service.registerTracking(windowID: 7, pid: 10)
+
+        service.handleWindowResized(element: element)
+        // An untracked element resolves to no window, which is the same silence.
+        service.windowSizeReader = { _ in CGSize(width: 900, height: 600) }
+        service.handleWindowResized(element: AXUIElementCreateApplication(10))
+
+        #expect(!reported)
+    }
+
     @Test("Process exit drops that app's retired window records")
     func processExitClearsRetiredWindows() {
         let windowService = MockWindowService()
