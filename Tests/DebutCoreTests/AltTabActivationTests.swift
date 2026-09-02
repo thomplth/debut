@@ -30,16 +30,33 @@ struct AltTabActivationTests {
         #expect(KeyAction.activateAltTabNext.isCycling)
     }
 
-    @Test("Option+backtick is exposed as the alternate backward binding")
-    func alternateBackwardBinding() {
+    /// Backtick reaches the switcher through the session's bare-backtick binding, exactly as it
+    /// does inside Cmd+Tab, so no global chord is registered for it.
+    @Test("No global shortcut claims Option+backtick")
+    func backtickIsNotGlobal() {
         let bindings = KeyBindings()
 
+        #expect(KeyAction.altTabActions == [.activateAltTabNext, .activateAltTabPrevious])
         #expect(
-            bindings.combo(for: .activateAltTabPreviousAlternate)
-                == KeyCombo(keyCode: kVK_ANSI_Grave, option: true)
+            bindings.action(
+                for: KeyCombo(keyCode: kVK_ANSI_Grave, option: true),
+                scope: .global
+            ) == nil
         )
-        #expect(KeyAction.altTabActions.contains(.activateAltTabPreviousAlternate))
         #expect(KeyAction.sessionActions.contains(.previousWindowAlternate))
+    }
+
+    @Test("Option+backtick passes through when no switcher is open")
+    func backtickPassesThroughWithoutSession() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let event = key(kVK_ANSI_Grave, .maskAlternate)
+        #expect(service.handleCGEvent(type: .keyDown, event: event) === event)
+
+        #expect(delegate.receivedEvents.isEmpty)
     }
 
     @Test("Option+Tab opens the alt-tab switcher and is consumed")
@@ -67,7 +84,9 @@ struct AltTabActivationTests {
         #expect(delegate.receivedEvents == [.altTabShiftHold])
     }
 
-    @Test("Option+backtick cycles backward while the switcher is open")
+    /// Option is the session's primary modifier and is stripped before session matching, so the
+    /// physical Option+backtick resolves through the same bare-backtick binding Cmd+Tab uses.
+    @Test("Option+backtick steps backward while the switcher is open")
     func alternateCyclesBackward() {
         let service = EventTapKeyboardService()
         let delegate = TestKeyboardDelegate()
@@ -83,7 +102,7 @@ struct AltTabActivationTests {
             ) == nil
         )
 
-        #expect(delegate.receivedEvents == [.altTabHold, .altTabShiftHold])
+        #expect(delegate.receivedEvents == [.altTabHold, .previousWindow])
     }
 
     /// Option is the session's primary modifier, so lifting it commits the selection through the
