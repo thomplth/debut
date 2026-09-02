@@ -94,6 +94,31 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     private let contradictionLock = NSLock()
     private var contradictions = AXContradictionRegistry()
 
+    private let ownWindowLock = NSLock()
+    private var consentedOwnWindowIDs: Set<CGWindowID> = []
+
+    /// Admits or withdraws one of Debut's own windows. As a regular application Debut is
+    /// enumerated like any other app, so without consent the overlay — which joins every Space —
+    /// would be managed as a window and render inside itself.
+    public func setOwnWindowConsent(_ consented: Bool, windowID: CGWindowID) {
+        ownWindowLock.withLock {
+            if consented {
+                consentedOwnWindowIDs.insert(windowID)
+            } else {
+                consentedOwnWindowIDs.remove(windowID)
+            }
+        }
+    }
+
+    static func admitsWindow(
+        windowID: CGWindowID,
+        ownerPID: pid_t,
+        currentPID: pid_t,
+        consentedOwnWindowIDs: Set<CGWindowID>
+    ) -> Bool {
+        ownerPID != currentPID || consentedOwnWindowIDs.contains(windowID)
+    }
+
     /// The verdicts worth carrying to the next launch, and the ones a previous launch left.
     /// Without this the dormant assignment for a ghost outlives the reason it was parked, and
     /// the startup reconcile restores the ghost before AX ever gets a chance to object again.
@@ -201,6 +226,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             contradictions.retainOnly(owners: regularPIDs)
         }
 
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let consentedOwnWindowIDs = ownWindowLock.withLock { self.consentedOwnWindowIDs }
+
         var seen = Set<CGWindowID>()
         return infoList.compactMap { dict in
             guard let windowID = dict[kCGWindowNumber] as? CGWindowID,
@@ -208,6 +236,13 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                   let boundsDict = dict[kCGWindowBounds] as? [String: CGFloat],
                   let bundleID = pidToBundleID[ownerPID]
             else { return nil }
+
+            guard Self.admitsWindow(
+                windowID: windowID,
+                ownerPID: ownerPID,
+                currentPID: currentPID,
+                consentedOwnWindowIDs: consentedOwnWindowIDs
+            ) else { return nil }
 
             // A positive AX verdict is a reason to exclude; the absence of one is not — an app
             // still warming up, or a window on a Space that isn't showing, reports neither.

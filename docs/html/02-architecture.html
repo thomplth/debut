@@ -92,9 +92,13 @@ property. It is the only place in the codebase where concrete types are chosen.
 <p><span class="srcline">AppDelegate.swift:44</span></p>
 
 <ol>
-  <li><code>NSApp.setActivationPolicy(.accessory)</code>. Combined with
-  <code>LSUIElement</code> in the Info.plist, this is what makes Debut an agent
-  with no Dock icon and no menu bar of its own.</li>
+  <li><code>NSApp.setActivationPolicy(.accessory)</code>, matching
+  <code>LSUIElement</code> in the Info.plist so a menu-bar-only user never sees a
+  Dock icon flash. <code>ActivationPolicyCoordinator</code> promotes the app to
+  <code>.regular</code> as soon as settings load, unless <code>showsDockIcon</code>
+  is off. The policy decides more than the Dock icon: every discovery path admits
+  regular applications only, so Debut's own Settings window is managed as a window
+  exactly when Debut is a regular app.</li>
 
   <li>Report <code>app_launched</code> to diagnostics.</li>
 

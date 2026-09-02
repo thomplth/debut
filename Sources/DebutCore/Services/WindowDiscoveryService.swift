@@ -857,11 +857,14 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     func handleAppActivation(_ app: AppInfo) {
+        // A switcher is never the app the user switched to. Debut's activation policy used to
+        // keep it out of this notification; as a regular app it arrives like anything else, and
+        // answering would name Debut the frontmost app every time its own window took focus.
+        guard app.bundleID != "com.thomplth.Debut" else { return }
         onFrontmostAppChanged?(app.bundleID)
 
         let pid = app.pid
-        let shouldTrackActivation = app.bundleID != "com.thomplth.Debut"
-            && !excludedBundleIDs.contains(app.bundleID)
+        let shouldTrackActivation = !excludedBundleIDs.contains(app.bundleID)
         let sampledFocusedWindowID: CGWindowID?
 
         // Sample focus before performing any enumeration so transient activation

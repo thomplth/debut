@@ -100,6 +100,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let maximumSpaceSwitchDuration: TimeInterval = 0.4
 
     public var launchAtLogin: Bool
+    /// Off makes Debut an agent again — no Dock icon and no menu bar, reachable only from its
+    /// status item. Its own Settings window then leaves the space manager with it, because
+    /// every discovery path admits regular applications only.
+    public var showsDockIcon: Bool
     public var excludedBundleIDs: [String]
     public var shareAnonymousTelemetry: Bool
 
@@ -159,6 +163,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
 
     public init() {
         self.launchAtLogin = true
+        self.showsDockIcon = true
         self.excludedBundleIDs = []
         self.shareAnonymousTelemetry = true
 
@@ -190,6 +195,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         launchAtLogin = try container.decode(Bool.self, forKey: .launchAtLogin)
+        showsDockIcon = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .showsDockIcon
+        ) ?? true
         excludedBundleIDs = try container.decode([String].self, forKey: .excludedBundleIDs)
         shareAnonymousTelemetry = try container.decodeIfPresent(
             Bool.self,

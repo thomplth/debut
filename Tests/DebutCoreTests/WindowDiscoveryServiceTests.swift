@@ -80,6 +80,34 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshotFocusedWindowID == 4)
     }
 
+    // A switcher is never the app the user switched to. As an accessory app Debut was filtered
+    // out of the activation notification by its policy alone; as a regular app it arrives like
+    // any other, and answering would name Debut the frontmost app and reconcile every window
+    // each time its own Settings window or overlay took focus.
+    @Test("Debut's own activation is not an app activation")
+    func ownActivationIsIgnored() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "com.thomplth.Debut", name: "Debut", pid: 10, isHidden: false),
+        ]
+        windowService.windowList = [liveWindow(1)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 1 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var callbackOrder: [String] = []
+        service.onFrontmostAppChanged = { callbackOrder.append("app:\($0 ?? "nil")") }
+        service.onWindowActivated = { _ in callbackOrder.append("focus") }
+        service.onAppActivated = { _ in callbackOrder.append("snapshot") }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "com.thomplth.Debut", name: "Debut", pid: 10, isHidden: false)
+        )
+
+        #expect(callbackOrder.isEmpty)
+    }
+
     // The reconciler decides space membership from the snapshot alone, so a snapshot that
     // omits desktops silently reverts it to guessing from the active space.
     @Test("Activation snapshots carry the desktop macOS reports for each window")

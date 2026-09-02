@@ -741,6 +741,10 @@ func visibleWindowTitles(for processIdentifier: pid_t) -> [String] {
     }
 }
 
+/// The strings Debut has *drawn*, which is what every caller here asserts on. A menu bar is
+/// deliberately not walked: it is not a window, and once Debut runs as a regular application the
+/// Apple menu hangs Recent Items off it — a list naming the very fixture files these checks count,
+/// realized lazily by the walk itself, so a card leaving the overlay need not lower its count.
 func accessibilityStrings(for processIdentifier: pid_t) -> [String] {
     let application = AXUIElementCreateApplication(processIdentifier)
     var strings: [String] = []
@@ -749,6 +753,13 @@ func accessibilityStrings(for processIdentifier: pid_t) -> [String] {
     func visit(_ element: AXUIElement) {
         let hash = CFHash(element)
         guard visited.insert(hash).inserted else { return }
+
+        var roleValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue) == .success,
+           let role = roleValue as? String,
+           role == kAXMenuBarRole || role == "AXExtrasMenuBar" {
+            return
+        }
 
         for attribute in [kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute] {
             var rawValue: CFTypeRef?
@@ -2018,8 +2029,14 @@ let dismissalSettledChangedPixelRatio = beforeDismissalRegion.flatMap { before i
     settledDismissalRegion.flatMap { changedPixelRatio(from: before, to: $0) }
 }
 let accessibleAfterDismissal = dismissalPID.map(accessibilityStrings(for:)) ?? []
-let closeEvent = readEvents().last { $0["event"] == "close_selected_window" }
+let dismissalEvents = readEvents()
+let closeEvent = dismissalEvents.last { $0["event"] == "close_selected_window" }
 let closedWindowID = closeEvent.flatMap { UInt32($0["windowID"] ?? "") }
+// Closing the window and forgetting it are separate steps, and only the second one shows up in the
+// card count this asserts on. Naming the events that followed the key separates "Debut never closed
+// it" from "Debut closed it and never learned it died".
+let eventsAfterClose = dismissalEvents.lastIndex { $0["event"] == "close_selected_window" }
+    .map { dismissalEvents[($0 + 1)...].compactMap { $0["event"] } } ?? []
 // The card is found by the label Debut says it drew, never by the title this harness reads from
 // `kCGWindowName`. That title is gated behind Screen Recording, which the harness always holds and
 // Debut does not on a GitHub-hosted runner — so Debut draws the owner name there while the harness
@@ -2037,6 +2054,8 @@ info(
         + "cardLabel=\(selectedCardLabel ?? "none") "
         + "accessibilityCount=\(selectedTitleCountBefore)->\(selectedTitleCountAfter) "
         + "accessibilityStrings=\(accessibleBeforeDismissal.count)->\(accessibleAfterDismissal.count) "
+        + "windowsInActiveSpace=\(windowsBeforeDismissal)->\(readState()["windowsInActiveSpace"] ?? "none") "
+        + "eventsAfterClose=[\(eventsAfterClose.joined(separator: ","))] "
         + "recording=\(dismissalRecording) "
         + "motionSamples=\(dismissalMotionSamples.count) "
         + "reduceMotion=\(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) "
