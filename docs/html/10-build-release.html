@@ -101,7 +101,7 @@ things in order:
 <table>
   <tr><th>Key</th><th>Value</th><th>Why it matters</th></tr>
   <tr><td><code>CFBundleIdentifier</code></td><td><code>com.thomplth.Debut</code></td><td>The gate that switches diagnostics and the resource reader into production mode (chapter 8)</td></tr>
-  <tr><td><code>LSUIElement</code></td><td><code>true</code></td><td>No Dock icon, no menu bar. Debut is an agent — this is what lets the overlay appear without a visible host app</td></tr>
+  <tr><td><code>LSUIElement</code></td><td><code>true</code></td><td>Debut launches as an agent so the overlay can appear without a visible host app, and so a menu-bar-only user never sees a Dock icon flash. The running policy comes from the <code>showsDockIcon</code> setting, which defaults to a regular Dock app</td></tr>
   <tr><td><code>NSSupportsAutomaticTermination</code></td><td><code>false</code></td><td>macOS must not reclaim the process while idle; the event tap has to stay alive</td></tr>
   <tr><td><code>NSSupportsSuddenTermination</code></td><td><code>false</code></td><td>State must be flushed on terminate (chapter 7), so the process needs to run its shutdown</td></tr>
   <tr><td><code>NSHighResolutionCapable</code></td><td><code>true</code></td><td>Required for correct Retina capture and rendering</td></tr>

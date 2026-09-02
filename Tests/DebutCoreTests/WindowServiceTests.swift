@@ -124,6 +124,26 @@ struct WindowServiceTests {
         ))
     }
 
+    // As a regular app Debut enumerates its own windows like any other, and the overlay joins
+    // all Spaces, so admitting it would render the overlay inside itself. Debut's own windows
+    // therefore enter by consent only: the Settings window registers itself, nothing else does.
+    @Test("Debut's own windows are refused unless explicitly admitted")
+    func ownWindowsRequireConsent() {
+        let ownPID: pid_t = 501
+        #expect(AccessibilityWindowService.admitsWindow(
+            windowID: 10, ownerPID: 900, currentPID: ownPID, consentedOwnWindowIDs: []
+        ))
+        #expect(!AccessibilityWindowService.admitsWindow(
+            windowID: 10, ownerPID: ownPID, currentPID: ownPID, consentedOwnWindowIDs: []
+        ))
+        #expect(AccessibilityWindowService.admitsWindow(
+            windowID: 10, ownerPID: ownPID, currentPID: ownPID, consentedOwnWindowIDs: [10]
+        ))
+        #expect(!AccessibilityWindowService.admitsWindow(
+            windowID: 11, ownerPID: ownPID, currentPID: ownPID, consentedOwnWindowIDs: [10]
+        ))
+    }
+
     // Plausibility gates admission, so it may rest on ambiguous evidence: a window macOS
     // cannot place on one desktop is refused entry but proves nothing, because an all-Spaces
     // or fullscreen window looks the same. Eviction cannot use that same bar — it needs a
