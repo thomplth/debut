@@ -79,6 +79,7 @@ public struct SpaceManager: Codable, Sendable {
         let spaceIDs = Set(allSpaces.map(\.id))
         dormantWindowAssignments.removeAll { !spaceIDs.contains($0.spaceID) }
         coalesceDormantRuntimeIdentities()
+        resolveLiveDormantRuntimeIdentityConflicts()
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -512,12 +513,19 @@ public struct SpaceManager: Codable, Sendable {
         _ lhs: DormantWindowAssignment,
         _ rhs: DormantWindowAssignment
     ) -> Bool {
-        guard let lhsPID = lhs.window.ownerPID, let rhsPID = rhs.window.ownerPID else {
+        hasSameRuntimeIdentity(lhs.window, rhs.window)
+    }
+
+    private static func hasSameRuntimeIdentity(
+        _ lhs: SpaceWindow,
+        _ rhs: SpaceWindow
+    ) -> Bool {
+        guard let lhsPID = lhs.ownerPID, let rhsPID = rhs.ownerPID else {
             return false
         }
         return lhsPID == rhsPID
-            && lhs.window.ownerBundleID == rhs.window.ownerBundleID
-            && lhs.window.windowID == rhs.window.windowID
+            && lhs.ownerBundleID == rhs.ownerBundleID
+            && lhs.windowID == rhs.windowID
     }
 
     private mutating func replaceDormantAssignment(_ assignment: DormantWindowAssignment) {
@@ -585,6 +593,55 @@ public struct SpaceManager: Codable, Sendable {
             }
         }
         dormantWindowAssignments = coalesced
+    }
+
+    /// Old state can contain the same running window both live and dormant after a transient
+    /// record claimed its window ID. Keep only one side of that impossible state. A dormant
+    /// activation newer than the live record restores its stable UUID and saved position;
+    /// otherwise the already-live record wins and its stale dormant shadow is discarded.
+    private mutating func resolveLiveDormantRuntimeIdentityConflicts() {
+        var retainedDormant: [DormantWindowAssignment] = []
+        for assignment in dormantWindowAssignments {
+            var liveLocation: (stack: Int, space: Int, window: Int)?
+            for stackIndex in spaceStacks.indices {
+                for spaceIndex in spaceStacks[stackIndex].spaces.indices {
+                    if let windowIndex = spaceStacks[stackIndex].spaces[spaceIndex].windows
+                        .firstIndex(where: {
+                            Self.hasSameRuntimeIdentity($0, assignment.window)
+                        }) {
+                        liveLocation = (stackIndex, spaceIndex, windowIndex)
+                        break
+                    }
+                }
+                if liveLocation != nil { break }
+            }
+            guard let liveLocation else {
+                retainedDormant.append(assignment)
+                continue
+            }
+
+            let liveWindow = spaceStacks[liveLocation.stack]
+                .spaces[liveLocation.space].windows[liveLocation.window]
+            let dormantIsNewer: Bool
+            switch (assignment.window.lastActivatedAt, liveWindow.lastActivatedAt) {
+            case let (dormant?, live?):
+                dormantIsNewer = dormant > live
+            case (_?, nil):
+                dormantIsNewer = true
+            default:
+                dormantIsNewer = false
+            }
+            if dormantIsNewer {
+                spaceStacks[liveLocation.stack].spaces[liveLocation.space]
+                    .removeWindow(windowID: liveWindow.windowID)
+                insertWindow(
+                    assignment.window,
+                    at: assignment.windowIndex,
+                    inSpaceID: assignment.spaceID
+                )
+            }
+        }
+        dormantWindowAssignments = retainedDormant
     }
     @discardableResult
     public mutating func restoreDormantWindow(

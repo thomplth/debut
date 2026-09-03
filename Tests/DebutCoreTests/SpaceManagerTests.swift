@@ -410,6 +410,77 @@ struct SpaceManagerTests {
         #expect(assignment.window.lastActivatedAt == newer)
     }
 
+    @Test("Decoding restores a newer dormant record shadowed by a live runtime duplicate")
+    func decodingRestoresNewerDormantRuntimeIdentity() throws {
+        let focusedAt = Date(timeIntervalSinceReferenceDate: 200)
+        var sm = SpaceManager()
+        let spaceID = sm.activeSpaceID
+        sm.addWindow(
+            SpaceWindow(windowID: 100, ownerBundleID: "com.mitchellh.ghostty",
+                        ownerName: "Ghostty", windowTitle: "Terminal", ownerPID: 500),
+            toSpaceID: spaceID
+        )
+        sm.addWindow(
+            SpaceWindow(windowID: 4794, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Focused tab", ownerPID: 40694),
+            toSpaceID: spaceID
+        )
+        let diaID = try #require(sm.spaces[0].windows.first(where: {
+            $0.windowID == 4794
+        })?.id)
+        sm.bringWindowToFront(windowID: 4794, inSpaceID: spaceID, activatedAt: focusedAt)
+        _ = sm.makeWindowDormant(windowID: 4794)
+
+        // Reproduce state written after a transient same-process record claimed Dia's live ID.
+        sm.addWindow(
+            SpaceWindow(windowID: 4794, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "", ownerPID: 40694),
+            toSpaceID: spaceID
+        )
+
+        let data = try JSONEncoder().encode(sm)
+        let decoded = try JSONDecoder().decode(SpaceManager.self, from: data)
+        let dia = try #require(decoded.spaces[0].windows.first(where: {
+            $0.windowID == 4794
+        }))
+
+        #expect(decoded.dormantWindowAssignments.isEmpty)
+        #expect(decoded.spaces[0].windows.map(\.windowID) == [4794, 100])
+        #expect(dia.id == diaID)
+        #expect(dia.windowTitle == "Focused tab")
+        #expect(dia.lastActivatedAt == focusedAt)
+    }
+
+    @Test("Decoding discards a dormant shadow when its live runtime record is newer")
+    func decodingKeepsNewerLiveRuntimeIdentity() throws {
+        let older = Date(timeIntervalSinceReferenceDate: 100)
+        let newer = Date(timeIntervalSinceReferenceDate: 200)
+        var sm = SpaceManager()
+        let spaceID = sm.activeSpaceID
+        sm.addWindow(
+            SpaceWindow(windowID: 4794, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Old tab", ownerPID: 40694),
+            toSpaceID: spaceID
+        )
+        sm.bringWindowToFront(windowID: 4794, inSpaceID: spaceID, activatedAt: older)
+        _ = sm.makeWindowDormant(windowID: 4794)
+        sm.addWindow(
+            SpaceWindow(windowID: 4794, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Current tab", ownerPID: 40694),
+            toSpaceID: spaceID
+        )
+        sm.bringWindowToFront(windowID: 4794, inSpaceID: spaceID, activatedAt: newer)
+
+        let data = try JSONEncoder().encode(sm)
+        let decoded = try JSONDecoder().decode(SpaceManager.self, from: data)
+        let dia = try #require(decoded.spaces[0].windows.first)
+
+        #expect(decoded.dormantWindowAssignments.isEmpty)
+        #expect(decoded.spaces[0].windows.count == 1)
+        #expect(dia.windowTitle == "Current tab")
+        #expect(dia.lastActivatedAt == newer)
+    }
+
     @Test("Explicit removal purges a dormant assignment")
     func explicitRemovalPurgesDormantAssignment() {
         var sm = SpaceManager()
