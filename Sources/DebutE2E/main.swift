@@ -1,3 +1,4 @@
+import AXPrivate
 import AppKit
 import Carbon.HIToolbox
 import DebutCore
@@ -2390,14 +2391,37 @@ func focusedWindowTitle(for processIdentifier: pid_t) -> String? {
     focusedWindowElement(for: processIdentifier).flatMap(windowTitle(of:))
 }
 
+/// The identity Debut keys a window on, and one no permission gates. A title cannot serve here:
+/// `kCGWindowName` is withheld from an app without Screen Recording, so on a hosted runner Debut
+/// labels every card with its owner's name while this harness — which does hold the permission —
+/// reads the real title, and the two can never meet.
+func windowIdentifier(of element: AXUIElement) -> CGWindowID? {
+    var windowID = CGWindowID(0)
+    guard _AXUIElementGetWindow(element, &windowID) == .success, windowID != 0 else { return nil }
+    return windowID
+}
+
+func focusedWindowIdentifier(for processIdentifier: pid_t) -> CGWindowID? {
+    focusedWindowElement(for: processIdentifier).flatMap(windowIdentifier(of:))
+}
+
+/// Where Debut ranks a window: which space holds it, and its position there with the most
+/// recently used first. Positions from two different spaces do not compare.
+func mruSlot(of windowID: CGWindowID, in order: [[CGWindowID]]) -> (space: Int, position: Int)? {
+    for (space, windows) in order.enumerated() {
+        if let position = windows.firstIndex(of: windowID) { return (space, position) }
+    }
+    return nil
+}
+
+func reportedMRUOrder() -> [[CGWindowID]] {
+    SpaceController.decodeWindowIDs(readState()["windowIDsBySpace"] ?? "")
+}
+
 if NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.Debut").isEmpty {
     clearDiagnosticFile()
     _ = waitForDebutReady(launchDebut())
 }
-let launchFocusDebutPID = NSRunningApplication
-    .runningApplications(withBundleIdentifier: "com.thomplth.Debut")
-    .first?.processIdentifier ?? -1
-
 // Two files so the app comes up with two windows whose titles cannot be confused with the
 // shared fixture's, and so focus has somewhere to move without leaving the app.
 let launchFocusFixtures = [
@@ -2441,75 +2465,117 @@ wait(5)
 // Focus is moved through AX rather than Command-`, which the VM does not deliver to the app:
 // this has to be an in-app window change, so no synthetic click or app switch will do, and
 // setting kAXMain is the request macOS itself answers with kAXFocusedWindowChanged.
-let launchFocusBefore = focusedWindowTitle(for: launchFocusPID)
 var launchFocusWindowsRef: CFTypeRef?
 _ = AXUIElementCopyAttributeValue(
     AXUIElementCreateApplication(launchFocusPID),
     kAXWindowsAttribute as CFString,
     &launchFocusWindowsRef
 )
-let launchFocusTarget = (launchFocusWindowsRef as? [AXUIElement])?.first {
-    let title = windowTitle(of: $0)
-    return title != nil && title != launchFocusBefore
+
+func focusWindow(_ window: AXUIElement) {
+    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
 }
-if let launchFocusTarget {
-    AXUIElementPerformAction(launchFocusTarget, kAXRaiseAction as CFString)
-    AXUIElementSetAttributeValue(launchFocusTarget, kAXMainAttribute as CFString, kCFBooleanTrue)
+
+// Both ends of the move are windows Debut already tracks. TextEdit restores documents from the
+// instance the shared fixture is running, so the app can come up with a window this scenario
+// never asked for, and starting from that one would read as a focus change that never landed.
+let launchFocusTrackedIDs = Set(reportedMRUOrder().flatMap { $0 })
+let launchFocusCandidates = (launchFocusWindowsRef as? [AXUIElement] ?? []).filter {
+    windowIdentifier(of: $0).map(launchFocusTrackedIDs.contains) ?? false
 }
+if let origin = launchFocusCandidates.first {
+    focusWindow(origin)
+    _ = waitFor(timeout: 5) {
+        focusedWindowIdentifier(for: launchFocusPID) == windowIdentifier(of: origin)
+    }
+}
+let launchFocusBeforeID = focusedWindowIdentifier(for: launchFocusPID)
+let launchFocusTarget = launchFocusCandidates.first {
+    windowIdentifier(of: $0) != launchFocusBeforeID
+}
+if let launchFocusTarget { focusWindow(launchFocusTarget) }
 let launchFocusMoved = waitFor(timeout: 5) {
-    let now = focusedWindowTitle(for: launchFocusPID)
-    return now != nil && now != launchFocusBefore
+    let now = focusedWindowIdentifier(for: launchFocusPID)
+    return now != nil && now != launchFocusBeforeID
 }
-let launchFocusAfter = focusedWindowTitle(for: launchFocusPID)
-wait(2)
+let launchFocusAfterID = focusedWindowIdentifier(for: launchFocusPID)
 
-postFlagsChanged(flags: [.maskCommand])
-wait(0.1)
-postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
-_ = waitFor(timeout: 5) { readState()["overlayVisible"] == "true" }
-wait(1)
-let launchFocusCards = accessibilityStrings(for: launchFocusDebutPID)
-postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
-postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
-postFlagsChanged(flags: [])
-wait(0.5)
-
-let launchFocusBeforeIndex = launchFocusBefore.flatMap { launchFocusCards.firstIndex(of: $0) }
-let launchFocusAfterIndex = launchFocusAfter.flatMap { launchFocusCards.firstIndex(of: $0) }
+// The state block refreshes on every reported event and the activation reports one, so the
+// order is polled for rather than read once.
+_ = waitFor(timeout: 5) {
+    guard let launchFocusAfterID, let launchFocusBeforeID else { return false }
+    let order = reportedMRUOrder()
+    guard let after = mruSlot(of: launchFocusAfterID, in: order),
+          let before = mruSlot(of: launchFocusBeforeID, in: order)
+    else { return false }
+    return after.space == before.space && after.position < before.position
+}
+let launchFocusOrder = reportedMRUOrder()
+let launchFocusBeforeSlot = launchFocusBeforeID.flatMap { mruSlot(of: $0, in: launchFocusOrder) }
+let launchFocusAfterSlot = launchFocusAfterID.flatMap { mruSlot(of: $0, in: launchFocusOrder) }
 let launchFocusEvents = readEvents().filter {
     ($0["event"] ?? "").hasPrefix("focus_observer_")
 }
 
+// Titles are the harness's own reading and are logged for a human only: Debut cannot see them
+// wherever Screen Recording is denied, so nothing here asserts on them.
 info("Launch focus: pid=\(launchFocusPID) opened=\(launchFocusOpened) "
     + "windows=\(visibleWindowTitles(for: launchFocusPID)) "
-    + "before=\(launchFocusBefore ?? "nil") after=\(launchFocusAfter ?? "nil") "
-    + "moved=\(launchFocusMoved) beforeIndex=\(launchFocusBeforeIndex ?? -1) "
-    + "afterIndex=\(launchFocusAfterIndex ?? -1)")
+    + "focusedTitle=\(focusedWindowTitle(for: launchFocusPID) ?? "nil") "
+    + "before=\(launchFocusBeforeID.map(String.init) ?? "nil") "
+    + "after=\(launchFocusAfterID.map(String.init) ?? "nil") moved=\(launchFocusMoved) "
+    + "tracked=\(launchFocusCandidates.compactMap(windowIdentifier(of:))) "
+    + "reportedOrder=\(launchFocusOrder) "
+    + "beforeSlot=\(launchFocusBeforeSlot.map { "\($0.space):\($0.position)" } ?? "none") "
+    + "afterSlot=\(launchFocusAfterSlot.map { "\($0.space):\($0.position)" } ?? "none")")
 for event in launchFocusEvents { info("  \(event)") }
 
 if !launchFocusOpened {
     skipTest(launchFocusCheck, reason: "A second TextEdit instance did not open two windows")
+} else if launchFocusCandidates.count < 2 {
+    // Discovering the windows of an app that just launched is Debut's own job, so this is a
+    // failure rather than a fixture that could not run — and saying so keeps it from reading
+    // as the AX skip below, which is about macOS not moving focus.
+    test(launchFocusCheck) {
+        info("  Debut tracks \(launchFocusCandidates.count) of the launched app's windows, so "
+            + "focus had nowhere tracked to move")
+        return false
+    }
 } else if !launchFocusMoved {
     // Debut is not being measured here: macOS never moved focus, so there is nothing it could
     // have observed. Failing would report a Debut regression for a fixture that did not run.
     skipTest(launchFocusCheck, reason: "AX did not move focus within the launched app")
 } else {
     test(launchFocusCheck) {
-        guard let afterIndex = launchFocusAfterIndex else {
-            info("  the newly focused window \(launchFocusAfter ?? "nil") has no card")
+        guard let after = launchFocusAfterSlot else {
+            info("  the newly focused window \(launchFocusAfterID.map(String.init) ?? "nil") "
+                + "is in no space Debut reports")
             return false
         }
-        guard let beforeIndex = launchFocusBeforeIndex else {
-            info("  the previously focused window \(launchFocusBefore ?? "nil") has no card")
+        guard let before = launchFocusBeforeSlot else {
+            info("  the previously focused window \(launchFocusBeforeID.map(String.init) ?? "nil") "
+                + "is in no space Debut reports")
             return false
         }
-        guard afterIndex < beforeIndex else {
-            info("  \(launchFocusAfter ?? "nil") is still behind \(launchFocusBefore ?? "nil"), "
-                + "so the focus change never reached the model")
+        guard after.space == before.space else {
+            info("  the two windows sit on spaces \(after.space) and \(before.space), so their "
+                + "positions do not compare")
+            return false
+        }
+        guard after.position < before.position else {
+            info("  window \(launchFocusAfterID.map(String.init) ?? "nil") is still behind "
+                + "\(launchFocusBeforeID.map(String.init) ?? "nil"), so the focus change never "
+                + "reached the model")
             return false
         }
         return true
     }
+}
+
+// Registration is answered by the app's AX server alone, so this stands whatever became of the
+// focus move above.
+if launchFocusOpened {
     test("The focused-window observer is never left refused by a launching app") {
         let failures = launchFocusEvents.filter {
             $0["event"] == "focus_observer_registration_failed"

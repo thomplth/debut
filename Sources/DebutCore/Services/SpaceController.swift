@@ -291,6 +291,27 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
+    /// The windows the overlay is showing, by space, in MRU order, named the way Debut names
+    /// them internally. Where window titles are withheld a card falls back to its owner's
+    /// name, so every card of one app reads alike and text cannot tell them apart; a window
+    /// ID is answerable from outside the process whatever permissions the reader holds.
+    public var windowIDsBySpace: [[CGWindowID]] {
+        let visibleSpaceManager = isSpaceManagerVisible ? overlaySpaceManager : spaceManager
+        return visibleSpaceManager.spaces.map { $0.windows.map(\.windowID) }
+    }
+
+    static func encode(_ windowIDs: [[CGWindowID]]) -> String {
+        windowIDs
+            .map { $0.map(String.init).joined(separator: ",") }
+            .joined(separator: ";")
+    }
+
+    public static func decodeWindowIDs(_ encoded: String) -> [[CGWindowID]] {
+        encoded.split(separator: ";", omittingEmptySubsequences: false).map { space in
+            space.split(separator: ",").compactMap { CGWindowID($0) }
+        }
+    }
+
     /// The macOS desktops that back the spaces. The space at index N is desktop N.
     public var spaceSwitcher: (any SpaceSwitching)?
 
@@ -386,6 +407,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 .map { String($0.windows.count) }
                 .joined(separator: ","),
             "windowAspectsBySpace": Self.encode(windowAspectsBySpace),
+            "windowIDsBySpace": Self.encode(windowIDsBySpace),
             "windowPreviewCount": "\(windowPreviews.count)",
             "variedWindowPreviewCount": "\(variedWindowPreviewIDs.count)",
         ]
