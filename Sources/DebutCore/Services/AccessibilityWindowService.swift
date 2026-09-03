@@ -211,6 +211,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         let showingDesktop = spaceSwitcher?.currentDesktopIndex()
         let corroboratedPIDs = Self.appPIDsWhoseAXAnswerCoversShowingDesktop(
             axWindowIDsByPID: classification.axWindowIDsByPID,
+            focusedWindowID: classification.focusedWindowID,
+            focusedWindowPID: classification.focusedWindowPID,
             windowDesktops: windowDesktops,
             showingDesktop: showingDesktop
         )
@@ -346,19 +348,27 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return windowDesktop == showingDesktop
     }
 
-    /// Apps whose `kAXWindows` answer demonstrably describes the desktop now showing, because
-    /// at least one window it named is on that desktop.
+    /// Apps whose Accessibility answer demonstrably describes the desktop now showing, because
+    /// either `kAXWindows` or the direct `kAXFocusedWindow` answer names a window there.
     ///
     /// Debut samples on the space-change notification, when the window server has already
-    /// switched and AX has not. Without this the transition into a desktop reads AX's account
-    /// of the desktop being left as silence about the one arriving.
+    /// switched and AX has not. Without the desktop check, the transition into a desktop reads
+    /// AX's account of the desktop being left as silence about the one arriving. Dia adds the
+    /// inverse wrinkle: its list can omit the focused browser window even while the direct
+    /// focused-window attribute names it, so ignoring that answer admits its transient surfaces.
     static func appPIDsWhoseAXAnswerCoversShowingDesktop(
         axWindowIDsByPID: [pid_t: Set<CGWindowID>],
+        focusedWindowID: CGWindowID? = nil,
+        focusedWindowPID: pid_t? = nil,
         windowDesktops: [CGWindowID: Int],
         showingDesktop: Int?
     ) -> Set<pid_t> {
         guard let showingDesktop else { return [] }
-        return Set(axWindowIDsByPID.compactMap { pid, windowIDs in
+        var confirmedWindowIDsByPID = axWindowIDsByPID
+        if let focusedWindowID, let focusedWindowPID {
+            confirmedWindowIDsByPID[focusedWindowPID, default: []].insert(focusedWindowID)
+        }
+        return Set(confirmedWindowIDsByPID.compactMap { pid, windowIDs in
             windowIDs.contains { windowDesktops[$0] == showingDesktop } ? pid : nil
         })
     }
@@ -401,6 +411,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         let windowDesktops = (spaceSwitcher?.windowLocations() ?? [:]).mapValues(\.index)
         let corroboratedPIDs = Self.appPIDsWhoseAXAnswerCoversShowingDesktop(
             axWindowIDsByPID: classification.axWindowIDsByPID,
+            focusedWindowID: classification.focusedWindowID,
+            focusedWindowPID: classification.focusedWindowPID,
             windowDesktops: windowDesktops,
             showingDesktop: showingDesktop
         )
@@ -534,7 +546,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         trackable: Set<CGWindowID>,
         untrackable: Set<CGWindowID>,
         axWindowIDsByPID: [pid_t: Set<CGWindowID>],
-        focusedWindowID: CGWindowID?
+        focusedWindowID: CGWindowID?,
+        focusedWindowPID: pid_t?
     ) {
         var trackable = Set<CGWindowID>()
         var untrackable = Set<CGWindowID>()
@@ -572,12 +585,21 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             }
         }
         let focusedWindowID: CGWindowID?
+        let focusedWindowPID: pid_t?
         if let frontmost = NSWorkspace.shared.frontmostApplication {
             focusedWindowID = self.focusedWindowID(for: frontmost.processIdentifier)
+            focusedWindowPID = focusedWindowID == nil ? nil : frontmost.processIdentifier
         } else {
             focusedWindowID = nil
+            focusedWindowPID = nil
         }
-        return (trackable, untrackable, axWindowIDsByPID, focusedWindowID)
+        return (
+            trackable,
+            untrackable,
+            axWindowIDsByPID,
+            focusedWindowID,
+            focusedWindowPID
+        )
     }
 
     private func focusedWindowID(for pid: pid_t) -> CGWindowID? {

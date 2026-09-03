@@ -272,6 +272,27 @@ struct WindowServiceTests {
         ) == [89895])
     }
 
+    @Test("A directly focused window corroborates its desktop when the AX list omits it")
+    func focusedWindowCorroboratesShowingDesktop() {
+        // Dia can omit its real focused browser window from `kAXWindows` while returning that
+        // same window from `kAXFocusedWindow`. The direct answer proves AX can see desktop 0,
+        // so its silence about the changing empty-title surface on desktop 0 is a contradiction.
+        let corroborated = AccessibilityWindowService.appPIDsWhoseAXAnswerCoversShowingDesktop(
+            axWindowIDsByPID: [40694: []],
+            focusedWindowID: 4794,
+            focusedWindowPID: 40694,
+            windowDesktops: [4794: 0, 51100: 0],
+            showingDesktop: 0
+        )
+
+        #expect(corroborated == [40694])
+        #expect(AccessibilityWindowService.accessibilityContradictsWindow(
+            windowDesktop: 0,
+            showingDesktop: 0,
+            appAXAnswerCoversShowingDesktop: corroborated.contains(40694)
+        ))
+    }
+
     @Test("With no showing desktop no AX answer corroborates")
     func noShowingDesktopCorroboratesNothing() {
         #expect(AccessibilityWindowService.appPIDsWhoseAXAnswerCoversShowingDesktop(
