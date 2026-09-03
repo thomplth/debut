@@ -270,10 +270,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
         ) ?? Self.defaultPreviewCacheTTL
     }
 
-    public func isExcluded(bundleID: String) -> Bool {
-        excludedBundleIDs.contains(bundleID)
-    }
-
     public func isQuickSwitchExcluded(bundleID: String) -> Bool {
         quickSwitchExcludedBundleIDs.contains(bundleID)
     }

@@ -567,7 +567,8 @@ struct SpaceControllerTests {
             SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Next"),
             toSpaceID: spaceID
         )
-        controller.updateFrontmostApp(isExcluded: true)
+        controller.excludedBundleIDs = ["com.excluded"]
+        controller.updateFrontmostApp(bundleID: "com.excluded")
 
         keyboardService.simulateEvent(.cmdTabHold)
 
@@ -586,7 +587,8 @@ struct SpaceControllerTests {
             SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Next"),
             toSpaceID: spaceID
         )
-        controller.updateFrontmostApp(isExcluded: true)
+        controller.excludedBundleIDs = ["com.excluded"]
+        controller.updateFrontmostApp(bundleID: "com.excluded")
 
         keyboardService.simulateEvent(.cmdTabTap)
 
@@ -1641,6 +1643,29 @@ struct SpaceControllerTests {
 
         let spaceB = controller.spaceManager.allSpaces.first { $0.id == spaceBID }
         #expect(spaceB?.windows.map(\.windowID) == [4795, 999])
+    }
+
+    // Activation is the one path that admits a window without consulting the exclusion list:
+    // discovery filters its snapshots, but the focus callback carries a bare window ID and the
+    // controller resolved the owner from an unfiltered window list. That is how an excluded
+    // Finder window reached a space at all.
+    @Test("Activation does not admit a window belonging to an excluded app")
+    func activationRefusesExcludedWindow() {
+        let (controller, windowService, _) = makeController()
+        windowService.windowList = [WindowInfo(
+            windowID: 40915,
+            ownerBundleID: "com.apple.finder",
+            ownerName: "Finder",
+            ownerPID: 20,
+            title: "Debut",
+            bounds: .zero,
+            isOnScreen: true
+        )]
+        controller.excludedBundleIDs = ["com.apple.finder"]
+
+        controller.recordWindowActivation(windowID: 40915)
+
+        #expect(controller.spaceManager.allSpaces.flatMap(\.windows).isEmpty)
     }
 
     // Spaces are desktops, so when macOS reports a focused window on the desktop showing,
