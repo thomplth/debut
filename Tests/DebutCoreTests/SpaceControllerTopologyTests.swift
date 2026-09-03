@@ -354,6 +354,37 @@ struct SpaceControllerSpaceTests {
         #expect(controller.spaceManager.spaces[0].windows.first?.windowID == 7)
     }
 
+    // Window titles are withheld from Debut on a host that denies Screen Recording, so a card's
+    // label there is its owner's name and every card of one app reads alike. A reader outside
+    // the process then cannot tell which card is which, and an E2E check that matched a title
+    // it resolved itself against Debut's rendering could never pass in CI. Window IDs are the
+    // identity Debut keys on and no permission gates them.
+    @Test("The diagnostic state reports each space's windows by ID in MRU order")
+    func diagnosticStateReportsWindowIDsInMRUOrder() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.spaceManager.createSpace(position: .below)
+        let spaceA = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: ""),
+            toSpaceID: spaceA)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 8, ownerBundleID: "com.a", ownerName: "A", windowTitle: ""),
+            toSpaceID: spaceA)
+        controller.spaceManager.activateSpace(id: spaceA)
+        spaces.windowDesktops = [7: 0, 8: 0]
+
+        let opening = SpaceController.decodeWindowIDs(
+            controller.diagnosticState["windowIDsBySpace"] ?? "")
+        #expect(opening == [[7, 8], []])
+
+        controller.recordWindowActivation(windowID: 8)
+
+        let reordered = SpaceController.decodeWindowIDs(
+            controller.diagnosticState["windowIDsBySpace"] ?? "")
+        #expect(reordered == [[8, 7], []])
+    }
+
     // The state block is the only way E2E observes a running session, and it reported the
     // overlay's selection cursor under the name `activeSpaceIndex`. The two used to be the
     // same thing; a desktop the user switches to themselves moves the active space without
