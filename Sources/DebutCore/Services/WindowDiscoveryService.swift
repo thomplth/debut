@@ -179,6 +179,20 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             : windows.filter { retiredWindowOwners[$0.windowID]?.ownerPID != $0.ownerPID }
     }
 
+    private func reportEviction(
+        _ window: SpaceWindow,
+        fromSpaceID spaceID: UUID,
+        in spaceManager: SpaceManager
+    ) {
+        diag.report("window_evicted", details: [
+            "windowID": "\(window.windowID)",
+            "bundleID": window.ownerBundleID,
+            "windowTitle": window.windowTitle,
+            "fromSpace": "\(spaceManager.spaceIndex(id: spaceID) ?? -1)",
+            "reason": "excluded",
+        ])
+    }
+
     public func discoverRunningWindows() -> [SpaceWindow] {
         excludingRetired(windowService.listWindows())
             .filter { !excludedBundleIDs.contains($0.ownerBundleID) }.map { info in
@@ -273,6 +287,27 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     "trigger": "startup_restore",
                 ])
             }
+        }
+
+        // Exclusion has to evict for the same reason. Filtering it out of the snapshot refuses
+        // admission but cannot reach an assignment that is already live: absent from every later
+        // snapshot, the window is invisible to reconciliation, desktop refreshes and activation
+        // alike, so nothing can move it and nothing can remove it. Delete rather than park —
+        // dormancy exists to reclaim a placement later, and an excluded app has none to reclaim.
+        var evictedBundleIDs: Set<String> = []
+        for space in spaceManager.allSpaces {
+            for window in space.windows where excludedBundleIDs.contains(window.ownerBundleID) {
+                reportEviction(window, fromSpaceID: space.id, in: spaceManager)
+                evictedBundleIDs.insert(window.ownerBundleID)
+            }
+        }
+        for assignment in spaceManager.dormantWindowAssignments
+        where excludedBundleIDs.contains(assignment.window.ownerBundleID) {
+            reportEviction(assignment.window, fromSpaceID: assignment.spaceID, in: spaceManager)
+            evictedBundleIDs.insert(assignment.window.ownerBundleID)
+        }
+        for bundleID in evictedBundleIDs {
+            spaceManager.removeAllWindows(forBundleID: bundleID)
         }
 
         var parkedDormantCount = 0
@@ -377,9 +412,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         onFrontmostAppChanged?(front?.bundleIdentifier)
 
         // Install focus observer on the current frontmost app
-        if let front,
-           front.bundleIdentifier != "com.thomplth.Debut" {
-            installFocusObserver(for: front.processIdentifier)
+        if let front, let info = appInfo(for: front) {
+            installFocusObserver(for: info.pid, bundleID: info.bundleID)
         }
     }
 
@@ -649,7 +683,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// first success, on the next activation, and after the last delay below.
     private static let focusObserverRetryDelays: [TimeInterval] = [0.25, 0.5, 1, 2]
 
-    func installFocusObserver(for pid: pid_t) {
+    func installFocusObserver(for pid: pid_t, bundleID: String) {
+        // The exclusion check lives here rather than at the call sites: only one of the two had
+        // it, so relaunching while an excluded app was frontmost pointed the observer at it for
+        // the whole session, and every focus change inside that app reached the activation path.
+        // Leave an observer already installed elsewhere alone — the user has not left that app.
+        guard bundleID != "com.thomplth.Debut", !excludedBundleIDs.contains(bundleID) else { return }
+
         // Skip if already observing this app, or already retrying for it — the launch pass
         // asks again 0.5s after the activation did, and a second chain would only reset the
         // backoff the first one is already working through.
@@ -831,17 +871,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
               let appInfo = appInfo(for: app)
         else { return }
 
-        let pid = appInfo.pid
-        let bundleID = appInfo.bundleID
         handleAppActivation(appInfo)
 
-        guard bundleID != "com.thomplth.Debut",
-              !excludedBundleIDs.contains(bundleID),
-              app.activationPolicy == .regular
-        else { return }
-
         // Move the focus observer to this app
-        installFocusObserver(for: pid)
+        installFocusObserver(for: appInfo.pid, bundleID: appInfo.bundleID)
     }
 
     /// Re-reads which desktop every window is on.
