@@ -523,6 +523,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     // MARK: - SpaceControllerDelegate
 
+    nonisolated public func spaceController(
+        _ controller: SpaceController,
+        didAdmitWindow windowID: CGWindowID,
+        ownerPID: pid_t
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            self?.windowDiscovery?.registerTracking(windowID: windowID, pid: ownerPID)
+        }
+    }
+
     nonisolated public func spaceControllerDidOpenOverlay(_ controller: SpaceController) {
         spaceControllerDidOpenOverlay(controller, overlayPresentation: nil)
     }

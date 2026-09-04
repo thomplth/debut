@@ -119,12 +119,20 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
 
 private final class SpaceMutationDelegate: SpaceControllerDelegate {
     private(set) var mutationCount = 0
+    private(set) var admittedWindows: [(windowID: CGWindowID, ownerPID: pid_t)] = []
 
     func spaceControllerDidOpenOverlay(_ controller: SpaceController) {}
     func spaceControllerDidCloseOverlay(_ controller: SpaceController) {}
     func spaceControllerDidUpdateSelection(_ controller: SpaceController) {}
     func spaceControllerDidSwitchSpace(_ controller: SpaceController) {}
     func spaceControllerDidMutateState(_ controller: SpaceController) { mutationCount += 1 }
+    func spaceController(
+        _ controller: SpaceController,
+        didAdmitWindow windowID: CGWindowID,
+        ownerPID: pid_t
+    ) {
+        admittedWindows.append((windowID, ownerPID))
+    }
 }
 
 @Suite("SpaceController on real Spaces")
@@ -331,6 +339,49 @@ struct SpaceControllerSpaceTests {
 
         controller.recordWindowActivation(windowID: 7)
 
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 7)
+            == controller.spaceManager.spaces[1].id)
+    }
+
+    // Discovery arms every window its own reconciliation finds, but this path admits one that
+    // arrived between snapshots, and nothing else ever registers it. Its destroy notification
+    // is resolved back to a window ID through a stored AX element, so a window admitted here
+    // has no path off its space at all: the assignment outlives the window that justified it.
+    @Test("A window the focus path admits is handed to lifecycle tracking")
+    func focusAdmittedWindowIsArmed() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, windowService) = makeController(spaces: spaces)
+        let delegate = SpaceMutationDelegate()
+        controller.delegate = delegate
+        windowService.windowList = [
+            WindowInfo(windowID: 7, ownerBundleID: "com.a", ownerName: "A", ownerPID: 42,
+                       title: "W", bounds: .zero, isOnScreen: true)
+        ]
+
+        controller.recordWindowActivation(windowID: 7)
+
+        #expect(delegate.admittedWindows.map(\.windowID) == [7])
+        #expect(delegate.admittedWindows.map(\.ownerPID) == [42])
+    }
+
+    // A window that reassigns between spaces was already discovered and armed, so handing it
+    // to tracking again is noise rather than a second chance.
+    @Test("A window that merely changes space is not readmitted to tracking")
+    func reassignedWindowIsNotReadmitted() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
+        let (controller, _) = makeController(spaces: spaces)
+        let delegate = SpaceMutationDelegate()
+        controller.delegate = delegate
+        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W",
+                        ownerPID: 42),
+            toSpaceID: controller.spaceManager.spaces[0].id)
+        spaces.windowDesktops = [7: 1]
+
+        controller.recordWindowActivation(windowID: 7)
+
+        #expect(delegate.admittedWindows.isEmpty)
         #expect(controller.spaceManager.spaceContainingWindow(windowID: 7)
             == controller.spaceManager.spaces[1].id)
     }

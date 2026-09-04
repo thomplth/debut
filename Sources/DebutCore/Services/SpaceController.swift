@@ -161,6 +161,14 @@ public protocol SpaceControllerDelegate: AnyObject {
     func spaceControllerDidUpdateSelection(_ controller: SpaceController)
     func spaceControllerDidSwitchSpace(_ controller: SpaceController)
     func spaceControllerDidMutateState(_ controller: SpaceController)
+    /// A window the focus path admitted, which discovery's reconciliation never saw and so never
+    /// armed. Without lifecycle notifications its destroy is unresolvable and the assignment
+    /// outlives the window.
+    func spaceController(
+        _ controller: SpaceController,
+        didAdmitWindow windowID: CGWindowID,
+        ownerPID: pid_t
+    )
 }
 
 public extension SpaceControllerDelegate {
@@ -177,6 +185,12 @@ public extension SpaceControllerDelegate {
     ) {
         spaceControllerDidCloseOverlay(controller)
     }
+
+    func spaceController(
+        _ controller: SpaceController,
+        didAdmitWindow windowID: CGWindowID,
+        ownerPID: pid_t
+    ) {}
 }
 
 public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
@@ -1013,6 +1027,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 ),
                 toSpaceID: targetSpaceID
             )
+            diag.report("window_assigned", details: [
+                "windowID": "\(windowID)",
+                "bundleID": info.ownerBundleID,
+                "windowTitle": info.title,
+                "toSpace": spaceLabel(forID: targetSpaceID),
+                "reason": "activated",
+            ])
+            // Discovery arms what its own reconciliation finds; this window arrived between
+            // snapshots, so without this it never gets a destroy notification and its
+            // assignment survives it.
+            delegate?.spaceController(self, didAdmitWindow: windowID, ownerPID: info.ownerPID)
         } else {
             return
         }
