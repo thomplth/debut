@@ -84,7 +84,7 @@ The manual workflow's reusable publish job must keep `secrets: inherit`. GitHub 
 
 The `stable-release` environment deliberately has no required reviewer. Its custom deployment branch policy still permits only `main`, while the CI, E2E, commit-pinning, eligibility, signing, and notarization gates remain mandatory. This lets one explicit release request complete without a second approval while preserving the boundary that excludes daily and patch builds.
 
-A release never commits and never pushes a branch. The `Main Protection` ruleset forbids any bot from updating `main`, and an earlier design that pushed a `Release vX.Y.Z` commit died at that push having already pushed its tag. The publish workflow instead tags the tested commit in place and pushes only the tag, which the ruleset does not cover.
+A release never commits and never pushes a branch. An earlier design that pushed a `Release vX.Y.Z` commit died at that push having already pushed its tag. The publish workflow instead tags the tested commit in place and pushes only the tag. Do not read the `Main Protection` ruleset as the thing that stops a branch push: it blocks deletion and force-push, not an ordinary update. The design holds because the workflow never attempts one.
 
 `scripts/apply-version.sh` therefore stamps the version into `Sources/DebutCore/DebutCore.swift` and `Resources/Info.plist` for the build only — those edits are deliberately thrown away. Both files must keep their current shape for the stamp to land. What is checked in stays `0.0.0-dev`, so a build reporting that version is telling you it is not a release. Do not "fix" it to a real number.
 
