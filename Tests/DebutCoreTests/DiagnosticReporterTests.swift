@@ -239,6 +239,55 @@ struct DiagnosticReporterTests {
         #expect(events.count == 1)
     }
 
+    @Test("The durable log stores a title hash, never the title")
+    func durableLogHashesTitles() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let redactor = DiagnosticRedactor(salt: "salt-a")
+        let reporter = DiagnosticReporter(directory: dir, redactor: redactor)
+        reporter.report("window_assigned", details: ["windowID": "1", "windowTitle": "Payroll.xlsx"])
+        reporter.flush()
+
+        let lines = durableLines(in: dir)
+        #expect(lines.count == 1)
+        #expect(lines.first?["windowTitle"] == nil)
+        #expect(lines.first?["windowTitleHash"] == redactor.hashedTitle("Payroll.xlsx"))
+
+        let raw = try String(contentsOf: dir.appendingPathComponent("diagnostic.jsonl"), encoding: .utf8)
+        #expect(!raw.contains("Payroll.xlsx"))
+    }
+
+    @Test("One title yields one hash across separate durable events")
+    func durableHashesGroupAcrossEvents() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir, redactor: DiagnosticRedactor(salt: "salt-a"))
+        reporter.report("window_assigned", details: ["windowTitle": "Payroll.xlsx"])
+        reporter.report("window_retired", details: ["windowTitle": "Payroll.xlsx"])
+        reporter.flush()
+
+        let hashes = durableLines(in: dir).compactMap { $0["windowTitleHash"] }
+        #expect(hashes.count == 2)
+        #expect(hashes[0] == hashes[1])
+    }
+
+    @Test("The bounded snapshot keeps the plaintext title for local debugging")
+    func snapshotKeepsPlaintextTitle() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir, redactor: DiagnosticRedactor(salt: "salt-a"))
+        reporter.report("window_assigned", details: ["windowTitle": "Payroll.xlsx"])
+        reporter.flush()
+
+        let data = try Data(contentsOf: dir.appendingPathComponent("diagnostic.json"))
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let events = object?["events"] as? [[String: String]]
+        #expect(events?.first?["windowTitle"] == "Payroll.xlsx")
+    }
+
     private func snapshotState(in directory: URL) -> [String: String] {
         guard let data = try? Data(contentsOf: directory.appendingPathComponent("diagnostic.json")),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

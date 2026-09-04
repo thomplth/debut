@@ -151,6 +151,13 @@ public enum OnboardingLaunchPolicy {
         return true
     }
 
+    /// Reads completion without the migration write `shouldPresent` performs, so
+    /// a caller that runs before the first-launch check still sees an existing
+    /// user as completed rather than as mid-onboarding.
+    public static func hasCompleted(defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: completionKey) || defaults.bool(forKey: legacyLaunchKey)
+    }
+
     public static func markCompleted(defaults: UserDefaults = .standard) {
         defaults.set(true, forKey: completionKey)
         defaults.set(true, forKey: legacyLaunchKey)

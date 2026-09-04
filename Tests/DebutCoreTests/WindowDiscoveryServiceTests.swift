@@ -637,7 +637,8 @@ struct WindowDiscoveryServiceTests {
         )
         _ = spaceManager.makeWindowDormant(windowID: 40916)
 
-        let reporter = DiagnosticReporter(directory: directory)
+        let redactor = DiagnosticRedactor(salt: "salt-a")
+        let reporter = DiagnosticReporter(directory: directory, redactor: redactor)
         let service = WindowDiscoveryService(
             windowService: windowService,
             processExitMonitor: MockProcessExitMonitor(),
@@ -657,7 +658,7 @@ struct WindowDiscoveryServiceTests {
         #expect(evictions.map { $0["windowID"] } == ["40915", "40916"])
         #expect(evictions.allSatisfy { $0["reason"] == "excluded" })
         #expect(evictions.first?["bundleID"] == "com.apple.finder")
-        #expect(evictions.first?["windowTitle"] == "Debut")
+        #expect(evictions.first?["windowTitleHash"] == redactor.hashedTitle("Debut"))
         #expect(evictions.first?["fromSpace"] == "1")
     }
 
@@ -681,7 +682,8 @@ struct WindowDiscoveryServiceTests {
             toSpaceID: spaceManager.spaces[1].id
         )
 
-        let reporter = DiagnosticReporter(directory: directory)
+        let redactor = DiagnosticRedactor(salt: "salt-a")
+        let reporter = DiagnosticReporter(directory: directory, redactor: redactor)
         WindowDiscoveryService(
             windowService: windowService,
             processExitMonitor: MockProcessExitMonitor(),
@@ -696,7 +698,7 @@ struct WindowDiscoveryServiceTests {
         #expect(dormancy["reason"] == "untrackable")
         #expect(dormancy["windowID"] == "22357")
         #expect(dormancy["bundleID"] == "company.thebrowser.dia")
-        #expect(dormancy["windowTitle"] == "Leisure")
+        #expect(dormancy["windowTitleHash"] == redactor.hashedTitle("Leisure"))
         #expect(dormancy["fromSpace"] == "1")
 
         let summary = try #require(lines.first { $0["event"] == "windows_reconciled" })

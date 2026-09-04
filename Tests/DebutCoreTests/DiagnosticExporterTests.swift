@@ -89,9 +89,11 @@ struct DiagnosticExporterTests {
             ]
         )
         let destination = directory.appendingPathComponent("export.json")
+        let redactor = DiagnosticRedactor(salt: "salt-a")
         let exporter = DiagnosticExporter(
             applicationSupportDirectory: directory,
-            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+            now: { Date(timeIntervalSince1970: 1_700_000_000) },
+            redactor: redactor
         )
 
         try exporter.export(snapshot, to: destination)
@@ -104,7 +106,10 @@ struct DiagnosticExporterTests {
 
         let runtime = try #require(root["runtime"] as? [String: Any])
         let liveWindows = try #require(runtime["discoveredWindows"] as? [[String: Any]])
-        #expect(liveWindows.first?["windowTitle"] as? String == "Runtime document")
+        #expect(liveWindows.first?["windowTitle"] == nil)
+        #expect(
+            liveWindows.first?["windowTitleHash"] as? String == redactor.hashedTitle("Runtime document")
+        )
         #expect(runtime["allCGWindowIDs"] as? [Int] == [41, 99])
         #expect(runtime["untrackableWindowIDs"] as? [Int] == [77])
         let tracking = try #require(runtime["tracking"] as? [String: Any])
@@ -114,7 +119,16 @@ struct DiagnosticExporterTests {
         let persistedState = try #require(persisted["state"] as? [String: Any])
         let spaces = try #require(persistedState["spaces"] as? [[String: Any]])
         let persistedWindows = try #require(spaces.first?["windows"] as? [[String: Any]])
-        #expect(persistedWindows.first?["windowTitle"] as? String == "Runtime document")
+        #expect(persistedWindows.first?["windowTitle"] == nil)
+        #expect(
+            persistedWindows.first?["windowTitleHash"] as? String
+                == redactor.hashedTitle("Runtime document")
+        )
+
+        // The export is the boundary titles actually cross: it lands wherever a
+        // save panel points and gets attached to public bug reports.
+        let text = try #require(String(data: data, encoding: .utf8))
+        #expect(!text.contains("Runtime document"))
 
         let diagnostic = try #require(root["diagnostic"] as? [String: Any])
         let currentLog = try #require(diagnostic["currentLifecycleEvents"] as? [[String: Any]])
