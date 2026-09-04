@@ -975,6 +975,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         onboardingWindow?.close()
         onboardingWindow = nil
         onboardingViewModel = nil
+
+        // The exporter started this launch gated, since completion is what makes
+        // the telemetry toggle a choice the user has actually been offered.
+        if let exporter = telemetryExporter {
+            let sending = TelemetryActivationPolicy.shouldSend(settings: currentSettings)
+            Task {
+                await exporter.setEnabled(sending)
+                if sending { try? await exporter.flush() }
+            }
+        }
+
         diag.report("onboarding_completed")
         showMenuBarCoachmark()
     }
@@ -1041,9 +1052,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 self.keyboardService?.heldCycleMinimumInterval =
                     newSettings.heldCycleMinimumInterval
                 if telemetryChanged, let exporter = self.telemetryExporter {
+                    let sending = TelemetryActivationPolicy.shouldSend(settings: newSettings)
                     Task {
-                        await exporter.setEnabled(newSettings.shareAnonymousTelemetry)
-                        if newSettings.shareAnonymousTelemetry { try? await exporter.flush() }
+                        await exporter.setEnabled(sending)
+                        if sending { try? await exporter.flush() }
                     }
                 }
             }
@@ -1238,7 +1250,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let exporter = TelemetryExporter(
             client: client,
             queue: DiskTelemetryQueue(file: support.appendingPathComponent("telemetry-queue.json")),
-            enabled: currentSettings.shareAnonymousTelemetry
+            enabled: TelemetryActivationPolicy.shouldSend(settings: currentSettings)
         )
         telemetryExporter = exporter
         PerformanceRecorder.shared.setObservationHandler { observation in
@@ -1255,7 +1267,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 try? await exporter.flush()
             }
         }
-        let telemetryEnabled = currentSettings.shareAnonymousTelemetry
+        let telemetryEnabled = TelemetryActivationPolicy.shouldSend(settings: currentSettings)
         Task {
             try? await exporter.pruneInvalidAnomalies()
             if telemetryEnabled { try? await exporter.flush() }

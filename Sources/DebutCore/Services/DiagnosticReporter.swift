@@ -37,6 +37,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     private let rotationByteLimit: Int
     private let performanceRecorder: PerformanceRecorder
     private let overlayPresentationRecorder: OverlayPresentationRecorder
+    private let redactor: DiagnosticRedactor
     private var eventLog: [[String: String]] = []
     private let queue = DispatchQueue(label: "com.thomplth.Debut.diagnostic")
 
@@ -65,14 +66,15 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         directory: URL,
         rotationByteLimit: Int = 2_000_000,
         performanceRecorder: PerformanceRecorder = .shared,
-        overlayPresentationRecorder: OverlayPresentationRecorder = .shared
+        overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
+        redactor: DiagnosticRedactor = DiagnosticRedactor(salt: DiagnosticSalt.current())
     ) {
         self.directory = directory
         self.rotationByteLimit = rotationByteLimit
         self.performanceRecorder = performanceRecorder
         self.overlayPresentationRecorder = overlayPresentationRecorder
+        self.redactor = redactor
         super.init()
-        NSLog("[Debut] DiagnosticReporter initialized at %@", directory.path)
     }
 
     public func report(
@@ -91,7 +93,6 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         let performance = performanceRecorder.snapshot()
         let overlayPresentation = overlayPresentationRecorder.snapshot()
         queue.async {
-            NSLog("[Debut] %@ %@", event, details.description)
             var entry = details
             entry["event"] = event
             entry["timestamp"] = Self.timestampFormatter.string(from: occurredAt)
@@ -222,8 +223,14 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     // MARK: - Durable event stream
 
     /// Must be called on `queue`.
+    /// Only the durable log is redacted. The snapshot keeps plaintext titles: it
+    /// is capped, overwritten in place, and never outlives the session, so it
+    /// stays readable for local debugging without accumulating history.
     private func appendDurableEvent(_ entry: [String: String]) {
-        guard var line = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys])
+        guard var line = try? JSONSerialization.data(
+            withJSONObject: redactor.redact(entry),
+            options: [.sortedKeys]
+        )
         else { return }
         line.append(0x0A)
 
