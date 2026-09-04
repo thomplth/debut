@@ -711,10 +711,30 @@ final class LockedApplicationResult: @unchecked Sendable {
     }
 }
 
-func launchDebut(arguments: [String] = []) -> NSRunningApplication? {
-    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.thomplth.Debut") else {
-        return nil
+let debutBundleID = "com.thomplth.Debut"
+
+/// LaunchServices answers a bundle-ID lookup with a single bundle even when several claim the
+/// identifier, and its choice between them is neither stable nor reported. A stale probe app
+/// declaring `com.thomplth.Debut` was handed to two consecutive runs, launched, crashed within a
+/// second, and the missing `app_ready` read as Debut failing to start — with nothing in the log
+/// naming the bundle that actually ran. Ambiguity is therefore refused rather than resolved.
+func debutApplicationURL() -> URL {
+    let claimants = NSWorkspace.shared.urlsForApplications(withBundleIdentifier: debutBundleID)
+    guard let url = claimants.first else {
+        fail("No application claims the bundle identifier \(debutBundleID)")
+        exit(1)
     }
+    guard claimants.count == 1 else {
+        fail("\(claimants.count) applications claim the bundle identifier \(debutBundleID)")
+        for claimant in claimants { info("  \(claimant.path)") }
+        info("  Remove the ones that are not Debut; LaunchServices picks between them at random.")
+        exit(1)
+    }
+    return url
+}
+
+func launchDebut(arguments: [String] = []) -> NSRunningApplication? {
+    let url = debutApplicationURL()
     let semaphore = DispatchSemaphore(value: 0)
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.arguments = arguments
@@ -880,7 +900,7 @@ func wait(_ seconds: Double) {
 @discardableResult
 func terminateDebutAndWait(timeout: TimeInterval = 10) -> Bool {
     for application in NSRunningApplication.runningApplications(
-        withBundleIdentifier: "com.thomplth.Debut"
+        withBundleIdentifier: debutBundleID
     ) {
         _ = application.terminate()
     }
@@ -888,7 +908,7 @@ func terminateDebutAndWait(timeout: TimeInterval = 10) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     repeat {
         if NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.thomplth.Debut"
+            withBundleIdentifier: debutBundleID
         ).isEmpty {
             return true
         }
@@ -988,18 +1008,17 @@ if CommandLine.arguments.dropFirst().first == "window-audit-desktops" {
 
 header("Debut E2E — Screen Interaction Tests")
 
-// Ensure app is running
-let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.Debut")
+// Resolved before the running check, because a second bundle claiming the identifier can also be
+// the process already running under it, which would read as "Debut running" and test nothing.
+let debutURL = debutApplicationURL()
+
+let running = NSRunningApplication.runningApplications(withBundleIdentifier: debutBundleID)
 if running.isEmpty {
     info("Launching Debut...")
-    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.thomplth.Debut") {
-        let sem = DispatchSemaphore(value: 0)
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in sem.signal() }
-        sem.wait()
-        wait(3)
-    } else {
-        fail("Debut.app not found"); exit(1)
-    }
+    let sem = DispatchSemaphore(value: 0)
+    NSWorkspace.shared.openApplication(at: debutURL, configuration: NSWorkspace.OpenConfiguration()) { _, _ in sem.signal() }
+    sem.wait()
+    wait(3)
 } else {
     info("Debut running (PID \(running[0].processIdentifier))")
 }
@@ -2418,7 +2437,7 @@ func reportedMRUOrder() -> [[CGWindowID]] {
     SpaceController.decodeWindowIDs(readState()["windowIDsBySpace"] ?? "")
 }
 
-if NSRunningApplication.runningApplications(withBundleIdentifier: "com.thomplth.Debut").isEmpty {
+if NSRunningApplication.runningApplications(withBundleIdentifier: debutBundleID).isEmpty {
     clearDiagnosticFile()
     _ = waitForDebutReady(launchDebut())
 }
