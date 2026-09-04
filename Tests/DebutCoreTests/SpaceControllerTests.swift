@@ -45,6 +45,7 @@ private final class DelayedCaptureWindowService: WindowService, @unchecked Senda
     }
 
     func raiseWindow(windowID: CGWindowID) -> Bool { true }
+    func frontWindow(windowID: CGWindowID, ownerPID: pid_t) -> Bool { true }
     func activateApp(pid: pid_t) -> Bool { true }
     func activateApp(bundleID: String) -> Bool { true }
     func terminateApp(pid: pid_t) -> Bool { true }
@@ -417,8 +418,82 @@ struct SpaceControllerTests {
         controller.switchToSpace(id: spaceID, raiseWindowID: 31117)
 
         #expect(windowService.raisedWindowID == 31117)
-        #expect(windowService.activatedPID == 79240)
+        #expect(windowService.frontedWindows
+            == [FrontWindowRequest(windowID: 31117, ownerPID: 79240)])
         #expect(windowService.activatedBundleID == nil)
+    }
+
+    @Test("Focusing a window fronts it through the window server")
+    func focusFrontsWindowThroughWindowServer() {
+        let (controller, windowService, _) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T2", ownerPID: 4242),
+            toSpaceID: spaceID
+        )
+
+        controller.switchToSpace(id: spaceID, raiseWindowID: 202)
+
+        #expect(windowService.frontedWindows
+            == [FrontWindowRequest(windowID: 202, ownerPID: 4242)])
+        // AppKit's request is advisory and macOS declines it for a background regular app, so a
+        // successful fronting must not be followed by one that can silently do nothing.
+        #expect(windowService.activatedPID == nil)
+        #expect(windowService.activatedBundleID == nil)
+    }
+
+    @Test("A refused fronting falls back to the AppKit activation request")
+    func refusedFrontingFallsBackToActivation() {
+        let (controller, windowService, _) = makeController()
+        windowService.frontWindowResult = false
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T2", ownerPID: 4242),
+            toSpaceID: spaceID
+        )
+
+        controller.switchToSpace(id: spaceID, raiseWindowID: 202)
+
+        #expect(windowService.frontedWindows
+            == [FrontWindowRequest(windowID: 202, ownerPID: 4242)])
+        #expect(windowService.activatedPID == 4242)
+    }
+
+    /// A pid that has gone stale answers no running application, and a fronting request for a
+    /// window the server has forgotten is declined. Neither is a reason to leave the app behind.
+    @Test("A refused process activation falls back to the owning bundle")
+    func refusedProcessActivationFallsBackToBundle() {
+        let (controller, windowService, _) = makeController()
+        windowService.frontWindowResult = false
+        windowService.activateAppResult = false
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T2", ownerPID: 4242),
+            toSpaceID: spaceID
+        )
+
+        controller.switchToSpace(id: spaceID, raiseWindowID: 202)
+
+        #expect(windowService.activatedPID == 4242)
+        #expect(windowService.activatedBundleID == "com.b")
+    }
+
+    @Test("A window with no owning process is activated by bundle")
+    func windowWithoutOwnerProcessActivatesByBundle() {
+        let (controller, windowService, _) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
+            toSpaceID: spaceID
+        )
+
+        controller.switchToSpace(id: spaceID, raiseWindowID: 202)
+
+        #expect(windowService.frontedWindows.isEmpty)
+        #expect(windowService.activatedBundleID == "com.b")
     }
 
     @Test("Clicking a window immediately switches to its space and window")
@@ -712,7 +787,7 @@ struct SpaceControllerTests {
             focusedWindowSnapshotProvider: { .unfocused },
             previewRefreshPolicy: policy,
             previewCacheTTL: ttl,
-            previewClock: { clock.now }
+            clock: { clock.now }
         )
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
@@ -1178,7 +1253,7 @@ struct SpaceControllerTests {
         keyboardService.simulateEvent(.cmdRelease)
 
         #expect(windowService.raisedWindowID == 404)
-        #expect(windowService.activatedPID == 33)
+        #expect(windowService.frontedWindows == [FrontWindowRequest(windowID: 404, ownerPID: 33)])
     }
 
     @Test("A rejected quit leaves the selected app available")
@@ -1203,7 +1278,7 @@ struct SpaceControllerTests {
         keyboardService.simulateEvent(.cmdRelease)
 
         #expect(windowService.raisedWindowID == 202)
-        #expect(windowService.activatedPID == 22)
+        #expect(windowService.frontedWindows == [FrontWindowRequest(windowID: 202, ownerPID: 22)])
     }
 
     @Test("External activation restores an app whose quit is still pending")
@@ -1410,6 +1485,113 @@ struct SpaceControllerTests {
 
         let windowIDs = controller.spaceManager.activeSpace.windows.map(\.windowID)
         #expect(windowIDs == [101, 303, 202])
+    }
+
+    // MARK: - Focus attribution
+
+    /// Two windows of one app, one per space, as the reported Dia case had them.
+    private func makeSameAppTwoSpaceController(
+        clock: TestClock
+    ) -> (SpaceController, UUID, UUID) {
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            focusedWindowSnapshotProvider: { .unfocused },
+            clock: { clock.now }
+        )
+        let spaceAID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let spaceBID = controller.spaceManager.spaces[1].id
+
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 888, ownerBundleID: "com.other", ownerName: "Other",
+                        windowTitle: "Other A", ownerPID: 11),
+            toSpaceID: spaceAID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 4794, ownerBundleID: "com.dia", ownerName: "Dia",
+                        windowTitle: "Dia A", ownerPID: 40694),
+            toSpaceID: spaceAID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 4795, ownerBundleID: "com.dia", ownerName: "Dia",
+                        windowTitle: "Dia B", ownerPID: 40694),
+            toSpaceID: spaceBID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 999, ownerBundleID: "com.other", ownerName: "Other",
+                        windowTitle: "Other B", ownerPID: 11),
+            toSpaceID: spaceBID
+        )
+
+        // Put both spaces in a state a wrong credit would visibly disturb: the app's window is
+        // second in each, so it reaching the head is evidence of an activation rather than the
+        // order it was added in.
+        controller.spaceManager.activateSpace(id: spaceAID)
+        controller.recordWindowActivation(windowID: 999)
+        controller.recordWindowActivation(windowID: 888)
+        return (controller, spaceAID, spaceBID)
+    }
+
+    // Fronting a process makes macOS report focus on *a* window of that app, not necessarily
+    // the one that was named. For a multi-window app it regularly names one on another space,
+    // and read literally that is a user activation of a window the user never touched: it takes
+    // the MRU head, so the next Option-Tab offers a window on a space they were never on.
+    @Test("A same-app focus report is credited to the window Debut asked for")
+    func focusReportForAnotherWindowIsCreditedToTheRequestedWindow() {
+        let clock = TestClock()
+        let (controller, spaceAID, spaceBID) = makeSameAppTwoSpaceController(clock: clock)
+
+        controller.switchToSpace(id: spaceAID, raiseWindowID: 4794)
+        controller.recordWindowActivation(windowID: 4795)
+
+        let spaceA = controller.spaceManager.allSpaces.first { $0.id == spaceAID }
+        let spaceB = controller.spaceManager.allSpaces.first { $0.id == spaceBID }
+        #expect(spaceA?.windows.map(\.windowID) == [4794, 888])
+        #expect(spaceB?.windows.map(\.windowID) == [999, 4795])
+    }
+
+    // The correction is one-shot. A genuine later move between the app's own windows is a real
+    // user choice and has to be recorded as itself.
+    @Test("Only the first focus report after a request is re-credited")
+    func onlyTheFirstFocusReportIsReattributed() {
+        let clock = TestClock()
+        let (controller, spaceAID, spaceBID) = makeSameAppTwoSpaceController(clock: clock)
+
+        controller.switchToSpace(id: spaceAID, raiseWindowID: 4794)
+        controller.recordWindowActivation(windowID: 4795)
+        controller.recordWindowActivation(windowID: 4795)
+
+        let spaceB = controller.spaceManager.allSpaces.first { $0.id == spaceBID }
+        #expect(spaceB?.windows.map(\.windowID) == [4795, 999])
+    }
+
+    // Fronting a window that is already focused produces no report to consume the request, so
+    // the request has to lapse on its own or it would misread a later click as Debut's own.
+    @Test("A focus request stops applying once it goes stale")
+    func staleFocusRequestStopsApplying() {
+        let clock = TestClock()
+        let (controller, spaceAID, spaceBID) = makeSameAppTwoSpaceController(clock: clock)
+
+        controller.switchToSpace(id: spaceAID, raiseWindowID: 4794)
+        clock.advance(by: 5)
+        controller.recordWindowActivation(windowID: 4795)
+
+        let spaceB = controller.spaceManager.allSpaces.first { $0.id == spaceBID }
+        #expect(spaceB?.windows.map(\.windowID) == [4795, 999])
+    }
+
+    @Test("A focus report from another app is credited as reported")
+    func focusReportFromAnotherAppIsCreditedAsReported() {
+        let clock = TestClock()
+        let (controller, spaceAID, spaceBID) = makeSameAppTwoSpaceController(clock: clock)
+
+        controller.switchToSpace(id: spaceAID, raiseWindowID: 4794)
+        controller.recordWindowActivation(windowID: 999)
+        controller.recordWindowActivation(windowID: 4795)
+
+        let spaceB = controller.spaceManager.allSpaces.first { $0.id == spaceBID }
+        #expect(spaceB?.windows.map(\.windowID) == [4795, 999])
     }
 
     // Spaces are desktops, so when macOS reports a focused window on the desktop showing,

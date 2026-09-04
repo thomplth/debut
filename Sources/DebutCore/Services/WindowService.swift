@@ -131,6 +131,13 @@ public protocol WindowService: Sendable {
     func raiseWindow(windowID: CGWindowID) -> Bool
     /// Performs the target window's accessibility close action when the app exposes one.
     func closeWindow(windowID: CGWindowID) -> Bool
+    /// Makes one window's process frontmost through the window server, naming the window so the
+    /// chosen one arrives in front rather than whichever the app last used.
+    ///
+    /// Returns whether the window server took the request. Prefer this over `activateApp`:
+    /// AppKit's activation is advisory from macOS 14 and is declined outright for a background
+    /// regular application, which Debut is whenever its Dock icon is on.
+    func frontWindow(windowID: CGWindowID, ownerPID: pid_t) -> Bool
     /// Activates one exact running application instance. Window focus must prefer this over a
     /// bundle lookup because hosted foreground applications can own windows without having a
     /// bundle identifier of their own.
