@@ -45,8 +45,8 @@ layered, and each layer exists because the one below it cannot see something.
   <tr><th>Layer</th><th>What it proves</th><th>What it cannot see</th></tr>
   <tr><td><strong>Unit</strong> — <code>swift test --no-parallel</code></td><td>Model logic, reconciliation decisions, keyboard interpretation, persistence round-trips</td><td>Anything requiring a real window server or another process</td></tr>
   <tr><td><strong>Screenshot</strong> — <code>ScreenshotTests.swift</code></td><td>SwiftUI actually renders, and geometry matches expectations</td><td>Whether the overlay window was ordered in front of anything</td></tr>
-  <tr><td><strong>E2E in a VM</strong> — <code>scripts/tart-e2e.sh</code></td><td>A real signed app, real permissions, real event tap, real windows</td><td>Synthetic drag gestures — virtualized macOS does not deliver them</td></tr>
-  <tr><td><strong>E2E in the foreground</strong> — <code>scripts/e2e-test.sh</code></td><td>Physical drag delivery</td><td>Nothing, but it takes over the developer's desktop</td></tr>
+  <tr><td><strong>E2E in a VM</strong> — <code>scripts/tart-e2e.sh</code></td><td>A real signed app, real permissions, real event tap, real windows</td><td>Nothing the foreground run reaches; drags included</td></tr>
+  <tr><td><strong>E2E in the foreground</strong> — <code>scripts/e2e-test.sh</code></td><td>Nothing Tart does not already cover</td><td>It takes over the developer's desktop; developer-only</td></tr>
 </table>
 
 <div class="warn">
@@ -297,12 +297,22 @@ Two scenarios are named in a set at the top of the file&nbsp;<span class="src">:
 ]</code></pre>
 
 <p>
-They are skipped when <code>GITHUB_ACTIONS=true</code> or
-<code>DEBUT_SKIP_VIRTUALIZED_DRAGS=1</code>&nbsp;<span class="src">:13-15</span>,
-and the skip prints an explanation that differs by environment: GitHub-hosted macOS
-"does not deliver synthetic drag gestures; run this check locally", versus
-virtualized macOS "use Tart run-all to diagnose"&nbsp;<span class="src">:34-37</span>.
+They are skipped when <code>GITHUB_ACTIONS=true</code>&nbsp;<span class="src">:13-14</span>,
+and the skip prints its reason: GitHub-hosted macOS "does not deliver synthetic drag
+gestures; run this check in Tart"&nbsp;<span class="src">:33-38</span>. Tart does
+deliver them, so both scenarios run there.
 </p>
+
+<div class="why">
+<p>
+<strong>The skip once claimed virtualization too, and that claim was never measured.</strong>
+It was extrapolated from the hosted runner at a time when every pointer scenario in the
+VM was failing — for an unrelated reason, stacked TCC alerts that swallowed the events
+(KHA-612). Re-measured after that fix, both drops pass in Tart, moving a window across
+desktops and back. Before attributing a failure to virtualization, look at what else in
+the guest is failing alongside it.
+</p>
+</div>
 
 <div class="why">
 <p>
@@ -311,7 +321,7 @@ A deleted test is an invariant that no longer exists. A skipped test with a prin
 reason is an invariant that this environment cannot check — the count still appears
 in the summary line (<code>"N/M passed, K skipped, F failed"</code>&nbsp;<span class="src">:1237</span>),
 so the gap stays visible. The drag loops also collapse to zero iterations under the
-skip flag&nbsp;<span class="src">:953, :1030</span>, so no time is spent moving a
+skip&nbsp;<span class="src">:953, :1030</span>, so no time is spent moving a
 pointer that nothing will observe.
 </p>
 </div>
@@ -322,8 +332,7 @@ pointer that nothing will observe.
 
 <pre><code>brew install cirruslabs/cli/tart
 ./scripts/tart-e2e.sh prepare   # one time; clones and sizes the VM
-./scripts/tart-e2e.sh run       # the normal loop
-./scripts/tart-e2e.sh run-all   # diagnose the drag skips only
+./scripts/tart-e2e.sh run       # every scenario
 ./scripts/tart-e2e.sh status
 ./scripts/tart-e2e.sh stop</code></pre>
 
@@ -384,13 +393,13 @@ upload evidence as an artefact even on failure. Use it when Tart is unavailable 
 as remote confirmation — not as a routine trigger.
 </p>
 
-<h3>Foreground, last resort</h3>
+<h3>The foreground session, never</h3>
 
 <p>
-<code>./scripts/e2e-test.sh</code> is the only local way to exercise physical drag
-delivery. It displays the overlay, injects global keyboard and mouse events, and
-captures the live desktop. <strong>Warn the user before running it</strong>, and
-only when the drag scenarios are material to the change.
+<code>./scripts/e2e-test.sh</code> runs against the developer's own desktop: it
+displays the overlay, injects global keyboard and mouse events, and captures the
+live screen. <strong>Only the developer may start it.</strong> Tart now covers
+every scenario, drags included, so there is nothing it reaches that the VM does not.
 </p>
 
 <h2>Tests about the tests</h2>

@@ -18,8 +18,7 @@ nonisolated(unsafe) var skipCount = 0
 nonisolated(unsafe) var totalCount = 0
 let environment = ProcessInfo.processInfo.environment
 let isGitHubHosted = environment["GITHUB_ACTIONS"] == "true"
-let skipsVirtualizedDrags = environment["DEBUT_SKIP_VIRTUALIZED_DRAGS"] == "1"
-let skipsSyntheticDrags = isGitHubHosted || skipsVirtualizedDrags
+let skipsSyntheticDrags = isGitHubHosted
 let hostedDragTests: Set<String> = [
     "Dropping a window updates the source and destination space models",
     "The refreshed destination stage supports an immediate reverse drag",
@@ -56,17 +55,10 @@ func skipTest(_ name: String, reason: String) {
 }
 
 func skipDragTest(_ name: String) {
-    if isGitHubHosted {
-        skipTest(
-            name,
-            reason: "GitHub-hosted macOS does not deliver synthetic drag gestures; run this check locally"
-        )
-    } else {
-        skipTest(
-            name,
-            reason: "Virtualized macOS does not deliver synthetic drag gestures; use Tart run-all to diagnose"
-        )
-    }
+    skipTest(
+        name,
+        reason: "GitHub-hosted macOS does not deliver synthetic drag gestures; run this check in Tart"
+    )
 }
 
 func test(_ name: String, _ body: () -> Bool) {
