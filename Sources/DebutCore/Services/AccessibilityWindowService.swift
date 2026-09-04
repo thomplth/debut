@@ -161,6 +161,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         FrontProcessManagement.front(windowID: windowID, ownerPID: ownerPID)
     }
 
+    public func frontmostApplicationPID() -> pid_t? {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier
+    }
+
     public func activateApp(bundleID: String) -> Bool {
         guard let app = findApp(bundleID: bundleID) else { return false }
         return app.activate()

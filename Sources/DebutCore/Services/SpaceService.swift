@@ -64,6 +64,13 @@ private let slpsSetFrontProcessWithOptions: (@convention(c)
 /// must honour; the default mode is the advisory one this call exists to avoid.
 private let kSLPSUserGenerated: UInt32 = 0x200
 
+// Delivers a raw `CGSEventRecord` to one process. Fronting a process does not decide which of its
+// windows takes the keyboard, so the chosen window is named by posting the event a click on it
+// would have produced.
+private let slpsPostEventRecordTo: (@convention(c)
+    (UnsafeMutablePointer<ProcessSerialNumber>, UnsafeMutablePointer<UInt8>) -> CGError)? =
+    skyLightSymbol("SLPSPostEventRecordTo")
+
 // A PSN is not derivable from a pid — measured on macOS 26.5.2, `Finder` at pid 673 answered
 // psn (0, 118813) — so it has to be asked for. `GetProcessForPID` is marked unavailable in the
 // macOS 26 SDK and cannot be called directly from Swift, but the symbol is still exported, so it
@@ -76,18 +83,71 @@ private let getProcessForPID: (@convention(c)
 
 /// Moving the front between processes, which the public API no longer does.
 public enum FrontProcessManagement {
+    /// Which private symbols resolved. Fronting degrades silently when one goes missing, so this
+    /// exists to be asserted rather than inferred from behaviour.
+    public struct Readiness: Sendable {
+        public let frontProcessResolved: Bool
+        public let processSerialNumberResolved: Bool
+        public let eventRecordPostResolved: Bool
+    }
+
+    public static var readiness: Readiness {
+        Readiness(
+            frontProcessResolved: slpsSetFrontProcessWithOptions != nil,
+            processSerialNumberResolved: getProcessForPID != nil,
+            eventRecordPostResolved: slpsPostEventRecordTo != nil
+        )
+    }
+
     /// Whether both symbols this needs resolved. A missing one makes every request a refusal,
     /// which the caller answers by falling back to the AppKit request rather than doing nothing.
     public static var isAvailable: Bool {
         slpsSetFrontProcessWithOptions != nil && getProcessForPID != nil
     }
 
-    /// Fronts `windowID`'s process and that window. Returns whether the window server took it.
+    /// Fronts `windowID`'s process and makes that window key. Returns whether the window server
+    /// took the front request — not whether the window arrived, which nothing here can observe.
     public static func front(windowID: CGWindowID, ownerPID: pid_t) -> Bool {
         guard let slpsSetFrontProcessWithOptions, let getProcessForPID else { return false }
         var psn = ProcessSerialNumber()
         guard getProcessForPID(ownerPID, &psn) == noErr else { return false }
-        return slpsSetFrontProcessWithOptions(&psn, windowID, kSLPSUserGenerated) == .success
+        guard slpsSetFrontProcessWithOptions(&psn, windowID, kSLPSUserGenerated) == .success
+        else { return false }
+        makeKeyWindow(windowID: windowID, of: &psn)
+        return true
+    }
+
+    /// Fronting a process does not decide which of its windows holds the keyboard, and naming the
+    /// window in the front request is not enough on its own — measured on macOS 26.5 by
+    /// alt-tab-macos, the front call alone leaves the app's previous window key, which reads to
+    /// the user as the switch having done nothing. Posting the event a click on the window would
+    /// have produced is what moves the keyboard, and the app answers nothing either way.
+    private static func makeKeyWindow(windowID: CGWindowID, of psn: inout ProcessSerialNumber) {
+        guard let slpsPostEventRecordTo else { return }
+        var record = keyWindowEventRecord(for: windowID)
+        _ = slpsPostEventRecordTo(&psn, &record)
+    }
+
+    /// The `CGSEventRecord` a left click on `windowID` would have produced.
+    ///
+    /// Only a mouse-down is posted. A matching up cancels the down before the app has acted on
+    /// it, leaving nothing keyed.
+    static func keyWindowEventRecord(for windowID: CGWindowID) -> [UInt8] {
+        // The buffer is far longer than the record it holds because `CGSEncodeEventRecord` reads
+        // past the declared length; on uninitialized heap that aborts the process.
+        var record = [UInt8](repeating: 0, count: 0x100)
+        record[0x04] = 0xf8
+        record[0x08] = UInt8(CGEventType.leftMouseDown.rawValue)
+        record[0x3a] = 0x10
+
+        // Window-relative, and deliberately past any content the window could have. A point apps
+        // reject — negative, or non-finite — is sanitized back to the origin, which puts the
+        // click on whatever control sits in the corner.
+        var location = CGPoint(x: 300_000, y: 300_000)
+        var windowID = windowID
+        withUnsafeBytes(of: &location) { record.replaceSubrange(0x20 ..< 0x20 + $0.count, with: $0) }
+        withUnsafeBytes(of: &windowID) { record.replaceSubrange(0x3c ..< 0x3c + $0.count, with: $0) }
+        return record
     }
 }
 

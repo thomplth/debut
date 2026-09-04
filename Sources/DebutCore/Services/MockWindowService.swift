@@ -29,6 +29,9 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     /// cannot refuse can only ever prove Debut asked, never that it noticed the answer — which is
     /// how an activation that macOS had stopped honouring stayed green for a day.
     public var frontWindowResult: Bool = true
+    /// Who macOS reports as frontmost afterwards, which is a separate answer from the one above:
+    /// the window server takes a request it then does not honour, and reports success either way.
+    public var frontmostPID: pid_t?
     public var activateAppResult: Bool = true
     public var terminatedPIDs: [pid_t] = []
     public var terminateAppResult: Bool = true
@@ -80,6 +83,8 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
         frontedWindows.append(FrontWindowRequest(windowID: windowID, ownerPID: ownerPID))
         return frontWindowResult
     }
+
+    public func frontmostApplicationPID() -> pid_t? { frontmostPID }
 
     public func activateApp(bundleID: String) -> Bool {
         activatedBundleID = bundleID

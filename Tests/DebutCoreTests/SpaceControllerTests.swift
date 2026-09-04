@@ -1487,6 +1487,55 @@ struct SpaceControllerTests {
         #expect(windowIDs == [101, 303, 202])
     }
 
+    // MARK: - Front verification
+
+    /// The window server accepts a front request and reports success whether or not the app comes
+    /// forward, so the return value alone cannot tell a working switch from a dead one. These
+    /// cover the only check that can: reading back who is actually in front afterwards.
+    private func makeFrontedController() -> (SpaceController, MockWindowService) {
+        let (controller, windowService, _) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T2", ownerPID: 4242),
+            toSpaceID: spaceID
+        )
+        controller.switchToSpace(id: spaceID, raiseWindowID: 202)
+        return (controller, windowService)
+    }
+
+    @Test("A front request the window server took but did not honour is caught")
+    func unhonouredFrontIsCaught() {
+        let (controller, windowService) = makeFrontedController()
+        windowService.frontmostPID = 11
+
+        #expect(controller.verifyPendingFront() == false)
+    }
+
+    @Test("A front request that landed is not reported as a failure")
+    func honouredFrontIsNotCaught() {
+        let (controller, windowService) = makeFrontedController()
+        windowService.frontmostPID = 4242
+
+        #expect(controller.verifyPendingFront() == true)
+    }
+
+    @Test("There is nothing to verify when no window was fronted")
+    func noFrontRequestVerifiesNothing() {
+        let (controller, _, _) = makeController()
+
+        #expect(controller.verifyPendingFront() == nil)
+    }
+
+    @Test("A front request is verified once")
+    func frontRequestIsVerifiedOnce() {
+        let (controller, windowService) = makeFrontedController()
+        windowService.frontmostPID = 11
+
+        #expect(controller.verifyPendingFront() == false)
+        #expect(controller.verifyPendingFront() == nil)
+    }
+
     // MARK: - Focus attribution
 
     /// Two windows of one app, one per space, as the reported Dia case had them.
