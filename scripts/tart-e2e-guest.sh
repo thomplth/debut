@@ -4,19 +4,9 @@ set -euo pipefail
 SHARE_DIR="/Volumes/My Shared Files"
 APP_ARCHIVE="$SHARE_DIR/${1:?missing app archive name}"
 E2E_SOURCE="$SHARE_DIR/${2:?missing E2E executable name}"
-E2E_MODE="${3:?missing E2E mode}"
 RESULTS_DIR="$SHARE_DIR/results"
 SYSTEM_TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
 FIXTURE_DIR="/tmp/debut-e2e-fixtures"
-
-case "$E2E_MODE" in
-    virtualized) DRAG_SKIP="1" ;;
-    all) DRAG_SKIP="0" ;;
-    *)
-        echo "Unknown E2E mode: $E2E_MODE" >&2
-        exit 2
-        ;;
-esac
 
 # This script replaces the installed app and rewrites TCC, so refuse to run
 # anywhere the host has not staged artifacts through VirtioFS.
@@ -225,17 +215,12 @@ as_console launchctl setenv DEBUT_FORCE_DISPLAY_STACK_INDICATOR 1
 as_console env DEBUT_FORCE_DISPLAY_STACK_INDICATOR=1 "$APP_PATH/Contents/MacOS/Debut" --force-display-stack-indicator >/tmp/debut-e2e-debut.log 2>&1 </dev/null &
 wait_for_debut_ready
 
-if [[ "$DRAG_SKIP" == "1" ]]; then
-    echo "Running the stable virtualized suite; four unsupported synthetic drags are explicit skips..."
-else
-    echo "Attempting all checks, including the four diagnostic synthetic drags..."
-fi
+echo "Running the full suite, including the synthetic drag gestures..."
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 unset GITHUB_ACTIONS
 set +e
-as_console env HOME="$console_home" GITHUB_ACTIONS= \
-    DEBUT_SKIP_VIRTUALIZED_DRAGS="$DRAG_SKIP" "$E2E_SOURCE"
+as_console env HOME="$console_home" GITHUB_ACTIONS= "$E2E_SOURCE"
 status=$?
 set -e
 
