@@ -225,6 +225,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
         let disqualifiedWindowIDs = windowService.listDisqualifiedWindowIDs()
         let axContradictedWindowIDs = windowService.listAXContradictedWindowIDs()
+        let parentedWindowIDs = windowService.listParentedWindowIDs()
         let runningApps = windowService.listRunningApps()
         _ = PerformanceRecorder.shared.end(discoveryID)
 
@@ -244,6 +245,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // on screen. A popup admitted while its desktop was hidden cannot be refused at
         // admission — there was nothing to contradict it with yet — so it has to be reclaimed
         // once the user brings that desktop forward.
+        //
+        // Parentage gets a fourth because the other three can all miss indefinitely. A dismissed
+        // sheet keeps a layer-0 surface on a resolved desktop for the life of its app, so nothing
+        // degrades for Core Graphics to catch, no destroy notification arrives, and the AX verdict
+        // waits on the user visiting that desktop. The window server names the window it was
+        // raised over, from anywhere, and that is the only signal that arrives on its own.
         let classificationID = PerformanceRecorder.shared.begin(
             .windowClassification,
             workload: .init(windows: liveWindows.count)
@@ -278,6 +285,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     reason = "disqualified"
                 } else if axContradictedWindowIDs.contains(windowID) {
                     reason = "ax_contradicted"
+                } else if parentedWindowIDs.contains(windowID) {
+                    reason = "parented"
                 } else {
                     continue
                 }
