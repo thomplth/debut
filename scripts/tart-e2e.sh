@@ -15,11 +15,10 @@ GUEST_ARTIFACT=""
 
 usage() {
     cat <<EOF
-Usage: scripts/tart-e2e.sh <prepare|run|run-all|stop|status>
+Usage: scripts/tart-e2e.sh <prepare|run|stop|status>
 
   prepare  Clone and configure the free Tahoe VM (one-time, about 27 GB download)
-  run      Run the checks that are stable under virtualization; skip the drag gestures
-  run-all  Attempt every check, including the drag gestures Tart cannot deliver
+  run      Run every check in the headless guest
   stop     Stop the warm guest VM
   status   Show the VM configuration and current IP address
 
@@ -131,7 +130,6 @@ prepare_ssh() {
 }
 
 run_e2e() {
-    local e2e_mode="$1"
     local guest_ip remote_command ssh_status
     if ! vm_exists; then
         echo "Tart VM $VM_NAME does not exist. Run scripts/tart-e2e.sh prepare first." >&2
@@ -144,8 +142,8 @@ run_e2e() {
 
     echo "Running the full E2E suite inside $VM_NAME..."
     guest_ip="$(tart ip "$VM_NAME")"
-    printf -v remote_command '/bin/bash %q %q %q %q' \
-        "/Volumes/My Shared Files/$GUEST_ARTIFACT" "$APP_ARTIFACT" "$E2E_ARTIFACT" "$e2e_mode"
+    printf -v remote_command '/bin/bash %q %q %q' \
+        "/Volumes/My Shared Files/$GUEST_ARTIFACT" "$APP_ARTIFACT" "$E2E_ARTIFACT"
     set +e
     ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$KNOWN_HOSTS" "admin@$guest_ip" "$remote_command" 2>&1 | tee "$SHARE_DIR/e2e-latest.log"
     ssh_status="${PIPESTATUS[0]}"
@@ -171,8 +169,7 @@ require_tart
 
 case "${1:-}" in
     prepare) prepare_vm ;;
-    run) run_e2e virtualized ;;
-    run-all) run_e2e all ;;
+    run) run_e2e ;;
     stop) tart stop "$VM_NAME" ;;
     status) show_status ;;
     -h|--help|help) usage ;;
