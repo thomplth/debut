@@ -43,6 +43,22 @@ private let slsCopyWindowsWithOptionsAndTags: (@convention(c) (
     UnsafeMutablePointer<UInt64>, UnsafeMutablePointer<UInt64>
 ) -> Unmanaged<CFArray>?)? = skyLightSymbol("SLSCopyWindowsWithOptionsAndTags")
 
+// The window server records which window a surface was raised over. A sheet or popup names its
+// host; an ordinary window names nothing. Reached through the iterator rather than a per-window
+// property call so the whole list costs one query.
+private let slsWindowQueryWindows: (@convention(c)
+    (CGSConnectionID, CFArray, Int32) -> UnsafeMutableRawPointer?)? =
+    skyLightSymbol("SLSWindowQueryWindows")
+private let slsWindowQueryResultCopyWindows: (@convention(c)
+    (UnsafeMutableRawPointer) -> UnsafeMutableRawPointer?)? =
+    skyLightSymbol("SLSWindowQueryResultCopyWindows")
+private let slsWindowIteratorAdvance: (@convention(c) (UnsafeMutableRawPointer) -> Bool)? =
+    skyLightSymbol("SLSWindowIteratorAdvance")
+private let slsWindowIteratorGetWindowID: (@convention(c) (UnsafeMutableRawPointer) -> CGWindowID)? =
+    skyLightSymbol("SLSWindowIteratorGetWindowID")
+private let slsWindowIteratorGetParentID: (@convention(c) (UnsafeMutableRawPointer) -> CGWindowID)? =
+    skyLightSymbol("SLSWindowIteratorGetParentID")
+
 // Every Space remembers which process it shows as frontmost when it is revealed. Unlike
 // `_SLPSSetFrontProcessWithOptions`, this writes that memory for one Space only: it does not set
 // the global front and does not disturb the other Spaces where the app has windows. That is what
@@ -583,6 +599,9 @@ public protocol SpaceSwitching: AnyObject {
     /// windows on the active Space, so this is how a window on another desktop is discovered
     /// at all, not just located once already known.
     func windowLocations() -> [CGWindowID: DesktopLocation]
+    /// Windows the window server attaches to another window. Empty means nothing is known to be
+    /// parented, which is why the default conformance can return nothing without evicting.
+    func parentedWindowIDs(among candidates: [CGWindowID]) -> Set<CGWindowID>
     func desktopCount() -> Int
     func currentDesktopIndex() -> Int?
     func desktopIndex(forWindow windowID: CGWindowID) -> Int?
@@ -611,6 +630,7 @@ public protocol SpaceSwitching: AnyObject {
 }
 
 public extension SpaceSwitching {
+    func parentedWindowIDs(among candidates: [CGWindowID]) -> Set<CGWindowID> { [] }
     func isSwitchInFlight(stackID: String) -> Bool { false }
     func spaceDidChange() {}
     func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool { false }
@@ -919,6 +939,31 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         }
         for windowID in ambiguous { result.removeValue(forKey: windowID) }
         return result
+    }
+
+    /// The windows the window server attaches to another window — sheets, and the popups an app
+    /// raises over one of its own windows.
+    ///
+    /// An empty result means "nothing is known to be parented", never "nothing is parented", so
+    /// a failed query errs towards admitting a window rather than parking a real one.
+    public func parentedWindowIDs(among candidates: [CGWindowID]) -> Set<CGWindowID> {
+        guard let connection, !candidates.isEmpty,
+              let slsWindowQueryWindows, let slsWindowQueryResultCopyWindows,
+              let slsWindowIteratorAdvance, let slsWindowIteratorGetWindowID,
+              let slsWindowIteratorGetParentID
+        else { return [] }
+
+        let identifiers = candidates.map { NSNumber(value: $0) } as CFArray
+        guard let query = slsWindowQueryWindows(connection, identifiers, Int32(candidates.count)),
+              let iterator = slsWindowQueryResultCopyWindows(query)
+        else { return [] }
+
+        var parented = Set<CGWindowID>()
+        while slsWindowIteratorAdvance(iterator) {
+            guard slsWindowIteratorGetParentID(iterator) != 0 else { continue }
+            parented.insert(slsWindowIteratorGetWindowID(iterator))
+        }
+        return parented
     }
 
     // MARK: Switching

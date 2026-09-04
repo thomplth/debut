@@ -124,6 +124,24 @@ struct WindowServiceTests {
         ))
     }
 
+    // A sheet or popup keeps a layer-0 backing surface with a resolved desktop long after it is
+    // dismissed, so every other CG signal agrees it is a window. The window server does not: it
+    // records the surface as attached to the window it was raised over. Measured 2026-09-04
+    // across 287 windows, 7 carried a parent and every one of them was a sheet or popup —
+    // System Settings' dismissed sheet chain 62511/62513/62516 and Dia's 424x200 popup 62652.
+    @Test("A window the window server parents to another window is never plausible")
+    func parentedWindowsAreNotPlausible() {
+        let bounds = CGRect(x: 0, y: 0, width: 480, height: 531)
+        #expect(AccessibilityWindowService.isPlausibleUntrackedWindow(
+            layer: 0, isRegularApp: true, bounds: bounds,
+            hasResolvedDesktop: true, hasParentWindow: false
+        ))
+        #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
+            layer: 0, isRegularApp: true, bounds: bounds,
+            hasResolvedDesktop: true, hasParentWindow: true
+        ))
+    }
+
     // As a regular app Debut enumerates its own windows like any other, and the overlay joins
     // all Spaces, so admitting it would render the overlay inside itself. Debut's own windows
     // therefore enter by consent only: the Settings window registers itself, nothing else does.
