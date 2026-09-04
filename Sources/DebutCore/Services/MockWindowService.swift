@@ -1,6 +1,16 @@
 import Foundation
 import CoreGraphics
 
+public struct FrontWindowRequest: Equatable, Sendable {
+    public let windowID: CGWindowID
+    public let ownerPID: pid_t
+
+    public init(windowID: CGWindowID, ownerPID: pid_t) {
+        self.windowID = windowID
+        self.ownerPID = ownerPID
+    }
+}
+
 public final class MockWindowService: WindowService, @unchecked Sendable {
     public var apps: [AppInfo] = []
     public var windowList: [WindowInfo] = []
@@ -14,6 +24,12 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public var closeWindowResult: Bool = true
     public var activatedBundleID: String?
     public var activatedPID: pid_t?
+    public var frontedWindows: [FrontWindowRequest] = []
+    /// The window server declines a fronting request for a window it no longer knows. A mock that
+    /// cannot refuse can only ever prove Debut asked, never that it noticed the answer — which is
+    /// how an activation that macOS had stopped honouring stayed green for a day.
+    public var frontWindowResult: Bool = true
+    public var activateAppResult: Bool = true
     public var terminatedPIDs: [pid_t] = []
     public var terminateAppResult: Bool = true
     public var capturedImages: [CGWindowID: CGImage] = [:]
@@ -60,14 +76,19 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
         return closeWindowResult
     }
 
+    public func frontWindow(windowID: CGWindowID, ownerPID: pid_t) -> Bool {
+        frontedWindows.append(FrontWindowRequest(windowID: windowID, ownerPID: ownerPID))
+        return frontWindowResult
+    }
+
     public func activateApp(bundleID: String) -> Bool {
         activatedBundleID = bundleID
-        return true
+        return activateAppResult
     }
 
     public func activateApp(pid: pid_t) -> Bool {
         activatedPID = pid
-        return true
+        return activateAppResult
     }
 
     public func terminateApp(pid: pid_t) -> Bool {
