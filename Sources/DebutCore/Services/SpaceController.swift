@@ -344,6 +344,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var frontmostAppIsExcluded = false
     /// The window Debut last asked the window server to front, pending the focus report it causes.
     private var focusRequest: (windowID: CGWindowID, ownerPID: pid_t, at: Date)?
+    private var pendingFront: (windowID: CGWindowID, ownerPID: pid_t)?
     private let diag = DiagnosticReporter.shared
     private let overlayPresentationRecorder: OverlayPresentationRecorder
     private var activeOverlayPresentation: OverlayPresentationContext?
@@ -632,6 +633,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let outcome = activateOwner(of: window, raising: windowID)
         if outcome != .refused, let ownerPID = window.ownerPID {
             focusRequest = (windowID: windowID, ownerPID: ownerPID, at: clock())
+            scheduleFrontVerification(windowID: windowID, ownerPID: ownerPID)
         }
         _ = windowService.raiseWindow(windowID: windowID)
         spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: spaceID)
@@ -639,6 +641,42 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             "windowID": "\(windowID)",
             "via": outcome.rawValue,
         ])
+    }
+
+    /// How long to leave the window server to apply a front request before reading back who is in
+    /// front. Nothing announces the request being applied, and it is not applied on the calling
+    /// thread, so this is the one place a single deferred read stands in for an event.
+    private static let frontVerificationDelay: TimeInterval = 0.3
+
+    private func scheduleFrontVerification(windowID: CGWindowID, ownerPID: pid_t) {
+        pendingFront = (windowID: windowID, ownerPID: ownerPID)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.frontVerificationDelay) {
+            [weak self] in
+            // A newer focus has its own check pending; verifying it on this one's deadline would
+            // read the front before the window server had the chance to move it.
+            guard let self, self.pendingFront?.windowID == windowID else { return }
+            self.verifyPendingFront()
+        }
+    }
+
+    /// Reads back whether the process Debut fronted is actually in front, and reports when it is
+    /// not. Returns nil when there was no request outstanding.
+    ///
+    /// This exists because every other signal says the switch worked: `frontWindow` returns
+    /// success for a request the window server accepts and then does not honour, so an activation
+    /// that does nothing is indistinguishable in the log from one that works.
+    @discardableResult
+    func verifyPendingFront() -> Bool? {
+        guard let request = pendingFront else { return nil }
+        pendingFront = nil
+        guard let frontmost = windowService.frontmostApplicationPID() else { return nil }
+        guard frontmost != request.ownerPID else { return true }
+        diag.report("window_front_not_taken", details: [
+            "windowID": "\(request.windowID)",
+            "requested": "\(request.ownerPID)",
+            "frontmost": "\(frontmost)",
+        ])
+        return false
     }
 
     /// How long an unanswered focus request keeps applying. The report it causes normally lands

@@ -138,6 +138,10 @@ public protocol WindowService: Sendable {
     /// AppKit's activation is advisory from macOS 14 and is declined outright for a background
     /// regular application, which Debut is whenever its Dock icon is on.
     func frontWindow(windowID: CGWindowID, ownerPID: pid_t) -> Bool
+    /// The process macOS currently shows as frontmost. `frontWindow` reports whether the window
+    /// server accepted a request, never whether the app arrived, so this is the only way to find
+    /// out that a switch did nothing.
+    func frontmostApplicationPID() -> pid_t?
     /// Activates one exact running application instance. Window focus must prefer this over a
     /// bundle lookup because hosted foreground applications can own windows without having a
     /// bundle identifier of their own.
@@ -154,4 +158,5 @@ public extension WindowService {
     func listDisqualifiedWindowIDs() -> Set<CGWindowID> { [] }
     func listAXContradictedWindowIDs() -> Set<CGWindowID> { [] }
     func closeWindow(windowID: CGWindowID) -> Bool { false }
+    func frontmostApplicationPID() -> pid_t? { nil }
 }
