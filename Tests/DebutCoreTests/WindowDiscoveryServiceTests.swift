@@ -384,6 +384,54 @@ struct WindowDiscoveryServiceTests {
         #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [4797])
     }
 
+    // The other three eviction paths can all miss a dismissed sheet indefinitely: it keeps a
+    // layer-0 surface on a resolved desktop for the life of its app, so nothing degrades, no
+    // destroy notification arrives, and the AX verdict waits on the user visiting that desktop.
+    // Measured 2026-09-04: System Settings showed four cards for one window, and Dia's dismissed
+    // 424x200 popup 62652 was still assigned hours later.
+    @Test("Reconciliation parks a live window the window server parents to another")
+    func reconciliationParksParentedLiveWindows() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 40694, isHidden: false),
+        ]
+        windowService.windowList = [WindowInfo(
+            windowID: 62650,
+            ownerBundleID: "company.thebrowser.dia",
+            ownerName: "Dia",
+            ownerPID: 40694,
+            title: "Leisure",
+            bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440),
+            isOnScreen: true
+        )]
+        windowService.parentedWindowIDList = [62652]
+
+        var spaceManager = SpaceManager()
+        let spaceID = spaceManager.activeSpaceID
+        for windowID in [CGWindowID(62650), CGWindowID(62652)] {
+            spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "company.thebrowser.dia",
+                    ownerName: "Dia",
+                    windowTitle: "",
+                    ownerPID: 40694
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        ).reconcileWindows(&spaceManager)
+
+        #expect(spaceManager.activeSpace.windows.map(\.windowID) == [62650])
+        // An app that models a genuinely independent window as a child would land here too, so
+        // this must stay recoverable on the next snapshot rather than deleting the assignment.
+        #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [62652])
+    }
+
     // A window admitted while its desktop was hidden can only be contradicted once that
     // desktop shows, so refusing it at admission never reaches the ones already assigned.
     @Test("Reconciliation parks a live window AX contradicts on its own showing desktop")
