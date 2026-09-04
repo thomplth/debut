@@ -114,6 +114,7 @@ public struct DiagnosticExportSnapshot: Sendable {
 public final class DiagnosticExporter {
     private let directory: URL
     private let now: @Sendable () -> Date
+    private let redactor: DiagnosticRedactor
 
     public convenience init() {
         self.init(applicationSupportDirectory: DebutCore.applicationSupportDirectory)
@@ -121,10 +122,12 @@ public final class DiagnosticExporter {
 
     init(
         applicationSupportDirectory: URL,
-        now: @escaping @Sendable () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init,
+        redactor: DiagnosticRedactor = DiagnosticRedactor(salt: DiagnosticSalt.current())
     ) {
         self.directory = applicationSupportDirectory
         self.now = now
+        self.redactor = redactor
     }
 
     public func export(_ snapshot: DiagnosticExportSnapshot, to destination: URL) throws {
@@ -141,8 +144,10 @@ public final class DiagnosticExporter {
                 "previousLifecycleEvents": jsonLinesFile(named: "diagnostic.jsonl.1"),
             ],
         ]
+        // An export is the one artefact that leaves the machine by design, so it
+        // is redacted whole rather than at each of the places a title enters it.
         let data = try JSONSerialization.data(
-            withJSONObject: root,
+            withJSONObject: redactor.redactJSONObject(root),
             options: [.prettyPrinted, .sortedKeys]
         )
         try data.write(to: destination, options: .atomic)
