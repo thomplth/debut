@@ -119,6 +119,10 @@ public protocol WindowService: Sendable {
     /// own desktop was showing and declining to name them. Kept separate from the Core Graphics
     /// verdict because it is only ever available for the desktop currently on screen.
     func listAXContradictedWindowIDs() -> Set<CGWindowID>
+    /// Window IDs the window server attaches to another window — sheets, and the popups an app
+    /// raises over one of its own windows. A third channel because it is the only verdict
+    /// readable from any desktop without an Accessibility element.
+    func listParentedWindowIDs() -> Set<CGWindowID>
     func listAllWindowIDs() -> Set<CGWindowID>?
     /// `onEnumerated` reports which requested windows the shareable-content
     /// snapshot actually matched, before any of them is captured. Without it a
@@ -157,6 +161,7 @@ public extension WindowService {
     func listUntrackableWindowIDs() -> Set<CGWindowID> { [] }
     func listDisqualifiedWindowIDs() -> Set<CGWindowID> { [] }
     func listAXContradictedWindowIDs() -> Set<CGWindowID> { [] }
+    func listParentedWindowIDs() -> Set<CGWindowID> { [] }
     func closeWindow(windowID: CGWindowID) -> Bool { false }
     func frontmostApplicationPID() -> pid_t? { nil }
 }
