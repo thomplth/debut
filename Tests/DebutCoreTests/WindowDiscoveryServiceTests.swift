@@ -602,6 +602,65 @@ struct WindowDiscoveryServiceTests {
         #expect(spaceManager.spaces[2].windows.map(\.windowID) == [22357])
     }
 
+    // Exclusion is a snapshot filter everywhere else, which refuses admission but cannot reach
+    // an assignment that is already live: the window is absent from every later snapshot, so no
+    // reconcile, desktop refresh, or activation can move or remove it. Evicting only at launch
+    // and on a settings change left a Finder window admitted through the activation path live
+    // for the rest of the session, unmovable and unremovable.
+    @Test("Reconcile evicts live and dormant assignments for excluded apps")
+    func reconcileEvictsExcludedAssignments() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DebutDiscoveryDiag-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false),
+            AppInfo(bundleID: "com.apple.finder", name: "Finder", pid: 20, isHidden: false),
+        ]
+        windowService.windowList = [liveWindow(1)]
+
+        var spaceManager = SpaceManager()
+        spaceManager.createSpace(position: .below)
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Window 1", ownerPID: 10),
+            toSpaceID: spaceManager.spaces[0].id
+        )
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 40915, ownerBundleID: "com.apple.finder", ownerName: "Finder", windowTitle: "Debut", ownerPID: 20),
+            toSpaceID: spaceManager.spaces[1].id
+        )
+        spaceManager.addWindow(
+            SpaceWindow(windowID: 40916, ownerBundleID: "com.apple.finder", ownerName: "Finder", windowTitle: "Downloads", ownerPID: 20),
+            toSpaceID: spaceManager.spaces[1].id
+        )
+        _ = spaceManager.makeWindowDormant(windowID: 40916)
+
+        let reporter = DiagnosticReporter(directory: directory)
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+        service.excludedBundleIDs = ["com.apple.finder"]
+        service.reconcileWindows(&spaceManager)
+        reporter.flush()
+
+        #expect(spaceManager.allSpaces.flatMap(\.windows).map(\.windowID) == [1])
+        #expect(spaceManager.dormantWindowAssignments.isEmpty)
+
+        let lines = try String(contentsOf: directory.appendingPathComponent("diagnostic.jsonl"), encoding: .utf8)
+            .split(separator: "\n")
+            .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: String] }
+        let evictions = lines.filter { $0["event"] == "window_evicted" }
+        #expect(evictions.map { $0["windowID"] } == ["40915", "40916"])
+        #expect(evictions.allSatisfy { $0["reason"] == "excluded" })
+        #expect(evictions.first?["bundleID"] == "com.apple.finder")
+        #expect(evictions.first?["windowTitle"] == "Debut")
+        #expect(evictions.first?["fromSpace"] == "1")
+    }
+
     @Test("Untrackable dormancy is reported with the placement it set aside")
     func untrackableDormancyIsReported() throws {
         let directory = FileManager.default.temporaryDirectory
@@ -1407,6 +1466,25 @@ struct WindowDiscoveryServiceTests {
         return service
     }
 
+    // `startObserving` had no exclusion check at all, so relaunching Debut while an excluded app
+    // was frontmost wired the focused-window observer to it for the whole session: every focus
+    // change inside that app then reached the activation path, which admitted its windows. The
+    // guard belongs here rather than at the call sites, where only one of the two had it.
+    @Test("An excluded app is never given the focused-window observer")
+    func excludedAppDoesNotReceiveFocusObserver() {
+        var attemptedPIDs: [pid_t] = []
+        let service = focusObserverService(registration: { pid in
+            attemptedPIDs.append(pid)
+            return .success
+        })
+        service.excludedBundleIDs = ["com.apple.finder"]
+
+        service.installFocusObserver(for: 20, bundleID: "com.apple.finder")
+
+        #expect(attemptedPIDs.isEmpty)
+        #expect(service.diagnosticTrackingSnapshot.observedPID == nil)
+    }
+
     // A freshly launched app refuses the registration until its AX server is up — measured at
     // -25204 for nine of nine apps, with the server silent for the first 0.8-2.9s. Debut sees
     // the activation ~0.2s in, so accepting the first answer means never observing focus.
@@ -1422,7 +1500,7 @@ struct WindowDiscoveryServiceTests {
             scheduler: scheduler
         )
 
-        service.installFocusObserver(for: 10)
+        service.installFocusObserver(for: 10, bundleID: "notion.id")
 
         #expect(attempts == 3)
         #expect(service.diagnosticTrackingSnapshot.observedPID == 10)
@@ -1443,7 +1521,7 @@ struct WindowDiscoveryServiceTests {
             scheduler: scheduler
         )
 
-        service.installFocusObserver(for: 10)
+        service.installFocusObserver(for: 10, bundleID: "notion.id")
 
         #expect(attempts > 1)
         #expect(service.diagnosticTrackingSnapshot.observedPID == nil)
@@ -1468,8 +1546,8 @@ struct WindowDiscoveryServiceTests {
         }
         service.focusObserverRetryScheduler = { _, work in pending.append(work) }
 
-        service.installFocusObserver(for: 10)
-        service.installFocusObserver(for: 20)
+        service.installFocusObserver(for: 10, bundleID: "notion.id")
+        service.installFocusObserver(for: 20, bundleID: "linear.id")
         for work in pending { work() }
 
         #expect(service.diagnosticTrackingSnapshot.observedPID == 20)
@@ -1488,7 +1566,7 @@ struct WindowDiscoveryServiceTests {
         })
         service.focusObserverRetryScheduler = { _, work in pending.append(work) }
 
-        service.installFocusObserver(for: 10)
+        service.installFocusObserver(for: 10, bundleID: "notion.id")
         service.handleProcessExit(pid: 10)
         for work in pending { work() }
 
@@ -1507,8 +1585,8 @@ struct WindowDiscoveryServiceTests {
         })
         service.focusObserverRetryScheduler = { _, work in pending.append(work) }
 
-        service.installFocusObserver(for: 10)
-        service.installFocusObserver(for: 10)
+        service.installFocusObserver(for: 10, bundleID: "notion.id")
+        service.installFocusObserver(for: 10, bundleID: "notion.id")
 
         #expect(attempts == 1)
         #expect(pending.count == 1)
