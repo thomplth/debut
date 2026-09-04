@@ -238,6 +238,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let consentedOwnWindowIDs = ownWindowLock.withLock { self.consentedOwnWindowIDs }
+        let parentedWindowIDs = spaceSwitcher?.parentedWindowIDs(
+            among: infoList.compactMap { $0[kCGWindowNumber] as? CGWindowID }
+        ) ?? []
 
         var seen = Set<CGWindowID>()
         return infoList.compactMap { dict in
@@ -272,7 +275,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                     layer: dict[kCGWindowLayer] as? Int,
                     isRegularApp: regularPIDs.contains(ownerPID),
                     bounds: bounds,
-                    hasResolvedDesktop: windowDesktop != nil
+                    hasResolvedDesktop: windowDesktop != nil,
+                    hasParentWindow: parentedWindowIDs.contains(windowID)
                 ) else { return nil }
                 if Self.accessibilityContradictsWindow(
                     isNamedByAX: axNamedWindowIDs.contains(windowID),
@@ -316,15 +320,21 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     /// judged purely from Core Graphics signals: on the normal window layer, owned by a regular
     /// (non-background) app, large enough to plausibly be user-facing, and resolvable to
     /// exactly one desktop rather than absent from the window server's Space bookkeeping.
+    ///
+    /// Parentage is the only one of these a dismissed sheet or popup fails. Such a surface keeps
+    /// its layer, size and desktop for as long as its app runs, so every other signal agrees it
+    /// is a window and it is admitted as a duplicate card beside the window it was raised over.
     static func isPlausibleUntrackedWindow(
         layer: Int?,
         isRegularApp: Bool,
         bounds: CGRect,
-        hasResolvedDesktop: Bool
+        hasResolvedDesktop: Bool,
+        hasParentWindow: Bool = false
     ) -> Bool {
         layer == 0
             && isRegularApp
             && hasResolvedDesktop
+            && !hasParentWindow
             && bounds.width >= minimumPlausibleWindowDimension
             && bounds.height >= minimumPlausibleWindowDimension
     }
@@ -491,6 +501,22 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             }
         }
         return disqualified
+    }
+
+    /// Assigned windows the window server attaches to another window.
+    ///
+    /// A dismissed sheet or popup keeps a layer-0 surface on a resolved desktop for as long as
+    /// its app runs, so the Core Graphics and Accessibility channels both miss it: nothing about
+    /// it degrades, and AX can only contradict it while its own desktop is showing. Parentage is
+    /// a positive statement readable from any desktop, which is what closes that gap.
+    public func listParentedWindowIDs() -> Set<CGWindowID> {
+        let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
+        guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
+            as? [[CFString: Any]]
+        else { return [] }
+        return spaceSwitcher?.parentedWindowIDs(
+            among: infoList.compactMap { $0[kCGWindowNumber] as? CGWindowID }
+        ) ?? []
     }
 
     /// Returns window IDs that AX explicitly identifies as modal or auxiliary UI
