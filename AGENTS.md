@@ -51,9 +51,9 @@ When E2E is justified, prioritize the headless Tart VM first:
 ./scripts/tart-e2e.sh run
 ```
 
-This runs the stable virtualized suite without taking over the foreground developer session. It explicitly skips the synthetic drag gestures that neither Tart nor GitHub-hosted macOS delivers; the script's own output is the authority on how many scenarios pass. Setup and evidence locations are documented in `docs/local-e2e.md`.
+This runs the whole suite without taking over the foreground developer session; the script's own output is the authority on how many scenarios pass. Setup and evidence locations are documented in `docs/local-e2e.md`.
 
-Use `./scripts/tart-e2e.sh run-all` only when diagnosing those virtualized drag checks.
+Tart delivers synthetic drags, so the two window-drop checks run there. GitHub-hosted macOS does not deliver them and skips those two; that skip is keyed on `GITHUB_ACTIONS` alone. A skip claimed for "virtualized macOS" was carried for a month on an extrapolation from the hosted runner, while the real cause of every pointer failure in the VM was stacked TCC alerts (KHA-612). Before attributing a failure to virtualization, check what else in the guest is failing with it.
 
 All agent-initiated E2E validation must run inside the headless Tart VM. Never run `./scripts/e2e-test.sh` or otherwise run the E2E executable against the developer's foreground session: it displays the overlay, injects global input, and captures the live desktop. This prohibition has no last-resort exception, including physical-drag validation. If Tart is unavailable or the VM cannot exercise a scenario, stop and report that limitation; do not fall back to the foreground session or manually trigger a hosted workflow.
 

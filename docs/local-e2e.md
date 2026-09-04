@@ -30,16 +30,9 @@ and the Tart guest agent. Xcode is intentionally not installed in the guest.
 ./scripts/tart-e2e.sh run
 ```
 
-This is the fast, stable iteration loop. It runs the supported scenarios and
-reports the synthetic drags that virtualized macOS cannot deliver as explicit
-skips, exiting successfully when the supported scenarios pass. The script's own
-output is the authority on the current pass count.
-
-Use the diagnostic mode only when investigating that drag limitation:
-
-```bash
-./scripts/tart-e2e.sh run-all
-```
+This is the fast, stable iteration loop, and it runs every scenario, including the
+synthetic drag gestures. The script's own output is the authority on the current
+pass count.
 
 The first run boots the VM headlessly; later runs reuse the warm guest and its
 GUI session. Results, screenshots, and the latest console output — retained even
@@ -50,24 +43,23 @@ the VM and shared-directory names.
 Use `./scripts/tart-e2e.sh stop` when the warm VM is no longer needed, and
 `./scripts/tart-e2e.sh status` to inspect it.
 
-## Foreground last resort
+## The foreground session is not an option
 
-`./scripts/e2e-test.sh` runs against the foreground developer session and is the
-only local option for exercising physical drag delivery. It opens the overlay,
-injects global keyboard and mouse events, and captures the live desktop. Warn the
-user before running it, and only when the drag scenarios are material to the
-change at hand.
+`./scripts/e2e-test.sh` runs against the developer's own desktop: it opens the
+overlay, injects global keyboard and mouse events, and captures the live screen.
+Only the developer may start it. Tart covers every scenario, drags included, so
+there is nothing left that the foreground run reaches and the VM does not.
 
-## Drag limitation
+## Drags under virtualization
 
-On the Tahoe base image, Virtualization.framework does not deliver drag sequences
-to SwiftUI, so `run` reports those scenarios as skips rather than failures.
-`run-all` attempts them for diagnostics and reproduces the same unsupported
-behavior GitHub-hosted macOS shows. Ordinary global keyboard, hover, click,
-Accessibility, screenshot, Mission Control, app lifecycle, and settings scenarios
-all pass.
+Tart delivers synthetic drags. An earlier note here claimed
+Virtualization.framework could not, and the two drop scenarios were skipped on
+that basis; re-measured on the Tahoe base image they pass, moving a window across
+desktops and back. The original claim was extrapolated from GitHub-hosted macOS,
+which genuinely does not deliver them and where the two checks still skip.
 
-Attaching a VNC framebuffer and retaining virtual keyboard and pointer devices
-were both tested; neither enabled drag delivery, and VNC additionally opens
-Screen Sharing on the host. The script therefore runs with
-`--no-graphics --no-pointer --no-keyboard`.
+That extrapolation held because every other pointer scenario was failing too, for
+an unrelated reason: stacked TCC alerts on the warm VM swallowed the events until
+KHA-612 cleared them. The VM still runs with `--no-graphics --no-pointer
+--no-keyboard`; a VNC framebuffer and retained virtual input devices were tested
+and neither is needed.

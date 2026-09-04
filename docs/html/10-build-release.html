@@ -255,7 +255,7 @@ to prove it on the wire anyway.
   <tr><th>Script</th><th>Does</th><th>Safe while working?</th></tr>
   <tr><td><code>build-app.sh</code></td><td>Build + bundle + sign</td><td>Yes</td></tr>
   <tr><td><code>rebuild.sh</code></td><td>Build, install, launch. No E2E</td><td>Yes — restarts Debut</td></tr>
-  <tr><td><code>tart-e2e.sh</code></td><td>Headless VM E2E: <code>prepare</code> / <code>run</code> / <code>run-all</code> / <code>status</code> / <code>stop</code></td><td>Yes — input stays in the guest</td></tr>
+  <tr><td><code>tart-e2e.sh</code></td><td>Headless VM E2E: <code>prepare</code> / <code>run</code> / <code>status</code> / <code>stop</code></td><td>Yes — input stays in the guest</td></tr>
   <tr><td><code>tart-e2e-guest.sh</code></td><td>Runs inside the guest: installs the app, seeds TCC</td><td>Guest only; refuses to run on the host</td></tr>
   <tr><td><code>ci-e2e.sh</code></td><td>GitHub-hosted runner entry point</td><td>CI only</td></tr>
   <tr><td><code>e2e-test.sh</code></td><td>Foreground E2E against the live desktop</td><td><strong>No</strong> — takes over input and screen. Warn first</td></tr>

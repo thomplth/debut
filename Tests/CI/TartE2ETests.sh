@@ -56,12 +56,10 @@ if [[ -f "$host_runner" ]]; then
         "the app must cross VirtioFS as one cache-safe archive"
     expect_contains "$host_runner" 'e2e-latest\.log' \
         "the host must retain guest output when E2E fails"
-    expect_contains "$host_runner" 'run-all' \
-        "Tart E2E must expose an all-gesture diagnostic mode"
-    expect_contains "$host_runner" 'run\) run_e2e virtualized' \
-        "the default Tart loop must select virtualized skips"
-    expect_contains "$host_runner" 'run-all\) run_e2e all' \
-        "run-all must attempt every synthetic drag"
+    expect_contains "$host_runner" 'run\) run_e2e' \
+        "the Tart loop must expose a run mode"
+    expect_not_contains "$host_runner" 'run-all' \
+        "a diagnostic mode that only re-enables virtualized drags has nothing left to enable"
 fi
 
 if [[ -f "$guest_runner" ]]; then
@@ -73,8 +71,8 @@ if [[ -f "$guest_runner" ]]; then
         "the guest suite must hold Screen Recording, since it samples frames in-process"
     expect_contains "$guest_runner" 'unset GITHUB_ACTIONS' \
         "the isolated local guest must run hosted-skipped gesture checks"
-    expect_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
-        "the default guest mode must identify unsupported virtualized drags"
+    expect_not_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
+        "the guest attempts synthetic drags; there is no virtualized skip to set"
     expect_contains "$guest_runner" 'com\.apple\.universalaccess reduceMotion -bool false' \
         "the guest must pin the host to the spring the motion check samples"
     expect_contains "$guest_runner" 'TextEdit' \
@@ -93,41 +91,30 @@ if [[ -f "$guest_runner" ]]; then
         "guest readiness must require the keyboard event tap"
     expect_contains "$guest_runner" 'state\.windowsInActiveSpace' \
         "guest readiness must require discovered fixture windows"
-    expect_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS="\$' \
-        "the drag flag must be a scalar; bash 3.2 rejects empty array expansion under set -u"
     expect_not_contains "$guest_runner" 'unzip -Z1.*awk.*exit' \
         "archive discovery must drain large framework bundles instead of SIGPIPE under pipefail"
 
-    expect_mode_dispatch() {
-        local mode="$1"
-        local expected_status="$2"
-        local expected_pattern="$3"
-        local output status
-
-        set +e
-        output="$("$guest_runner" missing-app.zip missing-e2e "$mode" 2>&1)"
-        status=$?
-        set -e
-
-        if (( status != expected_status )); then
-            fail "guest mode '$mode' exited $status, expected $expected_status: $output"
-        fi
-        grep -Eq -- "$expected_pattern" <<< "$output" \
-            || fail "guest mode '$mode' did not report '$expected_pattern': $output"
-    }
-
-    # Every mode must resolve before the guest is mutated, so an unusable mode
-    # cannot leave a half-provisioned guest behind.
-    expect_mode_dispatch bogus 2 'Unknown E2E mode'
-    expect_mode_dispatch virtualized 1 'staged E2E artifacts are missing'
-    expect_mode_dispatch all 1 'staged E2E artifacts are missing'
+    # Staged artifacts must be checked before the guest is mutated, so an unusable
+    # invocation cannot leave a half-provisioned guest behind.
+    set +e
+    missing_output="$("$guest_runner" missing-app.zip missing-e2e 2>&1)"
+    missing_status=$?
+    set -e
+    if (( missing_status != 1 )); then
+        fail "guest exited $missing_status on missing artifacts, expected 1: $missing_output"
+    fi
+    grep -Eq -- 'staged E2E artifacts are missing' <<< "$missing_output" \
+        || fail "guest did not report missing staged artifacts: $missing_output"
 fi
 
 if [[ -f "$e2e_source" ]]; then
-    expect_contains "$e2e_source" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
-        "DebutE2E must recognize the virtualized drag skip flag"
-    expect_contains "$e2e_source" 'Virtualized macOS does not deliver synthetic drag gestures' \
-        "virtualized skips must explain why the check did not run"
+    # Tart delivers synthetic drags: `run-all` passed 53/53 including a real cross-space
+    # window move and its reverse. The skip predated the TCC-alert root cause (KHA-612)
+    # that explained every other pointer failure in the VM.
+    expect_not_contains "$e2e_source" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
+        "virtualized drags are attempted, so no flag may suppress them"
+    expect_not_contains "$e2e_source" 'Virtualized macOS does not deliver synthetic drag gestures' \
+        "the virtualized drag skip and its wording are retired"
 
     # LaunchServices answers a bundle-ID lookup with one bundle even when several claim the ID,
     # and its choice between them is not stable. A stale probe app declaring com.thomplth.Debut
