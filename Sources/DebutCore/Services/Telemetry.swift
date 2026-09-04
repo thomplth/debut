@@ -194,6 +194,10 @@ public final class TelemetryDeckClient: TelemetryClient, @unchecked Sendable {
         }
         let event: [String: Any] = [
             "appID": appID,
+            // Must stay empty. Anything identifying here would let events be
+            // joined into a per-device history, which turns an anonymous payload
+            // into personal data and removes the basis for enabling this by
+            // default. Install counts come from GitHub release download counts.
             "clientUser": "",
             "type": "Debut.Performance.\(payload.event.rawValue)",
             "payload": dimensions,
@@ -312,6 +316,28 @@ public actor DiskTelemetryQueue: TelemetryQueue {
     private func write(_ envelope: Envelope) throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(envelope).write(to: file, options: [.atomic, .completeFileProtection])
+    }
+}
+
+/// Decides whether telemetry may send, given the user's setting and how far
+/// through first-run they are.
+///
+/// The setting ships on, but the toggle is only meaningful once the user has
+/// seen it. Sending before onboarding finishes would collect from someone who
+/// was never shown the choice, so completion is what turns the setting live.
+public enum TelemetryActivationPolicy {
+    public static func shouldSend(setting: Bool, onboardingCompleted: Bool) -> Bool {
+        setting && onboardingCompleted
+    }
+
+    public static func shouldSend(
+        settings: AppSettings,
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        shouldSend(
+            setting: settings.shareAnonymousTelemetry,
+            onboardingCompleted: OnboardingLaunchPolicy.hasCompleted(defaults: defaults)
+        )
     }
 }
 

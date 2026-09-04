@@ -176,4 +176,47 @@ struct OnboardingTests {
         #expect(defaults.bool(forKey: OnboardingLaunchPolicy.completionKey))
         #expect(OnboardingLaunchPolicy.shouldPresent(defaults: defaults, force: true))
     }
+
+    @Test("Completion is only reported once onboarding has actually finished")
+    func completionIsReportedAfterFinishing() throws {
+        let suiteName = "DebutOnboardingCompletionTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(!OnboardingLaunchPolicy.hasCompleted(defaults: defaults))
+        OnboardingLaunchPolicy.markCompleted(defaults: defaults)
+        #expect(OnboardingLaunchPolicy.hasCompleted(defaults: defaults))
+    }
+
+    @Test("A migrated user counts as completed without re-running onboarding")
+    func migratedUserCountsAsCompleted() throws {
+        let suiteName = "DebutOnboardingMigratedTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: OnboardingLaunchPolicy.legacyLaunchKey)
+
+        // Reading completion must not depend on `shouldPresent` having run first,
+        // or an existing user's telemetry stays gated until the next launch.
+        #expect(OnboardingLaunchPolicy.hasCompleted(defaults: defaults))
+    }
+}
+
+@Suite("TelemetryActivationPolicy")
+struct TelemetryActivationPolicyTests {
+
+    @Test("Nothing is sent before onboarding completes, even with the setting on")
+    func onboardingGatesSending() {
+        #expect(!TelemetryActivationPolicy.shouldSend(setting: true, onboardingCompleted: false))
+    }
+
+    @Test("Proceeding through onboarding without opting out starts sending")
+    func completingOnboardingEnablesSending() {
+        #expect(TelemetryActivationPolicy.shouldSend(setting: true, onboardingCompleted: true))
+    }
+
+    @Test("Opting out wins regardless of onboarding state")
+    func optingOutWins() {
+        #expect(!TelemetryActivationPolicy.shouldSend(setting: false, onboardingCompleted: true))
+        #expect(!TelemetryActivationPolicy.shouldSend(setting: false, onboardingCompleted: false))
+    }
 }
