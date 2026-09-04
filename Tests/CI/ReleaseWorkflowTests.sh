@@ -115,6 +115,11 @@ expect_not_contains "$readme" 'after approval' \
 expect_contains "$release_guide" 'single explicit release request' \
     "the build guide must describe one-request stable promotion"
 
+# The ruleset blocks deletion and force-push, not ordinary updates. Claiming it stops any bot from
+# updating main invites a future design to lean on protection that is not there.
+expect_not_contains "$agents" 'forbids any bot from updating' \
+    "the agent notes must not claim protection the ruleset does not provide"
+
 if [[ -f "$publish" ]]; then
     expect_contains "$publish" '^  workflow_call:' "the publish workflow must only run as a called gate"
     expect_not_contains "$publish" '^  (schedule|pull_request|push):' \
@@ -133,15 +138,37 @@ if [[ -f "$publish" ]]; then
     expect_contains "$publish" 'gh release create' "the workflow must create the GitHub release"
     expect_contains "$publish" 'Debut\.dmg' "the release must attach the disk image"
     expect_contains "$publish" 'git tag' "the release must be tagged"
-    # main is protected by a ruleset that lets no bot update it, so a release that tries to push a
-    # version-bump commit dies after building, having already pushed its tag. Tag the tested commit
-    # in place and push nothing but the tag.
+    # A release that tries to push a version-bump commit dies after building, having already pushed
+    # its tag. Tag the tested commit in place and push nothing but the tag.
     expect_not_contains "$publish" 'git commit' \
-        "the publish workflow must not commit, because it cannot push to protected main"
+        "the publish workflow must not commit, because it has no branch to push it to"
     expect_not_contains "$publish" 'git push .*HEAD:main|git push .*origin main' \
         "the publish workflow must never push a branch"
     expect_contains "$publish" 'git push origin "?\$\{?TAG' \
         "the publish workflow must push only the tag"
+
+    # The signing material is written to a runner filesystem the build steps and any script they
+    # invoke can read. Restricting the mode and removing it afterwards bounds that exposure to the
+    # steps that need it, whether or not the run succeeds.
+    expect_contains "$publish" 'umask 077' \
+        "the publish workflow must not create secret material world-readable"
+    expect_contains "$publish" 'if: always\(\)' \
+        "the publish workflow must clean up its secrets even when a step fails"
+    expect_contains "$publish" 'security delete-keychain' \
+        "the publish workflow must delete the keychain holding the Developer ID key"
+    for artefact in 'developer-id\.p12' 'notary-api-key\.p8' 'sparkle-eddsa\.key'; do
+        expect_contains "$publish" "rm -f.*$artefact" \
+            "the publish workflow must remove $artefact from the runner"
+    done
+
+    # A mutable tag on a third-party action is a write path into a job holding the Developer ID key
+    # and the Sparkle signing key. Pin every non-local action to a commit.
+    unpinned="$(grep -E '^[[:space:]]*(- )?uses:' "$publish" \
+        | grep -v 'uses:[[:space:]]*\./' \
+        | grep -Ev 'uses:[[:space:]]*[^@]+@[0-9a-f]{40}' || true)"
+    if [[ -n "$unpinned" ]]; then
+        fail "the publish workflow must pin every action to a commit SHA: $unpinned"
+    fi
 fi
 
 # The badge is the only place a reader sees whether main is currently releasable. The gates run on
