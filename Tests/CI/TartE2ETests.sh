@@ -128,6 +128,17 @@ if [[ -f "$e2e_source" ]]; then
         "DebutE2E must recognize the virtualized drag skip flag"
     expect_contains "$e2e_source" 'Virtualized macOS does not deliver synthetic drag gestures' \
         "virtualized skips must explain why the check did not run"
+
+    # LaunchServices answers a bundle-ID lookup with one bundle even when several claim the ID,
+    # and its choice between them is not stable. A stale probe app declaring com.thomplth.Debut
+    # took two consecutive runs before a single check ran: it launched, crashed, and the missing
+    # app_ready read as Debut failing to start.
+    expect_contains "$e2e_source" 'urlsForApplications\(withBundleIdentifier' \
+        "DebutE2E must see every bundle claiming Debut's identifier"
+    expect_not_contains "$e2e_source" 'urlForApplication\(withBundleIdentifier: (debutBundleID|"com\.thomplth\.Debut")' \
+        "a single-answer lookup cannot tell a hijacked launch from a real one"
+    expect_contains "$e2e_source" 'claim the bundle identifier' \
+        "an ambiguous install must be named and refused, not silently resolved"
 fi
 
 if (( failures > 0 )); then
