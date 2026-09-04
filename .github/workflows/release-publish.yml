@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Check out the commit the gates tested
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.sha }}
           fetch-depth: 0
@@ -69,7 +69,7 @@ jobs:
           echo "TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault" >> "$GITHUB_ENV"
 
       # Stamped into the working tree for the build only. It is deliberately never committed:
-      # main is protected against any bot update, and the tag is what records the version anyway.
+      # the tag is what records the version.
       - name: Stamp the version into the build
         env:
           VERSION: ${{ inputs.version }}
@@ -87,6 +87,7 @@ jobs:
           CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
         run: |
+          umask 077
           certificate="$RUNNER_TEMP/developer-id.p12"
           keychain="$RUNNER_TEMP/debut-signing.keychain-db"
           keychain_password="$(uuidgen)$(uuidgen)"
@@ -120,6 +121,7 @@ jobs:
           NOTARY_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
+          umask 077
           key="$RUNNER_TEMP/notary-api-key.p8"
           printf '%s' "$NOTARY_KEY" > "$key"
           xcrun notarytool submit .build/Debut.dmg \
@@ -136,6 +138,7 @@ jobs:
           SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
           VERSION: ${{ inputs.version }}
         run: |
+          umask 077
           private_key="$RUNNER_TEMP/sparkle-eddsa.key"
           printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$private_key"
           ./scripts/generate-appcast.sh "$VERSION" .build/Debut.dmg "$private_key" .build/appcast.xml
@@ -161,3 +164,14 @@ jobs:
             --notes-file "$RUNNER_TEMP/notes.md" \
             "${flags[@]}" \
             "${assets[@]}"
+
+      # A failing step leaves the signing material behind, so this runs unconditionally and does
+      # not fail the run: a release that succeeded must not be reported as broken by its own tidying.
+      - name: Remove the signing material from the runner
+        if: always()
+        continue-on-error: true
+        run: |
+          security delete-keychain "$RUNNER_TEMP/debut-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/developer-id.p12"
+          rm -f "$RUNNER_TEMP/notary-api-key.p8"
+          rm -f "$RUNNER_TEMP/sparkle-eddsa.key"
