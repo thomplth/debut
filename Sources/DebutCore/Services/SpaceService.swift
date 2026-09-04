@@ -51,6 +51,19 @@ private let slsSpaceSetFrontPSN: (@convention(c)
     (CGSConnectionID, CGSSpaceID, ProcessSerialNumber) -> CGError)? =
     skyLightSymbol("SLSSpaceSetFrontPSN")
 
+// The global counterpart of the call above: it fronts a process everywhere, and naming a window
+// fronts that one window rather than every window the app owns. This is the only way to move the
+// front across processes. `NSRunningApplication.activate()` became advisory in macOS 14 and is
+// declined for a background regular application, which is what Debut is while its Dock icon is on
+// — the overlay is a borderless status-level window that never takes activation for itself.
+private let slpsSetFrontProcessWithOptions: (@convention(c)
+    (UnsafeMutablePointer<ProcessSerialNumber>, CGWindowID, UInt32) -> CGError)? =
+    skyLightSymbol("_SLPSSetFrontProcessWithOptions")
+
+/// `kCPSUserGenerated`. The window server treats a front request attributed to the user as one it
+/// must honour; the default mode is the advisory one this call exists to avoid.
+private let kSLPSUserGenerated: UInt32 = 0x200
+
 // A PSN is not derivable from a pid — measured on macOS 26.5.2, `Finder` at pid 673 answered
 // psn (0, 118813) — so it has to be asked for. `GetProcessForPID` is marked unavailable in the
 // macOS 26 SDK and cannot be called directly from Swift, but the symbol is still exported, so it
@@ -60,6 +73,23 @@ private let getProcessForPID: (@convention(c)
     dlsym(UnsafeMutableRawPointer(bitPattern: -2), "GetProcessForPID")
         .map { unsafeBitCast($0, to: (@convention(c)
             (pid_t, UnsafeMutablePointer<ProcessSerialNumber>) -> OSStatus).self) }
+
+/// Moving the front between processes, which the public API no longer does.
+public enum FrontProcessManagement {
+    /// Whether both symbols this needs resolved. A missing one makes every request a refusal,
+    /// which the caller answers by falling back to the AppKit request rather than doing nothing.
+    public static var isAvailable: Bool {
+        slpsSetFrontProcessWithOptions != nil && getProcessForPID != nil
+    }
+
+    /// Fronts `windowID`'s process and that window. Returns whether the window server took it.
+    public static func front(windowID: CGWindowID, ownerPID: pid_t) -> Bool {
+        guard let slpsSetFrontProcessWithOptions, let getProcessForPID else { return false }
+        var psn = ProcessSerialNumber()
+        guard getProcessForPID(ownerPID, &psn) == noErr else { return false }
+        return slpsSetFrontProcessWithOptions(&psn, windowID, kSLPSUserGenerated) == .success
+    }
+}
 
 /// Selector for `SLSCopySpacesForWindows` meaning "all spaces the window belongs to".
 private let kSpaceSelectorAll: Int32 = 7

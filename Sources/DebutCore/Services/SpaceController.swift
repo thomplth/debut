@@ -339,9 +339,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var previewCaptureGeneration: UInt = 0
     private var previewCacheEntries: [CGWindowID: PreviewCacheEntry] = [:]
     private var pendingPreviewCaptureIDs: [CGWindowID] = []
-    private let previewClock: @Sendable () -> Date
+    private let clock: @Sendable () -> Date
     private var pendingPreviewFlush = false
     private var frontmostAppIsExcluded = false
+    /// The window Debut last asked the window server to front, pending the focus report it causes.
+    private var focusRequest: (windowID: CGWindowID, ownerPID: pid_t, at: Date)?
     private let diag = DiagnosticReporter.shared
     private let overlayPresentationRecorder: OverlayPresentationRecorder
     private var activeOverlayPresentation: OverlayPresentationContext?
@@ -355,7 +357,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
         previewRefreshPolicy: PreviewRefreshPolicy = .lastActiveOnly,
         previewCacheTTL: TimeInterval = AppSettings.defaultPreviewCacheTTL,
-        previewClock: @escaping @Sendable () -> Date = Date.init
+        clock: @escaping @Sendable () -> Date = Date.init
     ) {
         self.windowService = windowService
         self.keyboardService = keyboardService
@@ -365,7 +367,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         self.overlayPresentationRecorder = overlayPresentationRecorder
         self.previewRefreshPolicy = previewRefreshPolicy
         self.previewCacheTTL = previewCacheTTL
-        self.previewClock = previewClock
+        self.clock = clock
 
         let started = keyboardService.start(delegate: self)
         self.keyboardServiceStarted = started
@@ -627,17 +629,53 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             ])
             return
         }
+        let outcome = activateOwner(of: window, raising: windowID)
+        if outcome != .refused, let ownerPID = window.ownerPID {
+            focusRequest = (windowID: windowID, ownerPID: ownerPID, at: clock())
+        }
         _ = windowService.raiseWindow(windowID: windowID)
         spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: spaceID)
-        activateOwner(of: window)
+        diag.report("window_focused", details: [
+            "windowID": "\(windowID)",
+            "via": outcome.rawValue,
+        ])
     }
 
-    private func activateOwner(of window: SpaceWindow) {
+    /// How long an unanswered focus request keeps applying. The report it causes normally lands
+    /// within a few tens of milliseconds; this only stops a request nothing ever answers from
+    /// misreading a later click as Debut's own.
+    private static let focusRequestFailsafe: TimeInterval = 1
+
+    /// How the owning process was brought to the front, or that nothing would take it.
+    private enum ActivationOutcome: String {
+        case windowServer
+        case appKitProcess
+        case appKitBundle
+        case refused
+    }
+
+    /// Brings `window`'s process to the front, preferring the window server's own front-process
+    /// call over AppKit's.
+    ///
+    /// `NSRunningApplication.activate()` became an advisory request in macOS 14 and macOS
+    /// declines it for a background regular application. Debut became one when it gained a Dock
+    /// icon, and since its overlay is a borderless status-level window that never takes
+    /// activation, every request was made from the background and refused — the MRU moved while
+    /// the app stayed put. The window server call is not advisory and names the window, so the
+    /// chosen window arrives frontmost rather than whichever the app last used.
+    ///
+    /// AppKit remains the fallback: the private symbols may not resolve, and a window the server
+    /// has already forgotten is refused. Both leave a stale-but-running app reachable.
+    @discardableResult
+    private func activateOwner(of window: SpaceWindow,
+                               raising windowID: CGWindowID? = nil) -> ActivationOutcome {
         if let ownerPID = window.ownerPID {
-            _ = windowService.activateApp(pid: ownerPID)
-        } else {
-            _ = windowService.activateApp(bundleID: window.ownerBundleID)
+            if let windowID, windowService.frontWindow(windowID: windowID, ownerPID: ownerPID) {
+                return .windowServer
+            }
+            if windowService.activateApp(pid: ownerPID) { return .appKitProcess }
         }
+        return windowService.activateApp(bundleID: window.ownerBundleID) ? .appKitBundle : .refused
     }
 
     /// Adopts the desktop currently showing as the active space.
@@ -798,7 +836,40 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         spaceManager.spaceContainingWindow(windowID: windowID)
     }
 
-    public func recordWindowActivation(windowID: CGWindowID) {
+    /// Credits a focus report to the window Debut asked for, when that report is the answer to
+    /// the request rather than a choice of the user's.
+    ///
+    /// Fronting a process names a window, but macOS reports focus on whichever of that app's
+    /// windows it settles on, and for a multi-window app that is regularly one on another space.
+    /// Read literally it is a user activation of a window the user never touched, so it takes the
+    /// MRU head and the next Option-Tab offers a window on a space they were never on — while the
+    /// window actually in front is now second, which is why a tap could also do nothing at all.
+    /// Debut knows which window it asked for and does not have to divine it from the report.
+    ///
+    /// One-shot: the app's own later moves between its windows are real choices and stay theirs.
+    private func creditedActivation(of reportedWindowID: CGWindowID) -> CGWindowID {
+        guard let request = focusRequest else { return reportedWindowID }
+        guard clock().timeIntervalSince(request.at) < Self.focusRequestFailsafe else {
+            focusRequest = nil
+            return reportedWindowID
+        }
+        guard let ownerPID = spaceManager.allSpaces.lazy.flatMap(\.windows)
+            .first(where: { $0.windowID == reportedWindowID })?.ownerPID
+        else { return reportedWindowID }
+        focusRequest = nil
+        guard ownerPID == request.ownerPID, reportedWindowID != request.windowID else {
+            return reportedWindowID
+        }
+        diag.report("window_activation_recredited", details: [
+            "reported": "\(reportedWindowID)",
+            "credited": "\(request.windowID)",
+            "ownerPID": "\(ownerPID)",
+        ])
+        return request.windowID
+    }
+
+    public func recordWindowActivation(windowID reportedWindowID: CGWindowID) {
+        let windowID = creditedActivation(of: reportedWindowID)
         let ownerSpaceID = spaceOwningWindow(windowID: windowID)
         let desktopLocation = spaceSwitcher?.desktopLocation(forWindow: windowID)
         let stackID = desktopLocation?.stackID ?? ownerSpaceID.flatMap {
@@ -1123,10 +1194,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         let targetID = backtickCycleWindows[backtickCycleIndex]
-        _ = windowService.raiseWindow(windowID: targetID)
         if let targetWindow = sameAppWindows.first(where: { $0.windowID == targetID }) {
-            activateOwner(of: targetWindow)
+            activateOwner(of: targetWindow, raising: targetID)
         }
+        _ = windowService.raiseWindow(windowID: targetID)
     }
 
     private func commitBacktickCycle() {
@@ -1472,7 +1543,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // The window in front of the active space is the one that was just being used, so its
         // content is the one most likely to have moved on since the last capture.
         let lastActiveWindowID = spaceManager.activeSpace.windows.first?.windowID
-        let now = previewClock()
+        let now = clock()
         return assignedWindows.compactMap { window in
             if window.windowID == lastActiveWindowID { return window.windowID }
             guard windowPreviews[window.windowID] != nil,
@@ -1536,7 +1607,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
 
-        let clock = previewClock
+        let clock = self.clock
         previewCaptureTask = Task { [weak self, windowService] in
             await windowService.captureWindowImages(
                 windowIDs: windowIDs,

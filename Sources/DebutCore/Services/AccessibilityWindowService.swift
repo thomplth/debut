@@ -157,6 +157,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         }
     }
 
+    public func frontWindow(windowID: CGWindowID, ownerPID: pid_t) -> Bool {
+        FrontProcessManagement.front(windowID: windowID, ownerPID: ownerPID)
+    }
+
     public func activateApp(bundleID: String) -> Bool {
         guard let app = findApp(bundleID: bundleID) else { return false }
         return app.activate()
