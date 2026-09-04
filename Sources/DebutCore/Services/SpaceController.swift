@@ -355,6 +355,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var pendingPreviewCaptureIDs: [CGWindowID] = []
     private let clock: @Sendable () -> Date
     private var pendingPreviewFlush = false
+
+    /// Activation carries a bare window ID, so the controller has to answer the exclusion
+    /// question itself rather than relying on discovery's already-filtered snapshots.
+    public var excludedBundleIDs: Set<String> = []
     private var frontmostAppIsExcluded = false
     /// The window Debut last asked the window server to front, pending the focus report it causes.
     private var focusRequest: (windowID: CGWindowID, ownerPID: pid_t, at: Date)?
@@ -1014,9 +1018,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             ])
             spaceManager.removeLiveWindowFromAllSpaces(windowID: windowID)
             spaceManager.addWindow(window, toSpaceID: targetSpaceID)
-        } else if let info = windowService.listWindows().first(where: { $0.windowID == windowID }) {
+        } else if let info = windowService.listWindows().first(where: { $0.windowID == windowID }),
+                  !excludedBundleIDs.contains(info.ownerBundleID) {
             // Genuinely new — "code ." opening a window while the app's other windows sit
-            // on another desktop.
+            // on another desktop. Discovery filters its own snapshots, but this list is raw:
+            // activation is the one admission path that has to ask the question itself.
             spaceManager.addWindow(
                 SpaceWindow(
                     windowID: info.windowID,
@@ -1046,8 +1052,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         delegate?.spaceControllerDidMutateState(self)
     }
 
-    public func updateFrontmostApp(isExcluded: Bool) {
-        frontmostAppIsExcluded = isExcluded
+    public func updateFrontmostApp(bundleID: String?) {
+        frontmostAppIsExcluded = bundleID.map(excludedBundleIDs.contains) ?? false
     }
 
     public func markOverlayPresentation(

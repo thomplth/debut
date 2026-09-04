@@ -175,11 +175,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         discovery.reconcileWindows(&spaceManager)
         _ = PerformanceRecorder.shared.end(reconcileID)
 
-        // Remove excluded apps' windows from all spaces
-        for bundleID in currentSettings.excludedBundleIDs {
-            spaceManager.removeAllWindows(forBundleID: bundleID)
-        }
-
         // Empty spaces are deliberately kept: a desktop with nothing on it is still a
         // desktop, and pruning it would shift every later space off the desktop it maps to.
 
@@ -217,6 +212,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             previewCacheTTL: currentSettings.previewCacheTTL
         )
         controller.delegate = self
+        controller.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
         controller.spaceSwitcher = spaceService
         controller.onDesktopReveal = { [weak self] in
             DispatchQueue.main.async {
@@ -308,10 +304,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         discovery.onFrontmostAppChanged = { [weak self, weak keyboardService] bundleID in
             keyboardService?.updateFrontmostApp(bundleIdentifier: bundleID)
             guard let self else { return }
-            self.spaceController?.updateFrontmostApp(
-                isExcluded: bundleID.map { self.currentSettings.excludedBundleIDs.contains($0) }
-                    ?? false
-            )
+            self.spaceController?.updateFrontmostApp(bundleID: bundleID)
         }
         discovery.onAppActivated = { [weak self] snapshot in
             DispatchQueue.main.async {
@@ -1024,9 +1017,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 try? self.stateStore?.saveSettings(newSettings)
                 self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
                 self.keyboardService?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
+                self.spaceController?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
                 self.spaceController?.updateFrontmostApp(
-                    isExcluded: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-                        .map(newSettings.excludedBundleIDs.contains) ?? false
+                    bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
                 )
                 for bundleID in newSettings.excludedBundleIDs {
                     self.spaceController?.spaceManager.removeAllWindows(forBundleID: bundleID)
