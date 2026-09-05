@@ -1474,6 +1474,69 @@ struct SpaceControllerTests {
         #expect(windowService.raisedWindowID == 303)
     }
 
+    /// G1, D1, G2, L1 — the interleaved layout the cycle has to survive, since the two
+    /// same-app windows are not adjacent in the space's MRU.
+    private func makeInterleavedAppCycleController()
+        -> (SpaceController, MockWindowService, MockKeyboardService) {
+        let (controller, windowService, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        for (windowID, bundleID) in [
+            (CGWindowID(101), "com.example.Terminal"),
+            (202, "com.example.Browser"),
+            (303, "com.example.Terminal"),
+            (404, "com.example.Tracker"),
+        ] as [(CGWindowID, String)] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: bundleID,
+                    ownerName: bundleID,
+                    windowTitle: "Window \(windowID)"
+                ),
+                toSpaceID: spaceID
+            )
+        }
+        return (controller, windowService, keyboardService)
+    }
+
+    private func activeWindowIDs(_ controller: SpaceController) -> [CGWindowID] {
+        controller.spaceManager.activeSpace.windows.map(\.windowID)
+    }
+
+    @Test("The app-window cycle writes its MRU order when Command is released")
+    func appWindowCycleCommitsOnRelease() {
+        let (controller, _, keyboardService) = makeInterleavedAppCycleController()
+
+        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdRelease)
+
+        #expect(activeWindowIDs(controller) == [303, 101, 202, 404])
+    }
+
+    /// Both shortcuts are held under Command, so opening the switcher without releasing it is
+    /// the ordinary way to reach the overlay after a cycle — and the overlay must not list the
+    /// order the cycle already moved away from.
+    @Test("Opening the switcher mid-cycle commits the cycle rather than discarding it")
+    func appWindowCycleCommitsWhenOverlayOpens() {
+        let (controller, _, keyboardService) = makeInterleavedAppCycleController()
+
+        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdTabHold)
+
+        #expect(activeWindowIDs(controller) == [303, 101, 202, 404])
+        #expect(controller.selectedWindowIndex == 1)
+    }
+
+    @Test("A Command-Tab tap mid-cycle steps back from the cycled window, not the stale head")
+    func appWindowCycleCommitsBeforeTabTap() {
+        let (controller, _, keyboardService) = makeInterleavedAppCycleController()
+
+        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdTabTap)
+
+        #expect(activeWindowIDs(controller) == [101, 303, 202, 404])
+    }
+
     @Test("MRU: recordWindowActivation brings to front")
     func mruTracking() {
         let (controller, _, _) = makeController()
