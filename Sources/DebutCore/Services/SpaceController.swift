@@ -778,8 +778,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         )
         let performanceID = PerformanceRecorder.shared.begin(.spaceSwitch, workload: workload)
         defer { PerformanceRecorder.shared.end(performanceID) }
-        backtickCycleWindows = []
-        backtickCycleIndex = 0
+        commitBacktickCycle()
 
         let previousID = spaceManager.activeSpaceID
         var desktopIsSettling = false
@@ -1106,6 +1105,12 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
 
+        // Every other command reads the MRU the cycle has not written yet. Both shortcuts sit
+        // under Command, so reaching one of them without releasing it is ordinary use.
+        if !Self.continuesBacktickCycle(event) {
+            commitBacktickCycle()
+        }
+
         switch event {
         case .cmdTabTap:
             handleCmdTabTap()
@@ -1150,7 +1155,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         case .cmdShiftBacktickRepeat:
             handleCmdBacktick(reverse: true, wraps: false)
         case .cmdRelease:
-            commitBacktickCycle()
             commitSelection()
         case .escape:
             discardOverlay()
@@ -1204,6 +1208,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         guard !isStageStackCommitInFlight,
               spaceManager.spaces.indices.contains(index) else { return }
 
+        commitBacktickCycle()
+
         // Space window order is MRU. Capture the active app before switching,
         // then prefer that app's most-recent window in the destination space.
         let activeBundleID = spaceManager.activeSpace.windows.first?.ownerBundleID
@@ -1213,9 +1219,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 targetSpace.windows.first(where: { $0.ownerBundleID == bundleID })?.windowID
             }
             : nil
-
-        backtickCycleWindows = []
-        backtickCycleIndex = 0
 
         if isSpaceManagerVisible {
             stageStackTransaction.discard()
@@ -1269,6 +1272,20 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         _ = windowService.raiseWindow(windowID: targetID)
     }
 
+    private static func continuesBacktickCycle(_ event: DebutKeyEvent) -> Bool {
+        switch event {
+        case .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick, .cmdShiftBacktickRepeat:
+            true
+        default:
+            false
+        }
+    }
+
+    /// Writes the cycle's landing window to the MRU. A cycle in progress is an activation the
+    /// model has not been told about yet, so this must run before anything else reads or moves
+    /// the MRU — and nothing may drop the cycle instead. Discarding it left the order the user
+    /// had just cycled away from in place, and the next command then acted on that stale head:
+    /// Command-Tab under the still-held Command offered the second window of the old order.
     private func commitBacktickCycle() {
         guard !backtickCycleWindows.isEmpty else { return }
         let finalWindowID = backtickCycleWindows[backtickCycleIndex]
@@ -1278,6 +1295,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         )
         backtickCycleWindows = []
         backtickCycleIndex = 0
+        // The cycle's activation is reported by nothing else, so without this an MRU head the
+        // user moved by Command-backtick leaves no trace and a wrong order cannot be read back
+        // from a session afterwards — it has to be reproduced live.
+        diag.report("same_app_cycle_committed", details: [
+            "windowID": "\(finalWindowID)",
+            "space": spaceLabel(forID: spaceManager.activeSpaceID),
+        ])
         delegate?.spaceControllerDidMutateState(self)
     }
 
@@ -1437,8 +1461,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             overlayPresentationRecorder.mark(.controllerAccepted, for: presentation)
         }
 
-        backtickCycleWindows = []
-        backtickCycleIndex = 0
+        commitBacktickCycle()
         stageStackTransaction.discard()
 
         // Removing an inactive desktop need not change the Space currently showing, so there
