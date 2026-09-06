@@ -4,6 +4,13 @@ import Foundation
 import Testing
 @testable import DebutCore
 
+/// The two verdicts that park an assigned window on evidence the window server volunteers,
+/// rather than on Accessibility's classification of it.
+enum ParkVerdict: Sendable {
+    case parented
+    case disqualified
+}
+
 final class MockProcessExitMonitor: ProcessExitMonitoring, @unchecked Sendable {
     private(set) var monitoredPIDs: Set<pid_t> = []
     private(set) var cancelledPIDs: [pid_t] = []
@@ -432,6 +439,64 @@ struct WindowDiscoveryServiceTests {
         #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [62652])
     }
 
+    // Parking a window while still offering it as live undoes itself: the dormant assignment the
+    // park just created is an exact windowID+PID+bundle match, which is the strongest recovery
+    // there is, so the reconciler restores it on the same pass. Observed live — CrossOver window
+    // 44254 was parked `disqualified` at 2026-09-02T14:16:55Z and parked again at 14:23:06Z,
+    // which it could only be after being let back in.
+    //
+    // The case above misses this because its fixture never offers the parented window as live,
+    // so it proves the park and not the refusal. This one does both, and repeats the pass to
+    // show the window stays parked rather than oscillating.
+    @Test("A parked window is refused from the same snapshot that parked it",
+          arguments: [ParkVerdict.parented, ParkVerdict.disqualified])
+    func reconciliationRefusesTheWindowsItParks(verdict: ParkVerdict) {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 40694, isHidden: false),
+        ]
+        windowService.windowList = [CGWindowID(62650), CGWindowID(62652)].map { windowID in
+            WindowInfo(
+                windowID: windowID,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                ownerPID: 40694,
+                title: windowID == 62650 ? "Leisure" : "",
+                bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440),
+                isOnScreen: true
+            )
+        }
+        switch verdict {
+        case .parented: windowService.parentedWindowIDList = [62652]
+        case .disqualified: windowService.disqualifiedWindowIDList = [62652]
+        }
+
+        var spaceManager = SpaceManager()
+        let spaceID = spaceManager.activeSpaceID
+        for windowID in [CGWindowID(62650), CGWindowID(62652)] {
+            spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "company.thebrowser.dia",
+                    ownerName: "Dia",
+                    windowTitle: "",
+                    ownerPID: 40694
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        let discovery = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        for _ in 0..<2 {
+            discovery.reconcileWindows(&spaceManager)
+            #expect(spaceManager.activeSpace.windows.map(\.windowID) == [62650])
+            #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [62652])
+        }
+    }
+
     // A window admitted while its desktop was hidden can only be contradicted once that
     // desktop shows, so refusing it at admission never reaches the ones already assigned.
     @Test("Reconciliation parks a live window AX contradicts on its own showing desktop")
@@ -703,6 +768,51 @@ struct WindowDiscoveryServiceTests {
 
         let summary = try #require(lines.first { $0["event"] == "windows_reconciled" })
         #expect(summary["parked"] == "1")
+    }
+
+    // `liveCount` counts the snapshot, not what reconciliation acted on, so once a verdict can
+    // hold a window out of the reconciler the two diverge and nothing records by how much. The
+    // refusal is the whole fix and it is invisible in the log without this — which is how the
+    // park/re-admit loop it replaces stayed legible only as a window parked twice.
+    @Test("The summary reports how many live windows a verdict refused")
+    func refusedWindowsAreCounted() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DebutDiscoveryDiag-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 40694, isHidden: false),
+        ]
+        windowService.windowList = [CGWindowID(62650), CGWindowID(62652)].map { windowID in
+            WindowInfo(
+                windowID: windowID,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                ownerPID: 40694,
+                title: "Leisure",
+                bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440),
+                isOnScreen: true
+            )
+        }
+        windowService.parentedWindowIDList = [62652]
+
+        var spaceManager = SpaceManager()
+        let reporter = DiagnosticReporter(directory: directory, redactor: DiagnosticRedactor(salt: "salt-a"))
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        ).reconcileWindows(&spaceManager)
+        reporter.flush()
+
+        let lines = try String(contentsOf: directory.appendingPathComponent("diagnostic.jsonl"), encoding: .utf8)
+            .split(separator: "\n")
+            .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: String] }
+        let summary = try #require(lines.first { $0["event"] == "windows_reconciled" })
+        #expect(summary["liveCount"] == "2")
+        #expect(summary["refused"] == "1")
     }
 
     @Test("Empty window snapshot makes stopped-app assignments dormant")
