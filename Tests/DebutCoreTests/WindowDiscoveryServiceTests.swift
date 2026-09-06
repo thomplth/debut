@@ -4,6 +4,13 @@ import Foundation
 import Testing
 @testable import DebutCore
 
+/// The two verdicts that park an assigned window on evidence the window server volunteers,
+/// rather than on Accessibility's classification of it.
+enum ParkVerdict: Sendable {
+    case parented
+    case disqualified
+}
+
 final class MockProcessExitMonitor: ProcessExitMonitoring, @unchecked Sendable {
     private(set) var monitoredPIDs: Set<pid_t> = []
     private(set) var cancelledPIDs: [pid_t] = []
@@ -430,6 +437,64 @@ struct WindowDiscoveryServiceTests {
         // An app that models a genuinely independent window as a child would land here too, so
         // this must stay recoverable on the next snapshot rather than deleting the assignment.
         #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [62652])
+    }
+
+    // Parking a window while still offering it as live undoes itself: the dormant assignment the
+    // park just created is an exact windowID+PID+bundle match, which is the strongest recovery
+    // there is, so the reconciler restores it on the same pass. Observed live — CrossOver window
+    // 44254 was parked `disqualified` at 2026-09-02T14:16:55Z and parked again at 14:23:06Z,
+    // which it could only be after being let back in.
+    //
+    // The case above misses this because its fixture never offers the parented window as live,
+    // so it proves the park and not the refusal. This one does both, and repeats the pass to
+    // show the window stays parked rather than oscillating.
+    @Test("A parked window is refused from the same snapshot that parked it",
+          arguments: [ParkVerdict.parented, ParkVerdict.disqualified])
+    func reconciliationRefusesTheWindowsItParks(verdict: ParkVerdict) {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 40694, isHidden: false),
+        ]
+        windowService.windowList = [CGWindowID(62650), CGWindowID(62652)].map { windowID in
+            WindowInfo(
+                windowID: windowID,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                ownerPID: 40694,
+                title: windowID == 62650 ? "Leisure" : "",
+                bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440),
+                isOnScreen: true
+            )
+        }
+        switch verdict {
+        case .parented: windowService.parentedWindowIDList = [62652]
+        case .disqualified: windowService.disqualifiedWindowIDList = [62652]
+        }
+
+        var spaceManager = SpaceManager()
+        let spaceID = spaceManager.activeSpaceID
+        for windowID in [CGWindowID(62650), CGWindowID(62652)] {
+            spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "company.thebrowser.dia",
+                    ownerName: "Dia",
+                    windowTitle: "",
+                    ownerPID: 40694
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        let discovery = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        for _ in 0..<2 {
+            discovery.reconcileWindows(&spaceManager)
+            #expect(spaceManager.activeSpace.windows.map(\.windowID) == [62650])
+            #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [62652])
+        }
     }
 
     // A window admitted while its desktop was hidden can only be contradicted once that
