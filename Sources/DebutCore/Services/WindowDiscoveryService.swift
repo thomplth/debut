@@ -65,6 +65,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     public var retiredWindowIDs: Set<CGWindowID> { Set(retiredWindowOwners.keys) }
 
+    /// The tombstone as a question, for the admission paths that never take a discovery snapshot
+    /// and so cannot be covered by `excludingRetired`.
+    public func isRetired(windowID: CGWindowID, ownerPID: pid_t) -> Bool {
+        retiredWindowOwners[windowID]?.ownerPID == ownerPID
+    }
+
     /// The tombstones worth carrying to the next launch. The leaked surface outlives Debut, not
     /// just the window, so a verdict scoped to one run lets the startup reconcile bind the dead
     /// surface to a dormant assignment and the ghost returns on every launch.
