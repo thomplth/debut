@@ -120,6 +120,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
 private final class SpaceMutationDelegate: SpaceControllerDelegate {
     private(set) var mutationCount = 0
     private(set) var admittedWindows: [(windowID: CGWindowID, ownerPID: pid_t)] = []
+    var retiredWindows: [CGWindowID: pid_t] = [:]
 
     func spaceControllerDidOpenOverlay(_ controller: SpaceController) {}
     func spaceControllerDidCloseOverlay(_ controller: SpaceController) {}
@@ -132,6 +133,14 @@ private final class SpaceMutationDelegate: SpaceControllerDelegate {
         ownerPID: pid_t
     ) {
         admittedWindows.append((windowID, ownerPID))
+    }
+
+    func spaceController(
+        _ controller: SpaceController,
+        isWindowRetired windowID: CGWindowID,
+        ownerPID: pid_t
+    ) -> Bool {
+        retiredWindows[windowID] == ownerPID
     }
 }
 
@@ -362,6 +371,48 @@ struct SpaceControllerSpaceTests {
 
         #expect(delegate.admittedWindows.map(\.windowID) == [7])
         #expect(delegate.admittedWindows.map(\.ownerPID) == [42])
+    }
+
+    // Discovery funnels its own snapshots through `excludingRetired`, but this path reads
+    // `listWindows()` raw, and CG keeps a destroyed window's surface listed for the life of its
+    // process. A stale focus report for the window that just died then walks back in as a new
+    // assignment, which is the ghost card the user sees appear and vanish.
+    @Test("A window a destroy notification already retired is refused at activation")
+    func retiredWindowIsRefusedAtActivation() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, windowService) = makeController(spaces: spaces)
+        let delegate = SpaceMutationDelegate()
+        delegate.retiredWindows = [7: 42]
+        controller.delegate = delegate
+        windowService.windowList = [
+            WindowInfo(windowID: 7, ownerBundleID: "com.a", ownerName: "A", ownerPID: 42,
+                       title: "W", bounds: .zero, isOnScreen: true)
+        ]
+
+        controller.recordWindowActivation(windowID: 7)
+
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 7) == nil)
+        #expect(delegate.admittedWindows.isEmpty)
+    }
+
+    // The window server reissues IDs, so a tombstone speaks only for the process that owned the
+    // window it buried. Honouring it against a different owner would refuse a live window.
+    @Test("A recycled window ID under a different process does not inherit the tombstone")
+    func recycledWindowIDIsNotRefused() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, windowService) = makeController(spaces: spaces)
+        let delegate = SpaceMutationDelegate()
+        delegate.retiredWindows = [7: 42]
+        controller.delegate = delegate
+        windowService.windowList = [
+            WindowInfo(windowID: 7, ownerBundleID: "com.a", ownerName: "A", ownerPID: 99,
+                       title: "W", bounds: .zero, isOnScreen: true)
+        ]
+
+        controller.recordWindowActivation(windowID: 7)
+
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 7) != nil)
+        #expect(delegate.admittedWindows.map(\.ownerPID) == [99])
     }
 
     // A window that reassigns between spaces was already discovered and armed, so handing it
