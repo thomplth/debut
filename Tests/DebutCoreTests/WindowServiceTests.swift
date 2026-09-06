@@ -405,8 +405,8 @@ struct WindowServiceTests {
         let uniform = try #require(makeImage(bytes: [127, 127]))
         let varied = try #require(makeImage(bytes: [0, 255]))
 
-        #expect(!WindowImageStatistics.hasVariedLuminance(uniform))
-        #expect(WindowImageStatistics.hasVariedLuminance(varied))
+        #expect(!WindowImageStatistics.holdsContent(uniform))
+        #expect(WindowImageStatistics.holdsContent(varied))
     }
 
     /// A terminal sitting at a prompt puts content on well under 1% of its pixels. Validation
@@ -425,7 +425,7 @@ struct WindowServiceTests {
             inkRows: 2
         ))
 
-        #expect(WindowImageStatistics.hasVariedLuminance(sparse))
+        #expect(WindowImageStatistics.holdsContent(sparse))
     }
 
     @Test("A capture with no content at all is still rejected", arguments: [UInt8(0), 127, 255])
@@ -438,7 +438,89 @@ struct WindowServiceTests {
             inkRows: 0
         ))
 
-        #expect(!WindowImageStatistics.hasVariedLuminance(flat))
+        #expect(!WindowImageStatistics.holdsContent(flat))
+    }
+
+    /// The fixtures above are opaque and square; a window capture is neither, because the
+    /// window's rounded corners are transparent in the source.
+    ///
+    /// This is the worst case rather than the common one: at the 16x16 analysis grid a real
+    /// capture averages the corner away almost entirely (21 live windows all reported minimum
+    /// alpha 249-255). The fixture is kept sharp deliberately, so the predicate is held to the
+    /// hardest version of the case rather than the one that happens to be easy.
+    @Test(
+        "A blank capture is rejected despite its rounded corners",
+        arguments: [UInt8(0), 127, 255]
+    )
+    func flatRoundedCaptureIsRejected(value: UInt8) throws {
+        let flat = try #require(makeWindowCaptureImage(
+            width: 356,
+            height: 640,
+            cornerRadius: 12,
+            background: value,
+            ink: value,
+            inkRows: 0
+        ))
+
+        #expect(!WindowImageStatistics.holdsContent(flat))
+    }
+
+    /// The other half of the same fixture: rejecting every rounded capture would be just as
+    /// wrong, so real content behind the same corners must still be accepted.
+    @Test(
+        "Rounded corners do not cause real content to be rejected",
+        arguments: [
+            (background: UInt8(255), ink: UInt8(0)),
+            (background: UInt8(0), ink: UInt8(255)),
+        ]
+    )
+    func roundedCaptureWithContentIsAccepted(background: UInt8, ink: UInt8) throws {
+        let sparse = try #require(makeWindowCaptureImage(
+            width: 356,
+            height: 640,
+            cornerRadius: 12,
+            background: background,
+            ink: ink,
+            inkRows: 2
+        ))
+
+        #expect(WindowImageStatistics.holdsContent(sparse))
+    }
+
+    /// The case this predicate exists for, taken from a real dumped capture. Notion's windows
+    /// come back as a blank page carrying nothing but the traffic lights in one corner, and
+    /// those three dots are enough to put the luminance *range* at 15 and 24 — above a real
+    /// terminal at a prompt, which measured 35 with content spread over the whole frame. Range
+    /// therefore cannot separate the two classes at all, whatever it is thresholded at.
+    ///
+    /// What separates them is where the variance sits: a blank window varies in one corner, and
+    /// a window with content varies across many cells of the grid.
+    @Test("A blank capture carrying only traffic lights is rejected", arguments: [UInt8(255), 0])
+    func trafficLightOnlyCaptureIsRejected(background: UInt8) throws {
+        let blank = try #require(makeTrafficLightCaptureImage(
+            width: 356,
+            height: 640,
+            cornerRadius: 12,
+            background: background,
+            inkRows: 0
+        ))
+
+        #expect(!WindowImageStatistics.holdsContent(blank))
+    }
+
+    /// The same window once it has painted something: the traffic lights are still there, so
+    /// this differs from the fixture above only in the content the predicate is meant to see.
+    @Test("Content alongside traffic lights is accepted", arguments: [UInt8(255), 0])
+    func trafficLightCaptureWithContentIsAccepted(background: UInt8) throws {
+        let content = try #require(makeTrafficLightCaptureImage(
+            width: 356,
+            height: 640,
+            cornerRadius: 12,
+            background: background,
+            inkRows: 2
+        ))
+
+        #expect(WindowImageStatistics.holdsContent(content))
     }
 
     @Test("List running apps")
@@ -635,6 +717,98 @@ private func makeSparseContentImage(
         shouldInterpolate: false,
         intent: .defaultIntent
     )
+}
+
+/// What a ScreenCaptureKit window capture actually looks like: premultiplied BGRA whose corners
+/// are transparent, because the window's own corner mask is part of the captured content.
+/// `makeSparseContentImage` above is opaque grayscale, so it cannot exercise the corner case that
+/// let blank captures through.
+private func makeWindowCaptureImage(
+    width: Int,
+    height: Int,
+    cornerRadius: CGFloat,
+    background: UInt8,
+    ink: UInt8,
+    inkRows: Int
+) -> CGImage? {
+    guard let context = CGContext(
+        data: nil,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return nil }
+
+    context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+    context.addPath(CGPath(
+        roundedRect: CGRect(x: 0, y: 0, width: width, height: height),
+        cornerWidth: cornerRadius,
+        cornerHeight: cornerRadius,
+        transform: nil
+    ))
+    context.clip()
+
+    let level = { (value: UInt8) in CGFloat(value) / 255 }
+    context.setFillColor(gray: level(background), alpha: 1)
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+    context.setFillColor(gray: level(ink), alpha: 1)
+    for row in 0..<inkRows {
+        let top = 8 + row * 20
+        for x in stride(from: 10, to: min(300, width), by: 9) {
+            context.fill(CGRect(x: x, y: top, width: 4, height: 11))
+        }
+    }
+    return context.makeImage()
+}
+
+/// A window capture whose only guaranteed content is the traffic lights: three coloured dots in
+/// the top-left corner, present whether or not the app has painted anything behind them.
+private func makeTrafficLightCaptureImage(
+    width: Int,
+    height: Int,
+    cornerRadius: CGFloat,
+    background: UInt8,
+    inkRows: Int
+) -> CGImage? {
+    guard let context = CGContext(
+        data: nil,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return nil }
+
+    context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+    context.addPath(CGPath(
+        roundedRect: CGRect(x: 0, y: 0, width: width, height: height),
+        cornerWidth: cornerRadius,
+        cornerHeight: cornerRadius,
+        transform: nil
+    ))
+    context.clip()
+
+    context.setFillColor(gray: CGFloat(background) / 255, alpha: 1)
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+    let lights: [(CGFloat, CGFloat, CGFloat)] = [(1, 0.35, 0.33), (1, 0.74, 0.18), (0.16, 0.79, 0.25)]
+    for (index, light) in lights.enumerated() {
+        context.setFillColor(red: light.0, green: light.1, blue: light.2, alpha: 1)
+        context.fillEllipse(in: CGRect(x: 14 + index * 20, y: height - 24, width: 12, height: 12))
+    }
+
+    context.setFillColor(gray: background > 127 ? 0 : 1, alpha: 1)
+    for row in 0..<inkRows {
+        let top = height - 80 - row * 20
+        for x in stride(from: 10, to: min(300, width), by: 9) {
+            context.fill(CGRect(x: x, y: top, width: 4, height: 11))
+        }
+    }
+    return context.makeImage()
 }
 
 private final class CaptureCounter: @unchecked Sendable {
