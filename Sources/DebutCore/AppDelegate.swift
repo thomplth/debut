@@ -526,6 +526,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
     }
 
+    /// Answers on the caller's thread rather than hopping: the admission this gates has already
+    /// happened by the time an async reply could arrive. `recordWindowActivation` is only ever
+    /// reached from the main queue, which is what makes the assumption safe.
+    nonisolated public func spaceController(
+        _ controller: SpaceController,
+        isWindowRetired windowID: CGWindowID,
+        ownerPID: pid_t
+    ) -> Bool {
+        MainActor.assumeIsolated {
+            windowDiscovery?.isRetired(windowID: windowID, ownerPID: ownerPID) ?? false
+        }
+    }
+
     nonisolated public func spaceControllerDidOpenOverlay(_ controller: SpaceController) {
         spaceControllerDidOpenOverlay(controller, overlayPresentation: nil)
     }
