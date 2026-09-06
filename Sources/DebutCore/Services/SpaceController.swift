@@ -345,7 +345,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var preOverlaySpaceStackID: String?
     private var previousSpaceID: UUID?
     private var backtickCycleWindows: [CGWindowID] = []
-    private var backtickCycleIndex: Int = 0
+    private var backtickCycleSteppedAt: Date?
     private var overlayPresentationGeneration: UInt = 0
     private var isOverlayPresented: Bool = false
     private let focusedWindowSnapshotProvider: (() -> FocusedWindowSnapshot)?
@@ -778,7 +778,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         )
         let performanceID = PerformanceRecorder.shared.begin(.spaceSwitch, workload: workload)
         defer { PerformanceRecorder.shared.end(performanceID) }
-        commitBacktickCycle()
+        endBacktickCycle()
 
         let previousID = spaceManager.activeSpaceID
         var desktopIsSettling = false
@@ -972,11 +972,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             if isSpaceManagerVisible { handleLiveWindowsRemoved() }
         }
 
+        // A cycle step has already written its landing window to the MRU, so the app's own focus
+        // report answering that raise must not demote it — and for a same-app cycle that report
+        // regularly names the window the step moved away from. The suppression cannot outlive the
+        // cycle, though: a click on one of the same app's windows later is the user's own choice.
         if !backtickCycleWindows.isEmpty {
-            if backtickCycleWindows.contains(windowID) {
+            if backtickCycleWindows.contains(windowID),
+               let steppedAt = backtickCycleSteppedAt,
+               clock().timeIntervalSince(steppedAt) < Self.focusRequestFailsafe {
                 return
             }
-            commitBacktickCycle()
+            endBacktickCycle()
         }
 
         // A window cannot take focus on a desktop that is not showing, so the desktop is
@@ -1000,6 +1006,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         if ownerSpaceID == targetSpaceID {
             spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: targetSpaceID)
+            // The MRU head decides what every switch offers next, and this is the path that moves
+            // it most. Leaving it silent made a wrong order unreadable from a finished session:
+            // the log showed the command that ran and never the order it left behind.
+            diag.report("window_activation_recorded", details: [
+                "windowID": "\(windowID)",
+                "reported": "\(reportedWindowID)",
+                "space": spaceLabel(forID: targetSpaceID),
+                "order": windowOrderDescription(spaceID: targetSpaceID),
+            ])
             delegate?.spaceControllerDidMutateState(self)
             return
         }
@@ -1105,10 +1120,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
 
-        // Every other command reads the MRU the cycle has not written yet. Both shortcuts sit
-        // under Command, so reaching one of them without releasing it is ordinary use.
         if !Self.continuesBacktickCycle(event) {
-            commitBacktickCycle()
+            endBacktickCycle()
         }
 
         switch event {
@@ -1208,7 +1221,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         guard !isStageStackCommitInFlight,
               spaceManager.spaces.indices.contains(index) else { return }
 
-        commitBacktickCycle()
+        endBacktickCycle()
 
         // Space window order is MRU. Capture the active app before switching,
         // then prefer that app's most-recent window in the destination space.
@@ -1250,26 +1263,41 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         let windowIDs = sameAppWindows.map(\.windowID)
 
-        if backtickCycleWindows != windowIDs {
+        // The walk order is frozen for as long as the cycle covers the same windows. Each step
+        // writes its landing window to the MRU, so re-deriving the order from the MRU would make
+        // the cycle bounce between the two most recent windows instead of visiting the rest.
+        if Set(backtickCycleWindows) != Set(windowIDs) {
             backtickCycleWindows = windowIDs
-            backtickCycleIndex = 0
         }
 
+        // The step is taken from the window in front rather than a remembered index, so a cycle
+        // and the screen cannot drift apart however the cycle ends.
+        let position = backtickCycleWindows.firstIndex(of: frontWindow.windowID) ?? 0
+        let count = backtickCycleWindows.count
+        let destination: Int
         if reverse {
-            backtickCycleIndex = wraps
-                ? (backtickCycleIndex - 1 + backtickCycleWindows.count) % backtickCycleWindows.count
-                : max(0, backtickCycleIndex - 1)
+            destination = wraps ? (position - 1 + count) % count : max(0, position - 1)
         } else {
-            backtickCycleIndex = wraps
-                ? (backtickCycleIndex + 1) % backtickCycleWindows.count
-                : min(backtickCycleWindows.count - 1, backtickCycleIndex + 1)
+            destination = wraps ? (position + 1) % count : min(count - 1, position + 1)
         }
 
-        let targetID = backtickCycleWindows[backtickCycleIndex]
+        let targetID = backtickCycleWindows[destination]
+        backtickCycleSteppedAt = clock()
         if let targetWindow = sameAppWindows.first(where: { $0.windowID == targetID }) {
             activateOwner(of: targetWindow, raising: targetID)
         }
         _ = windowService.raiseWindow(windowID: targetID)
+
+        spaceManager.bringWindowToFront(windowID: targetID, inSpaceID: spaceManager.activeSpaceID)
+        // Nothing else reports this activation, so without it an MRU head the user moved by
+        // Command-backtick leaves no trace and a wrong order has to be reproduced live.
+        diag.report("same_app_cycle_stepped", details: [
+            "from": "\(frontWindow.windowID)",
+            "to": "\(targetID)",
+            "cycle": backtickCycleWindows.map(String.init).joined(separator: ","),
+            "space": spaceLabel(forID: spaceManager.activeSpaceID),
+        ])
+        delegate?.spaceControllerDidMutateState(self)
     }
 
     private static func continuesBacktickCycle(_ event: DebutKeyEvent) -> Bool {
@@ -1281,28 +1309,18 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
-    /// Writes the cycle's landing window to the MRU. A cycle in progress is an activation the
-    /// model has not been told about yet, so this must run before anything else reads or moves
-    /// the MRU — and nothing may drop the cycle instead. Discarding it left the order the user
-    /// had just cycled away from in place, and the next command then acted on that stale head:
-    /// Command-Tab under the still-held Command offered the second window of the old order.
-    private func commitBacktickCycle() {
-        guard !backtickCycleWindows.isEmpty else { return }
-        let finalWindowID = backtickCycleWindows[backtickCycleIndex]
-        spaceManager.bringWindowToFront(
-            windowID: finalWindowID,
-            inSpaceID: spaceManager.activeSpaceID
-        )
+    private func windowOrderDescription(spaceID: UUID) -> String {
+        guard let space = spaceManager.allSpaces.first(where: { $0.id == spaceID }) else {
+            return ""
+        }
+        return space.windows.map { "\($0.windowID)" }.joined(separator: ",")
+    }
+
+    /// Releases the frozen walk order. The MRU is already written, so ending a cycle costs
+    /// nothing and cannot be missed — only the order a further step would have walked is lost.
+    private func endBacktickCycle() {
         backtickCycleWindows = []
-        backtickCycleIndex = 0
-        // The cycle's activation is reported by nothing else, so without this an MRU head the
-        // user moved by Command-backtick leaves no trace and a wrong order cannot be read back
-        // from a session afterwards — it has to be reproduced live.
-        diag.report("same_app_cycle_committed", details: [
-            "windowID": "\(finalWindowID)",
-            "space": spaceLabel(forID: spaceManager.activeSpaceID),
-        ])
-        delegate?.spaceControllerDidMutateState(self)
+        backtickCycleSteppedAt = nil
     }
 
     private func handleCmdTabTap() {
@@ -1461,7 +1479,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             overlayPresentationRecorder.mark(.controllerAccepted, for: presentation)
         }
 
-        commitBacktickCycle()
+        endBacktickCycle()
         stageStackTransaction.discard()
 
         // Removing an inactive desktop need not change the Space currently showing, so there
