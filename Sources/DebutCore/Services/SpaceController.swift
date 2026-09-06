@@ -1710,18 +1710,29 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 metrics.recordCapture(windowID: capture.windowID)
                 // Luminance analysis draws the capture through Core Graphics. Doing it here
                 // rather than in the main-queue hop keeps the render path free.
-                let hasVariedLuminance = WindowImageStatistics.hasVariedLuminance(capture.image)
+                let holdsContent = WindowImageStatistics.holdsContent(capture.image)
                 // A non-nil image is not proof that ScreenCaptureKit returned window content.
                 // Keep the last good bitmap and its original timestamp when validation fails,
                 // so an expired entry remains visible and eligible for another refresh.
-                guard hasVariedLuminance else {
+                //
+                // alt-tab-macos rejects a bad capture the same way but gives up after three
+                // retries, on the grounds that "a tile stuck forever on a stale thumbnail would
+                // be worse than one that is briefly off" (`WindowThumbnails.acceptCapture`).
+                // That holds for what they reject — a mid-restore-animation frame, which is
+                // transient by construction and gone within ~0.6s. Debut's bad capture is a
+                // window whose renderer has stopped producing frames because it is occluded or
+                // on another desktop, which persists for as long as the user leaves it there, so
+                // accepting after N retries would put the blank plate back. Keeping the stale
+                // timestamp instead retries on every overlay open, unbounded, and resolves
+                // itself the moment the window is on screen again.
+                guard holdsContent else {
                     // Durable: discarding a capture the window server did return is the one
                     // outcome no other event records, so an unreported drop is unfalsifiable
                     // afterwards. A silent one hid every sparse window being thrown away
                     // behind a `preview_capture_completed` that looked like a clean run.
                     DiagnosticReporter.shared.report("preview_capture_discarded", details: [
                         "height": "\(capture.image.height)",
-                        "reason": "uniform_luminance",
+                        "reason": "no_content",
                         "width": "\(capture.image.width)",
                         "windowID": "\(capture.windowID)",
                     ])

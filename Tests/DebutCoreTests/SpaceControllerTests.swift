@@ -345,14 +345,26 @@ struct SpaceControllerTests {
         return ctx.makeImage()!
     }
 
-    private func makeUniformTestImage() -> CGImage {
+    /// A blank capture shaped like one ScreenCaptureKit actually returns: window-sized, and
+    /// rounded, so its corners are transparent. An opaque 2x1 swatch stood in for this before and
+    /// let the real case through — corners give a bare `max > min` a second luminance, so a blank
+    /// Electron window read as content and overwrote the good preview.
+    private func makeBlankWindowCaptureImage() -> CGImage {
+        let width = 356
+        let height = 640
         let ctx = CGContext(
-            data: nil, width: 2, height: 1, bitsPerComponent: 8, bytesPerRow: 8,
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         )!
+        ctx.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        ctx.addPath(CGPath(
+            roundedRect: CGRect(x: 0, y: 0, width: width, height: height),
+            cornerWidth: 12, cornerHeight: 12, transform: nil
+        ))
+        ctx.clip()
         ctx.setFillColor(CGColor(gray: 0.5, alpha: 1))
-        ctx.fill(CGRect(x: 0, y: 0, width: 2, height: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
         return ctx.makeImage()!
     }
 
@@ -738,7 +750,7 @@ struct SpaceControllerTests {
         let preview = controller.windowPreviews[101]
         #expect(preview != nil)
         if let preview {
-            #expect(WindowImageStatistics.hasVariedLuminance(preview))
+            #expect(WindowImageStatistics.holdsContent(preview))
         }
     }
 
@@ -987,7 +999,7 @@ struct SpaceControllerTests {
         keyboardSvc.simulateEvent(.escape)
 
         clock.advance(by: 61)
-        windowSvc.capturedImages = [101: makeTestImage(), 202: makeUniformTestImage()]
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeBlankWindowCaptureImage()]
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(waitUntil { windowSvc.captureRequests.count == 2 })
