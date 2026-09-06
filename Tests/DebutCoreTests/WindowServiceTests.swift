@@ -102,43 +102,20 @@ struct WindowServiceTests {
     // an AX-unknown window instead falls back to this CG-only heuristic.
     @Test("An AX-unknown window is plausible only when every CG signal agrees")
     func classifiesPlausibleUntrackedWindows() {
-        let bounds = CGRect(x: 0, y: 0, width: 200, height: 200)
         #expect(AccessibilityWindowService.isPlausibleUntrackedWindow(
-            layer: 0, isRegularApp: true, bounds: bounds, hasResolvedDesktop: true
+            layer: 0, isRegularApp: true, hasResolvedDesktop: true
         ))
         #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
-            layer: 3, isRegularApp: true, bounds: bounds, hasResolvedDesktop: true
+            layer: 3, isRegularApp: true, hasResolvedDesktop: true
         ))
         #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
-            layer: nil, isRegularApp: true, bounds: bounds, hasResolvedDesktop: true
+            layer: nil, isRegularApp: true, hasResolvedDesktop: true
         ))
         #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
-            layer: 0, isRegularApp: false, bounds: bounds, hasResolvedDesktop: true
+            layer: 0, isRegularApp: false, hasResolvedDesktop: true
         ))
         #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
-            layer: 0, isRegularApp: true, bounds: bounds, hasResolvedDesktop: false
-        ))
-        #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
-            layer: 0, isRegularApp: true,
-            bounds: CGRect(x: 0, y: 0, width: 10, height: 10), hasResolvedDesktop: true
-        ))
-    }
-
-    // A sheet or popup keeps a layer-0 backing surface with a resolved desktop long after it is
-    // dismissed, so every other CG signal agrees it is a window. The window server does not: it
-    // records the surface as attached to the window it was raised over. Measured 2026-09-04
-    // across 287 windows, 7 carried a parent and every one of them was a sheet or popup —
-    // System Settings' dismissed sheet chain 62511/62513/62516 and Dia's 424x200 popup 62652.
-    @Test("A window the window server parents to another window is never plausible")
-    func parentedWindowsAreNotPlausible() {
-        let bounds = CGRect(x: 0, y: 0, width: 480, height: 531)
-        #expect(AccessibilityWindowService.isPlausibleUntrackedWindow(
-            layer: 0, isRegularApp: true, bounds: bounds,
-            hasResolvedDesktop: true, hasParentWindow: false
-        ))
-        #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
-            layer: 0, isRegularApp: true, bounds: bounds,
-            hasResolvedDesktop: true, hasParentWindow: true
+            layer: 0, isRegularApp: true, hasResolvedDesktop: false
         ))
     }
 
@@ -187,6 +164,38 @@ struct WindowServiceTests {
         ))
     }
 
+    // Admission used to consult size and parentage only for a window Accessibility could not
+    // classify, while eviction parked any assigned window on those same two verdicts. A window
+    // AX called trackable was therefore parked and re-admitted from the same snapshot on every
+    // pass: CrossOver window 44254 was parked `disqualified` at 2026-09-02T14:16:55Z and parked
+    // again at 14:23:06Z, which it could only be after being let back in.
+    //
+    // Parentage is the sharper of the two. A dismissed sheet or popup keeps a layer-0 backing
+    // surface with a resolved desktop, so every other CG signal agrees it is a window; only the
+    // window server disagrees, recording the surface as attached to the window it was raised
+    // over. Measured 2026-09-04 across 287 windows, 7 carried a parent and every one was a sheet
+    // or popup — System Settings' dismissed chain 62511/62513/62516 and Dia's 424x200 popup 62652.
+    @Test("An eviction verdict refuses a window whatever Accessibility calls it")
+    func evictionVerdictsRefuseRegardlessOfAXClassification() {
+        #expect(AccessibilityWindowService.evictionVerdictRefusesWindow(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 480, height: 531), hasParentWindow: true
+        ))
+        #expect(AccessibilityWindowService.evictionVerdictRefusesWindow(
+            layer: 3, bounds: CGRect(x: 0, y: 0, width: 84, height: 77), hasParentWindow: false
+        ))
+        #expect(AccessibilityWindowService.evictionVerdictRefusesWindow(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 10, height: 10), hasParentWindow: false
+        ))
+        #expect(!AccessibilityWindowService.evictionVerdictRefusesWindow(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440), hasParentWindow: false
+        ))
+        // Admission may refuse on ambiguous evidence, but this predicate carries an eviction
+        // verdict, so it must stay silent where eviction is: a missing layer is not a verdict.
+        #expect(!AccessibilityWindowService.evictionVerdictRefusesWindow(
+            layer: nil, bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440), hasParentWindow: false
+        ))
+    }
+
     // The two predicates deliberately disagree here, and that gap is the whole design: a
     // fullscreen or all-Spaces window resolves to no single desktop, so it is not plausible
     // enough to admit, yet nothing about it says it is not a window.
@@ -194,7 +203,7 @@ struct WindowServiceTests {
     func unresolvedDesktopIsNotADisqualification() {
         let bounds = CGRect(x: 0, y: 0, width: 2338, height: 1440)
         #expect(!AccessibilityWindowService.isPlausibleUntrackedWindow(
-            layer: 0, isRegularApp: true, bounds: bounds, hasResolvedDesktop: false
+            layer: 0, isRegularApp: true, hasResolvedDesktop: false
         ))
         #expect(!AccessibilityWindowService.isDisqualifiedWindow(layer: 0, bounds: bounds))
     }
