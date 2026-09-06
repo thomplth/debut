@@ -770,6 +770,51 @@ struct WindowDiscoveryServiceTests {
         #expect(summary["parked"] == "1")
     }
 
+    // `liveCount` counts the snapshot, not what reconciliation acted on, so once a verdict can
+    // hold a window out of the reconciler the two diverge and nothing records by how much. The
+    // refusal is the whole fix and it is invisible in the log without this — which is how the
+    // park/re-admit loop it replaces stayed legible only as a window parked twice.
+    @Test("The summary reports how many live windows a verdict refused")
+    func refusedWindowsAreCounted() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DebutDiscoveryDiag-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 40694, isHidden: false),
+        ]
+        windowService.windowList = [CGWindowID(62650), CGWindowID(62652)].map { windowID in
+            WindowInfo(
+                windowID: windowID,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                ownerPID: 40694,
+                title: "Leisure",
+                bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440),
+                isOnScreen: true
+            )
+        }
+        windowService.parentedWindowIDList = [62652]
+
+        var spaceManager = SpaceManager()
+        let reporter = DiagnosticReporter(directory: directory, redactor: DiagnosticRedactor(salt: "salt-a"))
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        ).reconcileWindows(&spaceManager)
+        reporter.flush()
+
+        let lines = try String(contentsOf: directory.appendingPathComponent("diagnostic.jsonl"), encoding: .utf8)
+            .split(separator: "\n")
+            .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: String] }
+        let summary = try #require(lines.first { $0["event"] == "windows_reconciled" })
+        #expect(summary["liveCount"] == "2")
+        #expect(summary["refused"] == "1")
+    }
+
     @Test("Empty window snapshot makes stopped-app assignments dormant")
     func emptySnapshotMakesStoppedWindowsDormant() {
         let windowService = MockWindowService()
