@@ -67,7 +67,41 @@ enum PreviewCaptureSize {
 }
 
 enum WindowImageStatistics {
-    static func hasVariedLuminance(_ image: CGImage, sampleSize: Int = 16) -> Bool {
+    /// A cell has to be this opaque to count as window content, so that a capture the window
+    /// painted nothing into cannot be read as a luminance.
+    ///
+    /// This threshold does far less than it looks like it should. A window's rounded corners are
+    /// transparent in the source, but at a 16x16 analysis grid each cell averages hundreds of
+    /// source pixels and the corner dilutes away: measured over 21 live windows, every one
+    /// reported minimum alpha 249-255 and 256 of 256 cells opaque (Pages alone, 252). The filter
+    /// therefore only separates the all-or-nothing case — a capture that came back wholly
+    /// transparent, which does occur (2 of 23 windows in that same sample).
+    private static let opaqueAlpha: UInt8 = 250
+
+    /// How far a cell must sit from the median before it counts as differing from the background.
+    /// Flat regions are not bit-exact once a capture has been through colour conversion and
+    /// area-averaging, so this clears a little noise rather than reading any difference at all.
+    private static let backgroundLuminanceDelta: UInt16 = 6
+
+    /// How much of the frame has to differ from the background before the capture counts as
+    /// holding content, as a fraction of the cells the window painted. A fraction rather than a
+    /// count because it is a claim about area: content covers some of the window, whereas a blank
+    /// one differs from its background only where its chrome is.
+    ///
+    /// Measured by dumping 25 live captures to disk and reading them against what the window
+    /// actually looked like (2026-09-06). Blank windows scored 0, 0, 0, 2 and 4 varied cells of
+    /// 256; the lowest genuine content scored 8, then 10, 64, 78 and up. 2% is 5.12 cells, near
+    /// the geometric middle of that gap.
+    private static let variedCellFraction = 0.02
+
+    /// Whether a capture holds content, rather than a background and nothing else.
+    ///
+    /// This deliberately does not measure the luminance range. Range cannot separate the two
+    /// classes at any threshold: the same 25 captures put blank Notion windows at range 15 and
+    /// 24, *above* a real terminal sitting at a prompt at 35 — three traffic lights in one corner
+    /// move the range as far as a screen of sparse text does. What differs is where the variance
+    /// sits, which is why this counts cells instead.
+    static func holdsContent(_ image: CGImage, sampleSize: Int = 16) -> Bool {
         let width = min(sampleSize, image.width)
         let height = min(sampleSize, image.height)
         guard width > 0, height > 0 else { return false }
@@ -90,20 +124,46 @@ enum WindowImageStatistics {
             // pixels of a capture that holds hundreds of thousands, and a terminal at a prompt
             // puts content on ~0.3% of them: the samples landed on content less than once on
             // average, and real windows were discarded as failed captures on a coin flip.
-            context.interpolationQuality = .high
+            //
+            // `.medium` rather than `.high`: high-quality resampling overshoots across a
+            // transparent-to-opaque step, and the ringing lands on cells that are themselves
+            // fully opaque, so no alpha test can exclude it. That step is sharp in a synthetic
+            // fixture and largely averaged away in a real capture, so this matters less in
+            // practice than the table suggests — it is kept because `.high` can only ever spread
+            // a difference into cells that hold none. Measured over a blank 356x640 with a 12pt
+            // radius — luminance range across opaque cells, and the same measure for a window
+            // carrying two sparse rows of text:
+            //
+            //     quality   blank(0)  blank(127)  blank(255)  sparse
+            //     .high            0          12           6     108
+            //     .medium          0           0           0     213
+            //     .low             0           0           0       0
+            //     .none            0           0           0       0
+            //
+            // `.high` cannot separate a blank grey window from content; `.low` and `.none` fall
+            // back to point sampling and cannot see the text at all. Only `.medium` does both.
+            context.interpolationQuality = .medium
             context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
 
             let bytes = buffer.bindMemory(to: UInt8.self)
-            var minimum = UInt16.max
-            var maximum = UInt16.min
+            var luminances: [UInt16] = []
+            luminances.reserveCapacity(width * height)
             for pixel in stride(from: 0, to: bytes.count, by: 4) {
-                let luminance = UInt16(bytes[pixel])
-                    + UInt16(bytes[pixel + 1])
-                    + UInt16(bytes[pixel + 2])
-                minimum = min(minimum, luminance)
-                maximum = max(maximum, luminance)
+                guard bytes[pixel + 3] >= opaqueAlpha else { continue }
+                luminances.append(
+                    UInt16(bytes[pixel]) + UInt16(bytes[pixel + 1]) + UInt16(bytes[pixel + 2])
+                )
             }
-            return maximum > minimum
+            // A capture the window painted nothing into is as empty as a flat one.
+            guard !luminances.isEmpty else { return false }
+
+            // The median, not the mean: the background is whatever most of the frame is, and a
+            // mean is pulled toward the very content being looked for.
+            let background = luminances.sorted()[luminances.count / 2]
+            let varied = luminances.count {
+                (background > $0 ? background - $0 : $0 - background) > backgroundLuminanceDelta
+            }
+            return Double(varied) > Double(luminances.count) * variedCellFraction
         }
     }
 }
