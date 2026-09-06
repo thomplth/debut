@@ -169,6 +169,15 @@ public protocol SpaceControllerDelegate: AnyObject {
         didAdmitWindow windowID: CGWindowID,
         ownerPID: pid_t
     )
+    /// Whether a destroy notification already retired this window. Discovery honours its own
+    /// tombstones on every snapshot it takes, but the focus path admits from a raw window list,
+    /// so without asking here the verdict that evicted the window never reaches the one path
+    /// that can let it back in.
+    func spaceController(
+        _ controller: SpaceController,
+        isWindowRetired windowID: CGWindowID,
+        ownerPID: pid_t
+    ) -> Bool
 }
 
 public extension SpaceControllerDelegate {
@@ -191,6 +200,12 @@ public extension SpaceControllerDelegate {
         didAdmitWindow windowID: CGWindowID,
         ownerPID: pid_t
     ) {}
+
+    func spaceController(
+        _ controller: SpaceController,
+        isWindowRetired windowID: CGWindowID,
+        ownerPID: pid_t
+    ) -> Bool { false }
 }
 
 public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
@@ -1034,6 +1049,21 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             spaceManager.addWindow(window, toSpaceID: targetSpaceID)
         } else if let info = windowService.listWindows().first(where: { $0.windowID == windowID }),
                   !excludedBundleIDs.contains(info.ownerBundleID) {
+            // A destroy notification is the strongest evidence Debut ever gets, and CG keeps the
+            // dead window's surface listed for the rest of its process's life, so a focus report
+            // naming it arrives with the raw list still agreeing. Admitting on that agreement
+            // resurrects the window as a fresh assignment, which only the opportunistic
+            // `vanished` sweep can undo — the card appears, then disappears seconds later.
+            if delegate?.spaceController(self, isWindowRetired: windowID, ownerPID: info.ownerPID)
+                == true {
+                diag.report("window_activation_ignored", details: [
+                    "reason": "retired",
+                    "windowID": "\(windowID)",
+                    "bundleID": info.ownerBundleID,
+                    "ownerPID": "\(info.ownerPID)",
+                ])
+                return
+            }
             // Genuinely new — "code ." opening a window while the app's other windows sit
             // on another desktop. Discovery filters its own snapshots, but this list is raw:
             // activation is the one admission path that has to ask the question itself.
