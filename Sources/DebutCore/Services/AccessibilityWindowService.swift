@@ -269,14 +269,22 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                 height: boundsDict["Height"] ?? 0
             )
 
+            // Ahead of the AX branch, because these are the verdicts eviction acts on and an
+            // AX-trackable window is no more exempt from them than an AX-unknown one. Refusing
+            // them only in the branch below let a parented or degenerate window AX happened to
+            // classify be parked and re-admitted from the same snapshot on every pass.
+            guard !Self.evictionVerdictRefusesWindow(
+                layer: dict[kCGWindowLayer] as? Int,
+                bounds: bounds,
+                hasParentWindow: parentedWindowIDs.contains(windowID)
+            ) else { return nil }
+
             if !classification.trackable.contains(windowID) {
                 let windowDesktop = windowDesktops[windowID]
                 guard Self.isPlausibleUntrackedWindow(
                     layer: dict[kCGWindowLayer] as? Int,
                     isRegularApp: regularPIDs.contains(ownerPID),
-                    bounds: bounds,
-                    hasResolvedDesktop: windowDesktop != nil,
-                    hasParentWindow: parentedWindowIDs.contains(windowID)
+                    hasResolvedDesktop: windowDesktop != nil
                 ) else { return nil }
                 if Self.accessibilityContradictsWindow(
                     isNamedByAX: axNamedWindowIDs.contains(windowID),
@@ -316,27 +324,39 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         }
     }
 
+    /// Whether a verdict that would park an assigned window also refuses an unassigned one.
+    ///
+    /// Both signals here are volunteered by the window server about the surface itself, so
+    /// neither depends on Accessibility having classified the window — which is why this applies
+    /// to every window rather than only to the ones AX leaves unknown. Admission consulting a
+    /// narrower rule than eviction is not a conservative asymmetry, it is a loop: the park
+    /// creates a dormant assignment carrying the same window ID, PID and bundle, which is the
+    /// strongest recovery match the reconciler has, so the window returns on the same pass and
+    /// is parked again on the next. CrossOver window 44254 was parked `disqualified` at
+    /// 2026-09-02T14:16:55Z and parked again at 14:23:06Z.
+    static func evictionVerdictRefusesWindow(
+        layer: Int?,
+        bounds: CGRect,
+        hasParentWindow: Bool
+    ) -> Bool {
+        hasParentWindow || isDisqualifiedWindow(layer: layer, bounds: bounds)
+    }
+
     /// Whether a window AX has not classified either way still looks like a standard window,
     /// judged purely from Core Graphics signals: on the normal window layer, owned by a regular
-    /// (non-background) app, large enough to plausibly be user-facing, and resolvable to
-    /// exactly one desktop rather than absent from the window server's Space bookkeeping.
+    /// (non-background) app, and resolvable to exactly one desktop rather than absent from the
+    /// window server's Space bookkeeping.
     ///
-    /// Parentage is the only one of these a dismissed sheet or popup fails. Such a surface keeps
-    /// its layer, size and desktop for as long as its app runs, so every other signal agrees it
-    /// is a window and it is admitted as a duplicate card beside the window it was raised over.
+    /// Size and parentage are deliberately not repeated here — they are eviction verdicts, so
+    /// `evictionVerdictRefusesWindow` has already refused on them for every window rather than
+    /// only the AX-unknown ones. Layer stays because the two disagree about an absent one: no
+    /// layer at all is missing evidence, which may refuse admission but must never evict.
     static func isPlausibleUntrackedWindow(
         layer: Int?,
         isRegularApp: Bool,
-        bounds: CGRect,
-        hasResolvedDesktop: Bool,
-        hasParentWindow: Bool = false
+        hasResolvedDesktop: Bool
     ) -> Bool {
-        layer == 0
-            && isRegularApp
-            && hasResolvedDesktop
-            && !hasParentWindow
-            && bounds.width >= minimumPlausibleWindowDimension
-            && bounds.height >= minimumPlausibleWindowDimension
+        layer == 0 && isRegularApp && hasResolvedDesktop
     }
 
     /// Whether Accessibility's silence about a window is a verdict rather than a blind spot.

@@ -310,6 +310,21 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             spaceManager.removeAllWindows(forBundleID: bundleID)
         }
 
+        // A verdict that parks an assigned window also refuses an unassigned one, and the same
+        // pass has to apply both readings or it disagrees with itself. Parking a window the pass
+        // still offers as live undoes the park, because the dormant assignment it creates carries
+        // the window's own ID, PID and bundle — the strongest recovery match the reconciler has —
+        // so the window is restored before the pass ends. Admitting one that carries a verdict but
+        // no assignment yet is the same loop a pass later: it enters as `new`, is parked next
+        // pass, and is admitted again on the one after. `listWindows` refuses these too, but it is
+        // a separate window-server query taken at a different instant — a sheet dismissed between
+        // the two calls is named by one and not the other — so the verdicts read here are what
+        // make this pass self-consistent.
+        let refusedWindowIDs = untrackableWindowIDs
+            .union(disqualifiedWindowIDs)
+            .union(axContradictedWindowIDs)
+            .union(parentedWindowIDs)
+
         var parkedDormantCount = 0
         for space in spaceManager.allSpaces {
             for windowID in space.windowIDs {
@@ -365,14 +380,19 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             _ = spaceManager.makeWindowsDormant(forOwnerPID: ownerPID)
         }
 
+        // Tracking still covers the parked windows: arming them is what lets a destroy
+        // notification retire one for good, and only what the reconciler is offered as live
+        // decides what gets an assignment.
+        let admittedWindows = liveWindows.filter { !refusedWindowIDs.contains($0.windowID) }
+
         let firstSpaceID = spaceManager.spaces[0].id
         var reconciler = RuntimeWindowReconciler()
         let result = reconciler.reconcile(
             RuntimeWindowSnapshot(
-                liveWindows: liveWindows,
+                liveWindows: admittedWindows,
                 allWindowIDs: windowService.listAllWindowIDs(),
-                desktopIndexes: desktopIndexes(for: liveWindows),
-                desktopLocations: desktopLocations(for: liveWindows),
+                desktopIndexes: desktopIndexes(for: admittedWindows),
+                desktopLocations: desktopLocations(for: admittedWindows),
                 skyLightWindowIDs: skyLightWindowIDs()
             ),
             spaceManager: &spaceManager,
@@ -384,6 +404,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         diag.report("windows_reconciled", details: [
             "liveCount": "\(liveWindows.count)",
+            "refused": "\(liveWindows.count - admittedWindows.count)",
             "added": "\(result.addedCount)",
             "reassigned": "\(result.reassignedCount)",
             "dormant": "\(spaceManager.dormantWindowAssignments.count)",
