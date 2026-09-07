@@ -377,6 +377,29 @@ struct WindowServiceTests {
         #expect(restored.refuses(windowID: 17776, owner: 89895))
     }
 
+    // `listWindows()` clears and prunes the registry on every call, so persisting on each
+    // mutation would write the file from the overlay-open path. Only a real change may be
+    // reported, and the registry is the only thing that can tell one from a no-op.
+    @Test("The registry reports only mutations that changed it")
+    func registryRevisionTracksRealChanges() {
+        var registry = AXContradictionRegistry()
+        let empty = registry.revision
+
+        registry.record(windowID: 17776, owner: 89895, bundleID: "com.google.Chrome")
+        let recorded = registry.revision
+        #expect(recorded != empty)
+
+        registry.record(windowID: 17776, owner: 89895, bundleID: "com.google.Chrome")
+        #expect(registry.revision == recorded)
+
+        registry.clear(windowIDs: [99999])
+        registry.retainOnly(owners: [89895])
+        #expect(registry.revision == recorded)
+
+        registry.clear(windowIDs: [17776])
+        #expect(registry.revision != recorded)
+    }
+
     @Test("A restored contradiction is discarded unless the same process still owns it")
     func restoredContradictionRequiresTheSameProcess() {
         var registry = AXContradictionRegistry()
