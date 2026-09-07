@@ -343,6 +343,97 @@ struct ScreenshotTests {
         #expect(vm.selectedWindowIndex == 2)
     }
 
+    /// Lit pixels in the thumbnail's top-left corner, where only the badge ever draws: the
+    /// placeholder icon sits in the middle of the plate and a preview fills it uniformly. The
+    /// badge's own top rows are transparent icon margin, so the sample starts inside its frame.
+    private func badgeCornerPixelCount(preview: CGImage?, name: String) throws -> Int {
+        let metrics = StageMetrics.standard
+        let cardSize = NSSize(
+            width: metrics.thumbnailWidth + metrics.titleWidthAllowance + metrics.cardPadding * 2,
+            height: metrics.thumbnailHeight + metrics.titleSpacing + metrics.titleHeight
+                + metrics.cardPadding * 2
+        )
+        let card = WindowPreviewView(
+            window: StageWindowData(
+                id: 100,
+                windowID: 100,
+                ownerBundleID: "com.apple.finder",
+                ownerName: "Finder",
+                windowTitle: "Downloads",
+                previewImage: preview
+            ),
+            isWindowSelected: false,
+            metrics: metrics,
+            appearance: AppSettings()
+        )
+        .frame(width: cardSize.width, height: cardSize.height, alignment: .topLeading)
+
+        guard let image = renderSwiftUI(card, size: cardSize),
+              let bitmap = normalizedBitmap(image, size: cardSize)
+        else { throw ScreenshotError.renderFailed }
+        try saveImage(image, name: name)
+
+        // The title is the widest thing in the card, so the plate sits centered under it.
+        let plateOrigin = CGPoint(
+            x: metrics.cardPadding + metrics.titleWidthAllowance / 2,
+            y: metrics.cardPadding
+        )
+        // Points to pixels at the fixed @2x of `normalizedBitmap`.
+        func pixel(_ point: CGPoint) -> (x: Int, y: Int) {
+            (Int((plateOrigin.x + point.x) * 2), Int((plateOrigin.y + point.y) * 2))
+        }
+        // Empty plate in every case: past the badge, short of the centered placeholder.
+        let referencePoint = pixel(CGPoint(x: metrics.thumbnailWidth - 12, y: 12))
+        let reference = bitmap.colorAt(x: referencePoint.x, y: referencePoint.y) ?? .black
+
+        let corner = pixel(CGPoint(x: 2, y: 2))
+        let cornerEnd = pixel(CGPoint(x: metrics.badgeSize - 8, y: metrics.badgeSize - 8))
+        var lit = 0
+        for x in corner.x..<cornerEnd.x {
+            for y in corner.y..<cornerEnd.y {
+                guard let pixel = bitmap.colorAt(x: x, y: y) else { continue }
+                let distance = max(
+                    abs(pixel.redComponent - reference.redComponent),
+                    abs(pixel.greenComponent - reference.greenComponent),
+                    abs(pixel.blueComponent - reference.blueComponent)
+                )
+                if distance > 0.02 { lit += 1 }
+            }
+        }
+        return lit
+    }
+
+    @Test("A card with no preview draws its app icon only as the centered placeholder")
+    func placeholderCardDropsTheCornerBadge() throws {
+        var preview: CGImage?
+        if let context = CGContext(
+            data: nil,
+            width: 160,
+            height: 100,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) {
+            context.setFillColor(CGColor(red: 1, green: 0, blue: 1, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: 160, height: 100))
+            preview = context.makeImage()
+        }
+        let captured = try #require(preview)
+
+        let withPreview = try badgeCornerPixelCount(
+            preview: captured,
+            name: "05_card_badge_with_preview"
+        )
+        let withoutPreview = try badgeCornerPixelCount(
+            preview: nil,
+            name: "05_card_badge_without_preview"
+        )
+
+        #expect(withPreview > 0)
+        #expect(withoutPreview == 0)
+    }
+
     @Test("Magnify remains available as a selection style")
     func magnifySelectionState() throws {
         var appearance = AppSettings()
