@@ -992,29 +992,29 @@ struct ScreenshotTests {
         try saveImage(image, name: "settings_\(section.rawValue)")
     }
 
-    @Test("Onboarding pages and permission states fit the window", arguments: ["welcome", "permission", "one-desktop", "practice", "previews", "speed", "ready", "small-speed"])
+    @Test("Onboarding pages and permission states fit the window", arguments: ["welcome", "permission", "one-desktop", "practice", "desktop-switch", "window-move", "previews", "previews-active", "previews-disabled", "speed", "ready", "small-speed"])
     func onboardingPages(_ state: String) throws {
         let smallScreen = state == "small-speed"
         let state = smallScreen ? "speed" : state
+        let page: OnboardingPage = switch state {
+        case "welcome": .welcome
+        case "previews", "previews-active", "previews-disabled": .previews
+        case "speed": .speed
+        case "ready": .ready
+        default: .workspace
+        }
         let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient(
-            accessibilityGranted: state != "permission", screenRecordingGranted: false))
-        if state != "welcome" { vm.advance() }
+            accessibilityGranted: state != "permission", screenRecordingGranted: state == "previews-active"),
+            checkpoint: .init(page: page, exercise: state == "desktop-switch" ? .switchDesktop : state == "window-move" ? .moveWindow : .switchWindow, workspacePracticed: page.rawValue > 1, allWindowsPracticed: page.rawValue > 2))
         if !["welcome", "permission", "one-desktop"].contains(state) {
             vm.updateEnvironment(desktopCount: 2, windowCount: 2)
+            if state == "previews-disabled" { vm.useWithoutPreviews() }
+            vm.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: state == "practice" ? 0 : 1,
+                              title: page == .previews ? "Instant desktop switching" : state == "desktop-switch" ? "Move a window" : state == "window-move" ? "Window previews" : "Desktop switching"))
         }
-        if ["previews", "speed", "ready"].contains(state) {
-            vm.recordPractice(.workspace)
-            vm.advance()
-        }
-        if ["speed", "ready"].contains(state) {
-            vm.useWithoutPreviews()
-            vm.recordPractice(.allWindows)
-            vm.advance()
-        }
-        if state == "ready" { vm.advance() }
         let image = try #require(renderSwiftUI(
             OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")),
-            size: NSSize(width: 860, height: smallScreen ? 620 : 700)))
+            size: NSSize(width: 820, height: smallScreen ? 620 : 650)))
         try saveImage(image, name: "onboarding_\(smallScreen ? "small-speed" : state)")
     }
 

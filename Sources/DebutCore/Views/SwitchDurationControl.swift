@@ -6,14 +6,14 @@ struct SwitchDurationControl: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Space switch duration")
+                Text("Desktop transition duration")
                 Spacer()
                 Text(SettingsView.switchDurationLabel(duration)).foregroundStyle(.secondary).monospacedDigit()
             }
             Slider(value: $duration,
                    in: AppSettings.minimumSpaceSwitchDuration...AppSettings.maximumSpaceSwitchDuration, step: 0.01)
-                .accessibilityLabel("Space switch duration").accessibilityIdentifier("space-switch-duration")
-            Text("Applies to desktop switches handled by Debut, per desktop crossed. Choose Instant for no transition.")
+                .accessibilityLabel("Desktop transition duration").accessibilityIdentifier("space-switch-duration")
+            Text("Duration per desktop. Instant removes the transition.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

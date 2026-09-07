@@ -13,35 +13,36 @@ public struct OnboardingView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            if viewModel.page != .welcome && viewModel.page != .ready {
-                HStack(spacing: 24) {
-                    step("Focus", page: .workspace)
-                    step("See", page: .previews)
-                    step("Move", page: .speed)
-                }.padding(.top, 28).padding(.bottom, 24)
-            }
-            GeometryReader { geometry in
-                ScrollView {
-                    VStack {
-                        switch viewModel.page {
-                        case .welcome: welcome
-                        case .workspace: workspace
-                        case .previews: previews
-                        case .speed: speed
-                        case .ready: ready
-                        }
-                    }.frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if viewModel.page != .welcome && viewModel.page != .ready {
+                        HStack(spacing: 22) {
+                            step("Window and desktop switching", page: .workspace)
+                            step("Window previews", page: .previews)
+                            step("Instant desktop switching", page: .speed)
+                        }.font(.system(size: 11))
+                    }
+                    if let result = viewModel.lastResult {
+                        Label(result, systemImage: "checkmark.circle.fill")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    switch viewModel.page {
+                    case .welcome: welcome
+                    case .workspace: workspace
+                    case .previews: previews
+                    case .speed: speed
+                    case .ready: ready
+                    }
                 }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            footer.padding(.top, 20).padding(.bottom, 26)
+                .padding(24)
+                .frame(maxWidth: 820, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
+            Divider().padding(.horizontal, 24)
+            footer.padding(.horizontal, 24).padding(.vertical, 16)
         }
-        .padding(.horizontal, 36)
-        .frame(minWidth: 860)
-        .background {
-            LinearGradient(colors: [Color(nsColor: .windowBackgroundColor), Color.accentColor.opacity(0.06)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-                .background(Color(nsColor: .windowBackgroundColor))
-        }
+        .frame(minWidth: 740)
+        .background(Color(nsColor: .windowBackgroundColor))
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             viewModel.refreshPermissions()
             viewModel.onEnvironmentRefresh()
@@ -51,162 +52,202 @@ public struct OnboardingView: View {
     }
 
     private func step(_ title: String, page: OnboardingPage) -> some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 5) {
             Image(systemName: viewModel.page.rawValue > page.rawValue ? "checkmark.circle.fill" : "\(page.rawValue).circle.fill")
-            Text(title).fontWeight(.semibold)
-        }
-        .foregroundStyle(viewModel.page == page ? Color.accentColor : Color.secondary)
-        .accessibilityLabel("\(title), step \(page.rawValue) of 3")
+            Text(title)
+        }.foregroundStyle(viewModel.page == page ? Color.accentColor : Color.secondary)
     }
 
     private var welcome: some View {
-        VStack(spacing: 22) {
-            Spacer()
+        VStack(spacing: 20) {
             if let url = previewDirectory?.appendingPathComponent("AppIcon.icns"), let icon = NSImage(contentsOf: url) {
-                Image(nsImage: icon).resizable().frame(width: 112, height: 112).accessibilityHidden(true)
+                Image(nsImage: icon).resizable().frame(width: 100, height: 100).accessibilityHidden(true)
             }
-            Text("Debut").font(.system(size: 56, weight: .bold, design: .rounded))
-            Text("The right window. The right desktop.")
-                .font(.system(size: 23)).foregroundStyle(.secondary)
-            Spacer()
-        }
+            Text("Debut").font(.system(size: 44, weight: .bold))
+            Text("Switch windows and desktops with your keyboard.").font(.title3).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity).padding(.vertical, 100)
     }
 
     private func heading(_ title: String, _ subtitle: String) -> some View {
-        VStack(spacing: 8) {
-            Text(title).font(.system(size: 30, weight: .bold, design: .rounded))
-            Text(subtitle).font(.system(size: 15)).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 28, weight: .bold))
+            Text(subtitle).font(.system(size: 14)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var workspace: some View {
-        VStack(spacing: 18) {
-            heading("One desktop. One focus.", "Command–Tab switches between windows on this desktop. Your other work stays out of the way.")
-            preview("onboarding-workspace", fallback: "overlay", label: "Debut’s Command–Tab switcher on a real desktop")
+        VStack(alignment: .leading, spacing: 18) {
+            heading(workspaceTitle, workspaceDescription)
             if !viewModel.permissions.accessibilityGranted {
+                preview("onboarding-workspace", label: "Command-Tab shows windows grouped by desktop")
                 accessibilityPrompt
             } else if viewModel.desktopCount < 2 {
-                instruction("Make room for another desktop", icon: "rectangle.badge.plus") {
-                    Text("Open Mission Control, move your pointer to the top, and click + at the top right. Then click a desktop to return here.")
+                instruction("Create a second desktop", icon: "rectangle.badge.plus") {
+                    Text("A desktop is a separate workspace in macOS. You need two for these exercises.")
+                    Text("1. Open Mission Control.\n2. Move the pointer to the top of the screen and click +.\n3. Click your original desktop to return to this tutorial.")
                     HStack {
                         Button("Open Mission Control") { viewModel.onOpenMissionControl() }
                         Button("Check again") { viewModel.onEnvironmentRefresh() }
                     }
                 }
-            } else if viewModel.workspacePracticed {
-                success("You switched a window on this desktop.", detail: "Command–Tab leaves windows on your other desktops out of the cycle.")
             } else {
-                instruction("Try it now", icon: "keyboard") {
-                    Text(viewModel.windowCount == 0
-                         ? "Open a window in another app on this desktop, then come back to Debut."
-                         : "Hold ⌘ and press Tab. Keep holding ⌘ to see your windows, then release it to choose one.")
-                    Text("Click Debut in the Dock to return here. Use Esc to cancel and try again.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("Check windows again") { viewModel.onEnvironmentRefresh() }
-                }
+                preview("onboarding-workspace", label: "Command-Tab shows windows grouped by desktop")
+                exerciseInstructions
             }
-            Spacer(minLength: 0)
         }
     }
 
+    private var workspaceTitle: String {
+        switch viewModel.exercise {
+        case .switchWindow: "Switch windows on this desktop"
+        case .switchDesktop: "Switch desktops"
+        case .moveWindow: "Move a window to another desktop"
+        }
+    }
+    private var workspaceDescription: String {
+        switch viewModel.exercise {
+        case .switchWindow: "Command-Tab selects windows on the current desktop. Windows on other desktops are in separate rows."
+        case .switchDesktop: "Each row is a desktop. Hold Command and Option to move between rows."
+        case .moveWindow: "Use the arrow keys in the switcher to move a selected window to another desktop."
+        }
+    }
+
+    @ViewBuilder private var exerciseInstructions: some View {
+        if let target = viewModel.target {
+            instruction("Open “\(target.title)” to continue", icon: "keyboard") {
+                switch viewModel.exercise {
+                case .switchWindow:
+                    Text("The next lesson is a window on Desktop \(target.destinationDesktop + 1).")
+                    Text("1. Hold Command and press Tab.\n2. Keep holding Command. Press Tab until “\(target.title)” is selected.\n3. Release Command to open it.")
+                case .switchDesktop:
+                    Text("The next lesson is on Desktop \(target.destinationDesktop + 1). You are on Desktop \(target.originDesktop + 1).")
+                    Text("1. Hold Command and Option. Press Tab until the row containing “\(target.title)” is enlarged.\n2. Release Option, keep Command held, and press Tab until “\(target.title)” is selected.\n3. Release Command to switch desktops and open it.")
+                case .moveWindow:
+                    Text("Move “\(target.title)” from Desktop \(target.originDesktop + 1) to Desktop \(target.destinationDesktop + 1).")
+                    Text("1. Hold Command and press Tab until “\(target.title)” is selected.\n2. Keep Command held and press \(target.destinationDesktop > target.originDesktop ? "Down Arrow" : "Up Arrow") to move it to Desktop \(target.destinationDesktop + 1).\n3. Release Command to follow the window and open the next lesson.")
+                }
+                recovery
+            }
+        } else { preparingTarget }
+    }
+
     private var previews: some View {
-        VStack(spacing: 18) {
-            heading("Find it by sight.", "Option–Tab brings windows from every desktop into one list.")
+        VStack(alignment: .leading, spacing: 18) {
+            heading("Window previews", "Option-Tab shows windows from every desktop in one list. Selecting a window also switches to its desktop.")
             preview(viewModel.features.windowPreviews ? "onboarding-previews" : "onboarding-no-previews",
-                    fallback: "all-windows", label: "Debut’s Option–Tab all-windows switcher")
-            if !viewModel.permissions.accessibilityGranted {
-                accessibilityPrompt
-            } else if !viewModel.permissions.screenRecordingGranted && viewModel.features.windowPreviews {
-                instruction("See live window previews", icon: "rectangle.dashed.badge.record") {
-                    Text("Allow Screen Recording for window images and desktop wallpaper. Images stay in memory on your Mac and are never uploaded.")
+                    label: viewModel.features.windowPreviews ? "Option-Tab shows window previews from all desktops" : "Option-Tab shows app icons and window titles from all desktops")
+            if !viewModel.permissions.accessibilityGranted { accessibilityPrompt }
+            else if !viewModel.permissions.screenRecordingGranted && viewModel.features.windowPreviews {
+                instruction("Allow Screen Recording for window previews", icon: "rectangle.dashed.badge.record") {
+                    Text("Debut uses this permission to show window images and desktop wallpaper. Images stay on your Mac.")
                     HStack {
                         Button("Enable previews") { viewModel.requestScreenRecording() }.buttonStyle(.borderedProminent)
                         Button("Use without previews") { viewModel.useWithoutPreviews() }
                     }
-                    Text("After allowing access in System Settings, return here. If macOS asks, quit and reopen Debut.")
+                    Text("In System Settings, allow Debut under Privacy & Security → Screen & System Audio Recording. If macOS asks you to quit, reopen Debut to resume this lesson.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-            } else if viewModel.allWindowsPracticed {
-                success("You found a window across your Mac.", detail: "Option–Tab also takes you to the window’s desktop.")
-            } else {
-                instruction("Try Option–Tab", icon: "keyboard") {
-                    Text("Hold ⌥ and press Tab. Keep holding ⌥ to browse, then release it to choose a window. Click Debut in the Dock to return here.")
+            } else if let target = viewModel.target {
+                instruction("Open “\(target.title)” on Desktop \(target.destinationDesktop + 1)", icon: "keyboard") {
+                    Text("1. Hold Option and press Tab.\n2. Keep holding Option. Press Tab until “\(target.title)” is selected.\n3. Release Option to open the next lesson.")
                     if !viewModel.features.windowPreviews {
-                        Text("Previews are off. App icons and window titles still help you choose.").font(.caption).foregroundStyle(.secondary)
-                        Button("Enable previews instead") { viewModel.requestScreenRecording() }
+                        Text("Previews are off. You can still select windows by their app icons and titles.").foregroundStyle(.secondary)
                     }
+                    recovery
                 }
-            }
-            Spacer(minLength: 0)
+            } else { preparingTarget }
+        }
+    }
+
+    private var recovery: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Press Esc to cancel. If you open another window, return to Debut from the Dock.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("Restart exercise") { viewModel.onRestartExercise() }
+                .accessibilityIdentifier("onboarding-restart")
+        }.padding(.top, 4)
+    }
+
+    private var preparingTarget: some View {
+        instruction(viewModel.targetError ?? "Preparing the next lesson…", icon: "macwindow") {
+            Text("The next lesson opens in a separate window so you can practise switching to it.")
+            Button("Restart exercise") { viewModel.onRestartExercise() }
         }
     }
 
     private var speed: some View {
-        VStack(spacing: 16) {
-            heading("Your next desktop. Without the wait.", "Tune desktop changes through Debut. Try a shortcut or swipe—changes apply immediately.")
+        VStack(alignment: .leading, spacing: 16) {
+            heading("Instant desktop switching", "Remove the macOS desktop transition, or choose a shorter duration.")
             if let url = previewDirectory?.appendingPathComponent("onboarding-speed.mp4"), FileManager.default.fileExists(atPath: url.path) {
-                ZStack {
-                    if let poster = previewDirectory.flatMap({ NSImage(contentsOf: $0.appendingPathComponent("onboarding-speed.jpg")) }) {
-                        Image(nsImage: poster).resizable().scaledToFit()
-                    }
-                    OnboardingLoopVideo(url: url)
-                }.frame(height: 195)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .accessibilityLabel("Recorded comparison of Debut at 400 milliseconds and Instant")
-            } else {
-                preview("onboarding-workspace", fallback: "overlay", label: "Debut desktop switcher")
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("macOS default").frame(maxWidth: .infinity)
+                        Text("Debut Instant").frame(maxWidth: .infinity)
+                    }.font(.system(size: 12, weight: .medium))
+                    ZStack {
+                        if let image = previewDirectory.flatMap({ NSImage(contentsOf: $0.appendingPathComponent("onboarding-speed.jpg")) }) {
+                            Image(nsImage: image).resizable().scaledToFit()
+                        }
+                        OnboardingLoopVideo(url: url)
+                    }.frame(width: 384, height: 120)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .accessibilityLabel("Recorded desktop changes using macOS default and Debut Instant")
+                }.frame(width: 384).frame(maxWidth: .infinity)
             }
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("Let Debut handle").font(.headline)
+                    Text("Enable faster desktop switching").font(.headline)
                     Spacer()
                     Button("Enable all") { viewModel.setAllOverrides(true) }
                     Button("Disable all") { viewModel.setAllOverrides(false) }
-                }
-                HStack(alignment: .top, spacing: 24) {
-                    VStack(spacing: 10) {
-                        featureToggle("Window switching · ⌘ Tab", key: \.workspaceIsolation, id: "workspace-isolation")
-                        featureToggle("Numbered shortcuts · ⌃ 1–9", key: \.numberShortcuts, id: "number-shortcuts")
-                    }
-                    VStack(spacing: 10) {
-                        featureToggle("Control + ← / →", key: \.controlArrows, id: "control-arrows")
-                        featureToggle("Trackpad desktop swipe", key: \.trackpadSwipes, id: "trackpad-swipes")
-                    }
-                }
+                }.padding(.bottom, 10)
+                Text("Changes apply immediately. Turning these off restores macOS controls, including its app switcher.")
+                    .font(.caption).foregroundStyle(.secondary).padding(.bottom, 14)
                 SwitchDurationControl(duration: Binding(get: { viewModel.duration }, set: { viewModel.setDuration($0) }))
-            }.padding(18).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 16))
-            Text("Try an enabled shortcut or swipe now—changes apply immediately.\nIn Debut’s switcher, hold Command–Option and press Tab to choose another desktop.")
-                .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+                Divider().padding(.vertical, 12)
+                Grid(horizontalSpacing: 24, verticalSpacing: 8) {
+                    GridRow {
+                        featureToggle("Debut Command-Tab", detail: "Select a window on another desktop", key: \.workspaceIsolation, id: "workspace-isolation")
+                        featureToggle("Control + number", detail: "Jump to Desktop 1 through 9", key: \.numberShortcuts, id: "number-shortcuts")
+                    }
+                    GridRow {
+                        featureToggle("Control + Left / Right Arrow", detail: "Switch to an adjacent desktop", key: \.controlArrows, id: "control-arrows")
+                        featureToggle("Trackpad swipe", detail: "Swipe left or right with 3 or 4 fingers", key: \.trackpadSwipes, id: "trackpad-swipes")
+                    }
+                }
+
+            }.padding(16).background(.background, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(.separator.opacity(0.5)))
             if !viewModel.permissions.accessibilityGranted { accessibilityPrompt }
-            Spacer(minLength: 0)
         }
     }
 
     private var ready: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            Image(systemName: "checkmark.circle.fill").font(.system(size: 60)).foregroundStyle(Color.accentColor)
-            heading("You’re ready.", "Your windows, a shortcut away.")
-            VStack(alignment: .leading, spacing: 14) {
-                if viewModel.features.workspaceIsolation { Label("⌘ Tab — windows on this desktop", systemImage: "rectangle.3.group") }
-                Label("⌥ Tab — windows across your Mac", systemImage: "macwindow.on.rectangle")
-                if viewModel.features.numberShortcuts { Label("⌃ 1–9 — go straight to a desktop", systemImage: "arrow.right.square") }
-            }.font(.title3).padding(24)
-            Text("Find settings and this guide in Debut’s menu bar icon.").foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 22) {
+            heading("Setup complete", "You have switched windows, changed desktops, and moved a window between desktops.")
+            VStack(alignment: .leading, spacing: 12) {
+                if viewModel.features.workspaceIsolation {
+                    Text("Command-Tab: windows on this desktop")
+                    Text("Command-Option-Tab: select another desktop")
+                    Text("Up / Down Arrow in Command-Tab: move the selected window")
+                } else { Text("Debut Command-Tab is off. Turn it on in Settings to use desktop rows.") }
+                Text("Option-Tab: windows on all desktops")
+            }.font(.system(size: 15)).padding(.vertical, 12)
+            Text("Open Debut from the Dock or menu bar to change settings or repeat this tutorial.")
+                .foregroundStyle(.secondary)
             Toggle("Share anonymous usage and performance data", isOn: Binding(
                 get: { viewModel.shareAnonymousTelemetry }, set: { viewModel.setShareAnonymousTelemetry($0) }))
-                .toggleStyle(.switch).fixedSize()
-                .help("Only bucketed measurements. No screenshots, app or window names, or persistent identifiers.")
-            Spacer()
+                .toggleStyle(.switch)
+                .help("No screenshots, app or window names, or persistent identifiers.")
             if !viewModel.permissions.accessibilityGranted { accessibilityPrompt }
-        }
+        }.padding(.vertical, 24)
     }
 
     private var accessibilityPrompt: some View {
-        instruction("Allow Accessibility to use Debut", icon: "accessibility") {
-            Text("Debut needs this permission to handle shortcuts and focus your windows. In System Settings, turn on Debut under Privacy & Security → Accessibility, then return here.")
+        instruction("Allow Accessibility to continue", icon: "accessibility") {
+            Text("Debut needs Accessibility to handle shortcuts and select your windows. In System Settings, turn on Debut under Privacy & Security → Accessibility, then return here.")
             HStack {
                 Button("Open Accessibility Settings") { viewModel.requestAccessibility() }.buttonStyle(.borderedProminent)
                 Button("Check again") { viewModel.refreshPermissions(); viewModel.onEnvironmentRefresh() }
@@ -216,30 +257,37 @@ public struct OnboardingView: View {
 
     private func instruction<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: icon).font(.headline)
-            content().font(.subheadline).fixedSize(horizontal: false, vertical: true)
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(18)
-            .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+            Label(title, systemImage: icon).font(.system(size: 15, weight: .semibold))
+            content().font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+            .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func success(_ title: String, detail: String) -> some View {
-        instruction(title, icon: "checkmark.circle.fill") { Text(detail) }
-    }
-
-    private func featureToggle(_ title: String, key: WritableKeyPath<FeatureSettings, Bool>, id: String) -> some View {
-        Toggle(title, isOn: Binding(get: { viewModel.features[keyPath: key] }, set: {
+    private func featureToggle(_ title: String, detail: String, key: WritableKeyPath<FeatureSettings, Bool>, id: String) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 12, weight: .medium))
+                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Toggle(title, isOn: Binding(get: { viewModel.features[keyPath: key] }, set: {
             var features = viewModel.features
             features[keyPath: key] = $0
             viewModel.setFeatures(features)
-        })).toggleStyle(.switch).accessibilityIdentifier("onboarding-\(id)")
+            })).labelsHidden().toggleStyle(.switch).accessibilityIdentifier("onboarding-\(id)")
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
     }
 
-    @ViewBuilder private func preview(_ name: String, fallback: String, label: String) -> some View {
-        if let directory = previewDirectory,
-           let image = NSImage(contentsOf: directory.appendingPathComponent("\(name).jpg"))
-            ?? NSImage(contentsOf: directory.appendingPathComponent("\(fallback).jpg")) {
-            Image(nsImage: image).resizable().scaledToFit().frame(maxHeight: 270)
-                .clipShape(RoundedRectangle(cornerRadius: 14)).accessibilityLabel(label)
+    @ViewBuilder private func preview(_ name: String, label: String) -> some View {
+        if let directory = previewDirectory, let image = NSImage(contentsOf: directory.appendingPathComponent("\(name).jpg")) {
+            VStack(spacing: 6) {
+                Image(nsImage: image).resizable().scaledToFit().frame(maxHeight: 205)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityLabel(label)
+                Text("Example switcher. Use the shortcut below to see your practice window.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -247,16 +295,38 @@ public struct OnboardingView: View {
         HStack {
             if viewModel.page != .welcome { Button("Back") { viewModel.back() }.accessibilityIdentifier("onboarding-back") }
             Spacer()
-            if !viewModel.canAdvance && viewModel.permissions.accessibilityGranted {
-                Text(viewModel.page == .workspace && viewModel.desktopCount < 2 ? "Add a desktop to continue" : "Try the shortcut to continue")
+            if viewModel.page == .speed {
+                Text("Try a shortcut or swipe. Return with Option-Tab → Debut Tutorial.")
                     .font(.caption).foregroundStyle(.secondary)
+                Spacer()
             }
-            Button(viewModel.page == .welcome ? "Get started" : viewModel.page == .ready ? "Start using Debut" : "Continue") {
-                viewModel.advance()
-            }.buttonStyle(.borderedProminent).controlSize(.large)
-                .disabled(!viewModel.canAdvance).keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("onboarding-continue")
+            if viewModel.page == .workspace || viewModel.page == .previews {
+                Text("Complete the exercise to open the next lesson")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Button(viewModel.page == .welcome ? "Get started" : viewModel.page == .ready ? "Start using Debut" : "Continue") {
+                    viewModel.advance()
+                }.buttonStyle(.borderedProminent).controlSize(.large)
+                    .disabled(!viewModel.canAdvance).keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("onboarding-continue")
+            }
         }
+    }
+}
+
+struct OnboardingDestinationView: View {
+    let title: String
+    var onReturn: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Label("Debut tutorial", systemImage: "macwindow.on.rectangle").foregroundStyle(.secondary)
+            Text(title).font(.system(size: 32, weight: .bold))
+            Text("This is your next lesson.").font(.title3)
+            Text("Clicking this window does not complete the exercise. Return to the tutorial, then use its shortcut instructions to select this window.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button("Return to tutorial", action: onReturn).buttonStyle(.borderedProminent)
+        }.padding(40).frame(width: 600, height: 390, alignment: .leading)
+            .background(Color.accentColor.opacity(0.08))
     }
 }
 

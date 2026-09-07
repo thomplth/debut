@@ -171,14 +171,18 @@ sudo killall tccd 2>/dev/null || true
 # macOS keys this store by whatever it holds responsible for the capture: a bundle ID for Debut, and
 # for the suite the ssh session that launched it rather than the binary itself.
 screen_capture_approvals="$console_home/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
-for approval_client in "$bundle_id" "$E2E_SOURCE" "/usr/libexec/sshd-keygen-wrapper"; do
-    as_console env HOME="$console_home" defaults write \
-        "$screen_capture_approvals" "$approval_client" -date "3024-01-01 00:00:00 +0000"
-done
-as_console killall cfprefsd 2>/dev/null || true
-as_console killall UserNotificationCenter 2>/dev/null || true
-as_console killall -9 replayd 2>/dev/null || true
-as_console killall universalAccessAuthWarn 2>/dev/null || true
+reset_capture_reminders() {
+    for approval_client in "$bundle_id" "$E2E_SOURCE" "/usr/libexec/sshd-keygen-wrapper"; do
+        as_console env HOME="$console_home" defaults write \
+            "$screen_capture_approvals" "$approval_client" -date "3024-01-01 00:00:00 +0000"
+    done
+    as_console killall cfprefsd 2>/dev/null || true
+    as_console killall UserNotificationCenter 2>/dev/null || true
+    as_console killall -9 replayd 2>/dev/null || true
+    as_console killall universalAccessAuthWarn 2>/dev/null || true
+
+}
+reset_capture_reminders
 
 # Under Reduce Motion the removal transition is a 0.12s fade rather than a 0.36s spring, which is
 # correct behaviour but too brief to sample as motion. The fade branch is covered by unit tests, so
@@ -267,6 +271,10 @@ done
 grant_accessibility "$bundle_id" 0 "$APP_PATH"
 grant_screen_capture "$bundle_id" 0 "$APP_PATH"
 sudo killall tccd 2>/dev/null || true
+
+# Revoking capture during first-use probes can recreate a pending reminder. Clear that
+# fixture state before the full suite so its screenshots observe the actual app.
+reset_capture_reminders
 
 # Restore the full suite fixture after the isolated first-run journeys.
 as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 3
