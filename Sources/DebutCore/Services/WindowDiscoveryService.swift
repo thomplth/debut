@@ -862,10 +862,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         return spaceSwitcher.windowLocations().filter { liveIDs.contains($0.key) }
     }
 
-    /// Every window SkyLight places, unfiltered. Nil without a space switcher, since an
-    /// enumeration that was never made must not read as a screen with nothing on it.
+    /// Every window SkyLight places, unfiltered — which `windowLocations().keys` was not, since
+    /// that map drops a window found on more than one desktop. Nil without a space switcher,
+    /// since an enumeration that was never made must not read as a screen with nothing on it.
     private func skyLightWindowIDs() -> Set<CGWindowID>? {
-        spaceSwitcher.map { Set($0.windowLocations().keys) }
+        spaceSwitcher.map { $0.placedWindowIDs() }
     }
 
     private func discoverLaunchedWindows(for app: AppInfo) {
