@@ -122,9 +122,11 @@ lifecycle event does.
 ## Fullscreen apps
 
 The overlay is shown inside a fullscreen app's Space, and every shortcut behaves
-as it does on the desktop. The overlay window joins all Spaces at
-`.statusBar` level so the stages reach the Space the user is actually looking
-at.
+as it does on the desktop. The overlay is a nonactivating panel joining all
+Spaces at `.statusBar` level, so the stages reach the Space the user is actually
+looking at. The panel is what makes that reachable at all with a Dock icon: a
+regular application's ordinary window is refused entry to another app's
+fullscreen Space while that application is not active.
 
 The desktop surface must not join all Spaces, or it would follow into the
 fullscreen Space and cover the app. Inactive spaces are therefore not occluded
