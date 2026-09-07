@@ -47,7 +47,10 @@ private struct OverlayContentRootView: View {
     }
 }
 
-public final class OverlayWindow: NSWindow, @unchecked Sendable {
+/// A nonactivating panel rather than a plain window, because the window server refuses a regular
+/// application's ordinary window entry to another app's fullscreen Space while that application
+/// is not active — measured at every level and collection behaviour. A panel is let in either way.
+public final class OverlayWindow: NSPanel, @unchecked Sendable {
     private var hostingView: NSHostingView<OverlayContentRootView>?
     private var contentState: OverlayContentState?
     private var renderedWindowIDs: Set<CGWindowID> = []
@@ -74,11 +77,14 @@ public final class OverlayWindow: NSWindow, @unchecked Sendable {
         let screen = NSScreen.main ?? NSScreen.screens[0]
         super.init(
             contentRect: screen.overlayFrame,
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
 
+        // A panel hides itself when its application deactivates, and the overlay is opened from
+        // the background by an application that never becomes active.
+        self.hidesOnDeactivate = false
         self.level = .statusBar
         self.isOpaque = false
         self.backgroundColor = .clear
