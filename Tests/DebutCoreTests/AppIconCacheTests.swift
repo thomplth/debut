@@ -184,6 +184,38 @@ struct AppIconCacheTests {
         #expect(cache.cached(bundleID: "com.example.a", size: 40) == nil)
     }
 
+    // The stage's shadow was alpha-derived from its whole subtree, so it was the icons themselves
+    // that cast the halo every placeholder sat in; moving it onto the glass plate (KHA-641) left
+    // the icons flat. Blurring one silhouette once restores the halo as a plain composite.
+    @Test("The placeholder icon's halo is one shape-free blur, built once")
+    func iconShadowIsBakedOnce() throws {
+        let shadow = AppIconCache.iconShadow
+        let side = AppIconCache.BakedIconShadow.iconSide
+        let padding = AppIconCache.BakedIconShadow.padding
+        #expect(shadow.size == NSSize(width: side + padding * 2, height: side + padding * 2))
+        // One bitmap serves every app, so it must not be rebuilt per icon.
+        #expect(AppIconCache.iconShadow === shadow)
+
+        let rep = try #require(shadow.representations.first as? NSBitmapImageRep)
+        let scale = CGFloat(rep.pixelsWide) / shadow.size.width
+        let centerX = Int(shadow.size.width / 2 * scale)
+
+        // AppKit draws bottom-up and the shadow falls downwards, so it lands below the icon here.
+        let belowIcon = Int((padding - AppIconCache.BakedIconShadow.dy) * scale)
+        let cast = try #require(rep.colorAt(x: centerX, y: rep.pixelsHigh - 1 - belowIcon))
+        #expect(cast.alphaComponent > 0.05)
+
+        // The center fades to transparent, so an app whose icon does not fill the standard
+        // squircle shows a halo rather than a dark plate behind it.
+        let behindIcon = try #require(rep.colorAt(x: centerX, y: rep.pixelsHigh / 2))
+        #expect(behindIcon.alphaComponent < 0.01)
+
+        // The far corner is past four standard deviations, so a bitmap that merely tinted its
+        // whole padding would not pass.
+        let corner = try #require(rep.colorAt(x: 0, y: 0))
+        #expect(corner.alphaComponent < 0.01)
+    }
+
     private func opaqueIcon(_ size: CGFloat) -> NSImage {
         let image = NSImage(size: NSSize(width: size, height: size))
         image.lockFocus()

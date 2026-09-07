@@ -1880,6 +1880,18 @@ struct WindowPreviewView: View {
                                     width: metrics.previewPlaceholderIconSize,
                                     height: metrics.previewPlaceholderIconSize
                                 )
+                                .background {
+                                    // Overflow the icon's layout box with a shared bitmap. No
+                                    // alpha-derived shadow filter follows the changing cards.
+                                    let padded = metrics.previewPlaceholderIconSize
+                                        * (AppIconCache.BakedIconShadow.iconSide
+                                            + AppIconCache.BakedIconShadow.padding * 2)
+                                        / AppIconCache.BakedIconShadow.iconSide
+                                    Image(nsImage: AppIconCache.iconShadow)
+                                        .resizable()
+                                        .frame(width: padded, height: padded)
+                                        .allowsHitTesting(false)
+                                }
                             }
                     }
                 }
