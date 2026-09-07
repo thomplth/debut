@@ -1696,6 +1696,50 @@ struct SpaceControllerTests {
         #expect(windowIDs == [101, 303, 202])
     }
 
+    @Test("Onboarding practice requires a committed overlay and verified front process")
+    func onboardingPracticeVerification() {
+        let (controller, windows, _) = makeController()
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Practice", ownerPID: 4242),
+            toSpaceID: controller.spaceManager.activeSpaceID)
+        var practiced: [OnboardingPractice] = []
+        controller.onPracticeVerified = { practiced.append($0) }
+        controller.handleKeyEvent(.cmdTabHold)
+        #expect(practiced.isEmpty)
+        controller.commitOverlaySelection(spaceIndex: 0, windowIndex: 0)
+        windows.frontmostPID = 11
+        #expect(controller.verifyPendingFront() == false)
+        #expect(practiced.isEmpty)
+        controller.handleKeyEvent(.cmdTabHold)
+        controller.commitOverlaySelection(spaceIndex: 0, windowIndex: 0)
+        windows.frontmostPID = 4242
+        #expect(controller.verifyPendingFront() == true)
+        #expect(practiced == [.workspace])
+        controller.verifyPendingFront()
+        #expect(practiced == [.workspace])
+        controller.handleKeyEvent(.altTabHold)
+        controller.commitAltTabSelection(index: 0)
+        #expect(controller.verifyPendingFront() == true)
+        #expect(practiced == [.workspace, .allWindows])
+    }
+
+    @Test("An unverifiable practice attempt cannot credit a later unrelated focus")
+    func unknownPracticeCannotLeak() {
+        let (controller, windows, _) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Practice", ownerPID: 4242), toSpaceID: spaceID)
+        var practiced = false
+        controller.onPracticeVerified = { _ in practiced = true }
+        controller.handleKeyEvent(.cmdTabHold)
+        controller.commitOverlaySelection(spaceIndex: 0, windowIndex: 0)
+        windows.frontmostPID = nil
+        #expect(controller.verifyPendingFront() == nil)
+        controller.switchToSpace(id: spaceID, raiseWindowID: 202)
+        windows.frontmostPID = 4242
+        #expect(controller.verifyPendingFront() == true)
+        #expect(!practiced)
+    }
+
     // MARK: - Front verification
 
     /// The window server accepts a front request and reports success whether or not the app comes

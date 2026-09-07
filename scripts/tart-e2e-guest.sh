@@ -188,7 +188,7 @@ as_console env HOME="$console_home" defaults write NSGlobalDomain NSAutomaticWin
 
 # Demo capture uses this same disposable guest. Remove its windows before planting the
 # two-window fixture, including restored state that would repopulate other desktops.
-for fixture_app in TextEdit Safari Terminal Calculator Notes Preview; do
+for fixture_app in TextEdit Safari Terminal Calculator Notes Preview "Script Editor" "System Settings"; do
     as_console pkill -9 -x "$fixture_app" 2>/dev/null || true
 done
 as_console rm -rf "$console_home/Library/Saved Application State"
@@ -220,18 +220,73 @@ wait_for_fixture_apps
 echo "Provisioning desktops so spaces have somewhere to be..."
 as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 3
 
+rm -rf "$RESULTS_DIR"
+mkdir -p "$RESULTS_DIR"
+status=0
+
+# First-run permissions must be tested as real TCC denials, not simulated model flags.
+# Only this disposable host rewrites TCC; the normal suite never changes the developer's grants.
+as_console pkill -f "$APP_PATH" 2>/dev/null || true
+as_console env HOME="$console_home" "$E2E_SOURCE" switch-to-desktop 0
+as_console open -a TextEdit "$FIXTURE_DIR/one.txt" "$FIXTURE_DIR/two.txt"
+as_console rm -f "$support_dir/settings.json"
+sleep 2
+for denied_permission in accessibility capture desktop; do
+    as_console pkill -x TextEdit 2>/dev/null || true
+    as_console rm -rf "$support_dir"
+    as_console env HOME="$console_home" "$E2E_SOURCE" switch-to-desktop 0
+    as_console open -a TextEdit "$FIXTURE_DIR/one.txt" "$FIXTURE_DIR/two.txt"
+    sleep 2
+    grant_accessibility "$bundle_id" 0 "$APP_PATH"
+    grant_screen_capture "$bundle_id" 0 "$APP_PATH"
+    if [[ "$denied_permission" == accessibility ]]; then
+        sudo sqlite3 "$SYSTEM_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceAccessibility';"
+    elif [[ "$denied_permission" == capture ]]; then
+        sudo sqlite3 "$SYSTEM_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
+        sqlite3 "$USER_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
+    fi
+    if [[ "$denied_permission" == desktop ]]; then
+        if ! as_console env HOME="$console_home" "$E2E_SOURCE" reset-desktops; then
+            status=1
+        fi
+    fi
+    sudo killall tccd 2>/dev/null || true
+    as_console killall replayd 2>/dev/null || true
+    sleep 2
+    echo "Checking onboarding with denied $denied_permission..."
+    if ! as_console env HOME="$console_home" "$E2E_SOURCE" onboarding-permission-check "$denied_permission"; then
+        status=1
+    fi
+    if [[ -d /tmp/debut-e2e-screenshots ]]; then
+        ditto /tmp/debut-e2e-screenshots "$RESULTS_DIR/screenshots"
+    fi
+    if [[ -f "$support_dir/diagnostic.json" ]]; then
+        cp "$support_dir/diagnostic.json" "$RESULTS_DIR/onboarding-$denied_permission.json"
+    fi
+done
+grant_accessibility "$bundle_id" 0 "$APP_PATH"
+grant_screen_capture "$bundle_id" 0 "$APP_PATH"
+sudo killall tccd 2>/dev/null || true
+
+# Restore the full suite fixture after the isolated first-run journeys.
+as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 3
+as_console rm -rf "$support_dir"
+as_console pkill -x TextEdit 2>/dev/null || true
+as_console open -na TextEdit "$FIXTURE_DIR/one.txt"
+as_console open -na TextEdit "$FIXTURE_DIR/two.txt"
+wait_for_fixture_apps
+
 echo "Launching Debut in the guest Aqua session..."
 as_console launchctl setenv DEBUT_FORCE_DISPLAY_STACK_INDICATOR 1
 as_console env DEBUT_FORCE_DISPLAY_STACK_INDICATOR=1 "$APP_PATH/Contents/MacOS/Debut" --force-display-stack-indicator >/tmp/debut-e2e-debut.log 2>&1 </dev/null &
 wait_for_debut_ready
 
 echo "Running the full suite, including the synthetic drag gestures..."
-rm -rf "$RESULTS_DIR"
-mkdir -p "$RESULTS_DIR"
 unset GITHUB_ACTIONS
 set +e
 as_console env HOME="$console_home" GITHUB_ACTIONS= "$E2E_SOURCE"
-status=$?
+suite_status=$?
+if (( suite_status != 0 )); then status="$suite_status"; fi
 set -e
 
 if [[ -d /tmp/debut-e2e-screenshots ]]; then

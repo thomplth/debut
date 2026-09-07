@@ -122,17 +122,7 @@ public struct SettingsView: View {
             Text("Make each desktop a workspace").font(.title2.bold())
             FeatureControlsView(features: $viewModel.settings.features)
             Divider()
-            HStack {
-                Text("Space switch duration")
-                Spacer()
-                Text(Self.switchDurationLabel(viewModel.settings.spaceSwitchDuration))
-                    .foregroundStyle(.secondary).monospacedDigit()
-            }
-            Slider(value: $viewModel.settings.spaceSwitchDuration,
-                   in: AppSettings.minimumSpaceSwitchDuration...AppSettings.maximumSpaceSwitchDuration,
-                   step: 0.01)
-            Text("Applies to desktop switches handled by Debut, per desktop crossed. Choose Instant for no transition.")
-                .font(.caption).foregroundStyle(.secondary)
+            SwitchDurationControl(duration: $viewModel.settings.spaceSwitchDuration)
         }
     }
 

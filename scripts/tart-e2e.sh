@@ -137,6 +137,13 @@ run_e2e() {
     fi
 
     space_build
+    # First-use permission and desktop setup must start with a fresh compositor.
+    # A warm guest after the desktop stress scenarios can retain a partial swipe
+    # and refuse to open Mission Control despite reporting a settled desktop.
+    if guest_is_ready; then
+        echo "Restarting the guest before first-use validation..."
+        tart stop "$VM_NAME"
+    fi
     start_vm
     prepare_ssh
 
