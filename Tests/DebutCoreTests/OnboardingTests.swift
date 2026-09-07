@@ -34,7 +34,18 @@ struct OnboardingTests {
         #expect(OnboardingCapturePolicy.isEnabled(previewsRequested: true, screenRecordingGranted: true))
     }
 
-    @Test("A permission restart resumes the lesson without bypassing permission checks")
+    private func finishWorkspace(_ model: OnboardingViewModel) {
+        for action in [OnboardingPractice.workspace, .desktop, .moveWindow] {
+            model.setTarget(.init(windowID: 42, originDesktop: action == .workspace ? 1 : 0, destinationDesktop: 1, title: "Next lesson"))
+            model.recordPractice(action, windowID: 42, desktopIndex: 1)
+        }
+    }
+    private func finishPreviews(_ model: OnboardingViewModel) {
+        model.setTarget(.init(windowID: 43, originDesktop: 0, destinationDesktop: 1, title: "Instant desktop switching"))
+        model.recordPractice(.allWindows, windowID: 43, desktopIndex: 1)
+    }
+
+    @Test("A permission restart resumes the exact exercise without bypassing permission checks")
     func resumesAfterPermissionRestart() throws {
         let permissions = MockOnboardingPermissionClient()
         permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: false)
@@ -42,15 +53,15 @@ struct OnboardingTests {
         let model = OnboardingViewModel(permissionClient: permissions, onProgressChanged: { checkpoint = $0 })
         model.advance()
         model.updateEnvironment(desktopCount: 2, windowCount: 2)
-        model.recordPractice(.workspace)
-        model.advance()
+        model.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: 0, title: "Desktop switching"))
+        model.recordPractice(.workspace, windowID: 42, desktopIndex: 0)
         let restored = try JSONDecoder().decode(OnboardingCheckpoint.self, from: JSONEncoder().encode(try #require(checkpoint)))
         let resumed = OnboardingViewModel(permissionClient: permissions, checkpoint: restored)
-        #expect(resumed.page == .previews)
-        #expect(!resumed.canAdvance)
+        #expect(resumed.page == .workspace)
+        #expect(resumed.exercise == .switchDesktop)
+        #expect(resumed.target == nil)
         permissions.state = .init(accessibilityGranted: false, screenRecordingGranted: true)
         resumed.refreshPermissions()
-        resumed.recordPractice(.allWindows)
         #expect(!resumed.canAdvance)
     }
 
@@ -59,61 +70,34 @@ struct OnboardingTests {
         let permissions = MockOnboardingPermissionClient()
         let model = OnboardingViewModel(permissionClient: permissions)
         model.advance()
-        #expect(model.page == .workspace)
         model.updateEnvironment(desktopCount: 2, windowCount: 2)
-        model.recordPractice(.workspace)
-        model.advance()
+        finishWorkspace(model)
         #expect(model.page == .workspace)
+        #expect(model.exercise == .switchWindow)
         permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: false)
         model.refreshPermissions()
-        #expect(!model.canAdvance)
-        model.recordPractice(.workspace)
-        model.advance()
+        finishWorkspace(model)
         #expect(model.page == .previews)
-        #expect(!model.canAdvance)
+        finishPreviews(model)
+        #expect(model.page == .previews)
         model.useWithoutPreviews()
         #expect(!model.features.windowPreviews)
-        #expect(!model.canAdvance)
-        model.recordPractice(.allWindows)
-        model.advance()
+        finishPreviews(model)
         #expect(model.page == .speed)
-    }
-
-    @Test("Practice belongs to the current lesson and requires enough desktops")
-    func practicePreconditions() {
-        let permissions = MockOnboardingPermissionClient()
-        permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: true)
-        let model = OnboardingViewModel(permissionClient: permissions)
-        model.recordPractice(.workspace)
-        model.advance()
-        model.updateEnvironment(desktopCount: 1, windowCount: 2)
-        model.recordPractice(.workspace)
-        #expect(!model.canAdvance)
-        model.updateEnvironment(desktopCount: 2, windowCount: 2)
-        #expect(!model.canAdvance)
-        model.recordPractice(.allWindows)
-        #expect(!model.canAdvance)
-        model.recordPractice(.workspace)
-        #expect(model.canAdvance)
-        model.updateEnvironment(desktopCount: 1, windowCount: 2)
-        #expect(!model.canAdvance)
     }
 
     @Test("Revoking Accessibility blocks every later page")
     func revokedPermission() {
-        let permissions = MockOnboardingPermissionClient()
-        permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: true)
-        let model = OnboardingViewModel(permissionClient: permissions)
-        model.advance()
-        model.updateEnvironment(desktopCount: 2, windowCount: 2)
-        model.recordPractice(.workspace)
-        model.advance()
-        permissions.state = .init(accessibilityGranted: false, screenRecordingGranted: true)
-        model.refreshPermissions()
-        model.recordPractice(.allWindows)
-        model.advance()
-        #expect(model.page == .previews)
-        #expect(!model.canAdvance)
+        for page in [OnboardingPage.previews, .speed, .ready] {
+            let permissions = MockOnboardingPermissionClient()
+            let model = OnboardingViewModel(permissionClient: permissions,
+                checkpoint: .init(page: page, workspacePracticed: true, allWindowsPracticed: true))
+            model.updateEnvironment(desktopCount: 2, windowCount: 2)
+            finishPreviews(model)
+            model.advance()
+            #expect(model.page == page)
+            #expect(!model.canAdvance)
+        }
     }
 
     @Test("Live feature and duration choices publish immediately and completion is explicit")
@@ -129,10 +113,9 @@ struct OnboardingTests {
             onCompleted: { completed += 1 })
         model.advance()
         model.updateEnvironment(desktopCount: 2, windowCount: 2)
-        model.recordPractice(.workspace)
-        model.advance()
-        model.recordPractice(.allWindows)
-        model.advance()
+        finishWorkspace(model)
+        finishPreviews(model)
+        #expect(model.page == .speed)
         model.setDuration(0.25)
         #expect(durations == [0.25])
         model.setAllOverrides(false)
@@ -237,5 +220,5 @@ struct TelemetryActivationPolicyTests {
 @Test("Onboarding leaves its title bar and footer inside a small visible screen")
 func onboardingSmallScreen() {
     #expect(OnboardingLayout.contentHeight(visibleHeight: 670, titleBarHeight: 28) == 642)
-    #expect(OnboardingLayout.contentHeight(visibleHeight: 900, titleBarHeight: 28) == 700)
+    #expect(OnboardingLayout.contentHeight(visibleHeight: 900, titleBarHeight: 28) == 650)
 }

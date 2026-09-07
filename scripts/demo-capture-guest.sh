@@ -74,7 +74,7 @@ as_console pkill -f "Debut.app" 2>/dev/null || true
 # SIGKILL, not SIGTERM: Terminal refuses a polite quit while a shell is running in a window, so
 # every earlier capture left its session behind and the next one opened another on top. It also
 # denies AppKit the chance to write the saved state the next block is about to delete.
-for app in TextEdit Safari Terminal Calculator Notes Preview; do
+for app in TextEdit Safari Terminal Calculator Notes Preview "System Settings"; do
     as_console pkill -9 -x "$app" 2>/dev/null || true
 done
 # Resume reopens every window the last run left behind, and those stack up: one capture reached
@@ -117,6 +117,26 @@ as_console env HOME="$console_home" "$PROVISION_SOURCE" switch-to-desktop 0
 as_console pkill -f "Debut.app" 2>/dev/null || true
 sleep 2
 
+if [[ "${*:6}" == *onboarding* ]]; then
+    echo "Opening simple onboarding example windows..."
+    mkdir -p "$DESK_DIR"
+    cat > "$DESK_DIR/Work.rtf" <<'RTF'
+{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}{\colortbl;\red35\green100\blue220;}\f0\fs128\cf1 Desktop 1\par\fs80 Work\par\cf0\fs32\par Draft a project update\par Review this week's tasks\par Prepare the next meeting}
+RTF
+    cat > "$DESK_DIR/Notes.rtf" <<'RTF'
+{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}{\colortbl;\red20\green140\blue90;}\f0\fs128\cf1 Desktop 2\par\fs80 Notes\par\cf0\fs32\par Ideas for the weekend\par Places to visit\par Books to read}
+RTF
+    cat > "$DESK_DIR/Checklist.rtf" <<'RTF'
+{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}\f0\fs48 Checklist\par\fs32\par Review the draft\par Send the update\par Plan tomorrow}
+RTF
+    chown -R "$console_user" "$DESK_DIR"
+    for document in Work Notes Checklist; do
+        as_console open -a TextEdit "$DESK_DIR/$document.rtf"
+        sleep 2
+    done
+    as_console open "$APP_PATH"
+    sleep 5
+else
 echo "Opening a desk worth photographing..."
 rm -rf "$DESK_DIR"
 mkdir -p "$DESK_DIR"
@@ -228,6 +248,8 @@ as_console open "$DESK_DIR/events.command"
 sleep 4
 as_console open "$DESK_DIR/session.command"
 sleep 5
+
+fi
 
 echo "Capturing..."
 rm -rf "$MEDIA_DIR"
