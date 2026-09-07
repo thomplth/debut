@@ -336,6 +336,41 @@ func captureStills() {
     }
 }
 
+func resetOnboardingDesktop() {
+    let service = SpaceService()
+    service.switchDuration = 0
+    service.switchToDesktop(index: 0)
+    wait(1)
+    guard service.currentDesktopIndex() == 0 else { log("FAILED: comparison did not reset to Desktop 1"); exit(1) }
+}
+
+func arrangeOnboardingWindows() {
+    let windows = AccessibilityWindowService().listWindows()
+    let service = SpaceService()
+    for window in windows where window.ownerBundleID == "com.apple.TextEdit" {
+        let desktop = window.title.contains("Notes") ? 1 : 0
+        service.moveWindow(windowID: window.windowID, toDesktop: desktop) { _ in }
+        wait(0.3)
+        guard service.desktopIndex(forWindow: window.windowID) == desktop else {
+            log("FAILED: example window did not reach its desktop"); exit(1)
+        }
+    }
+    resetOnboardingDesktop()
+    _ = run("/usr/bin/pkill", ["-x", "Debut"])
+    wait(0.7)
+    _ = run("/usr/bin/open", ["/Applications/Debut.app"])
+    wait(3)
+    guard let notes = windows.first(where: { $0.title.contains("Notes") }) else { exit(1) }
+    let row = (readState()["windowIDsBySpace"] ?? "").split(separator: ";", omittingEmptySubsequences: false)
+    guard row.count > 1, row[1].split(separator: ",").contains(Substring(String(notes.windowID))) else {
+        log("FAILED: Debut's screenshot would show Notes on the wrong desktop"); exit(1)
+    }
+    if let work = windows.first(where: { $0.title.contains("Work") }) {
+        _ = AccessibilityWindowService().raiseWindow(windowID: work.windowID)
+    }
+    wait(1)
+}
+
 // Dedicated first-use media, always recorded in the disposable guest.
 func recordOnboarding() {
     guard requestedClips.contains("onboarding") else { return }
@@ -359,23 +394,55 @@ func recordOnboarding() {
         still("onboarding-previews")
         postTap(Key.escape, flags: .maskAlternate)
     }
-    let spaces = SpaceService()
-    spaces.switchDuration = 0
-    spaces.switchToDesktop(index: 0)
+    // The comparison uses an unmodified OS shortcut while Debut is stopped.
+    // Each path starts on the same desktop and records both directions.
+    _ = run("/usr/bin/pkill", ["-x", "Debut"])
     wait(1)
+    let defaults = UserDefaults(suiteName: "com.apple.symbolichotkeys")!
+    var hotkeys = defaults.dictionary(forKey: "AppleSymbolicHotKeys") ?? [:]
+    for (id, code) in [("79", 123), ("81", 124)] {
+        hotkeys[id] = ["enabled": true, "value": ["type": "standard", "parameters": [65535, code, 262144]]]
+    }
+    defaults.set(hotkeys, forKey: "AppleSymbolicHotKeys")
+    defaults.synchronize()
+    _ = run("/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings", ["-u"])
+    _ = run("/usr/bin/killall", ["Dock"])
+    wait(3)
     for native in [true, false] {
+        resetOnboardingDesktop()
         let url = outputDirectory.appendingPathComponent(native ? "onboarding-native.mov" : "onboarding-instant.mov")
         do {
             let recorder = try startDemoMovie(at: url)
-            wait(0.6)
-            spaces.switchDuration = native ? AppSettings.maximumSpaceSwitchDuration : 0
-            spaces.switchToDesktop(index: 1)
-            wait(2.4)
+            wait(0.8)
+            for destination in [1, 0] {
+                let started = Date()
+                if native {
+                    let source = CGEventSource(stateID: .hidSystemState)
+                    for down in [true, false] {
+                        let event = CGEvent(keyboardEventSource: source, virtualKey: destination == 1 ? 124 : 123, keyDown: down)!
+                        // Physical arrow keys carry the function-key and numeric-pad flags.
+                        // A session event with only Control is ignored by the native shortcut.
+                        event.flags = [.maskControl, .maskSecondaryFn, .maskNumericPad]
+                        event.post(tap: .cghidEventTap)
+                    }
+                    wait(0.6)
+                } else {
+                    // A fresh service owns one gesture. Reusing an unsettled coordinator would
+                    // queue the reset forever and record a still image on the second trial.
+                    let service = SpaceService()
+                    service.switchDuration = 0
+                    service.switchToDesktop(index: destination)
+                    wait(0.6)
+                }
+                guard SpaceService().currentDesktopIndex() == destination else {
+                    log("FAILED: \(native ? "macOS default" : "Instant") never reached desktop \(destination)")
+                    exit(1)
+                }
+                log("verified \(native ? "macOS default" : "Instant") desktop \(destination)")
+                wait(max(0, 2 - Date().timeIntervalSince(started)))
+            }
             try awaitCapture { try await recorder.stop() }
         } catch { log("onboarding movie failed: \(error)"); exit(1) }
-        spaces.switchDuration = 0
-        spaces.switchToDesktop(index: 0)
-        wait(1)
     }
     _ = run("/usr/bin/pkill", ["-x", "Debut"])
     wait(1)
@@ -408,7 +475,8 @@ log("output: \(outputDirectory.path)")
 selectDisplayMode(value(after: "--display"))
 if arguments.contains("--prepare-display") { exit(0) }
 
-arrangeSpaces(windowsPerSpace: Int(value(after: "--windows-per-space") ?? "") ?? 3)
+if requestedClips.contains("onboarding") { arrangeOnboardingWindows() }
+else { arrangeSpaces(windowsPerSpace: Int(value(after: "--windows-per-space") ?? "") ?? 3) }
 wait(1.0)
 
 // After the arrangement, not before: Debut's login-item banner arrives on its first launch and

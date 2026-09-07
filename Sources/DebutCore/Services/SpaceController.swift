@@ -215,6 +215,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public weak var delegate: SpaceControllerDelegate?
     public var onDesktopReveal: (() -> Void)?
     public var onPracticeVerified: ((OnboardingPractice) -> Void)?
+    public var onTutorialSelectionVerified: ((CGWindowID, OnboardingPractice) -> Void)?
+    private var tutorialMovedWindowIDs: Set<CGWindowID> = []
     private var overlayPractice: OnboardingPractice?
     private var pendingPractice: (windowID: CGWindowID, practice: OnboardingPractice)?
 
@@ -723,6 +725,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         guard frontmost != request.ownerPID else {
             if practice?.windowID == request.windowID, let practice {
                 onPracticeVerified?(practice.practice)
+                onTutorialSelectionVerified?(request.windowID, practice.practice)
             }
             return true
         }
@@ -1526,6 +1529,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func setupOverlay(mode: OverlayMode = .stages) {
         overlayPractice = nil
+        tutorialMovedWindowIDs = []
         pendingPractice = nil
         overlayMode = mode
         let presentation = activeOverlayPresentation
@@ -1890,9 +1894,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let visibleTargetSpace = overlaySpaceManager.spaces[safe: selectedSpaceIndex]
         let raiseWindowID = visibleTargetSpace?.windows[safe: selectedWindowIndex]?.windowID
 
-        if let raiseWindowID, let overlayPractice,
-           overlayPractice == .allWindows || targetSpace.id == spaceManager.activeSpaceID {
-            pendingPractice = (raiseWindowID, overlayPractice)
+        if let raiseWindowID, let overlayPractice {
+            let practice: OnboardingPractice
+            if tutorialMovedWindowIDs.contains(raiseWindowID) { practice = .moveWindow }
+            else if overlayPractice == .allWindows { practice = .allWindows }
+            else if targetSpace.id != spaceManager.activeSpaceID { practice = .desktop }
+            else { practice = .workspace }
+            pendingPractice = (raiseWindowID, practice)
         }
         switchToSpace(id: targetSpace.id, raiseWindowID: raiseWindowID)
 
@@ -2216,6 +2224,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         completion: @escaping @Sendable () -> Void
     ) {
         let commit = stageStackTransaction.commit(to: &spaceManager)
+        tutorialMovedWindowIDs = commit.keyboardWindowIDs.union(commit.pointerWindowIDs)
         guard commit.didMutate else {
             completion()
             return

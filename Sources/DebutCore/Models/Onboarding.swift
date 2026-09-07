@@ -7,12 +7,30 @@ public enum OnboardingPage: Int, CaseIterable, Sendable, Codable {
 
 public struct OnboardingCheckpoint: Codable, Sendable {
     public let page: OnboardingPage
+    public var exercise: OnboardingExercise? = nil
     public let workspacePracticed: Bool
     public let allWindowsPracticed: Bool
 }
 
 public enum OnboardingPractice: Sendable, Equatable {
-    case workspace, allWindows
+    case workspace, allWindows, desktop, moveWindow
+}
+
+public enum OnboardingExercise: String, Codable, Sendable {
+    case switchWindow, switchDesktop, moveWindow
+}
+
+public struct OnboardingTarget: Equatable, Sendable {
+    public let windowID: UInt32
+    public let originDesktop: Int
+    public let destinationDesktop: Int
+    public let title: String
+    public init(windowID: UInt32, originDesktop: Int, destinationDesktop: Int, title: String) {
+        self.windowID = windowID
+        self.originDesktop = originDesktop
+        self.destinationDesktop = destinationDesktop
+        self.title = title
+    }
 }
 
 public struct OnboardingPermissionState: Equatable, Sendable {
@@ -35,6 +53,11 @@ public protocol OnboardingPermissionClient: AnyObject {
 @Observable
 public final class OnboardingViewModel {
     public private(set) var page: OnboardingPage = .welcome
+    public private(set) var exercise: OnboardingExercise = .switchWindow
+    public private(set) var target: OnboardingTarget?
+    public var targetError: String?
+    public private(set) var lastResult: String?
+    public var onRestartExercise: @MainActor () -> Void = {}
     public var features: FeatureSettings
     public var duration: TimeInterval
     public private(set) var permissions: OnboardingPermissionState
@@ -80,6 +103,7 @@ public final class OnboardingViewModel {
         self.onProgressChanged = onProgressChanged
         if let checkpoint {
             page = checkpoint.page
+            exercise = checkpoint.exercise ?? .switchWindow
             workspacePracticed = checkpoint.workspacePracticed
             allWindowsPracticed = checkpoint.allWindowsPracticed
         }
@@ -89,8 +113,8 @@ public final class OnboardingViewModel {
         if page == .welcome { return true }
         guard permissions.accessibilityGranted else { return false }
         switch page {
-        case .workspace: return desktopCount >= 2 && workspacePracticed
-        case .previews: return allWindowsPracticed && (!features.windowPreviews || permissions.screenRecordingGranted)
+        case .workspace: return false
+        case .previews: return false
         case .speed, .ready: return true
         case .welcome: return true
         }
@@ -115,8 +139,18 @@ public final class OnboardingViewModel {
     }
 
     public func back() {
-        if let previous = OnboardingPage(rawValue: page.rawValue - 1) { page = previous }
+        target = nil
+        if page == .workspace, exercise != .switchWindow {
+            exercise = exercise == .moveWindow ? .switchDesktop : .switchWindow
+        } else if let previous = OnboardingPage(rawValue: page.rawValue - 1) { page = previous }
+        if page == .workspace {
+            var enabled = features
+            enabled.workspaceIsolation = true
+            setFeatures(enabled)
+        }
+        lastResult = nil
         refreshPermissions()
+        onRestartExercise()
         onEnvironmentRefresh()
         saveProgress()
     }
@@ -126,18 +160,47 @@ public final class OnboardingViewModel {
         self.windowCount = windowCount
     }
 
-    /// Called only after an actual switcher selection has passed front-process verification.
-    public func recordPractice(_ practice: OnboardingPractice) {
-        guard permissions.accessibilityGranted else { return }
-        if page == .workspace, practice == .workspace, desktopCount >= 2, windowCount > 0 {
-            workspacePracticed = true
+    public func setTarget(_ target: OnboardingTarget?) {
+        self.target = target
+        targetError = nil
+    }
+
+    /// The app supplies the selected window, confirmed desktop and actual switcher action.
+    /// Merely opening the overlay, clicking a destination, or choosing another window cannot pass.
+    @discardableResult
+    public func recordPractice(_ practice: OnboardingPractice, windowID: UInt32, desktopIndex: Int) -> Bool {
+        guard permissions.accessibilityGranted, desktopCount >= 2,
+              let target, target.windowID == windowID,
+              target.destinationDesktop == desktopIndex else { return false }
+        let changesDesktop = target.originDesktop != target.destinationDesktop
+        guard practice == .workspace ? !changesDesktop : changesDesktop else { return false }
+        if page == .workspace {
+            switch (exercise, practice) {
+            case (.switchWindow, .workspace): exercise = .switchDesktop
+            case (.switchDesktop, .desktop): exercise = .moveWindow
+            case (.moveWindow, .moveWindow):
+                workspacePracticed = true
+                page = .previews
+            default: return false
+            }
+        } else if page == .previews, practice == .allWindows,
+                  !features.windowPreviews || permissions.screenRecordingGranted {
+            allWindowsPracticed = true
+            page = .speed
+        } else { return false }
+        lastResult = switch practice {
+        case .workspace: "You selected this window with Command-Tab."
+        case .desktop: "You switched from Desktop \(target.originDesktop + 1) to Desktop \(desktopIndex + 1)."
+        case .moveWindow: "You moved this window from Desktop \(target.originDesktop + 1) to Desktop \(desktopIndex + 1)."
+        case .allWindows: "You opened this window on Desktop \(desktopIndex + 1) with Option-Tab."
         }
-        if page == .previews, practice == .allWindows { allWindowsPracticed = true }
+        self.target = nil
         saveProgress()
+        return true
     }
 
     private func saveProgress() {
-        onProgressChanged(.init(page: page, workspacePracticed: workspacePracticed,
+        onProgressChanged(.init(page: page, exercise: exercise, workspacePracticed: workspacePracticed,
                                 allWindowsPracticed: allWindowsPracticed))
     }
 
@@ -226,6 +289,6 @@ public enum OnboardingCapturePolicy {
 
 public enum OnboardingLayout {
     public static func contentHeight(visibleHeight: Double, titleBarHeight: Double) -> Double {
-        min(700, max(0, visibleHeight - titleBarHeight))
+        min(650, max(0, visibleHeight - titleBarHeight))
     }
 }

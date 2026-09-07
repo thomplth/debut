@@ -120,8 +120,8 @@ for still in "$RAW_DIR"/*.png; do
     name="$(basename "${still%.png}")"
     crop=""
     case "$name" in
-        onboarding-workspace) crop="crop=1480:850:700:700," ;;
-        onboarding-previews|onboarding-no-previews) crop="crop=1880:760:510:540," ;;
+        onboarding-workspace) crop="crop=1000:630:940:740," ;;
+        onboarding-previews|onboarding-no-previews) crop="crop=1340:430:770:715," ;;
     esac
     ffmpeg -loglevel error -y -i "$still" \
         -vf "${crop}scale=$((STILL_WIDTH * 2)):-1:flags=lanczos" -q:v 3 "$MEDIA_DIR/$name.jpg"
@@ -145,7 +145,7 @@ done
 
 if [[ -f "$RAW_DIR/onboarding-native.mov" && -f "$RAW_DIR/onboarding-instant.mov" ]]; then
     ffmpeg -loglevel error -y -i "$RAW_DIR/onboarding-native.mov" -i "$RAW_DIR/onboarding-instant.mov" \
-        -filter_complex '[0:v]fps=30,scale=640:400,tpad=stop_mode=clone:stop_duration=4,trim=duration=4,setpts=PTS-STARTPTS,drawtext=fontfile=/System/Library/Fonts/Supplemental/Arial.ttf:text=400 ms transition:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=10:x=20:y=20[a];[1:v]fps=30,scale=640:400,tpad=stop_mode=clone:stop_duration=4,trim=duration=4,setpts=PTS-STARTPTS,drawtext=fontfile=/System/Library/Fonts/Supplemental/Arial.ttf:text=Instant:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=10:x=20:y=20[b];[a][b]hstack=inputs=2[v]' \
+        -filter_complex '[0:v]fps=30,scale=640:400,tpad=stop_mode=clone:stop_duration=5,trim=duration=4.8,setpts=PTS-STARTPTS[a];[1:v]fps=30,scale=640:400,tpad=stop_mode=clone:stop_duration=5,trim=duration=4.8,setpts=PTS-STARTPTS[b];[a][b]hstack=inputs=2[v]' \
         -map '[v]' -c:v libx264 -crf 22 -pix_fmt yuv420p -movflags +faststart "$MEDIA_DIR/onboarding-speed.mp4"
     ffmpeg -loglevel error -y -ss 0.9 -i "$MEDIA_DIR/onboarding-speed.mp4" -frames:v 1 "$MEDIA_DIR/onboarding-speed.jpg"
 fi

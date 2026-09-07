@@ -998,45 +998,23 @@ if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
     let appeared = waitFor(timeout: 10) { onboardingButton("Get started") != nil }
     var passed = runtimeReady && appeared && onboardingPress("Get started") && !onboardingContinueEnabled()
     if oneDesktop {
-        passed = passed && SpaceService().userDesktops().count == 1 && onboardingContains("Make room for another desktop")
+        passed = passed && SpaceService().userDesktops().count == 1 && onboardingContains("Create a second desktop")
         _ = takeScreenshot("onboarding_one_desktop")
         passed = passed && DesktopProvisioning.ensureDesktops(2)
         returnToOnboarding()
-        passed = passed && !onboardingContains("Make room for another desktop") && !onboardingContinueEnabled()
+        passed = passed && !onboardingContains("Create a second desktop") && !onboardingContinueEnabled()
         _ = takeScreenshot("onboarding_desktop_added")
     } else if deniedAccessibility {
-        passed = passed && onboardingContains("Allow Accessibility to use Debut")
+        passed = passed && onboardingContains("Allow Accessibility to continue")
         _ = takeScreenshot("onboarding_accessibility_denied")
     } else {
-        postFlagsChanged(flags: .maskCommand)
-        postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
-        // The first cold presentation may take longer than 0.7s. The lesson asks
-        // the user to hold until windows appear; wait for that actual presentation
-        // before releasing, rather than committing during hosting-view setup.
-        passed = passed && waitFor(timeout: 10) {
-            overlayWindowIsOnScreen() && readEvents().contains {
-                $0["event"] == "overlay_presentation_completed"
-            }
-        }
-        postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
-        postFlagsChanged(flags: [])
-        wait(0.8)
-        returnToOnboarding()
-        passed = passed && onboardingContinueEnabled() && onboardingPress("Continue")
-            && onboardingContains("See live window previews") && !onboardingContinueEnabled()
+        passed = passed && performOnboardingExercise(.workspace)
+            && performOnboardingExercise(.desktop) && performOnboardingExercise(.moveWindow)
+            && onboardingContains("Allow Screen Recording for window previews") && !onboardingContinueEnabled()
         _ = takeScreenshot("onboarding_capture_optional")
         passed = passed && onboardingPress("Use without previews") && !onboardingContinueEnabled()
-        postFlagsChanged(flags: .maskAlternate)
-        postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskAlternate)
-        wait(0.7)
-        passed = passed && overlayWindowIsOnScreen()
-        _ = takeScreenshot("onboarding_without_previews_overlay")
-        postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskAlternate)
-        postFlagsChanged(flags: [])
-        wait(0.8)
-        returnToOnboarding()
-        passed = passed && onboardingContinueEnabled() && onboardingPress("Continue")
-            && onboardingContains("Space switch duration")
+        passed = passed && performOnboardingExercise(.allWindows)
+            && onboardingContains("Desktop transition duration")
         _ = takeScreenshot("onboarding_without_capture_speed")
     }
     _ = terminateDebutAndWait()
@@ -1051,7 +1029,8 @@ if CommandLine.arguments.dropFirst().first == "switch-to-desktop" {
     clearDiagnosticFile()
     let service = SpaceService()
     let application = launchDebut()
-    let ready = waitForDebutReady(application)
+    // A newly started AX server can consume its 10-second response timeout on a cold guest.
+    let ready = waitForDebutReady(application, timeout: 20)
     var landed = false
     if ready {
         postQuickSwitch(to: target)
@@ -2089,12 +2068,101 @@ test("Forced first launch presents the onboarding window") {
         let onboardingShown = readEvents().contains {
             $0["event"] == "onboarding_shown" && $0["forced"] == "true"
         }
-        if onboardingShown || onboardingWindowTitles.contains("Welcome to Debut") {
+        if onboardingShown || onboardingWindowTitles.contains("Debut Tutorial") {
             return true
         }
         wait(0.1)
     }
     return false
+}
+
+// A tutorial must land on its named window and requested real desktop, not merely open an overlay.
+@MainActor
+func currentOnboardingTarget() -> [String: String]? {
+    readEvents().last { $0["event"] == "onboarding_target_created" }
+}
+@MainActor
+func selectedOnboardingWindowID() -> String? {
+    let state = readState()
+    let rows = (state["windowIDsBySpace"] ?? "").split(separator: ";", omittingEmptySubsequences: false)
+    guard let row = Int(state["selectedSpaceIndex"] ?? ""), rows.indices.contains(row),
+          let column = Int(state["selectedWindowIndex"] ?? "") else { return nil }
+    let windows = rows[row].split(separator: ",")
+    return windows.indices.contains(column) ? String(windows[column]) : nil
+}
+@MainActor
+func performOnboardingExercise(_ practice: OnboardingPractice) -> Bool {
+    let title: String = switch practice {
+    case .workspace: "Desktop switching"
+    case .desktop: "Move a window"
+    case .moveWindow: "Window previews"
+    case .allWindows: "Instant desktop switching"
+    }
+    guard waitFor(timeout: 8, { currentOnboardingTarget()?["title"] == title }),
+          let target = currentOnboardingTarget(), let id = target["windowID"],
+          let destination = Int(target["destinationDesktop"] ?? "") else {
+        info("  Missing tutorial destination for \(practice): \(String(describing: currentOnboardingTarget()))")
+        return false
+    }
+    let flags: CGEventFlags = practice == .allWindows ? .maskAlternate : .maskCommand
+    let presentationCount = readEvents().filter { $0["event"] == "overlay_presentation_completed" }.count
+    postFlagsChanged(flags: flags)
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: flags)
+    guard waitFor(timeout: 15, {
+        overlayWindowIsOnScreen() && readEvents().filter { $0["event"] == "overlay_presentation_completed" }.count > presentationCount
+    }) else { postFlagsChanged(flags: []); return false }
+    postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: flags)
+    guard overlayWindowIsOnScreen() else { postFlagsChanged(flags: []); return false }
+    if practice == .desktop {
+        for _ in 0..<10 {
+            if readState()["selectedSpaceIndex"] == String(destination) { break }
+            let previousDesktop = readState()["selectedSpaceIndex"]
+            postFlagsChanged(flags: [.maskCommand, .maskAlternate])
+            postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand, .maskAlternate])
+            postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand, .maskAlternate])
+            guard waitFor(timeout: 15, { readState()["selectedSpaceIndex"] != previousDesktop }) else {
+                postFlagsChanged(flags: []); return false
+            }
+        }
+        postFlagsChanged(flags: .maskCommand)
+    }
+    for _ in 0..<60 {
+        if selectedOnboardingWindowID() == id { break }
+        let previousSelection = selectedOnboardingWindowID()
+        postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: flags)
+        postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: flags)
+        // Wait for the visible result of each press. Fixed delays can queue many Tabs
+        // while the first overlay warms up, then overshoot the intended destination.
+        guard waitFor(timeout: 15, { selectedOnboardingWindowID() != previousSelection }) else {
+            postFlagsChanged(flags: []); return false
+        }
+    }
+    let selected = selectedOnboardingWindowID() == id
+    _ = takeScreenshot("onboarding_\(practice)_selection")
+    if selected && practice == .moveWindow {
+        let origin = Int(readState()["selectedSpaceIndex"] ?? "") ?? 0
+        let arrow = destination > origin ? kVK_DownArrow : kVK_UpArrow
+        postKeyDown(keyCode: CGKeyCode(arrow), flags: flags)
+        postKeyUp(keyCode: CGKeyCode(arrow), flags: flags)
+        wait(0.3)
+    }
+    postFlagsChanged(flags: [])
+    let verified = selected && waitFor(timeout: 8) {
+        readEvents().contains { $0["event"] == "onboarding_practice_verified" && $0["windowID"] == id }
+    }
+    if !verified { info("  Tutorial \(practice) failed: selected=\(selected) target=\(id), state=\(readState())") }
+    guard verified && SpaceService().currentDesktopIndex() == destination else { return false }
+    // Capture the next lesson only after its named destination is ready, so evidence
+    // shows the instructions a learner follows rather than a transient loading state.
+    return waitFor(timeout: 8) {
+        switch practice {
+        case .workspace: onboardingContains("Open “Move a window” to continue")
+        case .desktop: onboardingContains("Open “Window previews” to continue")
+        case .moveWindow: onboardingContains("Open “Instant desktop switching” on Desktop")
+            || onboardingContains("Allow Screen Recording for window previews")
+        case .allWindows: onboardingContains("Desktop transition duration")
+        }
+    }
 }
 
 // Walk the actual controls. A welcome-window screenshot alone cannot prove onboarding works.
@@ -2149,40 +2217,85 @@ func returnToOnboarding() {
     wait(0.5)
 }
 
-test("Onboarding opens the focus lesson and refuses Next before practice") {
-    onboardingPress("Get started") && onboardingContains("One desktop. One focus.") && !onboardingContinueEnabled()
+test("Onboarding names the next window before asking for Command-Tab") {
+    onboardingPress("Get started") && onboardingContains("Switch windows on this desktop")
+        && waitFor { currentOnboardingTarget()?["title"] == "Desktop switching" }
+        && !onboardingContinueEnabled()
 }
-_ = takeScreenshot("11_onboarding_focus")
-postFlagsChanged(flags: .maskCommand)
-postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
-wait(0.7)
-test("Onboarding Command-Tab practice actually presents the switcher") { overlayWindowIsOnScreen() }
-postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
-postFlagsChanged(flags: [])
-wait(0.8)
-returnToOnboarding()
-test("A verified Command-Tab selection unlocks the focus lesson") {
-    onboardingContinueEnabled() && onboardingContains("You switched a window")
+_ = takeScreenshot("11_onboarding_windows")
+test("Restart replaces the temporary target without advancing the lesson") {
+    let old = currentOnboardingTarget()?["windowID"]
+    return onboardingPress("Restart exercise") && waitFor { currentOnboardingTarget()?["windowID"] != old }
+        && onboardingContains("Switch windows on this desktop")
 }
-_ = takeScreenshot("11_onboarding_focus_success")
-test("Option-Tab lesson requires its own practice") {
-    onboardingPress("Continue") && onboardingContains("Find it by sight.") && !onboardingContinueEnabled()
+test("Opening the target without a shortcut does not advance and offers a return route") {
+    guard let id = currentOnboardingTarget()?["windowID"].flatMap(UInt32.init),
+          let app = onboardingApplication else { return false }
+    let service = AccessibilityWindowService()
+    _ = service.frontWindow(windowID: id, ownerPID: app.processIdentifier)
+    _ = service.raiseWindow(windowID: id)
+    wait(0.5)
+    let unchanged = !readEvents().contains { $0["event"] == "onboarding_practice_verified" && $0["windowID"] == String(id) }
+    return unchanged && onboardingPress("Return to tutorial") && onboardingContains("Switch windows on this desktop")
 }
+test("Closing the target explains recovery and restart creates another window") {
+    guard let id = currentOnboardingTarget()?["windowID"].flatMap(UInt32.init) else { return false }
+    guard AccessibilityWindowService().closeWindow(windowID: id) else { return false }
+    return waitFor { onboardingContains("next lesson window was closed") }
+        && onboardingPress("Restart exercise")
+        && waitFor { currentOnboardingTarget()?["windowID"] != String(id) }
+}
+test("Cancelling the switcher cannot complete an exercise") {
+    postFlagsChanged(flags: .maskCommand)
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+    wait(0.7)
+    let visible = overlayWindowIsOnScreen()
+    let titleVisible = onboardingContains("Desktop switching") && onboardingContains("Debut Tutorial")
+    postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+    postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: .maskCommand)
+    postFlagsChanged(flags: [])
+    wait(0.5)
+    return visible && titleVisible && onboardingContains("Switch windows on this desktop")
+}
+test("The named Command-Tab target becomes the desktop lesson") { performOnboardingExercise(.workspace) }
+_ = takeScreenshot("11_onboarding_desktops")
+test("Command-Option-Tab reaches the next lesson on another real desktop") { performOnboardingExercise(.desktop) }
+_ = takeScreenshot("11_onboarding_move")
+test("Moving the named tutorial window to the requested desktop opens previews") { performOnboardingExercise(.moveWindow) }
 _ = takeScreenshot("11_onboarding_previews")
-postFlagsChanged(flags: .maskAlternate)
-postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskAlternate)
-wait(0.7)
-test("Onboarding Option-Tab practice actually presents all windows") { overlayWindowIsOnScreen() }
-postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskAlternate)
-postFlagsChanged(flags: [])
-wait(0.8)
-returnToOnboarding()
-test("A verified Option-Tab selection unlocks the preview lesson") { onboardingContinueEnabled() }
+test("Option-Tab reaches the named target on another desktop") { performOnboardingExercise(.allWindows) }
 test("The speed lesson exposes live controls") {
-    onboardingPress("Continue") && onboardingContains("Space switch duration")
-        && onboardingContains("Trackpad desktop swipe")
+    onboardingContains("Desktop transition duration") && onboardingContains("Trackpad swipe")
 }
 _ = takeScreenshot("11_onboarding_speed")
+test("All four desktop controls are visible and apply immediately") {
+    guard onboardingPress("Enable all") else { return false }
+    _ = takeScreenshot("11_onboarding_speed_controls")
+    guard let lastToggle = onboardingButton("Trackpad swipe", role: kAXCheckBoxRole),
+          let continueButton = onboardingButton("Continue") else { return false }
+    func position(_ element: AXUIElement) -> CGPoint? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var point = CGPoint.zero
+        guard AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cgPoint, &point) else { return nil }
+        return point
+    }
+    guard let lastPosition = position(lastToggle), let footerPosition = position(continueButton),
+          lastPosition.y + 24 < footerPosition.y else {
+        info("  The last desktop control is not visible above the footer")
+        return false
+    }
+    guard let toggle = onboardingButton("Debut Command-Tab", role: kAXCheckBoxRole),
+          AXUIElementPerformAction(toggle, kAXPressAction as CFString) == .success else { return false }
+    wait(0.3)
+    guard let data = try? Data(contentsOf: settingsFile),
+          let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else { return false }
+    let changed = !settings.features.workspaceIsolation && settings.features.numberShortcuts
+        && settings.features.controlArrows && settings.features.trackpadSwipes
+    return changed && onboardingContinueEnabled()
+}
+
 test("Disabling all overrides immediately persists the choice") {
     guard onboardingPress("Disable all"), let data = try? Data(contentsOf: settingsFile),
           let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else { return false }
@@ -2218,14 +2331,14 @@ test("A newly enabled onboarding shortcut switches the real desktop") {
     let returned = waitFor { service.currentDesktopIndex() == origin }
     wait(0.6)
     returnToOnboarding()
-    return landed && returned && onboardingContains("Space switch duration")
+    return landed && returned && onboardingContains("Desktop transition duration")
 }
 test("Completion has a ready destination before closing") {
-    onboardingPress("Continue") && onboardingContains("You’re ready.")
+    onboardingPress("Continue") && onboardingContains("Setup complete")
 }
 _ = takeScreenshot("11_onboarding_ready")
 test("Start using Debut closes onboarding") {
-    onboardingPress("Start using Debut") && !onboardingContains("You’re ready.")
+    onboardingPress("Start using Debut") && !onboardingContains("Setup complete")
 }
 
 _ = terminateDebutAndWait()
@@ -2236,6 +2349,11 @@ let restoredApplicationReady = waitForDebutReady(restoredApplication)
 test("Debut relaunches normally after the onboarding check") {
     restoredApplicationReady
 }
+// The destination-based tutorial ends on another desktop. Subsequent dismissal fixtures
+// still live on Desktop 1, so explicitly return before their independent scenarios.
+postQuickSwitch(to: 0)
+_ = waitFor { SpaceService().currentDesktopIndex() == 0 }
+wait(0.5)
 
 _ = terminateDebutAndWait()
 
