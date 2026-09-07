@@ -41,6 +41,8 @@ struct OnboardingTests {
         let permissions = MockOnboardingPermissionClient()
         let viewModel = OnboardingViewModel(permissionClient: permissions)
         viewModel.continueFromWelcome()
+        #expect(viewModel.page == .features)
+        viewModel.continueFromFeatures()
 
         #expect(viewModel.page == .permissions)
         #expect(!viewModel.canStartTutorial)
@@ -77,6 +79,19 @@ struct OnboardingTests {
         #expect(viewModel.screenRecordingRequirement.isRequired)
         #expect(viewModel.screenRecordingRequirement.detail.contains("wallpaper"))
         #expect(viewModel.screenRecordingRequirement.detail.contains("never"))
+    }
+
+    @Test("Feature choices are independent and immediately published")
+    func featureChoices() {
+        var observed: [FeatureSettings] = []
+        let model = OnboardingViewModel(permissionClient: MockOnboardingPermissionClient(),
+                                        onFeaturesChanged: { observed.append($0) })
+        var choice = model.features
+        choice.windowPreviews = false
+        model.setFeatures(choice)
+        #expect(observed == [choice])
+        #expect(!model.features.windowPreviews)
+        #expect(model.features.workspaceIsolation)
     }
 
     @Test("Permission requests are explicit user actions")
@@ -139,9 +154,15 @@ struct OnboardingTests {
         )
 
         viewModel.continueFromWelcome()
+        #expect(viewModel.page == .features)
+        viewModel.continueFromFeatures()
         viewModel.startTutorial()
         #expect(viewModel.tutorialStep == .switchWindows)
 
+        viewModel.advanceTutorial()
+        #expect(viewModel.tutorialStep == .switchSpaces)
+        viewModel.advanceTutorial()
+        #expect(viewModel.tutorialStep == .allWindows)
         viewModel.advanceTutorial()
         #expect(viewModel.tutorialStep == .moveWindow)
 

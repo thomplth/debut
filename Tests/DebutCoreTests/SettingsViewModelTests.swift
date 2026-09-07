@@ -36,12 +36,12 @@ struct SettingsViewModelTests {
     func sections() {
         let vm = SettingsViewModel()
         #expect(vm.sections == [
-            .appearance,
-            .selector,
+            .features,
             .excludedApps,
             .app,
             .privacy,
             .keyboardShortcuts,
+            .advanced,
             .troubleshooting,
             .about,
         ])
