@@ -168,7 +168,8 @@ struct ScreenshotTests {
         windowsPerSpace: [Int] = [3, 4, 2],
         activeIndex: Int = 1,
         appearance: AppSettings = AppSettings(),
-        windowSizes: [CGWindowID: CGSize] = [:]
+        windowSizes: [CGWindowID: CGSize] = [:],
+        windowPreviews: [CGWindowID: CGImage] = [:]
     ) -> StageOverlayViewModel {
         var sm = SpaceManager()
         let windowData: [(String, String, String)] = [
@@ -204,6 +205,7 @@ struct ScreenshotTests {
             spaceManager: sm,
             activeSpaceIndex: activeIndex,
             selectedWindowIndex: 1,
+            windowPreviews: windowPreviews,
             windowSizes: windowSizes,
             appearance: appearance
         )
@@ -432,6 +434,44 @@ struct ScreenshotTests {
 
         #expect(withPreview > 0)
         #expect(withoutPreview == 0)
+    }
+
+    // The badge bitmap grew to hold its baked shadow. Framing that padded bitmap directly would
+    // widen the card it sits on, which is exactly the kind of change a rendering fix must not make.
+    @Test("A preview does not move anything a preview-less card lays out")
+    func previewDoesNotChangeCardLayout() throws {
+        let size = NSSize(width: 1200, height: 600)
+        var preview: [CGWindowID: CGImage] = [:]
+        if let context = CGContext(
+            data: nil, width: 160, height: 100, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) {
+            context.setFillColor(CGColor(red: 1, green: 0, blue: 1, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: 160, height: 100))
+            if let image = context.makeImage() {
+                for id in CGWindowID(100)...CGWindowID(120) { preview[id] = image }
+            }
+        }
+
+        let withoutPreviews = renderWindowFrames(
+            StageOverlayView(viewModel: makeSampleViewModel()),
+            size: size
+        )
+        let withPreviews = renderWindowFrames(
+            StageOverlayView(viewModel: makeSampleViewModel(windowPreviews: preview)),
+            size: size
+        )
+
+        #expect(!withPreviews.isEmpty)
+        #expect(Set(withPreviews.keys) == Set(withoutPreviews.keys))
+        for (id, frame) in withPreviews {
+            let bare = try #require(withoutPreviews[id])
+            #expect(abs(frame.origin.x - bare.origin.x) < 0.5)
+            #expect(abs(frame.origin.y - bare.origin.y) < 0.5)
+            #expect(abs(frame.width - bare.width) < 0.5)
+            #expect(abs(frame.height - bare.height) < 0.5)
+        }
     }
 
     @Test("Magnify remains available as a selection style")
