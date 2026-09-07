@@ -5,7 +5,7 @@ import SwiftUI
 public final class SettingsWindow: NSWindow {
     public init<Content: View>(rootView: Content) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: 820, height: 620),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -24,24 +24,37 @@ public final class SettingsWindow: NSWindow {
 
 public struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
-    @State private var selectedSection: SettingsSection = .appearance
+    @State private var selectedSection: SettingsSection = .features
     @State private var showingResetConfirmation = false
     private let shortcutRecordingService: (any ShortcutRecordingService)?
     @State private var showingTelemetryPayload = false
     @State private var telemetryPayload = ""
+    @State private var externallyAppliedSettings: AppSettings?
 
     public init(
         viewModel: SettingsViewModel = SettingsViewModel(),
+        selectedSection: SettingsSection = .features,
         shortcutRecordingService: (any ShortcutRecordingService)? = nil
     ) {
+        self._selectedSection = State(initialValue: selectedSection)
         self._viewModel = State(initialValue: viewModel)
         self.shortcutRecordingService = shortcutRecordingService
     }
 
     public var body: some View {
         settingsNavigation
+            .background(Color(nsColor: .windowBackgroundColor))
             .frame(minWidth: 600, minHeight: 400)
-            .onChange(of: viewModel.settings) { _, _ in saveSettings() }
+            .onChange(of: viewModel.settings) { _, settings in
+                if settings != externallyAppliedSettings { saveSettings() }
+                externallyAppliedSettings = nil
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .debutSettingsChanged)) { note in
+                if let settings = note.object as? AppSettings, settings != viewModel.settings {
+                    externallyAppliedSettings = settings
+                    viewModel.settings = settings
+                }
+            }
     }
 
     private var settingsNavigation: some View {
@@ -52,35 +65,26 @@ public struct SettingsView: View {
             .navigationSplitViewColumnWidth(180)
             .listStyle(.sidebar)
         } detail: {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 32) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    switch selectedSection {
+                    case .features: featuresSection
+                    case .excludedApps: excludedAppsSection
+                    case .app: appSection
+                    case .privacy: privacySection
+                    case .keyboardShortcuts: keyboardShortcutsSection
+                    case .advanced:
                         appearanceSection
-                            .id(SettingsSection.appearance)
+                        Divider()
                         selectorSection
-                            .id(SettingsSection.selector)
-                        excludedAppsSection
-                            .id(SettingsSection.excludedApps)
-                        appSection
-                            .id(SettingsSection.app)
-                        privacySection
-                            .id(SettingsSection.privacy)
-                        keyboardShortcutsSection
-                            .id(SettingsSection.keyboardShortcuts)
-                        troubleshootingSection
-                            .id(SettingsSection.troubleshooting)
-                        aboutSection
-                            .id(SettingsSection.about)
-                    }
-                    .padding(24)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .onChange(of: selectedSection) { _, newValue in
-                    withAnimation {
-                        proxy.scrollTo(newValue, anchor: .top)
+                    case .troubleshooting: troubleshootingSection
+                    case .about: aboutSection
                     }
                 }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .id(selectedSection)
         }
         .alert("Reset Window Cache?", isPresented: $showingResetConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -88,7 +92,7 @@ public struct SettingsView: View {
                 viewModel.resetWindowCache()
             }
         } message: {
-            Text("This removes all space window assignments, including dormant windows, and rebuilds one space from windows Debut can currently discover. Settings are preserved.")
+            Text("This removes all space window assignments, including dormant windows, and rebuilds assignments from your current macOS desktops. Settings are preserved.")
         }
         .sheet(isPresented: $showingTelemetryPayload) {
             VStack(alignment: .leading, spacing: 12) {
@@ -113,12 +117,31 @@ public struct SettingsView: View {
 
     // MARK: - Sections
 
+    private var featuresSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Make each desktop a workspace").font(.title2.bold())
+            FeatureControlsView(features: $viewModel.settings.features)
+            Divider()
+            HStack {
+                Text("Space switch duration")
+                Spacer()
+                Text(Self.switchDurationLabel(viewModel.settings.spaceSwitchDuration))
+                    .foregroundStyle(.secondary).monospacedDigit()
+            }
+            Slider(value: $viewModel.settings.spaceSwitchDuration,
+                   in: AppSettings.minimumSpaceSwitchDuration...AppSettings.maximumSpaceSwitchDuration,
+                   step: 0.01)
+            Text("Applies to desktop switches handled by Debut, per desktop crossed. Choose Instant for no transition.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
     private var appearanceSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Appearance")
                 .font(.title2.bold())
 
-            Text("The overlay draws one stage per space. These controls set the stage surface and preview layout.")
+            Text("Fine-tune the space cards and window previews.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -133,7 +156,7 @@ public struct SettingsView: View {
                     .pickerStyle(.segmented)
                     .frame(width: 150)
                 }
-                Text("Clear lets more of the wallpaper through. Regular frosts the stage for more contrast over busy backgrounds.")
+                Text("Regular adds contrast over busy wallpapers.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -162,7 +185,7 @@ public struct SettingsView: View {
                     in: AppSettings.minimumStageScale...AppSettings.maximumStageScale,
                     step: AppSettings.stageScaleStep
                 )
-                Text("How large window previews are drawn. Larger previews show fewer windows per row, and a space with too many to fit is scaled back down so its stage stays on screen.")
+                Text("Large workspaces scale down automatically to fit.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -172,7 +195,7 @@ public struct SettingsView: View {
                     "Match each preview to its window",
                     isOn: $viewModel.settings.adaptiveCardSizing
                 )
-                Text("Previews share a height and take the width of the window they show, so a narrow window takes less room than a wide one. Turn this off to draw every preview at the shape of the display.")
+                Text("Use each window’s proportions instead of a uniform card size.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -187,7 +210,7 @@ public struct SettingsView: View {
                         .monospacedDigit()
                 }
                 Slider(value: $viewModel.settings.inactiveStageScale, in: 0.4...1.0, step: 0.05)
-                Text("How far spaces other than the current one shrink. Smaller values make the current space stand out more.")
+                Text("Size of the other spaces relative to the selected space.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -418,14 +441,14 @@ public struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 settingsToggle("Launch at login", isOn: $viewModel.settings.launchAtLogin)
-                Text("Debut only manages windows while it is running, so it is worth starting with your session. Reach it any time from the menu bar icon.")
+                Text("Start Debut when you sign in.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 settingsToggle("Show in Dock", isOn: $viewModel.settings.showsDockIcon)
-                Text("Turn this off to run Debut from the menu bar alone. Debut manages the windows of Dock applications only, so its own Settings window leaves the space manager with it.")
+                Text("Debut is always available in the menu bar.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -446,7 +469,7 @@ public struct SettingsView: View {
             Text("Keyboard Shortcuts")
                 .font(.title2.bold())
 
-            Text("Click any shortcut to record a replacement. Modifier-free global shortcuts show a warning because they intercept ordinary typing.")
+            Text("Click a shortcut to change it. Feature switches are in Features.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -548,26 +571,7 @@ public struct SettingsView: View {
                     in: 0...0.3,
                     step: 0.01
                 )
-                Text("Shortest gap between steps while a cycling shortcut is held, so a fast key-repeat setting cannot race the selection past what you can follow. Off falls back to your system key-repeat rate.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Space switch duration")
-                    Spacer()
-                    Text(Self.switchDurationLabel(viewModel.settings.spaceSwitchDuration))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(
-                    value: $viewModel.settings.spaceSwitchDuration,
-                    in: AppSettings.minimumSpaceSwitchDuration...AppSettings.maximumSpaceSwitchDuration,
-                    step: 0.01
-                )
-                Text("How long the desktop takes to slide across when switching spaces, per space crossed. Instant cuts straight to the space with no transition.")
+                Text("Minimum time between held-key steps. Off uses your system repeat rate.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -577,7 +581,7 @@ public struct SettingsView: View {
                 .font(.headline)
                 .padding(.top, 8)
 
-            Text("Apps in this list keep shortcuts that overlap Debut's configured quick-switch keys while frontmost. Debut quick switching remains active in other apps.")
+            Text("Let these apps handle numbered shortcuts and Control-arrow while frontmost.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -783,8 +787,8 @@ public struct SettingsView: View {
 
     private func sectionIcon(_ section: SettingsSection) -> String {
         switch section {
-        case .appearance: "paintbrush"
-        case .selector: "scope"
+        case .features: "square.stack.3d.up"
+        case .advanced: "slider.horizontal.3"
         case .excludedApps: "eye.slash"
         case .app: "gearshape"
         case .privacy: "hand.raised"

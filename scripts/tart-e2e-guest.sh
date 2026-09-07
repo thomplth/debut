@@ -177,13 +177,23 @@ for approval_client in "$bundle_id" "$E2E_SOURCE" "/usr/libexec/sshd-keygen-wrap
 done
 as_console killall cfprefsd 2>/dev/null || true
 as_console killall UserNotificationCenter 2>/dev/null || true
-as_console killall replayd 2>/dev/null || true
+as_console killall -9 replayd 2>/dev/null || true
+as_console killall universalAccessAuthWarn 2>/dev/null || true
 
 # Under Reduce Motion the removal transition is a 0.12s fade rather than a 0.36s spring, which is
 # correct behaviour but too brief to sample as motion. The fade branch is covered by unit tests, so
 # the disposable guest is pinned to the spring instead of the E2E check guessing which one it drew.
 as_console env HOME="$console_home" defaults write com.apple.universalaccess reduceMotion -bool false
 as_console env HOME="$console_home" defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool true
+
+# Demo capture uses this same disposable guest. Remove its windows before planting the
+# two-window fixture, including restored state that would repopulate other desktops.
+for fixture_app in TextEdit Safari Terminal Calculator Notes Preview; do
+    as_console pkill -9 -x "$fixture_app" 2>/dev/null || true
+done
+as_console rm -rf "$console_home/Library/Saved Application State"
+sudo find "$console_home/Library/Daemon Containers" -maxdepth 5 -type d -name "*.savedState" -exec rm -rf {} + 2>/dev/null || true
+as_console env HOME="$console_home" defaults write -g NSQuitAlwaysKeepsWindows -bool false
 
 echo "Preparing deterministic fixture windows..."
 as_console rm -rf "$support_dir"

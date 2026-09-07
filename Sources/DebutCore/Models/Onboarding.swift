@@ -13,12 +13,15 @@ public struct OnboardingPermissionRequirement: Sendable {
 
 public enum OnboardingPage: Int, CaseIterable, Sendable {
     case welcome
+    case features
     case permissions
     case tutorial
 }
 
 public enum OnboardingTutorialStep: Int, CaseIterable, Sendable {
     case switchWindows
+    case switchSpaces
+    case allWindows
     case moveWindow
 }
 
@@ -42,12 +45,20 @@ public protocol OnboardingPermissionClient: AnyObject {
 @MainActor
 @Observable
 public final class OnboardingViewModel {
-    public let introduction = "Debut replaces the system Command–Tab switcher with a visual way to move through your windows and spaces."
+    public let introduction = "See your windows and spaces. Keep Command–Tab focused on your work. Move between desktops at your pace."
 
     public let screenRecordingRequirement = OnboardingPermissionRequirement(
         isRequired: true,
-        detail: "Required to read your desktop wallpaper, so spaces sit on it instead of a black rectangle, and to draw live window previews. Debut reads the screen on your Mac and never records, stores, or transmits it."
+        detail: "Used for window previews and desktop wallpaper. Images stay in memory on your Mac and are never uploaded."
     )
+
+    public var features: FeatureSettings
+    private let onFeaturesChanged: @MainActor (FeatureSettings) -> Void
+
+    public func setFeatures(_ features: FeatureSettings) {
+        self.features = features
+        onFeaturesChanged(features)
+    }
 
     public private(set) var page: OnboardingPage = .welcome
     public private(set) var tutorialStep: OnboardingTutorialStep = .switchWindows
@@ -62,11 +73,15 @@ public final class OnboardingViewModel {
 
     public init(
         permissionClient: any OnboardingPermissionClient,
+        features: FeatureSettings = FeatureSettings(),
+        onFeaturesChanged: @escaping @MainActor (FeatureSettings) -> Void = { _ in },
         shareAnonymousTelemetry: Bool = true,
         onTelemetryChanged: @escaping @MainActor (Bool) -> Void = { _ in },
         onPermissionStateChanged: @escaping @MainActor (OnboardingPermissionState) -> Void = { _ in },
         onCompleted: @escaping @MainActor () -> Void = {}
     ) {
+        self.features = features
+        self.onFeaturesChanged = onFeaturesChanged
         self.permissionClient = permissionClient
         self.permissions = permissionClient.currentState()
         self.shareAnonymousTelemetry = shareAnonymousTelemetry
@@ -85,6 +100,12 @@ public final class OnboardingViewModel {
     }
 
     public func continueFromWelcome() {
+        page = .features
+    }
+
+    public func returnToFeatures() { page = .features }
+
+    public func continueFromFeatures() {
         page = .permissions
         refreshPermissions()
     }

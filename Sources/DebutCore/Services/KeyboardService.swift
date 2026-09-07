@@ -24,6 +24,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case jumpToLastSpace        // 9 (selects the final space within open overlay)
     case switchToSpace(Int)     // Configured modifier + 1-9 (global immediate switch)
     case switchToSpaceKeepingCurrentApplication(Int)
+    case switchAdjacentSpace(Int)
 
     case moveWindowUp           // Up Arrow
     case moveWindowDown         // Down Arrow

@@ -29,6 +29,12 @@ mkdir -p "$MACOS" "$RESOURCES" "$FRAMEWORKS"
 cp "$BIN_DIR/Debut" "$MACOS/Debut"
 cp "$PROJECT_DIR/Resources/Info.plist" "$CONTENTS/Info.plist"
 cp "$PROJECT_DIR/Resources/PrivacyInfo.xcprivacy" "$RESOURCES/PrivacyInfo.xcprivacy"
+# Onboarding illustrates the current app with the same real captures as the README.
+for image in overlay all-windows; do
+    if [[ -f "$PROJECT_DIR/docs/media/$image.jpg" ]]; then
+        cp "$PROJECT_DIR/docs/media/$image.jpg" "$RESOURCES/$image.jpg"
+    fi
+done
 
 SPARKLE_FRAMEWORK="$BUILD_DIR/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 if [[ ! -d "$SPARKLE_FRAMEWORK" ]]; then
