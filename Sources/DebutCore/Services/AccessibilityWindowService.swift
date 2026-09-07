@@ -35,7 +35,14 @@ struct AXContradictionRecord: Codable, Equatable, Sendable {
 /// `clear` is what stops a lasting refusal from becoming a permanent loss: the entry is
 /// dropped as soon as AX does name the window, so a misreport heals itself.
 struct AXContradictionRegistry {
-    private var owners: [CGWindowID: AXContradictionRecord] = [:]
+    private var owners: [CGWindowID: AXContradictionRecord] = [:] {
+        didSet { if owners != oldValue { revision += 1 } }
+    }
+
+    /// Distinguishes a mutation that changed something from one that did not. `listWindows()`
+    /// clears and prunes on every call, so a store driven by "was this mutated" would write on
+    /// the overlay-open path; one driven by this writes only when a verdict really moved.
+    private(set) var revision = 0
 
     var windowIDs: Set<CGWindowID> { Set(owners.keys) }
 
@@ -137,6 +144,22 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         }
     }
 
+    /// Publishes the verdicts as they change, for the same reason tombstones are published:
+    /// one written only at clean termination is lost to every kill, while the assignment it
+    /// overrules is saved throughout the session.
+    var onContradictionsChanged: (([AXContradictionRecord]) -> Void)?
+
+    /// Mutates the registry under the lock and reports only a mutation that changed it. The
+    /// callback runs outside the lock so a store cannot re-enter it.
+    private func mutateContradictions(_ body: (inout AXContradictionRegistry) -> Void) {
+        let changed: [AXContradictionRecord]? = contradictionLock.withLock {
+            let before = contradictions.revision
+            body(&contradictions)
+            return contradictions.revision == before ? nil : contradictions.records
+        }
+        if let changed { onContradictionsChanged?(changed) }
+    }
+
     public init(
         windowCaptureEnabled: Bool = ProcessInfo.processInfo.environment["DEBUT_DISABLE_WINDOW_PREVIEWS"] != "1"
     ) {
@@ -231,9 +254,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
         // AX naming a window is the only thing that can overturn a contradiction, so drop
         // those entries first. A momentary misreport then costs one snapshot, not the window.
-        contradictionLock.withLock {
-            contradictions.clear(windowIDs: axNamedWindowIDs)
-            contradictions.retainOnly(owners: regularPIDs)
+        mutateContradictions {
+            $0.clear(windowIDs: axNamedWindowIDs)
+            $0.retainOnly(owners: regularPIDs)
         }
 
         let currentPID = ProcessInfo.processInfo.processIdentifier
@@ -292,10 +315,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                     showingDesktop: showingDesktop,
                     appAXAnswerCoversShowingDesktop: corroboratedPIDs.contains(ownerPID)
                 ) {
-                    contradictionLock.withLock {
-                        contradictions.record(
-                            windowID: windowID, owner: ownerPID, bundleID: bundleID
-                        )
+                    mutateContradictions {
+                        $0.record(windowID: windowID, owner: ownerPID, bundleID: bundleID)
                     }
                     return nil
                 }
@@ -458,9 +479,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             listedByPID: classification.axWindowIDsByPID,
             focusedWindowID: classification.focusedWindowID
         )
-        contradictionLock.withLock {
-            contradictions.clear(windowIDs: axNamedWindowIDs)
-        }
+        mutateContradictions { $0.clear(windowIDs: axNamedWindowIDs) }
 
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
@@ -488,8 +507,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                   )
             else { continue }
             contradicted.insert(windowID)
-            contradictionLock.withLock {
-                contradictions.record(windowID: windowID, owner: ownerPID, bundleID: bundleID)
+            mutateContradictions {
+                $0.record(windowID: windowID, owner: ownerPID, bundleID: bundleID)
             }
         }
         // Assignments made on another desktop have to be reclaimed too, and the evidence that
