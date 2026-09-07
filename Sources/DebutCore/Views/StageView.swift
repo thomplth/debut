@@ -1286,7 +1286,12 @@ public struct StageOverlayView: View {
                                 size: CGSize(width: stageWidth, height: stageHeight),
                                 cornerRadius: CGFloat(viewModel.appearance.stageCornerRadius)
                                     * visualScale,
-                                appearance: viewModel.appearance
+                                appearance: viewModel.appearance,
+                                shadow: StageSurfaceShadow.forStage(
+                                    lift: lift,
+                                    visualScale: visualScale,
+                                    stageScale: scale
+                                )
                             )
                         }
                         .background(
@@ -1298,11 +1303,6 @@ public struct StageOverlayView: View {
                             }
                         )
                         .scaleEffect(scale)
-                        .shadow(
-                            color: .black.opacity(lift.shadowOpacity),
-                            radius: lift.shadowRadius * visualScale,
-                            y: lift.shadowY * visualScale
-                        )
                         .opacity(stageOpacity)
                         .offset(y: slotOffset)
                         .zIndex(isActive || isInteractionTarget ? 2 : 0)
@@ -1770,11 +1770,43 @@ struct StageSwiftUIView: View {
     }
 }
 
+struct StageSurfaceShadow {
+    let opacity: Double
+    let radius: CGFloat
+    let y: CGFloat
+
+    /// The plate sits inside the stage's own `.scaleEffect`, while the shadow it replaced was cast
+    /// on the already-scaled stage. Pre-dividing by that scale is what makes the two identical.
+    static func forStage(
+        lift: StageLift,
+        visualScale: CGFloat,
+        stageScale: CGFloat
+    ) -> StageSurfaceShadow {
+        let scale = max(stageScale, 0.01)
+        return StageSurfaceShadow(
+            opacity: lift.shadowOpacity,
+            radius: lift.shadowRadius * visualScale / scale,
+            y: lift.shadowY * visualScale / scale
+        )
+    }
+}
+
+/// The glass plate a stage's cards sit on — and, because it has the same silhouette as the stage
+/// and none of its contents, the thing that casts the stage's drop shadow.
+///
+/// Applied to the stage itself the shadow was alpha-derived from the whole subtree, so Core
+/// Animation rasterized every card and every window preview into an offscreen buffer on every
+/// frame of a cycle, at 8.0ms a frame with previews against 4.5ms without. Casting it here instead
+/// costs 0.7ms in both modes (KHA-641). The plate cannot merely sit *behind* the glass casting it:
+/// glass samples its backdrop, so a shadow shape drawn under the plate tints the plate itself,
+/// while a filter on the plate's own group composites after the backdrop is captured, as the
+/// original did.
 private struct StageSurfaceView: View {
     let spaceIndex: Int
     let size: CGSize
     let cornerRadius: CGFloat
     let appearance: AppSettings
+    let shadow: StageSurfaceShadow
 
     var body: some View {
         Color.clear
@@ -1783,6 +1815,7 @@ private struct StageSurfaceView: View {
                 cornerRadius: cornerRadius,
                 appearance: appearance
             ))
+            .shadow(color: .black.opacity(shadow.opacity), radius: shadow.radius, y: shadow.y)
             .background {
                 GeometryReader { geometry in
                     Color.clear.preference(
@@ -1853,19 +1886,25 @@ struct WindowPreviewView: View {
                 .frame(width: metrics.thumbnailWidth, height: metrics.thumbnailHeight)
 
                 if StageMotion.showsAppIconBadge(hasPreview: window.previewImage != nil) {
-                    AppIconImage(
-                        bundleID: window.ownerBundleID,
-                        name: window.ownerName,
-                        iconSize: AppIconCache.badgeRasterSize,
-                        fallbackBaseSize: StageMetrics.standard.badgeSize
-                    )
+                    // The badge's shadow is in its bitmap, which is therefore padded and draws
+                    // past the badge's box on every side. Framing that padded image directly
+                    // would widen the card, so the box keeps the badge's size and the picture
+                    // overflows it.
+                    let padded = metrics.badgeSize
+                        * (AppIconCache.badgeRasterSize + AppIconCache.BakedBadgeShadow.padding * 2)
+                        / AppIconCache.badgeRasterSize
+                    Color.clear
                         .frame(width: metrics.badgeSize, height: metrics.badgeSize)
-                        .shadow(
-                            color: .black.opacity(0.3),
-                            radius: 2 * metrics.scaleFactor,
-                            x: 0,
-                            y: metrics.scaleFactor
-                        )
+                        .overlay {
+                            AppIconImage(
+                                bundleID: window.ownerBundleID,
+                                name: window.ownerName,
+                                iconSize: AppIconCache.badgeRasterSize,
+                                fallbackBaseSize: StageMetrics.standard.badgeSize,
+                                badge: true
+                            )
+                            .frame(width: padded, height: padded)
+                        }
                         .offset(x: -4 * metrics.scaleFactor, y: -4 * metrics.scaleFactor)
                 }
             }
@@ -1928,6 +1967,8 @@ struct AppIconImage: View {
     let name: String
     var iconSize: CGFloat = 128
     var fallbackBaseSize: CGFloat = 128
+    /// Resolves the bitmap that already carries the badge's drop shadow, padded to hold the blur.
+    var badge: Bool = false
 
     var body: some View {
         // `iconSize` is the cache's raster size, not this view's layout size. A resizable SwiftUI
@@ -1941,7 +1982,11 @@ struct AppIconImage: View {
     private func resolveIcon() -> NSImage {
         // Never hand back NSWorkspace's lazy icon: it rasterizes at draw time, on the main
         // thread, inside the Core Animation commit (KHA-481).
-        if let icon = AppIconCache.shared.cachedOrRasterize(bundleID: bundleID, size: iconSize) {
+        if let icon = AppIconCache.shared.cachedOrRasterize(
+            bundleID: bundleID,
+            size: iconSize,
+            badge: badge
+        ) {
             return icon
         }
         // Draw the original fallback design at the cache's larger raster size. It is later
@@ -1965,7 +2010,7 @@ struct AppIconImage: View {
         let sz = (label as NSString).size(withAttributes: attrs)
         (label as NSString).draw(at: NSPoint(x: size / 2 - sz.width / 2, y: size / 2 - sz.height / 2), withAttributes: attrs)
         img.unlockFocus()
-        return img
+        return badge ? AppIconCache.withBadgeShadow(img) : img
     }
 }
 
