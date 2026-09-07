@@ -21,14 +21,32 @@ public final class AppIconCache: @unchecked Sendable {
     public static let badgeRasterSize = StageMetrics.standard
         .scaled(by: CGFloat(AppSettings.maximumStageScale)).badgeSize
 
-    public static let overlayIconSizes: [CGFloat] = [
-        placeholderIconRasterSize,
-        badgeRasterSize,
-    ]
+    public static let overlayIconSizes: [CGFloat] = [placeholderIconRasterSize]
+
+    /// Warmed apart from the plain sizes because the badge's bitmap carries a baked drop shadow.
+    public static let overlayBadgeIconSizes: [CGFloat] = [badgeRasterSize]
+
+    /// The badge's drop shadow, expressed in raster points so it can be drawn into the bitmap.
+    ///
+    /// The badge is rasterized at the maximum stage scale and framed at the drawn one, so the
+    /// shadow the overlay asks for — `2 * scaleFactor` — is a constant multiple of the raster size
+    /// whatever the current scale is. Baking it therefore stays correct across the scale slider.
+    public struct BakedBadgeShadow {
+        /// The overlay asked SwiftUI for `radius: 2 * scaleFactor`. Core Graphics takes twice that
+        /// number for the same gaussian — measured by sweeping the factor and reading the mean
+        /// channel delta against the unbaked render, which bottoms out at 2.
+        public static let blur: CGFloat = 4 * CGFloat(AppSettings.maximumStageScale)
+        public static let dy: CGFloat = CGFloat(AppSettings.maximumStageScale)
+        public static let opacity: CGFloat = 0.3
+
+        /// Room for the blur to spill outside the icon, at four standard deviations.
+        public static let padding: CGFloat = blur * 2
+    }
 
     private struct Key: Hashable {
         let bundleID: String
         let size: CGFloat
+        let badge: Bool
     }
 
     private let rasterize: (String, CGFloat) -> NSImage?
@@ -41,18 +59,18 @@ public final class AppIconCache: @unchecked Sendable {
         self.rasterize = rasterize
     }
 
-    public func cached(bundleID: String, size: CGFloat) -> NSImage? {
+    public func cached(bundleID: String, size: CGFloat, badge: Bool = false) -> NSImage? {
         lock.lock()
         defer { lock.unlock() }
-        return icons[Key(bundleID: bundleID, size: size)]
+        return icons[Key(bundleID: bundleID, size: size, badge: badge)]
     }
 
     /// Cache lookup that falls back to rasterizing on the calling thread, keeping the result so
     /// a miss is paid once rather than on every SwiftUI update.
-    public func cachedOrRasterize(bundleID: String, size: CGFloat) -> NSImage? {
-        if let hit = cached(bundleID: bundleID, size: size) { return hit }
-        let key = Key(bundleID: bundleID, size: size)
-        guard let icon = rasterize(bundleID, size) else { return nil }
+    public func cachedOrRasterize(bundleID: String, size: CGFloat, badge: Bool = false) -> NSImage? {
+        if let hit = cached(bundleID: bundleID, size: size, badge: badge) { return hit }
+        let key = Key(bundleID: bundleID, size: size, badge: badge)
+        guard let icon = make(key) else { return nil }
         lock.lock()
         icons[key] = icon
         requested.insert(key)
@@ -60,13 +78,15 @@ public final class AppIconCache: @unchecked Sendable {
         return icon
     }
 
-    public func warm(bundleIDs: [String], sizes: [CGFloat]) {
+    public func warm(bundleIDs: [String], sizes: [CGFloat], badgeSizes: [CGFloat] = []) {
         let pending: [Key] = {
             lock.lock()
             defer { lock.unlock() }
-            let keys = bundleIDs
-                .flatMap { bundleID in sizes.map { Key(bundleID: bundleID, size: $0) } }
-                .filter { !requested.contains($0) }
+            let keys = bundleIDs.flatMap { bundleID in
+                sizes.map { Key(bundleID: bundleID, size: $0, badge: false) }
+                    + badgeSizes.map { Key(bundleID: bundleID, size: $0, badge: true) }
+            }
+            .filter { !requested.contains($0) }
             requested.formUnion(keys)
             return keys
         }()
@@ -74,7 +94,7 @@ public final class AppIconCache: @unchecked Sendable {
 
         for key in pending {
             queue.async { [self] in
-                guard let icon = rasterize(key.bundleID, key.size) else { return }
+                guard let icon = make(key) else { return }
                 lock.lock()
                 icons[key] = icon
                 lock.unlock()
@@ -82,10 +102,56 @@ public final class AppIconCache: @unchecked Sendable {
         }
     }
 
+    private func make(_ key: Key) -> NSImage? {
+        guard let icon = rasterize(key.bundleID, key.size) else { return nil }
+        return key.badge ? AppIconCache.withBadgeShadow(icon) : icon
+    }
+
     /// Runs once every warm request enqueued so far has finished. The queue is serial, so
     /// ordering alone gives the guarantee.
     public func whenWarmed(_ body: @escaping @Sendable () -> Void) {
         queue.async { body() }
+    }
+
+    /// Draws the icon into a padded bitmap with its drop shadow already in the pixels.
+    ///
+    /// A badge renders only on a card that has a preview, so its `.shadow` was an offscreen blur
+    /// per badge per frame, on exactly the cards the preview mode adds. In the pixels it costs
+    /// nothing to draw.
+    public static func withBadgeShadow(_ icon: NSImage) -> NSImage {
+        let padding = BakedBadgeShadow.padding
+        let inner = icon.size
+        let size = NSSize(width: inner.width + padding * 2, height: inner.height + padding * 2)
+        let scale: CGFloat = 2
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int((size.width * scale).rounded()),
+            pixelsHigh: Int((size.height * scale).rounded()),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return icon }
+        bitmap.size = size
+
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return icon }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(BakedBadgeShadow.opacity)
+        // AppKit's y axis points up, so a shadow SwiftUI drops downwards has a negative offset.
+        shadow.shadowOffset = NSSize(width: 0, height: -BakedBadgeShadow.dy)
+        shadow.shadowBlurRadius = BakedBadgeShadow.blur
+        shadow.set()
+        icon.draw(in: NSRect(origin: NSPoint(x: padding, y: padding), size: inner))
+        NSGraphicsContext.restoreGraphicsState()
+
+        let baked = NSImage(size: size)
+        baked.addRepresentation(bitmap)
+        return baked
     }
 
     /// Forces the IconServices round-trip here, on whatever thread this is called from, and keeps

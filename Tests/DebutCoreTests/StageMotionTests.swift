@@ -1187,4 +1187,37 @@ struct StageMotionTests {
         #expect(acceptedAfterMovement)
         #expect(remainedEnabled)
     }
+
+    // The stage's shadow moved onto the glass plate, which sits inside the stage's `.scaleEffect`
+    // rather than outside it as the old modifier did (KHA-641). The plate's numbers therefore have
+    // to come out pre-divided, or an inactive stage draws a shadow shrunk by its own depth scale.
+    @Test("The plate's shadow arrives at the size the stage-level shadow drew")
+    func plateShadowSurvivesTheStageScale() {
+        let lift = StageMotion.lift(isActive: false)
+        let visualScale: CGFloat = 1.5
+
+        for stageScale in [CGFloat(1.0), 0.82, 0.5] {
+            let plate = StageSurfaceShadow.forStage(
+                lift: lift,
+                visualScale: visualScale,
+                stageScale: stageScale
+            )
+            #expect(abs(plate.radius * stageScale - lift.shadowRadius * visualScale) < 0.001)
+            #expect(abs(plate.y * stageScale - lift.shadowY * visualScale) < 0.001)
+            #expect(plate.opacity == lift.shadowOpacity)
+        }
+    }
+
+    // A stage collapsed to nothing would otherwise divide by zero and hand Core Animation an
+    // infinite blur radius.
+    @Test("A fully collapsed stage still yields a finite plate shadow")
+    func plateShadowClampsAtZeroScale() {
+        let plate = StageSurfaceShadow.forStage(
+            lift: StageMotion.lift(isActive: true),
+            visualScale: 1,
+            stageScale: 0
+        )
+        #expect(plate.radius.isFinite)
+        #expect(plate.y.isFinite)
+    }
 }
