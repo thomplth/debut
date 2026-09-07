@@ -86,11 +86,15 @@ public struct StageMetrics: Equatable, Sendable {
         )
     }
 
-    /// How far a card may stray from the display's own shape. One very tall window would
-    /// otherwise set the height of every row it appears in, and one very wide one would push
-    /// its row off the display.
-    public static let minimumAdaptiveWidthRatio: CGFloat = 0.6
+    /// How far above the display's own shape a card may stray. One very wide window would
+    /// otherwise push its row off the display.
     public static let maximumAdaptiveWidthRatio: CGFloat = 1.6
+
+    /// The narrowest a card is drawn. A tall window's card may shrink until it can no longer say
+    /// which app the window belongs to, which is the icon badged over its top-left corner. A
+    /// fraction of the display's card was the earlier floor and had nothing to do with what a
+    /// narrow card still has to show.
+    public var minimumAdaptiveWidth: CGFloat { badgeSize + cardPadding * 2 }
 
     /// These metrics with the card narrowed or widened to one window's shape.
     ///
@@ -99,9 +103,9 @@ public struct StageMetrics: Equatable, Sendable {
     /// size has not been discovered, and the display's shape is the honest answer for it.
     public func adapted(toContentAspect aspect: CGFloat?) -> StageMetrics {
         guard let aspect, aspect > 0, thumbnailWidth > 0 else { return self }
-        return withThumbnailWidth(min(
-            max(thumbnailHeight * aspect, thumbnailWidth * Self.minimumAdaptiveWidthRatio),
-            thumbnailWidth * Self.maximumAdaptiveWidthRatio
+        return withThumbnailWidth(max(
+            min(thumbnailHeight * aspect, thumbnailWidth * Self.maximumAdaptiveWidthRatio),
+            minimumAdaptiveWidth
         ))
     }
 
