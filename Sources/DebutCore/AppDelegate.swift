@@ -215,7 +215,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         AppIconCache.shared.warm(
             bundleIDs: spaceManager.allWindowOwnerBundleIDs,
-            sizes: AppIconCache.overlayIconSizes
+            sizes: AppIconCache.overlayIconSizes,
+            badgeSizes: AppIconCache.overlayBadgeIconSizes
         )
 
         let controller = SpaceController(
