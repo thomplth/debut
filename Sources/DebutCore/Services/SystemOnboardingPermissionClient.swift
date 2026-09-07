@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import CoreGraphics
 
@@ -15,6 +16,7 @@ public final class SystemOnboardingPermissionClient: OnboardingPermissionClient 
     public func requestAccessibility() {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
     }
 
     public func requestScreenRecording() {

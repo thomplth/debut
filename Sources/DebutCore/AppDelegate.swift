@@ -120,12 +120,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         hiddenIdlePerformanceID = PerformanceRecorder.shared.begin(.hiddenIdle)
     }
 
-    /// Settings is the only window a Dock icon can lead back to, so clicking the icon opens it
-    /// rather than doing nothing.
+    /// During setup the Dock returns to the current lesson, including after practice.
     public func applicationShouldHandleReopen(
         _ sender: NSApplication,
         hasVisibleWindows: Bool
     ) -> Bool {
+        if let onboardingWindow {
+            onboardingWindow.makeKeyAndOrderFront(nil)
+            return true
+        }
         guard !hasVisibleWindows else { return true }
         openSettings()
         return true
@@ -228,6 +231,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             previewCacheTTL: currentSettings.previewCacheTTL
         )
         controller.delegate = self
+        controller.onPracticeVerified = { [weak self] practice in
+            DispatchQueue.main.async {
+                guard let self, let model = self.onboardingViewModel else { return }
+                self.refreshOnboardingEnvironment()
+                model.recordPractice(practice)
+                self.diag.report("onboarding_practice_verified", details: ["practice": "\(practice)"])
+            }
+        }
         controller.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
         controller.spaceSwitcher = spaceService
         controller.onDesktopReveal = { [weak self] in
@@ -253,7 +264,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             diag.report("desktop_swipe_tap_failed")
         }
         keyboardService.features = currentSettings.features
-        controller.windowPreviewsEnabled = currentSettings.features.windowPreviews
+        controller.windowPreviewsEnabled = OnboardingCapturePolicy.isEnabled(
+            previewsRequested: currentSettings.features.windowPreviews,
+            screenRecordingGranted: onboardingPermissionClient.currentState().screenRecordingGranted)
         keyboardService.heldCycleMinimumInterval = currentSettings.heldCycleMinimumInterval
 
         // Spaces are the user's desktops, so the persisted lists are only a starting guess.
@@ -466,6 +479,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             guard let self else { return }
             self.spaceController?.desktopDidChange()
             self.refreshDesktopNavigationAvailability()
+            self.refreshOnboardingEnvironment()
             // Moving a window between desktops activates no app, so without this the move is
             // only noticed the next time the user clicks the window.
             self.windowDiscovery?.refreshDesktopAssignments()
@@ -482,6 +496,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     @objc private func desktopLayoutMayHaveChanged(_ notification: Notification) {
         spaceController?.reconcileSpacesWithDesktops()
         refreshDesktopNavigationAvailability()
+        refreshOnboardingEnvironment()
     }
 
     @objc private func screenParametersDidChange(_ notification: Notification) {
@@ -516,6 +531,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         if spaceController == nil {
             diag.report("accessibility_granted", details: ["source": source])
             setupController()
+        }
+        let captureEnabled = OnboardingCapturePolicy.isEnabled(
+            previewsRequested: currentSettings.features.windowPreviews,
+            screenRecordingGranted: state.screenRecordingGranted)
+        if spaceController?.windowPreviewsEnabled != captureEnabled {
+            spaceController?.windowPreviewsEnabled = captureEnabled
+            if captureEnabled { spaceController?.prewarmWindowPreviews() }
         }
         stopAccessibilityObservation()
     }
@@ -1019,10 +1041,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
 
+        let replay = ProcessInfo.processInfo.arguments.contains("--show-onboarding")
+            || OnboardingLaunchPolicy.hasCompleted()
+        let checkpoint = replay ? nil : UserDefaults.standard.data(forKey: "onboardingCheckpoint")
+            .flatMap { try? JSONDecoder().decode(OnboardingCheckpoint.self, from: $0) }
         let viewModel = OnboardingViewModel(
             permissionClient: onboardingPermissionClient,
             features: currentSettings.features,
             onFeaturesChanged: { [weak self] features in self?.applyFeatures(features) },
+            duration: currentSettings.spaceSwitchDuration,
+            onDurationChanged: { [weak self] duration in
+                guard let self else { return }
+                var settings = self.currentSettings
+                settings.spaceSwitchDuration = duration
+                self.applySettings(settings)
+            },
             shareAnonymousTelemetry: currentSettings.shareAnonymousTelemetry,
             onTelemetryChanged: { [weak self] enabled in
                 guard let self else { return }
@@ -1033,18 +1066,34 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             onPermissionStateChanged: { [weak self] state in
                 self?.handlePermissionStateChange(state, source: "onboarding")
             },
+            checkpoint: checkpoint,
+            onProgressChanged: { progress in
+                if !replay, let data = try? JSONEncoder().encode(progress) {
+                    UserDefaults.standard.set(data, forKey: "onboardingCheckpoint")
+                }
+            },
             onCompleted: { [weak self] in
                 self?.completeOnboarding()
             }
         )
+        viewModel.onEnvironmentRefresh = { [weak self] in self?.refreshOnboardingEnvironment() }
+        viewModel.onOpenMissionControl = {
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app"))
+        }
         let view = OnboardingView(viewModel: viewModel)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: 860, height: 700),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
+        if let screen = NSScreen.main {
+            let titleBarHeight = window.frame.height - window.contentRect(forFrameRect: window.frame).height
+            window.setContentSize(NSSize(width: 860, height: OnboardingLayout.contentHeight(
+                visibleHeight: screen.visibleFrame.height, titleBarHeight: titleBarHeight)))
+        }
         window.title = "Welcome to Debut"
+        window.collectionBehavior = [.canJoinAllSpaces]
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: view)
         window.center()
@@ -1052,14 +1101,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         NSApp.activate(ignoringOtherApps: true)
 
         onboardingViewModel = viewModel
+        refreshOnboardingEnvironment()
         onboardingWindow = window
         diag.report("onboarding_shown", details: [
             "forced": "\(ProcessInfo.processInfo.arguments.contains("--show-onboarding"))",
         ])
     }
 
+    private func refreshOnboardingEnvironment() {
+        guard let onboardingViewModel else { return }
+        spaceController?.reconcileSpacesWithDesktops()
+        onboardingViewModel.updateEnvironment(
+            desktopCount: spaceController?.spaceManager.spaces.count ?? 1,
+            windowCount: spaceController?.spaceManager.activeSpace.windows.count ?? 0)
+    }
+
     private func completeOnboarding() {
         OnboardingLaunchPolicy.markCompleted()
+        UserDefaults.standard.removeObject(forKey: "onboardingCheckpoint")
         onboardingWindow?.close()
         onboardingWindow = nil
         onboardingViewModel = nil
@@ -1137,8 +1196,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             diag.report("desktop_swipe_tap_failed")
         }
         keyboardService?.features = newSettings.features
-        spaceController?.windowPreviewsEnabled = newSettings.features.windowPreviews
+        spaceController?.windowPreviewsEnabled = OnboardingCapturePolicy.isEnabled(
+            previewsRequested: newSettings.features.windowPreviews,
+            screenRecordingGranted: onboardingPermissionClient.currentState().screenRecordingGranted)
         onboardingViewModel?.features = newSettings.features
+        onboardingViewModel?.duration = newSettings.spaceSwitchDuration
         NotificationCenter.default.post(name: .debutSettingsChanged, object: newSettings)
         updateFeatureMenu()
     }

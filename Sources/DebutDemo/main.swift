@@ -336,6 +336,65 @@ func captureStills() {
     }
 }
 
+// Dedicated first-use media, always recorded in the disposable guest.
+func recordOnboarding() {
+    guard requestedClips.contains("onboarding") else { return }
+    _ = run("/usr/bin/killall", ["Dock"])
+    wait(3)
+    holding(.maskCommand) {
+        // Keep Tab down long enough to open the visual switcher.
+        let down = CGEvent(keyboardEventSource: nil, virtualKey: Key.tab, keyDown: true)!
+        down.flags = .maskCommand
+        down.post(tap: .cgSessionEventTap)
+        wait(1.2)
+        still("onboarding-workspace")
+        let up = CGEvent(keyboardEventSource: nil, virtualKey: Key.tab, keyDown: false)!
+        up.flags = .maskCommand
+        up.post(tap: .cgSessionEventTap)
+        postTap(Key.escape, flags: .maskCommand)
+    }
+    holding(.maskAlternate) {
+        postTap(Key.tab, flags: .maskAlternate)
+        wait(1.2)
+        still("onboarding-previews")
+        postTap(Key.escape, flags: .maskAlternate)
+    }
+    let spaces = SpaceService()
+    spaces.switchDuration = 0
+    spaces.switchToDesktop(index: 0)
+    wait(1)
+    for native in [true, false] {
+        let url = outputDirectory.appendingPathComponent(native ? "onboarding-native.mov" : "onboarding-instant.mov")
+        do {
+            let recorder = try startDemoMovie(at: url)
+            wait(0.6)
+            spaces.switchDuration = native ? AppSettings.maximumSpaceSwitchDuration : 0
+            spaces.switchToDesktop(index: 1)
+            wait(2.4)
+            try awaitCapture { try await recorder.stop() }
+        } catch { log("onboarding movie failed: \(error)"); exit(1) }
+        spaces.switchDuration = 0
+        spaces.switchToDesktop(index: 0)
+        wait(1)
+    }
+    _ = run("/usr/bin/pkill", ["-x", "Debut"])
+    wait(1)
+    let withoutPreviews = Process()
+    withoutPreviews.executableURL = URL(fileURLWithPath: "/Applications/Debut.app/Contents/MacOS/Debut")
+    var environment = ProcessInfo.processInfo.environment
+    environment["DEBUT_DISABLE_WINDOW_PREVIEWS"] = "1"
+    withoutPreviews.environment = environment
+    try! withoutPreviews.run()
+    wait(4)
+    holding(.maskAlternate) {
+        postTap(Key.tab, flags: .maskAlternate)
+        wait(1)
+        still("onboarding-no-previews")
+        postTap(Key.escape, flags: .maskAlternate)
+    }
+    withoutPreviews.terminate()
+}
+
 // MARK: - Main
 
 try? FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
@@ -356,6 +415,11 @@ wait(1.0)
 // the arrangement takes a minute, so an early sweep would clear a store that then refills.
 clearNotifications()
 
+if requestedClips.contains("onboarding") {
+    recordOnboarding()
+    log("done")
+    exit(0)
+}
 captureStills()
 wait(1.0)
 recordSpaceSwitch()
