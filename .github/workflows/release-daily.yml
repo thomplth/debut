@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.plan.outputs.version }}
+      build_version: ${{ steps.plan.outputs.build_version }}
       previous_tag: ${{ steps.plan.outputs.previous_tag }}
       should_release: ${{ steps.plan.outputs.should_release }}
       sha: ${{ github.sha }}
@@ -32,9 +33,9 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Plan the patch release
+      - name: Plan the nightly release
         id: plan
-        run: ./scripts/release-plan.sh patch --require-changes | tee -a "$GITHUB_OUTPUT"
+        run: ./scripts/release-plan.sh nightly --require-changes | tee -a "$GITHUB_OUTPUT"
 
       - name: Summarise the plan
         run: |
@@ -64,5 +65,6 @@ jobs:
     with:
       channel: daily
       version: ${{ needs.plan.outputs.version }}
+      build_version: ${{ needs.plan.outputs.build_version }}
       previous_tag: ${{ needs.plan.outputs.previous_tag }}
       sha: ${{ needs.plan.outputs.sha }}

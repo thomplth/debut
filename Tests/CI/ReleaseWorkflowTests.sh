@@ -87,8 +87,8 @@ if [[ -f "$daily" ]]; then
     expect_contains "$daily" '^  schedule:' "the daily release must run on a schedule"
     expect_contains "$daily" 'cron:' "the daily release must declare a cron expression"
     expect_contains "$daily" '^  workflow_dispatch:' "the daily release must be runnable on demand"
-    expect_contains "$daily" 'release-plan\.sh patch --require-changes' \
-        "the daily release must bump the patch number and skip when main has not moved"
+    expect_contains "$daily" 'release-plan\.sh nightly --require-changes' \
+        "the daily release must plan a nightly and skip when main has not moved"
     expect_contains "$daily" "should_release == 'true'" \
         "the daily release must skip its jobs when there is nothing to release"
 fi
@@ -97,6 +97,7 @@ if [[ -f "$manual" ]]; then
     expect_not_contains "$manual" '^  schedule:' "the manual release must never run on a schedule"
     expect_contains "$manual" '^  workflow_dispatch:' "the manual release must be human triggered"
     expect_contains "$manual" 'type: choice' "the manual release must offer a bump choice"
+    expect_contains "$manual" '^          - patch$' "the manual release must offer a patch bump"
     expect_contains "$manual" '^          - minor$' "the manual release must offer a minor bump"
     expect_contains "$manual" '^          - major$' "the manual release must offer a major bump"
     expect_contains "$manual" 'default: minor' "the manual release must default to the minor bump"
@@ -184,5 +185,17 @@ fi
 if (( failures > 0 )); then
     exit 1
 fi
+
+
+# The final signed bytes must be exercised before any tag is pushed. A release
+# gating only the earlier development bundle does not prove Sparkle can install it.
+python3 - "$publish" <<'PY'
+import sys
+from pathlib import Path
+s = Path(sys.argv[1]).read_text()
+assert s.index('verify-appcast-signature.swift') < s.index('git push origin')
+assert s.index('ci-update-e2e.sh') < s.index('git push origin')
+assert s.rindex('verify-release-commit.sh') > s.index('ci-update-e2e.sh')
+PY
 
 echo "PASS: release workflow contract"

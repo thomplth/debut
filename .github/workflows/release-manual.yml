@@ -9,6 +9,7 @@ on:
         type: choice
         default: minor
         options:
+          - patch
           - minor
           - major
 
@@ -25,6 +26,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.plan.outputs.version }}
+      build_version: ${{ steps.plan.outputs.build_version }}
       previous_tag: ${{ steps.plan.outputs.previous_tag }}
       sha: ${{ github.sha }}
 
@@ -69,5 +71,6 @@ jobs:
     with:
       channel: stable
       version: ${{ needs.plan.outputs.version }}
+      build_version: ${{ needs.plan.outputs.build_version }}
       previous_tag: ${{ needs.plan.outputs.previous_tag }}
       sha: ${{ needs.plan.outputs.sha }}

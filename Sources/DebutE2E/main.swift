@@ -1010,7 +1010,14 @@ if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
     } else {
         postFlagsChanged(flags: .maskCommand)
         postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
-        wait(0.7)
+        // The first cold presentation may take longer than 0.7s. The lesson asks
+        // the user to hold until windows appear; wait for that actual presentation
+        // before releasing, rather than committing during hosting-view setup.
+        passed = passed && waitFor(timeout: 10) {
+            overlayWindowIsOnScreen() && readEvents().contains {
+                $0["event"] == "overlay_presentation_completed"
+            }
+        }
         postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
         postFlagsChanged(flags: [])
         wait(0.8)

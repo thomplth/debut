@@ -4,11 +4,19 @@ set -euo pipefail
 # Rewrites the two places the app states its own version. Runs against the current directory so
 # the release tests can drive it with fixture files.
 #
-# Usage: apply-version.sh <version>
+# Usage: apply-version.sh <version> [numeric-build-version]
 
 version="${1:-}"
-if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "usage: apply-version.sh <major.minor.patch>" >&2
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-nightly\.[0-9]{8}(\.[1-9][0-9]*)?)?$ ]]; then
+    echo "usage: apply-version.sh <major.minor.patch[-nightly.YYYYMMDD[.N]]> [numeric-build-version]" >&2
+    exit 2
+fi
+
+short_version="${version%%-*}"
+build_version="${2:-$short_version}"
+[[ "$build_version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "invalid numeric bundle build" >&2; exit 2; }
+if [[ "$version" == *-nightly.* && -z "${2:-}" ]]; then
+    echo "nightlies require the build_version from release-plan.sh" >&2
     exit 2
 fi
 
@@ -22,7 +30,8 @@ done
 # Rewriting in place keeps the checked-in formatting; PlistBuddy would reflow the whole file.
 set_plist_string() {
     local key="$1"
-    awk -v key="$key" -v value="$version" '
+    local value="$2"
+    awk -v key="$key" -v value="$value" '
         $0 ~ "<key>" key "</key>" {
             print
             if ((getline next_line) > 0) {
@@ -37,10 +46,9 @@ set_plist_string() {
 }
 
 sed -E -i '' "s/(public static let version = \")[^\"]*(\")/\1$version\2/" "$source_file"
-set_plist_string CFBundleShortVersionString
-# CFBundleVersion has to keep rising for macOS to treat a build as newer, and the release
-# version already does.
-set_plist_string CFBundleVersion
+set_plist_string CFBundleShortVersionString "$short_version"
+# The publish workflow supplies the monotonic build recorded in its annotated tag.
+set_plist_string CFBundleVersion "$build_version"
 
 # A rewrite that quietly matched nothing would ship a build reporting the previous version.
 verify() {
@@ -52,9 +60,9 @@ verify() {
 
 verify "$source_file" "public static let version = \"$version\"" \
     "could not set the version in $source_file"
-grep -A1 "<key>CFBundleShortVersionString</key>" "$plist" | grep -q "<string>$version</string>" \
+grep -A1 "<key>CFBundleShortVersionString</key>" "$plist" | grep -q "<string>$short_version</string>" \
     || { echo "apply-version: could not set CFBundleShortVersionString in $plist" >&2; exit 1; }
-grep -A1 "<key>CFBundleVersion</key>" "$plist" | grep -q "<string>$version</string>" \
+grep -A1 "<key>CFBundleVersion</key>" "$plist" | grep -q "<string>$build_version</string>" \
     || { echo "apply-version: could not set CFBundleVersion in $plist" >&2; exit 1; }
 
 echo "Applied version $version"
