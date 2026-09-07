@@ -1123,6 +1123,47 @@ struct RuntimeWindowReconcilerTests {
         #expect(result.events.contains { $0.reason == WindowAssignmentEvent.Reason.dormantRestored } == false)
     }
 
+    // Dia's fullscreen window carries no title, and the previous cycle left a titleless dormant
+    // Dia assignment behind. The exact-title pass then compares "" against "" and succeeds on no
+    // identity at all, rebinding that dormant slot onto a brand-new window ID — the ghost card
+    // standing beside the real window after leaving fullscreen. The window IDs differ and the
+    // process is the same, so nothing but the empty title can be doing the matching.
+    @Test("A dormant assignment with no title is not restored onto an unrelated titleless window")
+    func emptyTitleDoesNotSatisfyExactRecovery() {
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(
+            SpaceWindow(
+                windowID: 70396,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                windowTitle: "",
+                ownerPID: 900
+            ),
+            toSpaceID: spaceID
+        )
+        #expect(manager.makeWindowsDormant(forOwnerPID: 900) == 1)
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [
+                    liveWindow(74306, bundleID: "company.thebrowser.dia", ownerName: "Dia",
+                               ownerPID: 900, title: ""),
+                ],
+                allWindowIDs: [74306]
+            ),
+            spaceManager: &manager,
+            allowDormantBundleFallback: false
+        )
+
+        #expect(result.events.contains {
+            $0.reason == WindowAssignmentEvent.Reason.dormantRestored
+        } == false)
+        #expect(manager.dormantWindowAssignments.count == 1)
+        #expect(manager.dormantWindowAssignments.first?.window.windowID == 70396)
+    }
+
     @Test("A launch reconcile still restores a dormant window by bundle fallback")
     func launchReconcileStillAllowsBundleFallback() {
         var manager = SpaceManager()
