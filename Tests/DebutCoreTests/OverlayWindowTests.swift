@@ -16,6 +16,22 @@ struct OverlayWindowTests {
         #expect(window.level == .statusBar)
     }
 
+    @Test("The overlay is a nonactivating panel, which is what a regular app can order there")
+    func overlayIsANonactivatingPanel() {
+        // Measured in the Tart guest with a fullscreen TextEdit showing: from a regular
+        // application every plain window ordered front was refused the fullscreen Space — at
+        // .statusBar and .popUpMenu, with and without .stationary — while a nonactivating panel
+        // with the same level and behaviour arrived. From an accessory application both worked,
+        // which is why the Dock icon made the overlay vanish there and nowhere else.
+        let window = OverlayWindow()
+
+        #expect(window.isKind(of: NSPanel.self))
+        #expect(window.styleMask.contains(.nonactivatingPanel))
+        // A panel hides itself when its app deactivates, and Debut's overlay opens from the
+        // background of an app that is never active.
+        #expect(!window.hidesOnDeactivate)
+    }
+
     @Test("Updating content synchronizes the screen frame before layout")
     func updateSynchronizesFrame() throws {
         let screen = try #require(NSScreen.main ?? NSScreen.screens.first)
