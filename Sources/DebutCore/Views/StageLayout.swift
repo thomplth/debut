@@ -139,8 +139,11 @@ public struct StageMetrics: Equatable, Sendable {
         thumbnailHeight + titleSpacing + titleHeight + cardPadding * 2
     }
 
-    /// Keep the pre-scaling title size as previews resize or change aspect ratio.
-    public var titleFontSize: CGFloat { 10.4 }
+    /// Taken from the scale, not the thumbnail's width: an ultrawide display widens the card
+    /// and a portrait display narrows it, and neither should move the title's size.
+    public var titleFontSize: CGFloat {
+        max(9, Self.standard.thumbnailWidth * 0.065 * scale)
+    }
 
     /// A macOS app icon's body is a continuous-corner squircle with a 185.4-point corner drawn
     /// on a 1024-point canvas.
@@ -155,8 +158,8 @@ public struct StageMetrics: Equatable, Sendable {
     /// non-layout details that belong to a stage, such as its corner radius and command hints.
     public var scaleFactor: CGFloat { scale }
 
-    /// Resize the preview and label container together, reserving at least one full line
-    /// for the fixed-size title when previews shrink.
+    /// Every dimension scales together, so a card only ever grows or shrinks — it never changes
+    /// shape, and the title stays legible against the thumbnail it labels.
     public func scaled(by scale: CGFloat) -> StageMetrics {
         StageMetrics(
             thumbnailWidth: thumbnailWidth * scale,
@@ -164,7 +167,7 @@ public struct StageMetrics: Equatable, Sendable {
             cardPadding: cardPadding * scale,
             titleWidthAllowance: titleWidthAllowance * scale,
             titleSpacing: titleSpacing * scale,
-            titleHeight: max(Self.standard.titleHeight, Self.standard.titleHeight * self.scale * scale),
+            titleHeight: titleHeight * scale,
             badgeSize: badgeSize * scale,
             previewPlaceholderIconSize: previewPlaceholderIconSize * scale,
             windowSpacing: windowSpacing * scale,
