@@ -740,6 +740,33 @@ func launchDebut(arguments: [String] = []) -> NSRunningApplication? {
     return result.load()
 }
 
+/// Whether the window server is showing an overlay-sized Debut window right now. The diagnostic
+/// state block reports that Debut opened a session, never that the window arrived: an overlay the
+/// window server refuses a Space leaves `overlayVisible` true with nothing on screen.
+func overlayWindowIsOnScreen() -> Bool {
+    let debutPIDs = Set(
+        NSRunningApplication
+            .runningApplications(withBundleIdentifier: debutBundleID)
+            .map(\.processIdentifier)
+    )
+    guard !debutPIDs.isEmpty,
+          let listing = CGWindowListCopyWindowInfo(
+              [.optionOnScreenOnly, .excludeDesktopElements],
+              kCGNullWindowID
+          ) as? [[String: Any]]
+    else { return false }
+
+    let display = CGDisplayBounds(CGMainDisplayID())
+    return listing.contains { window in
+        guard let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+              debutPIDs.contains(pid),
+              let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
+              let width = bounds["Width"], let height = bounds["Height"]
+        else { return false }
+        return width * height > display.width * display.height / 2
+    }
+}
+
 func visibleWindowTitles(for processIdentifier: pid_t) -> [String] {
     guard let rawWindows = CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements],
@@ -1251,6 +1278,16 @@ test("Overlay is visible") {
         wait(0.1)
     }
     info("  overlayVisible = \(readState()["overlayVisible"] ?? "nil")")
+    return false
+}
+
+// The control for the same check in scenario 11: on an ordinary desktop the overlay window has
+// always reached the screen, so a failure there is about the Space and not about the check.
+test("The overlay window is on screen") {
+    for _ in 0..<30 {
+        if overlayWindowIsOnScreen() { return true }
+        wait(0.1)
+    }
     return false
 }
 
@@ -1789,6 +1826,17 @@ if enteredFullscreen {
         return false
     }
 
+    // Debut opening a session says nothing about the window arriving. This is the check that
+    // fails when the window server refuses the overlay the fullscreen Space.
+    test("The overlay window reaches the fullscreen Space") {
+        for _ in 0..<30 {
+            if overlayWindowIsOnScreen() { return true }
+            wait(0.1)
+        }
+        info("  No overlay-sized Debut window is on screen while the fullscreen Space shows")
+        return false
+    }
+
     test("Debut presents knowing the focused window was fullscreen") {
         let fullscreenState = readState()["focusedWindowFullscreen"] ?? "nil"
         if fullscreenState != "true" { info("  focusedWindowFullscreen = \(fullscreenState)") }
@@ -1824,6 +1872,7 @@ if enteredFullscreen {
         ? "The TextEdit fixture is not running"
         : "The guest did not complete the fullscreen Space transition"
     skipTest("Overlay opens over a fullscreen Space", reason: reason)
+    skipTest("The overlay window reaches the fullscreen Space", reason: reason)
     skipTest("Debut presents knowing the focused window was fullscreen", reason: reason)
     skipTest("Releasing the modifier commits the session from a fullscreen Space", reason: reason)
 }
