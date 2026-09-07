@@ -13,6 +13,10 @@ on:
         description: The version to release, without the leading v
         required: true
         type: string
+      build_version:
+        description: Monotonic numeric bundle build recorded in the release tag
+        required: true
+        type: string
       previous_tag:
         description: The tag the release notes start after, empty for the first release
         required: false
@@ -73,13 +77,23 @@ jobs:
       - name: Stamp the version into the build
         env:
           VERSION: ${{ inputs.version }}
-        run: ./scripts/apply-version.sh "$VERSION"
+          BUILD_VERSION: ${{ inputs.build_version }}
+        run: ./scripts/apply-version.sh "$VERSION" "$BUILD_VERSION"
 
       - name: Write the release notes
         env:
           VERSION: ${{ inputs.version }}
           PREVIOUS_TAG: ${{ inputs.previous_tag }}
-        run: ./scripts/release-notes.sh "$PREVIOUS_TAG" "v$VERSION" | tee "$RUNNER_TEMP/notes.md"
+        run: |
+          ./scripts/release-notes.sh "$PREVIOUS_TAG" "v$VERSION" | tee "$RUNNER_TEMP/notes.md"
+          if [[ "${{ inputs.channel }}" == "daily" ]]; then
+              cat >> "$RUNNER_TEMP/notes.md" <<'NOTES'
+
+          This nightly is an experimental, ad-hoc signed build. It is not notarized;
+          macOS Gatekeeper will block normal first launch. Use the latest stable
+          release for a signed, notarized download and automatic updates.
+          NOTES
+          fi
 
       - name: Import the stable Developer ID identity
         if: inputs.channel == 'stable'
@@ -102,10 +116,11 @@ jobs:
       - name: Tag the tested commit
         env:
           VERSION: ${{ inputs.version }}
+          BUILD_VERSION: ${{ inputs.build_version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v$VERSION" -m "Debut v$VERSION"
+          git tag -a "v$VERSION" -m "Debut v$VERSION" -m "Debut-build: $BUILD_VERSION"
           echo "TAG=v$VERSION" >> "$GITHUB_ENV"
 
       - name: Build the disk image
@@ -141,11 +156,40 @@ jobs:
           umask 077
           private_key="$RUNNER_TEMP/sparkle-eddsa.key"
           printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$private_key"
-          ./scripts/generate-appcast.sh "$VERSION" .build/Debut.dmg "$private_key" .build/appcast.xml
+          ./scripts/generate-appcast.sh "$VERSION" .build/Debut.dmg "$private_key" .build/appcast.xml .build/Debut.app/Contents/Info.plist
+          swift scripts/verify-appcast-signature.swift .build/appcast.xml .build/Debut.dmg .build/Debut.app/Contents/Info.plist
+
+      - name: Assess the notarized artifact with Gatekeeper
+        if: inputs.channel == 'stable'
+        env:
+          VERSION: ${{ inputs.version }}
+          BUILD_VERSION: ${{ inputs.build_version }}
+        run: ./scripts/verify-distribution.sh .build/Debut.dmg "$VERSION" "$BUILD_VERSION" .build/appcast.xml
+
+      - name: Verify Sparkle installs and relaunches the signed candidate
+        if: inputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+          BUILD_VERSION: ${{ inputs.build_version }}
+        run: ./scripts/ci-update-e2e.sh "$PREVIOUS_TAG" "$BUILD_VERSION"
+
+      - name: Retain signed update rehearsal evidence
+        if: always() && inputs.channel == 'stable'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: debut-update-evidence
+          path: ${{ runner.temp }}/update-e2e/evidence
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Last, so a build or packaging failure leaves no tag behind claiming a release happened.
       - name: Push the tag
-        run: git push origin "$TAG"
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          ./scripts/verify-release-commit.sh "$SHA"
+          git push origin "$TAG"
 
       - name: Publish the GitHub release
         env:

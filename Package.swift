@@ -81,6 +81,11 @@ let package = Package(
             path: "Sources/DebutBenchmarks"
         ),
         .testTarget(
+            name: "UpdaterTests",
+            dependencies: [.product(name: "Sparkle", package: "Sparkle")],
+            path: "Tests/UpdaterTests"
+        ),
+        .testTarget(
             name: "DebutCoreTests",
             dependencies: ["DebutCore", "DebutInputDriver"],
             path: "Tests/DebutCoreTests"

@@ -5,9 +5,10 @@ version="${1:-}"
 dmg="${2:-}"
 private_key="${3:-}"
 output="${4:-}"
+plist="${5:?missing packaged Info.plist}"
 
 if [[ -z "$output" ]]; then
-    echo "usage: generate-appcast.sh <version> <dmg> <private-key> <output>" >&2
+    echo "usage: generate-appcast.sh <version> <dmg> <private-key> <output> <packaged Info.plist>" >&2
     exit 2
 fi
 
@@ -22,6 +23,13 @@ signature="$($sign_update --ed-key-file "$private_key" "$dmg")"
 [[ "$signature" == sparkle:edSignature=*length=* ]] || {
     echo "Sparkle did not return enclosure signing attributes" >&2
     exit 1
+}
+
+build_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
+short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+minimum_system="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$plist")"
+[[ "$build_version" =~ ^[0-9]+(\.[0-9]+){0,2}$ && "$minimum_system" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || {
+    echo "invalid packaged version metadata" >&2; exit 1;
 }
 
 repository="${GITHUB_REPOSITORY:-thomplth/debut}"
@@ -40,8 +48,9 @@ release_url="https://github.com/$repository/releases/tag/v$version"
     echo '    <item>'
     echo "      <title>Debut $version</title>"
     echo "      <pubDate>$published</pubDate>"
-    echo "      <sparkle:version>$version</sparkle:version>"
-    echo "      <sparkle:shortVersionString>$version</sparkle:shortVersionString>"
+    echo "      <sparkle:version>$build_version</sparkle:version>"
+    echo "      <sparkle:shortVersionString>$short_version</sparkle:shortVersionString>"
+    echo "      <sparkle:minimumSystemVersion>$minimum_system</sparkle:minimumSystemVersion>"
     echo "      <sparkle:releaseNotesLink>$release_url</sparkle:releaseNotesLink>"
     echo "      <enclosure url=\"$download_url\" $signature type=\"application/octet-stream\"/>"
     echo '    </item>'
