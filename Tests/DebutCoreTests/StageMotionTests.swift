@@ -639,6 +639,12 @@ struct StageMotionTests {
         ))
     }
 
+    @Test("The corner badge yields to the placeholder icon on a card with no preview")
+    func badgeVisibility() {
+        #expect(StageMotion.showsAppIconBadge(hasPreview: true))
+        #expect(!StageMotion.showsAppIconBadge(hasPreview: false))
+    }
+
     @Test("The fill uses screenshot-derived translucent adaptive colors")
     func filledColors() {
         let darkFill = StageMotion.windowSelectorFill(isDarkMode: true)
