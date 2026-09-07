@@ -808,6 +808,31 @@ struct SpaceControllerTests {
         return (controller, windowService, keyboardService, delegate)
     }
 
+    @Test("Disabling previews clears images and stops captures until re-enabled")
+    func previewFeatureChoice() throws {
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: controller.spaceManager.activeSpaceID
+        )
+        windowSvc.capturedImages = [101: makeTestImage()]
+        controller.prewarmWindowPreviews()
+        #expect(waitUntil { controller.windowPreviews.count == 1 })
+        let requests = windowSvc.captureRequests.count
+        controller.windowPreviewsEnabled = false
+        #expect(controller.windowPreviews.isEmpty)
+        controller.prewarmWindowPreviews()
+        keyboardSvc.simulateEvent(.altTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(controller.windowPreviews.isEmpty)
+        #expect(windowSvc.captureRequests.count == requests)
+        keyboardSvc.simulateEvent(.escape)
+        keyboardSvc.simulateEvent(.cmdRelease)
+        controller.windowPreviewsEnabled = true
+        controller.prewarmWindowPreviews()
+        #expect(waitUntil { controller.windowPreviews.count == 1 })
+    }
+
     @Test("Hidden startup prewarm fills the cold preview cache")
     func hiddenStartupPrewarmFillsColdCache() throws {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()

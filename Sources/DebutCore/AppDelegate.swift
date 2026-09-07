@@ -9,6 +9,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var overlayWindow: OverlayWindow?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
+    private var desktopSwipeService: DesktopSwipeService?
+    private var desktopNavigationStackID: String?
     private var onboardingViewModel: OnboardingViewModel?
     private var coachmarkPopover: NSPopover?
     private var statusItem: NSStatusItem?
@@ -242,11 +244,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         keyboardService.quickSwitchModifiers = currentSettings.quickSwitchModifiers
         keyboardService.quickSwitchSameApplicationModifiers =
             currentSettings.quickSwitchSameApplicationModifiers
+        let swipeService = DesktopSwipeService { [weak controller] offset in
+            controller?.handleKeyEvent(.switchAdjacentSpace(offset))
+        }
+        desktopSwipeService = swipeService
+        if !swipeService.setEnabled(currentSettings.features.trackpadSwipes) {
+            diag.report("desktop_swipe_tap_failed")
+        }
+        keyboardService.features = currentSettings.features
+        controller.windowPreviewsEnabled = currentSettings.features.windowPreviews
         keyboardService.heldCycleMinimumInterval = currentSettings.heldCycleMinimumInterval
 
         // Spaces are the user's desktops, so the persisted lists are only a starting guess.
         // Reconciliation also adopts each display's currently visible desktop without moving it.
         controller.reconcileSpacesWithDesktops()
+        refreshDesktopNavigationAvailability()
 
         discovery.onWindowsDiscovered = { [weak self] windows in
             DispatchQueue.main.async {
@@ -436,6 +448,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         observingAccessibilityChanges = false
     }
 
+    /// Keep input callbacks free of queries, and leave fullscreen navigation to macOS.
+    private func refreshDesktopNavigationAvailability() {
+        let stackID = spaceController?.spaceManager.selectedSpaceStackID
+        desktopNavigationStackID = stackID
+        let available = stackID.flatMap { spaceService?.spaceTopology().stack(id: $0)?.currentDesktopIndex } != nil
+        keyboardService?.desktopNavigationAvailable = available
+        desktopSwipeService?.desktopNavigationAvailable = available
+    }
+
     /// Fires for Debut's own switches as well as the user's. Debut's own switches are the
     /// ones waiting on this to focus their target; a user's switch has nothing pending and
     /// only needs the active space adopted.
@@ -443,6 +464,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.spaceController?.desktopDidChange()
+            self.refreshDesktopNavigationAvailability()
             // Moving a window between desktops activates no app, so without this the move is
             // only noticed the next time the user clicks the window.
             self.windowDiscovery?.refreshDesktopAssignments()
@@ -458,6 +480,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     /// window that is mid-move back to the desktop it just left.
     @objc private func desktopLayoutMayHaveChanged(_ notification: Notification) {
         spaceController?.reconcileSpacesWithDesktops()
+        refreshDesktopNavigationAvailability()
     }
 
     @objc private func screenParametersDidChange(_ notification: Notification) {
@@ -601,6 +624,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.debouncedSaver?.scheduleSave(controller.spaceManager)
+            if self.desktopNavigationStackID != controller.spaceManager.selectedSpaceStackID {
+                self.refreshDesktopNavigationAvailability()
+            }
             self.diag.report("space_state_mutated")
         }
     }
@@ -864,6 +890,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let menu = NSMenu()
+        let featureMenu = NSMenu(title: "Features")
+        for (index, title) in Self.featureMenuTitles.enumerated() {
+            let item = NSMenuItem(title: title, action: #selector(toggleFeature(_:)), keyEquivalent: "")
+            item.tag = 100 + index
+            item.target = self
+            if index == 2 { featureMenu.addItem(.separator()) }
+            featureMenu.addItem(item)
+        }
+        let featuresItem = NSMenuItem(title: "Features", action: nil, keyEquivalent: "")
+        featuresItem.submenu = featureMenu
+        menu.addItem(featuresItem)
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Tutorial...", action: #selector(openTutorial), keyEquivalent: ""))
         let updateItem = NSMenuItem(
@@ -876,6 +914,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Debut", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
+        updateFeatureMenu()
+    }
+
+    static let featureMenuTitles = ["Window previews", "Workspace Command–Tab", "Numbered space shortcuts", "Control-arrow switching", "Trackpad desktop swipe"]
+    private static let featureKeyPaths: [WritableKeyPath<FeatureSettings, Bool>] = [
+        \.windowPreviews, \.workspaceIsolation, \.numberShortcuts, \.controlArrows, \.trackpadSwipes,
+    ]
+
+    private func updateFeatureMenu() {
+        for (index, keyPath) in Self.featureKeyPaths.enumerated() {
+            statusItem?.menu?.item(withTitle: "Features")?.submenu?.item(withTag: 100 + index)?.state = currentSettings.features[keyPath: keyPath] ? .on : .off
+        }
+    }
+
+    @objc private func toggleFeature(_ sender: NSMenuItem) {
+        let index = sender.tag - 100
+        guard Self.featureKeyPaths.indices.contains(index) else { return }
+        var features = currentSettings.features
+        features[keyPath: Self.featureKeyPaths[index]].toggle()
+        applyFeatures(features)
     }
 
     /// As a regular application Debut owns the menu bar while it is frontmost, and an app with
@@ -962,14 +1020,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         let viewModel = OnboardingViewModel(
             permissionClient: onboardingPermissionClient,
+            features: currentSettings.features,
+            onFeaturesChanged: { [weak self] features in self?.applyFeatures(features) },
             shareAnonymousTelemetry: currentSettings.shareAnonymousTelemetry,
             onTelemetryChanged: { [weak self] enabled in
                 guard let self else { return }
-                self.currentSettings.shareAnonymousTelemetry = enabled
-                try? self.stateStore?.saveSettings(self.currentSettings)
-                if let exporter = self.telemetryExporter {
-                    Task { await exporter.setEnabled(enabled) }
-                }
+                var settings = self.currentSettings
+                settings.shareAnonymousTelemetry = enabled
+                self.applySettings(settings)
             },
             onPermissionStateChanged: { [weak self] state in
                 self?.handlePermissionStateChange(state, source: "onboarding")
@@ -980,7 +1038,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         )
         let view = OnboardingView(viewModel: viewModel)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 640),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -1036,6 +1094,60 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         diag.report("onboarding_coachmark_shown")
     }
 
+    private func applySettings(_ newSettings: AppSettings) {
+        let telemetryChanged = self.currentSettings.shareAnonymousTelemetry != newSettings.shareAnonymousTelemetry
+        self.launchAtLogin.apply(enabled: newSettings.launchAtLogin)
+        self.activationPolicy.apply(showsDockIcon: newSettings.showsDockIcon)
+        self.currentSettings = newSettings
+        try? self.stateStore?.saveSettings(newSettings)
+        self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
+        self.keyboardService?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
+        self.spaceController?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
+        self.spaceController?.updateFrontmostApp(
+            bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        )
+        for bundleID in newSettings.excludedBundleIDs {
+            self.spaceController?.spaceManager.removeAllWindows(forBundleID: bundleID)
+        }
+        if let spaceManager = self.spaceController?.spaceManager {
+            self.debouncedSaver?.scheduleSave(spaceManager)
+        }
+        self.keyboardService?.keyBindings = newSettings.keyBindings
+        self.spaceController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
+        self.spaceController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
+        self.spaceController?.previewCacheTTL = newSettings.previewCacheTTL
+        self.spaceService?.switchDuration = newSettings.spaceSwitchDuration
+        self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
+            newSettings.quickSwitchExcludedBundleIDs
+        )
+        self.keyboardService?.quickSwitchModifiers = newSettings.quickSwitchModifiers
+        self.keyboardService?.quickSwitchSameApplicationModifiers =
+            newSettings.quickSwitchSameApplicationModifiers
+        self.keyboardService?.heldCycleMinimumInterval =
+            newSettings.heldCycleMinimumInterval
+        if telemetryChanged, let exporter = self.telemetryExporter {
+            let sending = TelemetryActivationPolicy.shouldSend(settings: newSettings)
+            Task {
+                await exporter.setEnabled(sending)
+                if sending { try? await exporter.flush() }
+            }
+        }
+        if desktopSwipeService?.setEnabled(newSettings.features.trackpadSwipes) == false {
+            diag.report("desktop_swipe_tap_failed")
+        }
+        keyboardService?.features = newSettings.features
+        spaceController?.windowPreviewsEnabled = newSettings.features.windowPreviews
+        onboardingViewModel?.features = newSettings.features
+        NotificationCenter.default.post(name: .debutSettingsChanged, object: newSettings)
+        updateFeatureMenu()
+    }
+
+    private func applyFeatures(_ features: FeatureSettings) {
+        var settings = currentSettings
+        settings.features = features
+        applySettings(settings)
+    }
+
     private func showSettings(settings: AppSettings) {
         if let settingsWindow, settingsWindow.isVisible {
             settingsWindow.makeKeyAndOrderFront(nil)
@@ -1050,43 +1162,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         vm.onSettingsChanged = { [weak self] newSettings in
             DispatchQueue.main.async {
                 guard let self else { return }
-                let telemetryChanged = self.currentSettings.shareAnonymousTelemetry != newSettings.shareAnonymousTelemetry
-                self.launchAtLogin.apply(enabled: newSettings.launchAtLogin)
-                self.activationPolicy.apply(showsDockIcon: newSettings.showsDockIcon)
-                self.currentSettings = newSettings
-                try? self.stateStore?.saveSettings(newSettings)
-                self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
-                self.keyboardService?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
-                self.spaceController?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
-                self.spaceController?.updateFrontmostApp(
-                    bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-                )
-                for bundleID in newSettings.excludedBundleIDs {
-                    self.spaceController?.spaceManager.removeAllWindows(forBundleID: bundleID)
-                }
-                if let spaceManager = self.spaceController?.spaceManager {
-                    self.debouncedSaver?.scheduleSave(spaceManager)
-                }
-                self.keyboardService?.keyBindings = newSettings.keyBindings
-                self.spaceController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
-                self.spaceController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
-                self.spaceController?.previewCacheTTL = newSettings.previewCacheTTL
-                self.spaceService?.switchDuration = newSettings.spaceSwitchDuration
-                self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
-                    newSettings.quickSwitchExcludedBundleIDs
-                )
-                self.keyboardService?.quickSwitchModifiers = newSettings.quickSwitchModifiers
-                self.keyboardService?.quickSwitchSameApplicationModifiers =
-                    newSettings.quickSwitchSameApplicationModifiers
-                self.keyboardService?.heldCycleMinimumInterval =
-                    newSettings.heldCycleMinimumInterval
-                if telemetryChanged, let exporter = self.telemetryExporter {
-                    let sending = TelemetryActivationPolicy.shouldSend(settings: newSettings)
-                    Task {
-                        await exporter.setEnabled(sending)
-                        if sending { try? await exporter.flush() }
-                    }
-                }
+                self.applySettings(newSettings)
             }
         }
         vm.onResetWindowCache = { [weak self] in

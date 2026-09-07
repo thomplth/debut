@@ -1,74 +1,38 @@
-# Settings
+# Settings and onboarding
 
-The Settings window is the entry point on first launch and the place to configure
-Debut's behavior, appearance, shortcuts, and exclusions.
+First launch opens onboarding: choose features, grant permissions, then learn workspace
+switching, desktop navigation, all-windows switching and moving windows. The three
+feature pillars are screenshot previews, workspace-scoped switching, and faster desktop
+navigation. Spaces are actual macOS desktops, created and removed in Mission Control.
 
-## Layout
+Settings opens on **Features**. Its sidebar selects one independently scrolling page:
+Features, Excluded Apps, App, Privacy, Keyboard Shortcuts, Advanced, Troubleshooting,
+About. Choices save immediately and also update onboarding and menu-bar checkmarks.
 
-```
-┌───────────────┬──────────────────────────────────┐
-│ Appearance    │                                  │
-│ Selector      │                                  │
-│ Excluded Apps │   all sections stacked           │
-│ App           │                                  │
-│ Privacy       │                                  │
-│ Keyboard      │                                  │
-│ Troubleshoot  │                                  │
-│ About         │                                  │
-└───────────────┴──────────────────────────────────┘
-```
+**Features** uses the same controls as onboarding. Window previews, workspace isolation,
+and numbered shortcuts default on. Control-arrow and trackpad desktop interception
+default off, including on upgrade. Disabling workspace isolation returns its activation
+shortcuts and same-app cycling to macOS; Option-Tab and workspace browsing remain
+available. Disabling previews stops captures and clears cached images; cards still show
+icons and titles. Screen Recording remains required for desktop wallpaper.
 
-A fixed-width sidebar lists the sections while the main area stacks all of them
-in a single scrollable view. Clicking a sidebar entry scrolls to that section,
-and the sidebar highlights whichever section the scroll position implies.
+Numbered shortcuts, Control-arrow and trackpad desktop gestures are independently
+switchable. Debut's duration setting applies per desktop crossed, from Instant to
+400 ms. New input handlers must leave other gestures and unclaimed shortcuts untouched,
+consume the matching key-up of a claimed key-down, and never intercept their own
+synthetic DockSwipe events. Trackpad interception commits one adjacent hop per gesture.
 
-Changes save immediately and take effect live; nothing requires a restart. The
-window uses the native macOS settings visual style.
+**Keyboard Shortcuts** holds editable activation and session bindings, separate numbered
+modifiers for direct navigation and same-app preference, overlay delay, held-repeat pace,
+and app exclusions for numbered and Control-arrow inputs. Existing bindings remain saved
+when their feature is disabled.
 
-## Sections
+**Advanced** holds glass, card geometry, adaptive sizing, selection appearance, preview
+refresh policy and cache lifetime. **Excluded Apps** removes selected apps from window
+management. **App** controls login launch and Dock visibility. **Privacy** contains the
+sharing switch and exact-payload preview. **Troubleshooting** exports local diagnostics
+or resets assignments against the real desktop list. **About** shows the version and
+provides update checks.
 
-Individual controls, their ranges, and their default values are defined in
-`SettingsWindow.swift` and `AppSettings` and are deliberately not restated here.
-
-**Appearance** — glass style, stage geometry, and the window preview refresh
-policy.
-
-**Selector** — selection style and the controls specific to it. Filled is the
-default and exposes surrounding space and corner radius. Its translucent adaptive
-plate sits behind the preview and app icon while leaving the title outside. Magnify
-preserves the original effect and exposes selected-window scale and shadow
-strength. The fill is not drawn on drag previews.
-
-**Excluded Apps** — a picker over running regular apps and the resulting
-exclusion list. Adding an app removes it from every space and filters it out of
-discovery immediately.
-
-**App** — launch at login, registered through `SMAppService`. Overlay animation
-follows the system Reduce Motion setting rather than a Debut toggle.
-
-Every control in Settings must be wired to behaviour. Options that no code reads
-are removed rather than left visible; `AppSettings` ignores unknown keys, so
-files written by an older build keep loading.
-
-**Privacy** — one switch for anonymous usage and performance sharing, on by default,
-alongside a preview of the exact payload and a link to the privacy policy. The choice
-takes effect immediately and turning it off discards anything still queued. Local
-diagnostics are unaffected either way; see [../docs/privacy.md](../docs/privacy.md).
-
-**Keyboard Shortcuts** — an editable binding for every `KeyAction`, recorded by
-clicking a row and pressing the combination. Conflicts are detected inline and
-require explicit replacement. The section also carries the overlay hold delay
-and quick-switch exclusions. Quick switching exposes separate modifier settings
-for direct space switching and for switching while keeping the current app;
-both apply to digits 1–9.
-
-**Troubleshooting** — exports a diagnostic snapshot covering window assignments,
-Accessibility tracking, lifecycle events, and persisted state (it includes app
-and window names and window titles), and resets the window cache when closed or
-duplicate windows linger in Debut.
-
-**About** — icon, name, and version.
-
-## Not yet implemented
-
-- No check-for-updates control.
+The menu bar provides quick feature checkmarks, Settings, Tutorial, update checks and Quit.
+Control values and ranges live in AppSettings and SettingsWindow.swift.
