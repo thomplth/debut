@@ -33,8 +33,8 @@ if [[ -x "$eligibility" ]]; then
         || fail "a stable .0 release must be update eligible"
     [[ "$($eligibility daily 1.2.1)" == "eligible=false" ]] \
         || fail "a daily release must not be update eligible"
-    if "$eligibility" stable 1.2.1 >/dev/null 2>&1; then
-        fail "a patch release must be rejected from the stable channel"
+    if ! "$eligibility" stable 1.2.1 >/dev/null 2>&1; then
+        fail "a promoted patch release must be accepted"
     fi
     if "$eligibility" stable invalid >/dev/null 2>&1; then
         fail "an invalid stable version must be rejected"
@@ -68,15 +68,15 @@ echo 'sparkle:edSignature="fixture-signature" length="1234"'
 SCRIPT
     chmod +x "$fake_signer"
     SPARKLE_SIGN_UPDATE="$fake_signer" GITHUB_REPOSITORY=thomplth/debut \
-        "$appcast" 1.2.0 "$fixture/Debut.dmg" "$fixture/private-key" "$fixture/appcast.xml" \
+        "$appcast" 1.2.0 "$fixture/Debut.dmg" "$fixture/private-key" "$fixture/appcast.xml" "$plist" \
         >/dev/null
     expect_contains "$fixture/appcast.xml" 'releases/download/v1\.2\.0/Debut\.dmg' \
         "the appcast must point at the immutable versioned release asset"
     expect_contains "$fixture/appcast.xml" 'sparkle:edSignature="fixture-signature" length="1234"' \
         "the appcast must carry Sparkle's signature and exact archive length"
-    if SPARKLE_SIGN_UPDATE="$fake_signer" "$appcast" 1.2.1 \
-        "$fixture/Debut.dmg" "$fixture/private-key" "$fixture/patch.xml" >/dev/null 2>&1; then
-        fail "appcast generation must refuse patch releases"
+    if SPARKLE_SIGN_UPDATE="$fake_signer" "$appcast" 1.2.1-nightly.20260908 \
+        "$fixture/Debut.dmg" "$fixture/private-key" "$fixture/patch.xml" "$plist" >/dev/null 2>&1; then
+        fail "appcast generation must refuse nightly releases"
     fi
     rm -rf "$fixture"
 fi
