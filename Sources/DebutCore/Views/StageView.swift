@@ -331,6 +331,12 @@ enum StageMotion {
         isSelected && !isDragging && style == .filled
     }
 
+    /// A card with no preview draws the app icon in the middle of its empty plate, so the
+    /// corner badge would be that same icon a second time.
+    static func showsAppIconBadge(hasPreview: Bool) -> Bool {
+        hasPreview
+    }
+
     static func windowSelectorFill(isDarkMode: Bool) -> WindowSelectorFill {
         // The screenshots show white at 30% over the dark desktop and black at 25% over
         // the light desktop. Keeping the overlay translucent lets the desktop material show
@@ -1846,20 +1852,22 @@ struct WindowPreviewView: View {
                 }
                 .frame(width: metrics.thumbnailWidth, height: metrics.thumbnailHeight)
 
-                AppIconImage(
-                    bundleID: window.ownerBundleID,
-                    name: window.ownerName,
-                    iconSize: AppIconCache.badgeRasterSize,
-                    fallbackBaseSize: StageMetrics.standard.badgeSize
-                )
-                    .frame(width: metrics.badgeSize, height: metrics.badgeSize)
-                    .shadow(
-                        color: .black.opacity(0.3),
-                        radius: 2 * metrics.scaleFactor,
-                        x: 0,
-                        y: metrics.scaleFactor
+                if StageMotion.showsAppIconBadge(hasPreview: window.previewImage != nil) {
+                    AppIconImage(
+                        bundleID: window.ownerBundleID,
+                        name: window.ownerName,
+                        iconSize: AppIconCache.badgeRasterSize,
+                        fallbackBaseSize: StageMetrics.standard.badgeSize
                     )
-                    .offset(x: -4 * metrics.scaleFactor, y: -4 * metrics.scaleFactor)
+                        .frame(width: metrics.badgeSize, height: metrics.badgeSize)
+                        .shadow(
+                            color: .black.opacity(0.3),
+                            radius: 2 * metrics.scaleFactor,
+                            x: 0,
+                            y: metrics.scaleFactor
+                        )
+                        .offset(x: -4 * metrics.scaleFactor, y: -4 * metrics.scaleFactor)
+                }
             }
             .background {
                 if showsSelector {
