@@ -510,7 +510,15 @@ public struct RuntimeWindowReconciler: Sendable {
         // Exact title matches reclaim only unassigned live windows. Activation
         // publishes reconciliation before focus, keeping replacements unassigned
         // here without risking an unrelated assigned window with a duplicate title.
-        for info in liveWindows {
+        //
+        // An empty title is the absence of an identity rather than one two windows share, so
+        // comparing it pairs any titleless window of a bundle with any titleless slot of it.
+        // Dia's fullscreen window is titleless: each fullscreen cycle rebound a stale stage-1
+        // dormant slot onto it and stood a ghost card beside the real window, then parked it
+        // titleless again to seed the next cycle. Recovering a genuinely titleless window is
+        // left to the one-to-one bundle fallback below, which exists for unusable titles and
+        // at least requires the counts to line up.
+        for info in liveWindows where !info.title.isEmpty {
             guard let assignment = assignments.first(where: {
                 !usedAssignmentIDs.contains($0.window.id) &&
                     $0.window.ownerBundleID == info.ownerBundleID &&
