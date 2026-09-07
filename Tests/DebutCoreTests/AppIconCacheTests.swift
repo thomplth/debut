@@ -132,8 +132,65 @@ struct AppIconCacheTests {
         let largest = StageMetrics.standard.scaled(by: CGFloat(AppSettings.maximumStageScale))
         #expect(AppIconCache.badgeRasterSize == largest.badgeSize)
         #expect(AppIconCache.placeholderIconRasterSize == largest.previewPlaceholderIconSize)
-        #expect(AppIconCache.overlayIconSizes
-            == [AppIconCache.placeholderIconRasterSize, AppIconCache.badgeRasterSize])
+        #expect(AppIconCache.overlayIconSizes == [AppIconCache.placeholderIconRasterSize])
+        #expect(AppIconCache.overlayBadgeIconSizes == [AppIconCache.badgeRasterSize])
+    }
+
+    // A badge draws only on a card that has a preview, so its SwiftUI `.shadow` was an offscreen
+    // blur per badge per frame on exactly the cards the preview mode adds — the whole gap between
+    // cycling with previews and without (KHA-641). In the bitmap it costs nothing per frame.
+    @Test("The badge bitmap carries its drop shadow in the pixels")
+    func badgeShadowIsBaked() throws {
+        let side: CGFloat = 40
+        let baked = AppIconCache.withBadgeShadow(opaqueIcon(side))
+        let padding = AppIconCache.BakedBadgeShadow.padding
+        #expect(baked.size == NSSize(width: side + padding * 2, height: side + padding * 2))
+
+        // Size alone proves only that the bitmap was padded. A shadow that silently failed to
+        // draw leaves that padding empty, so assert the pixels under the icon are actually dark.
+        let rep = try #require(baked.representations.first as? NSBitmapImageRep)
+        let scale = CGFloat(rep.pixelsWide) / baked.size.width
+        let centerX = Int(baked.size.width / 2 * scale)
+        // AppKit draws bottom-up and the shadow falls downwards, so it lands below the icon here.
+        let belowIcon = Int((padding - AppIconCache.BakedBadgeShadow.dy) * scale)
+        let shadowPixel = try #require(rep.colorAt(x: centerX, y: rep.pixelsHigh - 1 - belowIcon))
+        #expect(shadowPixel.alphaComponent > 0.05)
+
+        // The far corner is past four standard deviations, so a bitmap that merely tinted its
+        // whole padding would not pass.
+        let corner = try #require(rep.colorAt(x: 0, y: 0))
+        #expect(corner.alphaComponent < 0.01)
+    }
+
+    @Test("The shadowed badge is cached apart from the plain icon of the same size")
+    func badgeVariantIsItsOwnKey() throws {
+        let cache = AppIconCache { _, size in self.opaqueIcon(size) }
+        let plain = try #require(cache.cachedOrRasterize(bundleID: "com.example.a", size: 40))
+        let badge = try #require(
+            cache.cachedOrRasterize(bundleID: "com.example.a", size: 40, badge: true)
+        )
+        #expect(plain.size == NSSize(width: 40, height: 40))
+        #expect(badge.size.width > plain.size.width)
+        #expect(cache.cached(bundleID: "com.example.a", size: 40)?.size == plain.size)
+    }
+
+    @Test("Warming reaches the shadowed badge, not just the plain icon")
+    func warmsBadgeVariant() throws {
+        let cache = AppIconCache { _, size in self.opaqueIcon(size) }
+        cache.warm(bundleIDs: ["com.example.a"], sizes: [64], badgeSizes: [40])
+        waitForWarm(cache)
+        #expect(cache.cached(bundleID: "com.example.a", size: 64) != nil)
+        #expect(cache.cached(bundleID: "com.example.a", size: 40, badge: true) != nil)
+        #expect(cache.cached(bundleID: "com.example.a", size: 40) == nil)
+    }
+
+    private func opaqueIcon(_ size: CGFloat) -> NSImage {
+        let image = NSImage(size: NSSize(width: size, height: size))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: size, height: size).fill()
+        image.unlockFocus()
+        return image
     }
 }
 
