@@ -61,7 +61,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// something remembers the destruction. The owner is kept because the window server
     /// recycles IDs: the same ID under a different process is a different window and must not
     /// inherit this one's tombstone.
-    private var retiredWindowOwners: [CGWindowID: RetiredWindowRecord] = [:]
+    private var retiredWindowOwners: [CGWindowID: RetiredWindowRecord] = [:] {
+        didSet {
+            guard retiredWindowOwners != oldValue else { return }
+            onRetiredWindowsChanged?(retiredWindowRecords)
+        }
+    }
+
+    /// Publishes the tombstones as they change so they can be stored on the session's own
+    /// schedule. A verdict written only when Debut terminates cleanly is absent from every
+    /// kill, while the assignment it overrules is saved throughout the session — so the next
+    /// startup reconcile restores a window this service already knows is gone.
+    var onRetiredWindowsChanged: (([RetiredWindowRecord]) -> Void)?
 
     public var retiredWindowIDs: Set<CGWindowID> { Set(retiredWindowOwners.keys) }
 

@@ -1375,6 +1375,56 @@ struct WindowDiscoveryServiceTests {
         #expect(relaunched.discoverRunningWindows().isEmpty)
     }
 
+    // The verdict has to reach disk on its own schedule, not the app's. Assignments are written
+    // continuously by the debounced saver, so a verdict written only at termination is lost to
+    // every kill — including the `pkill` in this repo's own install loop — while the assignment
+    // it overrules survives, and the next startup reconcile re-admits the dead surface.
+    @Test("A tombstone is published the moment it is recorded")
+    func retirementIsPublishedWhenRecorded() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var published: [[RetiredWindowRecord]] = []
+        service.onRetiredWindowsChanged = { published.append($0) }
+
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 7, pid: 10)
+        service.handleWindowDestroyed(element: element)
+
+        #expect(published.last == [
+            RetiredWindowRecord(windowID: 7, ownerPID: 10, ownerBundleID: "notion.id")
+        ])
+    }
+
+    @Test("Dropping a tombstone is published too")
+    func retirementPurgeIsPublished() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 7, pid: 10)
+        service.handleWindowDestroyed(element: element)
+
+        var published: [[RetiredWindowRecord]] = []
+        service.onRetiredWindowsChanged = { published.append($0) }
+        service.handleProcessExit(pid: 10)
+
+        // A stale tombstone left on disk would refuse a future window of a reissued PID.
+        #expect(published.last == [])
+    }
+
     @Test("A restored retirement is ignored when its PID now runs a different app")
     func restoredRetirementIgnoredForReissuedPID() {
         let windowService = MockWindowService()
