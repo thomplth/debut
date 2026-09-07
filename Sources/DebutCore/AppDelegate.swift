@@ -16,6 +16,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var observingAccessibilityChanges = false
     private var windowDiscovery: WindowDiscoveryService?
     private let diag = DiagnosticReporter.shared
+    /// Verdicts are published from an AX destroy callback and from `listWindows()`, so the write
+    /// they trigger is moved off whichever thread produced the evidence.
+    private nonisolated let verdictQueue = DispatchQueue(
+        label: "com.thomplth.Debut.verdictPersistence"
+    )
     private let onboardingPermissionClient = SystemOnboardingPermissionClient()
     private let launchAtLogin = LaunchAtLoginCoordinator()
     private let activationPolicy = ActivationPolicyCoordinator()
@@ -73,6 +78,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             (try? store.loadContradictions()) ?? [],
             runningBundleIDsByPID: Self.runningBundleIDsByPID()
         )
+        accessibility.onContradictionsChanged = { [verdictQueue] records in
+            verdictQueue.async { try? store.saveContradictions(records) }
+        }
         windowService = accessibility
         keyboardService = EventTapKeyboardService()
 
@@ -136,6 +144,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             (try? stateStore?.loadRetiredWindows()) ?? [],
             runningBundleIDsByPID: Self.runningBundleIDsByPID()
         )
+        if let stateStore {
+            discovery.onRetiredWindowsChanged = { [verdictQueue] records in
+                verdictQueue.async { try? stateStore.saveRetiredWindows(records) }
+            }
+        }
         windowService.windowElementResolver = { [weak discovery] windowID in
             discovery?.trackedWindowElement(windowID: windowID)
         }
