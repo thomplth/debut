@@ -156,7 +156,7 @@ struct StageWindowLayoutTests {
         #expect(grown.slot(at: 5) == StageGridSlot(row: 1, column: 2))
     }
 
-    @Test("Scaling resizes the container while keeping title typography fixed")
+    @Test("Scaling multiplies every dimension, so a card keeps its proportions")
     func scaledMetrics() {
         let scaled = metrics.scaled(by: 1.5)
 
@@ -171,20 +171,9 @@ struct StageWindowLayoutTests {
 
         #expect(scaled.cardWidth == metrics.cardWidth * 1.5)
         #expect(scaled.cardHeight == metrics.cardHeight * 1.5)
-        #expect(scaled.titleFontSize == 10.4)
+        #expect(scaled.titleFontSize == metrics.titleFontSize * 1.5)
         #expect(scaled.thumbnailCornerRadius == metrics.thumbnailCornerRadius * 1.5)
         #expect(metrics.scaled(by: 1) == metrics)
-        #expect(metrics.scaled(by: 0.5).scaled(by: 2) == metrics)
-    }
-
-    @Test("Small previews reserve enough height for the fixed title", arguments: [0.5, 0.75, 1.0, 1.5, 2.5])
-    func fixedTitleMetrics(scale: Double) {
-        let scaled = metrics.scaled(by: CGFloat(scale))
-        #expect(scaled.titleFontSize == 10.4)
-        #expect(scaled.titleHeight >= 14)
-        #expect(scaled.titleHeight == max(14, metrics.titleHeight * CGFloat(scale)))
-        #expect(scaled.thumbnailWidth + scaled.titleWidthAllowance
-            == (metrics.thumbnailWidth + metrics.titleWidthAllowance) * CGFloat(scale))
     }
 
     @Test("A thumbnail's corner is cut like the app icon badged over it")
@@ -343,7 +332,7 @@ struct DisplayShapedMetricsTests {
 
     /// A portrait card is under 160pt wide and an ultrawide card is over it, so a font taken
     /// from the thumbnail width would shrink and swell with the monitor rather than the slider.
-    @Test("Title size is independent of preview scale and display shape")
+    @Test("Title size follows the scale, not the display's shape")
     func titleSizeFollowsScaleOnly() {
         let ultrawide = shaped(3_440, 1_440)
         let portrait = shaped(1_080, 1_920)
