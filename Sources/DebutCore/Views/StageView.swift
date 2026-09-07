@@ -1817,9 +1817,15 @@ struct WindowPreviewView: View {
                         Image(decorative: cgImage, scale: 1.0)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: metrics.thumbnailCornerRadius))
+                            .clipShape(RoundedRectangle(
+                                cornerRadius: metrics.thumbnailCornerRadius,
+                                style: .continuous
+                            ))
                     } else {
-                        RoundedRectangle(cornerRadius: metrics.thumbnailCornerRadius)
+                        RoundedRectangle(
+                            cornerRadius: metrics.thumbnailCornerRadius,
+                            style: .continuous
+                        )
                             .fill(.quaternary.opacity(0.3))
                             .overlay {
                                 // Rasterized at a scale-independent size and framed at the
