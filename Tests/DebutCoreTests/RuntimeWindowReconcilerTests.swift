@@ -1077,6 +1077,90 @@ struct RuntimeWindowReconcilerTests {
         #expect(result.events.isEmpty)
     }
 
+    // MARK: - Unplaced new window regression (KHA-635)
+    //
+    // Dia's fullscreen window sits on a Space that is not one of the desktops, so SkyLight
+    // places it nowhere Debut manages and the desktop answer is absent. Guessing the showing
+    // desktop then stood a second Dia card in stage 1 on every fullscreen cycle.
+
+    @Test("A new window SkyLight places on no desktop is refused")
+    func unplacedNewWindowIsRefused() {
+        var manager = SpaceManager()
+        manager.addWindow(
+            SpaceWindow(windowID: 67699, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Inbox", ownerPID: 95707),
+            toSpaceID: manager.activeSpaceID
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [
+                    liveWindow(67699, bundleID: "company.thebrowser.dia", ownerName: "Dia",
+                               ownerPID: 95707, title: "Inbox"),
+                    liveWindow(78810, bundleID: "company.thebrowser.dia", ownerName: "Dia",
+                               ownerPID: 95707, title: ""),
+                ],
+                allWindowIDs: [67699, 78810],
+                desktopIndexes: [67699: 0],
+                skyLightWindowIDs: [67699]
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(manager.activeSpace.windows.map(\.windowID) == [67699])
+        #expect(manager.spaceContainingWindow(windowID: 78810) == nil)
+        #expect(result.addedCount == 0)
+        #expect(result.refusedCount == 1)
+        #expect(!result.events.contains { $0.windowID == 78810 })
+    }
+
+    // A window on every desktop has no single desktop answer either, but it really is on the
+    // one showing, so the guess is right for it and only for it.
+    @Test("A new window SkyLight places on every desktop still lands on the showing one")
+    func allDesktopsNewWindowIsAdmitted() {
+        var manager = SpaceManager()
+        manager.createSpace(position: .below)
+        let secondSpace = manager.spaces[1].id
+        manager.activateSpace(id: secondSpace)
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(27135, bundleID: "com.apple.reminders",
+                                         ownerName: "Reminders", ownerPID: 11546,
+                                         title: "Reminders")],
+                allWindowIDs: [27135],
+                skyLightWindowIDs: [27135]
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(manager.spaceContainingWindow(windowID: 27135) == secondSpace)
+        #expect(result.addedCount == 1)
+        #expect(result.refusedCount == 0)
+    }
+
+    // An enumeration that never happened is not a statement that the window is nowhere.
+    @Test("A new window is still admitted when SkyLight gave no answer at all")
+    func unplacedRefusalNeedsASkyLightAnswer() {
+        var manager = SpaceManager()
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(78810, bundleID: "company.thebrowser.dia",
+                                         ownerName: "Dia", ownerPID: 95707, title: "")],
+                allWindowIDs: [78810],
+                skyLightWindowIDs: nil
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(manager.activeSpace.windows.map(\.windowID) == [78810])
+        #expect(result.refusedCount == 0)
+    }
+
     // MARK: - Preview "Open" ghost regression (KHA-566)
     //
     // Reproduces a real session. Preview was quit while an image window and a generic

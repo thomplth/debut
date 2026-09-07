@@ -599,6 +599,11 @@ public protocol SpaceSwitching: AnyObject {
     /// windows on the active Space, so this is how a window on another desktop is discovered
     /// at all, not just located once already known.
     func windowLocations() -> [CGWindowID: DesktopLocation]
+    /// Every window SkyLight puts on a desktop, including the ones on more than one that
+    /// `windowLocations()` drops for having no single answer. Absence from this set is the
+    /// difference between "on every desktop" and "on no desktop at all", which the location
+    /// map alone collapses into the same missing key.
+    func placedWindowIDs() -> Set<CGWindowID>
     /// Windows the window server attaches to another window. Empty means nothing is known to be
     /// parented, which is why the default conformance can return nothing without evicting.
     func parentedWindowIDs(among candidates: [CGWindowID]) -> Set<CGWindowID>
@@ -631,6 +636,7 @@ public protocol SpaceSwitching: AnyObject {
 
 public extension SpaceSwitching {
     func parentedWindowIDs(among candidates: [CGWindowID]) -> Set<CGWindowID> { [] }
+    func placedWindowIDs() -> Set<CGWindowID> { Set(windowLocations().keys) }
     func isSwitchInFlight(stackID: String) -> Bool { false }
     func spaceDidChange() {}
     func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool { false }
@@ -914,7 +920,17 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     /// more than one space as no single answer, a window seen on a second, different desktop
     /// here is dropped rather than left pointing at whichever desktop was queried last.
     public func windowLocations() -> [CGWindowID: DesktopLocation] {
-        guard let connection, let slsCopyWindowsWithOptionsAndTags else { return [:] }
+        enumerateDesktopWindows().locations
+    }
+
+    public func placedWindowIDs() -> Set<CGWindowID> {
+        let enumeration = enumerateDesktopWindows()
+        return Set(enumeration.locations.keys).union(enumeration.shared)
+    }
+
+    private func enumerateDesktopWindows()
+        -> (locations: [CGWindowID: DesktopLocation], shared: Set<CGWindowID>) {
+        guard let connection, let slsCopyWindowsWithOptionsAndTags else { return ([:], []) }
         let topology = spaceTopology()
         var result: [CGWindowID: DesktopLocation] = [:]
         var ambiguous: Set<CGWindowID> = []
@@ -938,7 +954,7 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             }
         }
         for windowID in ambiguous { result.removeValue(forKey: windowID) }
-        return result
+        return (result, ambiguous)
     }
 
     /// The windows the window server attaches to another window — sheets, and the popups an app

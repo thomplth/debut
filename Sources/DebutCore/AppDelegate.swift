@@ -262,10 +262,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                     ),
                     spaceManager: &controller.spaceManager
                 )
-                if result.didMutate {
+                if result.didMutate || result.refusedCount > 0 {
                     self.diag.report("runtime_windows_reconciled", details: [
                         "added": "\(result.addedCount)",
                         "reassigned": "\(result.reassignedCount)",
+                        "refused": "\(result.refusedCount)",
                         "trigger": "app_launch",
                     ])
                     self.reportAssignmentEvents(result.events, trigger: "app_launch")
@@ -328,10 +329,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                     spaceManager: &controller.spaceManager,
                     allowDormantBundleFallback: false
                 )
-                if result.didMutate {
+                if result.didMutate || result.refusedCount > 0 {
                     self.diag.report("runtime_windows_reconciled", details: [
                         "added": "\(result.addedCount)",
                         "reassigned": "\(result.reassignedCount)",
+                        "refused": "\(result.refusedCount)",
                         "trigger": "app_activation",
                     ])
                     self.reportAssignmentEvents(result.events, trigger: "app_activation")
@@ -348,10 +350,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                     spaceManager: &controller.spaceManager,
                     allowDormantBundleFallback: false
                 )
-                guard result.didMutate else { return }
+                guard result.didMutate || result.refusedCount > 0 else { return }
                 self.diag.report("runtime_windows_reconciled", details: [
                     "added": "\(result.addedCount)",
                     "reassigned": "\(result.reassignedCount)",
+                    "refused": "\(result.refusedCount)",
                     "trigger": "desktop_changed",
                 ])
                 self.reportAssignmentEvents(result.events, trigger: "desktop_changed")
