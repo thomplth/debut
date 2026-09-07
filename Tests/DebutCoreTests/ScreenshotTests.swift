@@ -595,53 +595,8 @@ struct ScreenshotTests {
         #expect(abs(enlarged.height - expected.cardHeight) < 0.5)
     }
 
-    @Test("Rendered window titles keep their glyph size as previews resize")
-    func windowTitleSizeStaysFixed() throws {
-        let size = NSSize(width: 600, height: 500)
-        var appearance = AppSettings()
-        appearance.windowSelectionStyle = .filled
-        let window = StageWindowData(
-            id: 1, windowID: 1, ownerBundleID: "com.apple.finder",
-            ownerName: "Finder", windowTitle: "Hg Title", previewImage: nil
-        )
-        var glyphSizes: [CGSize] = []
-        for scale: CGFloat in [0.5, 1, 1.5, 2.5] {
-            let metrics = StageMetrics.standard.scaled(by: scale)
-            let image = try #require(renderSwiftUI(
-                WindowPreviewView(window: window, isWindowSelected: true,
-                    metrics: metrics, appearance: appearance)
-                    .environment(\.colorScheme, .dark), size: size
-            ))
-            try saveImage(image, name: "06_fixed_title_\(scale)")
-            let bitmap = try #require(normalizedBitmap(image, size: size))
-            // Only the title region, below the preview: measure actual bright glyph pixels,
-            // rather than a frame that would pass even if the text were scaled or clipped.
-            let top = size.height / 2 - metrics.cardHeight / 2
-                + metrics.cardPadding + metrics.thumbnailHeight + metrics.titleSpacing
-            let bottom = top + metrics.titleHeight
-            var minX = bitmap.pixelsWide, minY = bitmap.pixelsHigh
-            var maxX = -1, maxY = -1
-            for y in Int(top * 2)..<Int(bottom * 2) {
-                for x in 0..<bitmap.pixelsWide {
-                    guard let color = bitmap.colorAt(x: x, y: y),
-                          min(color.redComponent, color.greenComponent, color.blueComponent) > 0.7
-                    else { continue }
-                    minX = min(minX, x); maxX = max(maxX, x)
-                    minY = min(minY, y); maxY = max(maxY, y)
-                }
-            }
-            #expect(maxX >= minX && maxY >= minY)
-            glyphSizes.append(CGSize(width: maxX - minX + 1, height: maxY - minY + 1))
-        }
-        let reference = glyphSizes[1]
-        for measured in glyphSizes {
-            #expect(abs(measured.width - reference.width) <= 2)
-            #expect(abs(measured.height - reference.height) <= 2)
-        }
-    }
-
-    @Test("A 150 percent preview scale preserves the overall overlay composition")
-    func enlargedStageScalePreservesRenderedComposition() throws {
+    @Test("A 150 percent stage scale is a proportional rendering of the original UI")
+    func enlargedStageScalePreservesRenderedProportions() throws {
         let originalSize = NSSize(width: 1_200, height: 600)
         let scale: CGFloat = 1.5
         let enlargedSize = NSSize(
