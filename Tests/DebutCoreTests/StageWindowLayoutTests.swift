@@ -176,6 +176,17 @@ struct StageWindowLayoutTests {
         #expect(metrics.scaled(by: 1) == metrics)
     }
 
+    @Test("A thumbnail's corner is cut like the app icon badged over it")
+    func thumbnailCornerMatchesBadgedAppIcon() {
+        // macOS draws an app icon's body 824 points wide on a 1024-point canvas, with a
+        // 185.4-point corner radius. The badge's offset lines that body's top-left corner up
+        // with the thumbnail's, so a shallower cut there leaves the thumbnail poking out.
+        let iconCornerRadius = metrics.badgeSize * 185.4 / 1024
+
+        #expect(metrics.thumbnailCornerRadius == iconCornerRadius)
+        #expect(metrics.thumbnailCornerRadius > metrics.cardPadding)
+    }
+
     @Test("The standard stage stays compact while its cards make selector clearance")
     func standardSingleRowVerticalProfile() {
         let stage = layout(3, availableWidth: fourColumnWidth)
