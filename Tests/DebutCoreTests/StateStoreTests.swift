@@ -341,6 +341,14 @@ struct StateStoreTests {
         #expect(AppSettings.defaultHeldCycleMinimumInterval == 0.06)
     }
 
+    @Test("Saved preview scales respect the current setting range", arguments: [0.5, 0.75, 1.0, 1.5, 2.5, 3.0])
+    func savedStageScaleRange(scale: Double) throws {
+        var settings = AppSettings()
+        settings.stageScale = scale
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+        #expect(decoded.stageScale == min(2.5, max(1, scale)))
+    }
+
     @Test("Settings written before the stage scale existed use the 100 percent default")
     func legacySettingsDefaultStageScale() throws {
         let encoded = try JSONEncoder().encode(AppSettings())

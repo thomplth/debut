@@ -634,8 +634,61 @@ struct ScreenshotTests {
         #expect(abs(enlarged.height - expected.cardHeight) < 0.5)
     }
 
-    @Test("A 150 percent stage scale is a proportional rendering of the original UI")
-    func enlargedStageScalePreservesRenderedProportions() throws {
+    @Test("Rendered title glyphs grow more gently than previews")
+    func windowTitleSizeGrowsGently() throws {
+        let size = NSSize(width: 600, height: 500)
+        var appearance = AppSettings()
+        appearance.windowSelectionStyle = .filled
+        let window = StageWindowData(
+            id: 1, windowID: 1, ownerBundleID: "com.apple.finder",
+            ownerName: "Finder", windowTitle: "Hg Title", previewImage: nil
+        )
+        func glyphSize(_ bitmap: NSBitmapImageRep, rows: Range<Int>) -> CGSize {
+            var minX = bitmap.pixelsWide, minY = bitmap.pixelsHigh
+            var maxX = -1, maxY = -1
+            for y in rows {
+                for x in 0..<bitmap.pixelsWide {
+                    guard let color = bitmap.colorAt(x: x, y: y),
+                          min(color.redComponent, color.greenComponent, color.blueComponent) > 0.7
+                    else { continue }
+                    minX = min(minX, x); maxX = max(maxX, x)
+                    minY = min(minY, y); maxY = max(maxY, y)
+                }
+            }
+            #expect(maxX >= minX && maxY >= minY)
+            return CGSize(width: maxX - minX + 1, height: maxY - minY + 1)
+        }
+        for (scale, fontSize): (CGFloat, CGFloat) in [(1, 10.4), (1.5, 12.73734666), (2, 14.70782105), (2.5, 16.44384383)] {
+            let metrics = StageMetrics.standard.scaled(by: scale)
+            let image = try #require(renderSwiftUI(
+                WindowPreviewView(window: window, isWindowSelected: true,
+                    metrics: metrics, appearance: appearance)
+                    .environment(\.colorScheme, .dark), size: size
+            ))
+            try saveImage(image, name: "06_gentle_title_\(scale)")
+            let bitmap = try #require(normalizedBitmap(image, size: size))
+            // Only the title region, below the preview: measure actual bright glyph pixels,
+            // rather than a frame that would pass even if the text were scaled or clipped.
+            let top = size.height / 2 - metrics.cardHeight / 2
+                + metrics.cardPadding + metrics.thumbnailHeight + metrics.titleSpacing
+            let bottom = top + metrics.titleHeight
+            let measured = glyphSize(bitmap, rows: Int(top * 2)..<Int(bottom * 2))
+            // Compare against text rendered at the intended point size. System-font optical
+            // sizing changes glyph proportions, so multiplying baseline pixels is not a reference.
+            let referenceSize = NSSize(width: 200, height: 60)
+            let reference = try #require(renderSwiftUI(
+                Text("Hg Title").font(.system(size: fontSize)).foregroundStyle(.white),
+                size: referenceSize
+            ))
+            let referenceBitmap = try #require(normalizedBitmap(reference, size: referenceSize))
+            let expected = glyphSize(referenceBitmap, rows: 0..<referenceBitmap.pixelsHigh)
+            #expect(abs(measured.width - expected.width) <= 2)
+            #expect(abs(measured.height - expected.height) <= 2)
+        }
+    }
+
+    @Test("A 150 percent preview scale preserves the overall overlay composition")
+    func enlargedStageScalePreservesRenderedComposition() throws {
         let originalSize = NSSize(width: 1_200, height: 600)
         let scale: CGFloat = 1.5
         let enlargedSize = NSSize(
