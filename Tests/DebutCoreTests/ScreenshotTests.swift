@@ -317,6 +317,55 @@ struct ScreenshotTests {
         #expect(viewModel.selectedWindow?.windowID == entries[2].window.windowID)
     }
 
+    @Test("Actual previews cast a shadow beyond their image bounds",
+          arguments: [CGFloat(0.5), 1, 2.5], [CGFloat(0.3), 1.6, 4])
+    func previewDropShadow(scale: CGFloat, aspect: CGFloat) throws {
+        let metrics = StageMetrics.standard.scaled(by: scale).adapted(toContentAspect: aspect)
+        let size = NSSize(width: 500 * scale, height: 300 * scale)
+        let context = try #require(CGContext(
+            data: nil, width: Int(100 * aspect), height: 100, bitsPerComponent: 8,
+            bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.3, green: 0.6, blue: 0.9, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: context.width, height: context.height))
+        let preview = try #require(context.makeImage())
+        // Tall and wide windows hit the adaptive width limits and therefore letterbox.
+        // The shadow must follow the visible image, not the surrounding layout frame.
+        let imageWidth = min(metrics.thumbnailWidth, metrics.thumbnailHeight * aspect)
+        let centerY = size.height / 2 - (metrics.titleSpacing + metrics.titleHeight) / 2
+        for selected in [false, true] {
+            for dark in [false, true] {
+                let background: CGFloat = dark ? 0.25 : 0.9
+                let card = WindowPreviewView(
+                    window: StageWindowData(
+                        id: 100, windowID: 100, ownerBundleID: "com.apple.finder",
+                        ownerName: "", windowTitle: "", previewImage: preview
+                    ),
+                    isWindowSelected: selected, metrics: metrics, appearance: AppSettings()
+                ).environment(\.colorScheme, dark ? .dark : .light)
+                let image = try #require(renderSwiftUI(card, size: size, background: background))
+                let bitmap = try #require(normalizedBitmap(image, size: size))
+                try saveImage(image, name: "05_preview_shadow_\(scale)_\(aspect)_\(selected)_\(dark)")
+                // Sample past the selector as well as the image. A selected narrow image has
+                // a wide letterbox and selector to its right, so use its bottom edge instead.
+                // Unselected narrow images are still sampled inside that letterbox.
+                let below = selected && imageWidth < metrics.thumbnailWidth
+                let outset = selected ? CGFloat(AppSettings().selectorOutset) * scale : 0
+                let point = below
+                    ? CGPoint(x: size.width / 2,
+                              y: centerY + metrics.thumbnailHeight / 2 + outset + 4 * scale)
+                    : CGPoint(x: size.width / 2 + imageWidth / 2 + outset + 4 * scale,
+                              y: centerY)
+                let shadow = try #require(bitmap.colorAt(
+                    x: Int(point.x * 2), y: Int(point.y * 2)
+                ))
+                let bare = try #require(bitmap.colorAt(x: Int((size.width - 5 * scale) * 2), y: Int(centerY * 2)))
+                #expect(bare.redComponent - shadow.redComponent > (dark ? 0.015 : 0.03))
+            }
+        }
+    }
+
     @Test("Placeholder cards cast a halo on a light background at every stage scale",
           arguments: [0.5, 1.0, 2.0])
     func placeholderHalo(scale: CGFloat) throws {
@@ -501,6 +550,25 @@ struct ScreenshotTests {
             StageOverlayView(viewModel: makeSampleViewModel(windowPreviews: preview)),
             size: size
         )
+
+        let stages = makeSampleViewModel(windowPreviews: preview)
+        let flat = AltTabOverlayViewModel(
+            entries: stages.spaceManager.globalWindowOrder(), selectedIndex: 2,
+            windowPreviews: preview
+        )
+        for dark in [false, true] {
+            let background: CGFloat = dark ? 0.25 : 0.9
+            let stageImage = try #require(renderSwiftUI(
+                StageOverlayView(viewModel: stages).environment(\.colorScheme, dark ? .dark : .light),
+                size: size, background: background
+            ))
+            try saveImage(stageImage, name: "02_preview_shadows_\(dark)")
+            let flatImage = try #require(renderSwiftUI(
+                AltTabOverlayView(viewModel: flat).environment(\.colorScheme, dark ? .dark : .light),
+                size: size, background: background
+            ))
+            try saveImage(flatImage, name: "10_preview_shadows_\(dark)")
+        }
 
         #expect(!withPreviews.isEmpty)
         #expect(Set(withPreviews.keys) == Set(withoutPreviews.keys))
