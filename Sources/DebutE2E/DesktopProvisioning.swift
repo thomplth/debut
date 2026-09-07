@@ -64,6 +64,52 @@ enum DesktopProvisioning {
         return true
     }
 
+    /// Resets only disposable fixture hosts, using an action the Dock actually advertises.
+    static func resetToSingleDesktop() -> Bool {
+        guard AXIsProcessTrusted() else { return false }
+        let service = SpaceService()
+        while service.userDesktops().count > 1 {
+            let before = service.userDesktops().count
+            guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return false }
+            let dockElement = AXUIElementCreateApplication(dock.processIdentifier)
+            // This is a presentation precondition, not a toggle: a warm guest may
+            // already have Mission Control open when the fixture starts.
+            if element(in: dockElement, identifier: addButtonIdentifier) == nil { toggleMissionControl() }
+            guard element(in: dockElement, identifier: addButtonIdentifier) != nil else {
+                print("Cannot reset desktops: Mission Control did not expose its add button.")
+                return false
+            }
+            // Mission Control only exposes desktop removal while its top strip is expanded.
+            let bounds = CGDisplayBounds(CGMainDisplayID())
+            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                    mouseCursorPosition: CGPoint(x: bounds.midX, y: bounds.minY + 2),
+                    mouseButton: .left)?.post(tap: .cghidEventTap)
+            Thread.sleep(forTimeInterval: 0.5)
+            var removable: [AXUIElement] = []
+            func visit(_ element: AXUIElement, depth: Int = 0) {
+                guard depth < 12 else { return }
+                var actions: CFArray?
+                AXUIElementCopyActionNames(element, &actions)
+                if (actions as? [String] ?? []).contains("AXRemoveDesktop") { removable.append(element) }
+                var children: CFTypeRef?
+                AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+                for child in children as? [AXUIElement] ?? [] { visit(child, depth: depth + 1) }
+            }
+            visit(dockElement)
+            guard let last = removable.last else {
+                print("The Dock exposes no remove-desktop action; cannot validate the one-desktop fixture.")
+                toggleMissionControl()
+                return false
+            }
+            let result = AXUIElementPerformAction(last, "AXRemoveDesktop" as CFString)
+            Thread.sleep(forTimeInterval: 1)
+            toggleMissionControl()
+            guard result == .success, service.userDesktops().count < before else { return false }
+        }
+        print("Single-desktop fixture: \(service.userDesktops())")
+        return true
+    }
+
     private static func toggleMissionControl() {
         let process = Process()
         process.executableURL = URL(

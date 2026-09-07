@@ -36,6 +36,14 @@ for image in overlay all-windows; do
     fi
 done
 
+for media in onboarding-workspace.jpg onboarding-previews.jpg onboarding-no-previews.jpg onboarding-speed.mp4 onboarding-speed.jpg; do
+    if [[ ! -f "$PROJECT_DIR/docs/media/$media" ]]; then
+        echo "Missing onboarding demonstration: $media" >&2
+        exit 1
+    fi
+    cp "$PROJECT_DIR/docs/media/$media" "$RESOURCES/$media"
+done
+
 SPARKLE_FRAMEWORK="$BUILD_DIR/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 if [[ ! -d "$SPARKLE_FRAMEWORK" ]]; then
     echo "Missing resolved Sparkle.framework at $SPARKLE_FRAMEWORK" >&2

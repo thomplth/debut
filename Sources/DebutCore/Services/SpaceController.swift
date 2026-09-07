@@ -214,6 +214,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public let keyboardService: any KeyboardService
     public weak var delegate: SpaceControllerDelegate?
     public var onDesktopReveal: (() -> Void)?
+    public var onPracticeVerified: ((OnboardingPractice) -> Void)?
+    private var overlayPractice: OnboardingPractice?
+    private var pendingPractice: (windowID: CGWindowID, practice: OnboardingPractice)?
 
     private var pendingSpaceFocus: (spaceID: UUID, windowID: CGWindowID)?
     /// Focus restored by macOS while Debut is traversing adjacent desktops is passive. Keep
@@ -675,6 +678,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
         let outcome = activateOwner(of: window, raising: windowID)
+        if outcome == .refused { pendingPractice = nil }
         if outcome != .refused, let ownerPID = window.ownerPID {
             focusRequest = (windowID: windowID, ownerPID: ownerPID, at: clock())
             scheduleFrontVerification(windowID: windowID, ownerPID: ownerPID)
@@ -713,8 +717,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     func verifyPendingFront() -> Bool? {
         guard let request = pendingFront else { return nil }
         pendingFront = nil
+        let practice = pendingPractice
+        pendingPractice = nil
         guard let frontmost = windowService.frontmostApplicationPID() else { return nil }
-        guard frontmost != request.ownerPID else { return true }
+        guard frontmost != request.ownerPID else {
+            if practice?.windowID == request.windowID, let practice {
+                onPracticeVerified?(practice.practice)
+            }
+            return true
+        }
         diag.report("window_front_not_taken", details: [
             "windowID": "\(request.windowID)",
             "requested": "\(request.ownerPID)",
@@ -1382,12 +1393,14 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func openOverlay(selectNextWindow: Bool) {
         setupOverlay()
+        overlayPractice = .workspace
         let windowCount = overlaySpaceManager.activeSpace.windows.count
         selectedWindowIndex = !frontmostAppIsExcluded && windowCount >= 2 ? 1 : 0
     }
 
     private func openOverlay(selectLastWindow: Bool) {
         setupOverlay()
+        overlayPractice = .workspace
         let windowCount = overlaySpaceManager.activeSpace.windows.count
         selectedWindowIndex = windowCount > 0 ? windowCount - 1 : 0
     }
@@ -1453,6 +1466,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func openAltTab(forward: Bool) {
         setupOverlay(mode: .altTab)
+        overlayPractice = .allWindows
 
         // Focus notifications and the shortcut arrive on independent paths. Make the focused
         // window authoritative at the moment the switcher opens, before relying on entry zero
@@ -1511,6 +1525,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func setupOverlay(mode: OverlayMode = .stages) {
+        overlayPractice = nil
+        pendingPractice = nil
         overlayMode = mode
         let presentation = activeOverlayPresentation
         let focusedWindow = probeFocusedWindow()
@@ -1874,6 +1890,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let visibleTargetSpace = overlaySpaceManager.spaces[safe: selectedSpaceIndex]
         let raiseWindowID = visibleTargetSpace?.windows[safe: selectedWindowIndex]?.windowID
 
+        if let raiseWindowID, let overlayPractice,
+           overlayPractice == .allWindows || targetSpace.id == spaceManager.activeSpaceID {
+            pendingPractice = (raiseWindowID, overlayPractice)
+        }
         switchToSpace(id: targetSpace.id, raiseWindowID: raiseWindowID)
 
         diag.report("overlay_committed", details: [

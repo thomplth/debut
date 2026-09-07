@@ -832,63 +832,32 @@ struct ScreenshotTests {
         try saveImage(image, name: "settings_\(section.rawValue)")
     }
 
-    @Test("Onboarding welcome screen")
-    func onboardingWelcome() throws {
-        let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())
-        guard let img = renderSwiftUI(
-            OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")),
-            size: NSSize(width: 760, height: 640)
-        ) else {
-            throw ScreenshotError.renderFailed
+    @Test("Onboarding pages and permission states fit the window", arguments: ["welcome", "permission", "one-desktop", "practice", "previews", "speed", "ready", "small-speed"])
+    func onboardingPages(_ state: String) throws {
+        let smallScreen = state == "small-speed"
+        let state = smallScreen ? "speed" : state
+        let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient(
+            accessibilityGranted: state != "permission", screenRecordingGranted: false))
+        if state != "welcome" { vm.advance() }
+        if !["welcome", "permission", "one-desktop"].contains(state) {
+            vm.updateEnvironment(desktopCount: 2, windowCount: 2)
         }
-        try saveImage(img, name: "07_onboarding_welcome")
-        #expect(vm.page == .welcome)
+        if ["previews", "speed", "ready"].contains(state) {
+            vm.recordPractice(.workspace)
+            vm.advance()
+        }
+        if ["speed", "ready"].contains(state) {
+            vm.useWithoutPreviews()
+            vm.recordPractice(.allWindows)
+            vm.advance()
+        }
+        if state == "ready" { vm.advance() }
+        let image = try #require(renderSwiftUI(
+            OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")),
+            size: NSSize(width: 860, height: smallScreen ? 620 : 700)))
+        try saveImage(image, name: "onboarding_\(smallScreen ? "small-speed" : state)")
     }
 
-    @Test("Onboarding feature choices")
-    func onboardingFeatures() throws {
-        let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())
-        vm.continueFromWelcome()
-        let image = try #require(renderSwiftUI(OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")), size: NSSize(width: 760, height: 640)))
-        try saveImage(image, name: "07_onboarding_features")
-        #expect(vm.page == .features)
-    }
-
-    @Test("Onboarding permission screen")
-    func onboardingPermissions() throws {
-        let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())
-        vm.continueFromWelcome()
-        vm.continueFromFeatures()
-        guard let img = renderSwiftUI(
-            OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")),
-            size: NSSize(width: 760, height: 640)
-        ) else {
-            throw ScreenshotError.renderFailed
-        }
-        try saveImage(img, name: "08_onboarding_permissions")
-        #expect(vm.page == .permissions)
-    }
-
-    @Test("Onboarding tutorial screen")
-    func onboardingTutorial() throws {
-        let vm = OnboardingViewModel(
-            permissionClient: PreviewOnboardingPermissionClient(
-                accessibilityGranted: true,
-                screenRecordingGranted: true
-            )
-        )
-        vm.continueFromWelcome()
-        vm.continueFromFeatures()
-        vm.startTutorial()
-        guard let img = renderSwiftUI(
-            OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")),
-            size: NSSize(width: 760, height: 640)
-        ) else {
-            throw ScreenshotError.renderFailed
-        }
-        try saveImage(img, name: "09_onboarding_tutorial")
-        #expect(vm.page == .tutorial)
-    }
 }
 
 @MainActor

@@ -31,6 +31,8 @@ let previewCaptureTests: Set<String> = [
     "Window previews contain non-uniform captured pixels",
 ]
 
+var onboardingApplication: NSRunningApplication?
+
 // Provisioning is a separate invocation rather than a step of the suite, because the desktops
 // have to exist before Debut launches and builds its space list. It is never implied: the suite
 // also runs against the developer's own session, where silently adding desktops would be a
@@ -38,6 +40,10 @@ let previewCaptureTests: Set<String> = [
 if CommandLine.arguments.dropFirst().first == "provision-desktops" {
     let target = Int(CommandLine.arguments.dropFirst(2).first ?? "") ?? 3
     exit(DesktopProvisioning.ensureDesktops(target) ? 0 : 1)
+}
+
+if CommandLine.arguments.dropFirst().first == "reset-desktops" {
+    exit(DesktopProvisioning.resetToSingleDesktop() ? 0 : 1)
 }
 
 func color(_ text: String, _ code: Int) -> String { "\u{001B}[\(code)m\(text)\u{001B}[0m" }
@@ -978,6 +984,59 @@ func clearDiagnosticFile() {
 //
 // This must run after every supporting global above (diagnosticFile in particular) has been
 // initialized: main.swift runs top-level `let`s in sequential order, not lazily, and
+// Permission-negative onboarding checks are dispatched only by the disposable guest runner.
+if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
+    let deniedAccessibility = CommandLine.arguments.last == "accessibility"
+    let oneDesktop = CommandLine.arguments.last == "desktop"
+    clearDiagnosticFile()
+    onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
+    let runtimeReady = deniedAccessibility || waitFor(timeout: 15) {
+        readState()["eventTapRunning"] == "true"
+            && (Int(readState()["windowsInActiveSpace"] ?? "0") ?? 0) > 0
+    }
+    if !runtimeReady { info("  Onboarding fixture never became ready for shortcut input") }
+    let appeared = waitFor(timeout: 10) { onboardingButton("Get started") != nil }
+    var passed = runtimeReady && appeared && onboardingPress("Get started") && !onboardingContinueEnabled()
+    if oneDesktop {
+        passed = passed && SpaceService().userDesktops().count == 1 && onboardingContains("Make room for another desktop")
+        _ = takeScreenshot("onboarding_one_desktop")
+        passed = passed && DesktopProvisioning.ensureDesktops(2)
+        returnToOnboarding()
+        passed = passed && !onboardingContains("Make room for another desktop") && !onboardingContinueEnabled()
+        _ = takeScreenshot("onboarding_desktop_added")
+    } else if deniedAccessibility {
+        passed = passed && onboardingContains("Allow Accessibility to use Debut")
+        _ = takeScreenshot("onboarding_accessibility_denied")
+    } else {
+        postFlagsChanged(flags: .maskCommand)
+        postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+        wait(0.7)
+        postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+        postFlagsChanged(flags: [])
+        wait(0.8)
+        returnToOnboarding()
+        passed = passed && onboardingContinueEnabled() && onboardingPress("Continue")
+            && onboardingContains("See live window previews") && !onboardingContinueEnabled()
+        _ = takeScreenshot("onboarding_capture_optional")
+        passed = passed && onboardingPress("Use without previews") && !onboardingContinueEnabled()
+        postFlagsChanged(flags: .maskAlternate)
+        postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskAlternate)
+        wait(0.7)
+        passed = passed && overlayWindowIsOnScreen()
+        _ = takeScreenshot("onboarding_without_previews_overlay")
+        postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskAlternate)
+        postFlagsChanged(flags: [])
+        wait(0.8)
+        returnToOnboarding()
+        passed = passed && onboardingContinueEnabled() && onboardingPress("Continue")
+            && onboardingContains("Space switch duration")
+        _ = takeScreenshot("onboarding_without_capture_speed")
+    }
+    _ = terminateDebutAndWait()
+    print("Onboarding \(oneDesktop ? "one-desktop" : deniedAccessibility ? "denied-accessibility" : "denied-capture") flow: \(passed ? "PASS" : "FAIL")")
+    exit(passed ? 0 : 1)
+}
+
 // waitForDebutReady() reads diagnosticFile through readEvents() — dispatching this subcommand
 // any earlier in the file reads that global before its initializer runs and segfaults.
 if CommandLine.arguments.dropFirst().first == "switch-to-desktop" {
@@ -2000,8 +2059,16 @@ else { try? FileManager.default.removeItem(at: settingsFile) }
 // --- 13. First-launch onboarding (forced, without changing user defaults) ---
 header("13. First-launch onboarding")
 
+// Start the first-use audit with a settled compositor, after the preceding drag/switch fixtures.
+let resetOnboardingDock = Process()
+resetOnboardingDock.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+resetOnboardingDock.arguments = ["Dock"]
+try? resetOnboardingDock.run()
+resetOnboardingDock.waitUntilExit()
+wait(3)
+
 clearDiagnosticFile()
-let onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
+onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
 let onboardingApplicationReady = waitForDebutReady(onboardingApplication)
 let onboardingWindowTitles = onboardingApplication.map {
     visibleWindowTitles(for: $0.processIdentifier)
@@ -2021,6 +2088,137 @@ test("Forced first launch presents the onboarding window") {
         wait(0.1)
     }
     return false
+}
+
+// Walk the actual controls. A welcome-window screenshot alone cannot prove onboarding works.
+@MainActor
+func onboardingButton(_ title: String, role wantedRole: String = kAXButtonRole) -> AXUIElement? {
+    guard let application = onboardingApplication else { return nil }
+    var visited = Set<CFHashCode>()
+    func find(_ element: AXUIElement) -> AXUIElement? {
+        guard visited.insert(CFHash(element)).inserted else { return nil }
+        var role: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        if role as? String == wantedRole {
+            if wantedRole == kAXSliderRole { return element }
+            for attribute in [kAXTitleAttribute, kAXDescriptionAttribute] {
+                var value: CFTypeRef?
+                AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+                if value as? String == title { return element }
+            }
+        }
+        var children: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        for child in children as? [AXUIElement] ?? [] {
+            if let result = find(child) { return result }
+        }
+        return nil
+    }
+    return find(AXUIElementCreateApplication(application.processIdentifier))
+}
+@MainActor
+func onboardingPress(_ title: String) -> Bool {
+    guard let button = onboardingButton(title) else { return false }
+    let result = AXUIElementPerformAction(button, kAXPressAction as CFString)
+    wait(0.3)
+    return result == .success
+}
+@MainActor
+func onboardingContinueEnabled() -> Bool {
+    guard let button = onboardingButton("Continue") else { return false }
+    var enabled: CFTypeRef?
+    AXUIElementCopyAttributeValue(button, kAXEnabledAttribute as CFString, &enabled)
+    return enabled as? Bool == true
+}
+@MainActor
+func onboardingContains(_ text: String) -> Bool {
+    guard let application = onboardingApplication else { return false }
+    return accessibilityStrings(for: application.processIdentifier).contains { $0.contains(text) }
+}
+@MainActor
+func returnToOnboarding() {
+    guard let application = onboardingApplication else { return }
+    _ = application.activate(options: [.activateAllWindows])
+    wait(0.5)
+}
+
+test("Onboarding opens the focus lesson and refuses Next before practice") {
+    onboardingPress("Get started") && onboardingContains("One desktop. One focus.") && !onboardingContinueEnabled()
+}
+_ = takeScreenshot("11_onboarding_focus")
+postFlagsChanged(flags: .maskCommand)
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+wait(0.7)
+test("Onboarding Command-Tab practice actually presents the switcher") { overlayWindowIsOnScreen() }
+postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+postFlagsChanged(flags: [])
+wait(0.8)
+returnToOnboarding()
+test("A verified Command-Tab selection unlocks the focus lesson") {
+    onboardingContinueEnabled() && onboardingContains("You switched a window")
+}
+_ = takeScreenshot("11_onboarding_focus_success")
+test("Option-Tab lesson requires its own practice") {
+    onboardingPress("Continue") && onboardingContains("Find it by sight.") && !onboardingContinueEnabled()
+}
+_ = takeScreenshot("11_onboarding_previews")
+postFlagsChanged(flags: .maskAlternate)
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskAlternate)
+wait(0.7)
+test("Onboarding Option-Tab practice actually presents all windows") { overlayWindowIsOnScreen() }
+postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskAlternate)
+postFlagsChanged(flags: [])
+wait(0.8)
+returnToOnboarding()
+test("A verified Option-Tab selection unlocks the preview lesson") { onboardingContinueEnabled() }
+test("The speed lesson exposes live controls") {
+    onboardingPress("Continue") && onboardingContains("Space switch duration")
+        && onboardingContains("Trackpad desktop swipe")
+}
+_ = takeScreenshot("11_onboarding_speed")
+test("Disabling all overrides immediately persists the choice") {
+    guard onboardingPress("Disable all"), let data = try? Data(contentsOf: settingsFile),
+          let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else { return false }
+    return !settings.features.workspaceIsolation && !settings.features.numberShortcuts
+        && !settings.features.controlArrows && !settings.features.trackpadSwipes
+}
+_ = onboardingPress("Enable all")
+test("The onboarding duration slider updates the running settings") {
+    guard let slider = onboardingButton("", role: kAXSliderRole) else { return false }
+    // Exercise the slider through its advertised user action rather than assuming
+    // its AXValue uses the binding's seconds instead of a normalized percentage.
+    for _ in 0..<40 {
+        guard AXUIElementPerformAction(slider, kAXIncrementAction as CFString) == .success else {
+            info("  Duration slider refused its increment action")
+            return false
+        }
+        wait(0.025)
+    }
+    wait(0.3)
+    guard let data = try? Data(contentsOf: settingsFile),
+          let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else { return false }
+    info("  Onboarding slider reached \(settings.spaceSwitchDuration) seconds")
+    return abs(settings.spaceSwitchDuration - 0.4) < 0.001
+}
+test("A newly enabled onboarding shortcut switches the real desktop") {
+    let service = SpaceService()
+    let origin = service.currentDesktopIndex() ?? 0
+    let target = origin == 0 ? 1 : 0
+    postQuickSwitch(to: target)
+    let landed = waitFor { service.currentDesktopIndex() == target }
+    wait(0.6)
+    postQuickSwitch(to: origin)
+    let returned = waitFor { service.currentDesktopIndex() == origin }
+    wait(0.6)
+    returnToOnboarding()
+    return landed && returned && onboardingContains("Space switch duration")
+}
+test("Completion has a ready destination before closing") {
+    onboardingPress("Continue") && onboardingContains("You’re ready.")
+}
+_ = takeScreenshot("11_onboarding_ready")
+test("Start using Debut closes onboarding") {
+    onboardingPress("Start using Debut") && !onboardingContains("You’re ready.")
 }
 
 _ = terminateDebutAndWait()
