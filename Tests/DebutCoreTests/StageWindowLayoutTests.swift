@@ -156,7 +156,7 @@ struct StageWindowLayoutTests {
         #expect(grown.slot(at: 5) == StageGridSlot(row: 1, column: 2))
     }
 
-    @Test("Scaling multiplies every dimension, so a card keeps its proportions")
+    @Test("Preview geometry scales proportionally while titles grow gently")
     func scaledMetrics() {
         let scaled = metrics.scaled(by: 1.5)
 
@@ -171,9 +171,14 @@ struct StageWindowLayoutTests {
 
         #expect(scaled.cardWidth == metrics.cardWidth * 1.5)
         #expect(scaled.cardHeight == metrics.cardHeight * 1.5)
-        #expect(scaled.titleFontSize == metrics.titleFontSize * 1.5)
+        #expect(abs(scaled.titleFontSize - 12.737) < 0.001)
         #expect(scaled.thumbnailCornerRadius == metrics.thumbnailCornerRadius * 1.5)
         #expect(metrics.scaled(by: 1) == metrics)
+    }
+
+    @Test("Titles follow the approved gentle curve", arguments: [1.0, 1.5, 2.0, 2.5])
+    func gentleTitleScale(scale: Double) {
+        #expect(abs(metrics.scaled(by: scale).titleFontSize - 10.4 * scale.squareRoot()) < 0.0001)
     }
 
     @Test("A thumbnail's corner is cut like the app icon badged over it")
@@ -398,13 +403,25 @@ struct FittedStageScaleTests {
             == CGFloat(AppSettings.minimumStageScale))
     }
 
+    @Test("The setting starts at 100 percent but crowded overlays can still fit below it")
+    func settingMinimumPreservesAutomaticFit() {
+        #expect(AppSettings.minimumStageScale == 1)
+        #expect(fitted(0.5, windowCounts: [1], display: roomyDisplay) == 1)
+        let display = CGSize(width: 900, height: 600)
+        let scale = fitted(1, windowCounts: [24], display: display)
+        #expect(scale >= 0.5 && scale < 1)
+        let metrics = StageMetrics.shaped(forDisplay: display).scaled(by: scale)
+        let layout = StageConstants.stageLayouts(forWindowCounts: [24], screenWidth: display.width, metrics: metrics)[0]
+        #expect(layout.stageSize.height <= StageConstants.availableStageHeight(screenHeight: display.height))
+    }
+
     @Test("A stage too tall for the display scales down until it fits")
     func tallStageScalesDown() {
         let display = CGSize(width: 1_440, height: 900)
         let scale = fitted(1.5, windowCounts: [24], display: display)
 
         #expect(scale < 1.5)
-        #expect(scale >= CGFloat(AppSettings.minimumStageScale))
+        #expect(scale >= 0.5)
 
         let fittedHeight = StageConstants.stageLayouts(
             forWindowCounts: [24],
@@ -426,7 +443,7 @@ struct FittedStageScaleTests {
     @Test("A display too small at every scale still returns a usable scale")
     func impossibleFitFallsBackToTheFloor() {
         let scale = fitted(1.5, windowCounts: [200], display: CGSize(width: 600, height: 400))
-        #expect(scale == CGFloat(AppSettings.minimumStageScale))
+        #expect(scale == 0.5)
     }
 
     @Test("Fitting never leaves a stage wider than the display")
@@ -440,7 +457,7 @@ struct FittedStageScaleTests {
                     metrics: StageMetrics.standard.scaled(by: scale)
                 )[0].stageSize.width
                 #expect(width <= StageConstants.availableStageWidth(screenWidth: display.width)
-                    || scale == CGFloat(AppSettings.minimumStageScale))
+                    || scale == 0.5)
             }
         }
     }

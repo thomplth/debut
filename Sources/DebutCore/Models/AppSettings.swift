@@ -112,9 +112,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Keep the original overlay dimensions as the default; users can enlarge the complete,
     /// proportionally scaled presentation with the appearance setting when they need it.
     public static let defaultStageScale: Double = 1.0
-    /// The floor doubles as the floor the automatic viewport fit may shrink to, so a space
-    /// holding more windows than the display can show at any readable size still fits.
-    public static let minimumStageScale: Double = 0.5
+    /// The user-selectable range. Automatic viewport fitting has its own lower floor.
+    public static let minimumStageScale: Double = 1.0
     public static let maximumStageScale: Double = 2.5
     public static let stageScaleStep: Double = 0.05
 
@@ -210,10 +209,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
         glassStyle = try container.decode(GlassStyle.self, forKey: .glassStyle)
         stageCornerRadius = try container.decode(Double.self, forKey: .stageCornerRadius)
         inactiveStageScale = try container.decode(Double.self, forKey: .inactiveStageScale)
-        stageScale = try container.decodeIfPresent(
+        let savedStageScale = try container.decodeIfPresent(
             Double.self,
             forKey: .stageScale
         ) ?? Self.defaultStageScale
+        stageScale = min(Self.maximumStageScale, max(Self.minimumStageScale, savedStageScale))
         adaptiveCardSizing = try container.decodeIfPresent(
             Bool.self,
             forKey: .adaptiveCardSizing

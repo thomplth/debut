@@ -861,22 +861,25 @@ public struct StageConstants {
         screenHeight - screenMargin * 2
     }
 
+    /// Automatic fitting may go below the user-selectable size to keep crowded stages visible.
+    private static let minimumFittedStageScale: CGFloat = 0.5
+
     /// The largest requested scale at which every stage still fits the display.
     ///
     /// Scale, column capacity and row count are circular — a bigger card fits fewer per row, and
     /// more rows make a taller stage — so the fit is searched for rather than solved. Stage height
     /// only ever grows with scale, so walking the slider's own steps downward finds the largest
-    /// scale that fits, and staying on those steps keeps the setting and the drawn size in step.
+    /// scale that fits. The request uses the slider range; fitting can shrink below its minimum.
     public static func fittedStageScale(
         requested: CGFloat,
         contentAspects: [[CGFloat?]],
         containerSize: CGSize
     ) -> CGFloat {
         let metrics = StageMetrics.shaped(forDisplay: containerSize)
-        let floor = CGFloat(AppSettings.minimumStageScale)
+        let floor = minimumFittedStageScale
         let ceiling = CGFloat(AppSettings.maximumStageScale)
         let step = CGFloat(AppSettings.stageScaleStep)
-        let clamped = min(ceiling, max(floor, requested))
+        let clamped = min(ceiling, max(CGFloat(AppSettings.minimumStageScale), requested))
         let availableWidth = availableStageWidth(screenWidth: containerSize.width)
         let availableHeight = availableStageHeight(screenHeight: containerSize.height)
 

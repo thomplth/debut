@@ -139,10 +139,10 @@ public struct StageMetrics: Equatable, Sendable {
         thumbnailHeight + titleSpacing + titleHeight + cardPadding * 2
     }
 
-    /// Taken from the scale, not the thumbnail's width: an ultrawide display widens the card
-    /// and a portrait display narrows it, and neither should move the title's size.
+    /// Grow titles more gently than previews, independently of the display or window shape.
+    /// Keep the existing readability floor when automatic fitting shrinks a crowded overlay.
     public var titleFontSize: CGFloat {
-        max(9, Self.standard.thumbnailWidth * 0.065 * scale)
+        max(9, 10.4 * scale.squareRoot())
     }
 
     /// A macOS app icon's body is a continuous-corner squircle with a 185.4-point corner drawn
@@ -158,8 +158,8 @@ public struct StageMetrics: Equatable, Sendable {
     /// non-layout details that belong to a stage, such as its corner radius and command hints.
     public var scaleFactor: CGFloat { scale }
 
-    /// Every dimension scales together, so a card only ever grows or shrinks — it never changes
-    /// shape, and the title stays legible against the thumbnail it labels.
+    /// Preview and label-container geometry scale together; title typography follows its
+    /// gentler curve above.
     public func scaled(by scale: CGFloat) -> StageMetrics {
         StageMetrics(
             thumbnailWidth: thumbnailWidth * scale,
