@@ -54,7 +54,16 @@ func selectDisplayMode(_ requested: String?) {
         log("no mode matches \(requested); staying put")
         return
     }
-    let result = CGDisplaySetDisplayMode(display, best, nil)
+    var configuration: CGDisplayConfigRef?
+    guard CGBeginDisplayConfiguration(&configuration) == .success, let configuration else { return }
+    let configured = CGConfigureDisplayWithDisplayMode(configuration, display, best, nil)
+    let result: CGError
+    if configured == .success {
+        result = CGCompleteDisplayConfiguration(configuration, .forSession)
+    } else {
+        CGCancelDisplayConfiguration(configuration)
+        result = configured
+    }
     log("set mode \(describe(best)): \(result == .success ? "ok" : "failed (\(result.rawValue))")")
     wait(2.0)
 }
@@ -170,62 +179,52 @@ func clearNotifications() {
 }
 
 func still(_ name: String) {
-    let path = outputDirectory.appendingPathComponent("\(name).png").path
-    let status = run("/usr/sbin/screencapture", ["-x", "-r", path])
-    log(status == 0 ? "still \(name).png" : "still \(name) FAILED (status \(status))")
+    let url = outputDirectory.appendingPathComponent("\(name).png")
+    do {
+        try captureDemoStill(to: url)
+        log("still \(name).png")
+    } catch {
+        log("still \(name) FAILED: \(error)")
+        exit(1)
+    }
 }
 
-/// `screencapture -v` returns only when the recording stops, so it runs detached while the
-/// scripted input plays underneath it. `-V` bounds the clip; the caller's actions must fit.
 func clip(_ name: String, seconds: Int, _ body: () -> Void) {
-    guard requestedClips.isEmpty || requestedClips.contains(name) else {
-        log("clip \(name) skipped")
-        return
-    }
-    let path = outputDirectory.appendingPathComponent("\(name).mov").path
-    try? FileManager.default.removeItem(atPath: path)
-
-    let recorder = Process()
-    recorder.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-    recorder.arguments = ["-v", "-x", "-V", "\(seconds)", path]
+    guard requestedClips.isEmpty || requestedClips.contains(name) else { return }
+    let url = outputDirectory.appendingPathComponent("\(name).mov")
+    try? FileManager.default.removeItem(at: url)
     do {
-        try recorder.run()
+        let recorder = try startDemoMovie(at: url)
+        let started = Date()
+        wait(0.5)
+        body()
+        wait(max(0, Double(seconds) - Date().timeIntervalSince(started)))
+        try awaitCapture { try await recorder.stop() }
+        log("clip \(name).mov")
     } catch {
-        log("clip \(name) FAILED to start: \(error)")
-        return
+        log("clip \(name) FAILED: \(error)")
+        exit(1)
     }
-    // screencapture spends about a second negotiating the stream before the first frame.
-    wait(1.5)
-    body()
-    recorder.waitUntilExit()
-    let exists = FileManager.default.fileExists(atPath: path)
-    log(exists ? "clip \(name).mov" : "clip \(name) FAILED (no file)")
 }
 
 // MARK: - Space arrangement
 
-/// Splits the single startup space into three, driving Debut's own overlay commands rather
+/// Distributes windows across three provisioned desktops using Debut's overlay rather
 /// than writing state.json, because window IDs are ephemeral and would not survive a write.
 func arrangeSpaces(windowsPerSpace: Int) {
+    guard SpaceService().userDesktops().count >= 3 else {
+        log("Demo requires three real desktops. Run the guest provisioning step first.")
+        exit(1)
+    }
     describeState("before arrange")
     describeWindows("before arrange")
 
     // Every in-overlay command carries only the held activation modifier. Adding Option
-    // turns Tab into space cycling and stops N and the digits matching at all.
+    // turns Tab into space cycling and stops the digits matching.
     let held: CGEventFlags = .maskCommand
     holding(held) {
         postTap(Key.tab, flags: held)
         wait(0.8)
-        // N creates a space below the active one and makes it active, so two taps leave
-        // the startup space at index 0 with two empty spaces under it.
-        postTap(Key.n, flags: held)
-        wait(0.6)
-        describeState("  after first new space")
-        postTap(Key.n, flags: held)
-        wait(0.6)
-        describeState("  after second new space")
-        describeWindows("  after second new space")
-
         // A moved window drags the selection with it, so reaching space 2 is two hops and
         // every hop starts by jumping back to space 1.
         let plan = Array(repeating: 1, count: windowsPerSpace)
@@ -244,11 +243,13 @@ func arrangeSpaces(windowsPerSpace: Int) {
         wait(0.5)
     }
 
+    wait(2)
     describeState("after arrange")
     describeWindows("after arrange")
     let counts = spaceWindowCounts()
     if counts.count != 3 || counts.contains(0) {
-        log("WARNING: expected three non-empty spaces, got \(counts)")
+        log("FAILED: expected three non-empty desktops, got \(counts)")
+        exit(1)
     }
 }
 
@@ -281,6 +282,21 @@ func recordWindowCycle() {
             wait(1.5)
         }
         wait(2.0)
+    }
+}
+
+func recordAllWindows() {
+    clip("all-windows", seconds: 10) {
+        holding(.maskAlternate) {
+            postTap(Key.tab, flags: .maskAlternate)
+            wait(1.5)
+            still("all-windows")
+            for _ in 0..<3 {
+                postTap(Key.tab, flags: .maskAlternate)
+                wait(1.3)
+            }
+        }
+        wait(2)
     }
 }
 
@@ -331,6 +347,7 @@ guard CGPreflightScreenCaptureAccess() else {
 
 log("output: \(outputDirectory.path)")
 selectDisplayMode(value(after: "--display"))
+if arguments.contains("--prepare-display") { exit(0) }
 
 arrangeSpaces(windowsPerSpace: Int(value(after: "--windows-per-space") ?? "") ?? 3)
 wait(1.0)
@@ -346,6 +363,8 @@ wait(1.0)
 recordWindowCycle()
 wait(1.0)
 recordQuickSwitch()
+wait(1.0)
+recordAllWindows()
 wait(1.0)
 recordWindowMove()
 

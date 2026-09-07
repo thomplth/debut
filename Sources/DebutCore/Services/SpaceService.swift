@@ -469,6 +469,7 @@ enum DockSwipeEvent {
                      progress: Double = kInstantSwitchProgress,
                      location: CGPoint? = nil) -> CGEvent? {
         guard let event = CGEvent(source: nil) else { return nil }
+        event.setIntegerValueField(.eventSourceUserData, value: DesktopSwipeService.syntheticMarker)
         if let location { event.location = location }
 
         event.setIntegerValueField(kCGSEventTypeField, value: kCGSEventDockControl)
@@ -504,6 +505,7 @@ enum DockSwipeEvent {
     /// The envelope event the Dock expects alongside each dock-control event.
     static func makeEnvelope(location: CGPoint? = nil) -> CGEvent? {
         guard let event = CGEvent(source: nil) else { return nil }
+        event.setIntegerValueField(.eventSourceUserData, value: DesktopSwipeService.syntheticMarker)
         if let location { event.location = location }
         event.setIntegerValueField(kCGSEventTypeField, value: kCGSEventGesture)
         return event

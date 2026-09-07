@@ -115,18 +115,30 @@ let screenshotDir: URL = {
 let screenRecordingAvailable = CGPreflightScreenCaptureAccess()
 
 func takeScreenshot(_ name: String) -> String {
-    let path = screenshotDir.appendingPathComponent("\(name).png").path
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-    proc.arguments = ["-x", "-C", path]  // -x no sound, -C capture cursor
-    try? proc.run()
-    proc.waitUntilExit()
-    if proc.terminationStatus == 0 {
-        info("  Screenshot: \(path)")
-    } else {
-        info("  Screenshot unavailable (Screen Recording permission is not granted)")
+    let url = screenshotDir.appendingPathComponent("\(name).png")
+    let result = LockedBox<CGImage>()
+    let finished = DispatchSemaphore(value: 0)
+    let filter = displayCaptureFilter
+    Task.detached {
+        defer { finished.signal() }
+        guard let filter else { return }
+        let configuration = SCStreamConfiguration()
+        configuration.width = Int(CGDisplayBounds(CGMainDisplayID()).width * 2)
+        configuration.height = Int(CGDisplayBounds(CGMainDisplayID()).height * 2)
+        configuration.showsCursor = true
+        if let image = try? await SCScreenshotManager.captureImage(contentFilter: filter.filter, configuration: configuration) {
+            result.store(image)
+        }
     }
-    return path
+    _ = finished.wait(timeout: .now() + 10)
+    if let image = result.load(),
+       let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) {
+        CGImageDestinationAddImage(destination, image, nil)
+        if CGImageDestinationFinalize(destination) { info("  Screenshot: \(url.path)") }
+    } else {
+        info("  Screenshot unavailable from ScreenCaptureKit")
+    }
+    return url.path
 }
 
 /// The pixels of one screen region, detached from the frame they came from so a burst of samples
@@ -1924,6 +1936,67 @@ if let originalSettingsData {
     try? FileManager.default.removeItem(at: settingsFile)
 }
 
+// --- Launch feature controls: read the actual desktop after intercepted input. ---
+header("Launch feature controls")
+let featureSettingsBackup = try? Data(contentsOf: settingsFile)
+var featureSettings = (try? settingsStore.loadSettings()) ?? AppSettings()
+featureSettings.features.controlArrows = true
+featureSettings.features.trackpadSwipes = true
+featureSettings.features.workspaceIsolation = false
+featureSettings.features.windowPreviews = false
+try? settingsStore.saveSettings(featureSettings)
+clearDiagnosticFile()
+let featureApplication = launchDebut()
+let featureReady = waitForDebutReady(featureApplication)
+let featureSpaces = SpaceService()
+
+if featureSpaces.userDesktops().count >= 2 {
+    let baselineReady = quickSwitch(to: 0, using: featureSpaces)
+    postKeyDown(keyCode: CGKeyCode(kVK_RightArrow), flags: .maskControl)
+    postKeyUp(keyCode: CGKeyCode(kVK_RightArrow), flags: .maskControl)
+    test("Enabled Control-arrow reaches the adjacent real desktop through Debut") {
+        featureReady && baselineReady && waitFor { featureSpaces.currentDesktopIndex() == 1 }
+            && readEvents().contains { $0["keyEvent"] == "switchAdjacentSpace(1)" }
+    }
+    wait(0.5)
+    // Emulate the unmarked DockSwipe stream a physical desktop gesture produces.
+    // Debut's marked replacement must pass through its own tap without a second hop.
+    func postPhysicalSwipe(phase: Int64, progress: Double) {
+        guard let event = CGEvent(source: nil) else { return }
+        for (field, value) in [(55, Int64(30)), (110, Int64(23)), (123, Int64(1)), (132, phase)] {
+            event.setIntegerValueField(CGEventField(rawValue: UInt32(field))!, value: value)
+        }
+        event.setDoubleValueField(CGEventField(rawValue: 139)!, value: Double(Float.leastNonzeroMagnitude))
+        event.setDoubleValueField(CGEventField(rawValue: 124)!, value: progress)
+        event.post(tap: .cgSessionEventTap)
+    }
+    postPhysicalSwipe(phase: 1, progress: 0)
+    wait(0.03)
+    postPhysicalSwipe(phase: 2, progress: -0.2)
+    wait(0.25)
+    postPhysicalSwipe(phase: 2, progress: -0.6)
+    postPhysicalSwipe(phase: 4, progress: -0.6)
+    info("Swipe result: desktop=\(String(describing: featureSpaces.currentDesktopIndex())) events=\(readEvents().filter { ($0["event"] ?? "").contains("swipe") || ($0["keyEvent"] ?? "").contains("Adjacent") })")
+    test("A desktop swipe reaches the previous desktop without recapturing its replacement") {
+        waitFor { featureSpaces.currentDesktopIndex() == 0 }
+            && readEvents().contains { $0["keyEvent"] == "switchAdjacentSpace(-1)" }
+    }
+} else {
+    test("Launch input fixture has at least two desktops") { false }
+}
+postFlagsChanged(flags: .maskCommand)
+postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+wait(0.3)
+test("Disabled workspace isolation leaves Command-Tab to macOS") {
+    readState()["overlayVisible"] != "true"
+        && !readEvents().contains { $0["keyEvent"] == "cmdTabHold" }
+}
+postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+postFlagsChanged(flags: [])
+_ = terminateDebutAndWait()
+if let featureSettingsBackup { try? featureSettingsBackup.write(to: settingsFile, options: .atomic) }
+else { try? FileManager.default.removeItem(at: settingsFile) }
+
 // --- 13. First-launch onboarding (forced, without changing user defaults) ---
 header("13. First-launch onboarding")
 
@@ -1967,6 +2040,11 @@ header("14. Settings window chrome")
 clearDiagnosticFile()
 let settingsApplication = launchDebut(arguments: ["--show-settings"])
 let settingsApplicationReady = waitForDebutReady(settingsApplication)
+let settingsWindowVisible = waitFor(timeout: 5) {
+    settingsApplication.map { visibleWindowTitles(for: $0.processIdentifier).contains("Debut Settings") } ?? false
+}
+wait(0.25) // Let the first composited frame follow the window-server registration.
+
 let settingsWindowTitles = settingsApplication.map {
     visibleWindowTitles(for: $0.processIdentifier)
 } ?? []
@@ -1974,7 +2052,7 @@ info("Visible Debut windows: \(settingsWindowTitles)")
 _ = takeScreenshot("13_settings_window")
 
 test("Settings integrates its controls into hidden transparent titlebar chrome") {
-    settingsApplicationReady && readEvents().contains {
+    settingsApplicationReady && settingsWindowVisible && readEvents().contains {
         $0["event"] == "settings_shown"
             && $0["fullSizeContentView"] == "true"
             && $0["titleHidden"] == "true"
@@ -2649,7 +2727,7 @@ if launchFocusOpened {
     }
 }
 
-NSRunningApplication(processIdentifier: launchFocusPID)?.forceTerminate()
+// Keep the just-launched TextEdit alive for the resize scenario below.
 
 // --- 18. A resized window reshapes its card ---
 // Sizes reach the model from discovery alone, and resizing a window runs none of it. The card
@@ -2658,13 +2736,12 @@ NSRunningApplication(processIdentifier: launchFocusPID)?.forceTerminate()
 // account for the new shape.
 header("18. A resized window reshapes its card")
 
-let resizeFixture = NSRunningApplication
-    .runningApplications(withBundleIdentifier: "com.apple.TextEdit")
-    .first
-let resizeFixtureWindow = resizeFixture.flatMap { fixture -> AXUIElement? in
-    fixture.activate()
+// Use the exact process and windows established above. The first TextEdit process
+// may own a window on another desktop, where kAXFocusedWindow cannot reach it.
+let resizeFixtureWindow = launchFocusCandidates.first
+if let resizeFixtureWindow {
+    focusWindow(resizeFixtureWindow)
     wait(1)
-    return focusedWindowElement(for: fixture.processIdentifier)
 }
 
 /// Every aspect the state block reports, flattened: which card is which does not matter here,
@@ -2708,9 +2785,11 @@ if let resizeFixtureWindow, let originalSize = windowSize(resizeFixtureWindow) {
 } else {
     skipTest(
         "A resized window reports its new shape without an app switch",
-        reason: "The TextEdit fixture is not running"
+        reason: "The launch-focus fixture has no accessible window to resize"
     )
 }
+
+NSRunningApplication(processIdentifier: launchFocusPID)?.forceTerminate()
 
 // --- Summary ---
 header("Results")

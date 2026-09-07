@@ -331,6 +331,13 @@ struct KeyboardServiceTests {
         oldDefault.flags = .maskControl
 
         #expect(service.handleCGEvent(type: .keyDown, event: configured) == nil)
+        let release = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_4),
+            keyDown: false
+        )!
+        release.flags = [.maskControl, .maskAlternate]
+        #expect(service.handleCGEvent(type: .keyUp, event: release) == nil)
         #expect(service.handleCGEvent(type: .keyDown, event: oldDefault) === oldDefault)
         #expect(delegate.receivedEvents == [.switchToSpace(4)])
     }
