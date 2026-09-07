@@ -497,17 +497,28 @@ struct AdaptiveCardSizingTests {
         #expect(metrics.adapted(toContentAspect: -2) == metrics)
     }
 
-    /// One very tall window would otherwise set the height of every row it appears in, and one
-    /// very wide one would push its whole row off the display.
-    @Test("Card width is clamped to a band around the display's own card")
+    /// A card must always show which app the window belongs to, and one very wide window would
+    /// push its whole row off the display.
+    @Test("Card width is clamped between its app icon and a band above the display's card")
     func widthIsClamped() {
         let sliver = metrics.adapted(toContentAspect: 0.05)
         let banner = metrics.adapted(toContentAspect: 40)
 
-        #expect(sliver.thumbnailWidth
-            == metrics.thumbnailWidth * StageMetrics.minimumAdaptiveWidthRatio)
+        #expect(sliver.thumbnailWidth == metrics.minimumAdaptiveWidth)
         #expect(banner.thumbnailWidth
             == metrics.thumbnailWidth * StageMetrics.maximumAdaptiveWidthRatio)
+    }
+
+    /// The badge is drawn over the thumbnail's top-left corner, so the narrowest card is the one
+    /// that still leaves a margin around it.
+    @Test("The narrowest card is its app icon plus padding")
+    func minimumWidthFitsTheAppIcon() {
+        #expect(metrics.minimumAdaptiveWidth == metrics.badgeSize + metrics.cardPadding * 2)
+        #expect(metrics.minimumAdaptiveWidth < metrics.thumbnailWidth)
+
+        let scaled = metrics.scaled(by: 1.5)
+        #expect(scaled.minimumAdaptiveWidth == scaled.badgeSize + scaled.cardPadding * 2)
+        #expect(scaled.adapted(toContentAspect: 0.05).thumbnailWidth == scaled.minimumAdaptiveWidth)
     }
 
     @Test("Narrow cards leave room for more of them on a row")
