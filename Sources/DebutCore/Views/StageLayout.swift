@@ -145,7 +145,14 @@ public struct StageMetrics: Equatable, Sendable {
         max(9, Self.standard.thumbnailWidth * 0.065 * scale)
     }
 
-    public var thumbnailCornerRadius: CGFloat { cardPadding }
+    /// A macOS app icon's body is a continuous-corner squircle with a 185.4-point corner drawn
+    /// on a 1024-point canvas.
+    public static let appIconCornerRadiusRatio: CGFloat = 185.4 / 1024
+
+    /// Cut like the app icon badged over the thumbnail's top-left corner, since the badge's
+    /// offset puts the icon body's own corner there. A shallower cut hugs the corner point more
+    /// closely than the icon's does, leaving the thumbnail showing past the icon covering it.
+    public var thumbnailCornerRadius: CGFloat { badgeSize * Self.appIconCornerRadiusRatio }
 
     /// The visual scale represented by these metrics. Rendering code uses this for the few
     /// non-layout details that belong to a stage, such as its corner radius and command hints.
