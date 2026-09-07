@@ -1863,6 +1863,26 @@ struct WindowPreviewView: View {
                                 cornerRadius: metrics.thumbnailCornerRadius,
                                 style: .continuous
                             ))
+                            .background {
+                                GeometryReader { geometry in
+                                    // This is the fitted image's box, before the card's frame.
+                                    // Letterboxed previews must cast from their visible edges.
+                                    let scale = metrics.scaleFactor
+                                    let shadow = PreviewShadowCache.shared.image(
+                                        for: CGSize(width: geometry.size.width / scale,
+                                                    height: geometry.size.height / scale),
+                                        cornerRadius: metrics.thumbnailCornerRadius / scale
+                                    )
+                                    Image(nsImage: shadow)
+                                        .resizable()
+                                        .frame(width: shadow.size.width * scale,
+                                               height: shadow.size.height * scale)
+                                        .opacity(colorScheme == .dark ? 0.5 : 0.22)
+                                        .position(x: geometry.size.width / 2,
+                                                  y: geometry.size.height / 2)
+                                }
+                                .allowsHitTesting(false)
+                            }
                     } else {
                         RoundedRectangle(
                             cornerRadius: metrics.thumbnailCornerRadius,
