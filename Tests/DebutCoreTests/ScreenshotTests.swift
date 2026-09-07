@@ -17,10 +17,12 @@ struct ScreenshotTests {
         return dir
     }()
 
-    private func renderSwiftUI<V: View>(_ view: V, size: NSSize) -> NSImage? {
+    private func renderSwiftUI<V: View>(
+        _ view: V, size: NSSize, background: CGFloat = 0.1
+    ) -> NSImage? {
         let hostingView = NSHostingView(rootView: view
             .frame(width: size.width, height: size.height)
-            .background(Color(nsColor: NSColor(white: 0.1, alpha: 1.0)))
+            .background(Color(nsColor: NSColor(white: background, alpha: 1.0)))
         )
         hostingView.frame = NSRect(origin: .zero, size: size)
         hostingView.layoutSubtreeIfNeeded()
@@ -300,9 +302,46 @@ struct ScreenshotTests {
             size: NSSize(width: 1200, height: 600)
         ) else { throw ScreenshotError.renderFailed }
         try saveImage(image, name: "10_alt_tab_flat_list")
+        let lightFlat = try #require(renderSwiftUI(
+            AltTabOverlayView(viewModel: viewModel),
+            size: NSSize(width: 1200, height: 600), background: 0.9
+        ))
+        try saveImage(lightFlat, name: "10_alt_tab_flat_list_light")
+        let lightStages = try #require(renderSwiftUI(
+            StageOverlayView(viewModel: stages),
+            size: NSSize(width: 1200, height: 600), background: 0.9
+        ))
+        try saveImage(lightStages, name: "02_three_stages_light")
 
         #expect(viewModel.windows.count == 9)
         #expect(viewModel.selectedWindow?.windowID == entries[2].window.windowID)
+    }
+
+    @Test("Placeholder cards cast a halo on a light background at every stage scale",
+          arguments: [0.5, 1.0, 2.0])
+    func placeholderHalo(scale: CGFloat) throws {
+        let metrics = StageMetrics.standard.scaled(by: scale)
+        let size = NSSize(width: 400 * scale, height: 300 * scale)
+        let card = WindowPreviewView(
+            window: StageWindowData(
+                id: 100, windowID: 100,
+                ownerBundleID: "com.example.missing-halo-fixture", ownerName: "",
+                windowTitle: "", previewImage: nil
+            ),
+            isWindowSelected: false, metrics: metrics, appearance: AppSettings()
+        )
+        let image = try #require(renderSwiftUI(card, size: size, background: 0.9))
+        let bitmap = try #require(normalizedBitmap(image, size: size))
+        try saveImage(image, name: "05_placeholder_halo_\(scale)")
+
+        // Both samples are inside the same empty thumbnail, below the placeholder icon.
+        // The title is empty. Require a larger difference than the card's existing shadow
+        // alone (0.024), so removing the halo fails at every scale.
+        let iconCenterY = size.height / 2 - (metrics.titleSpacing + metrics.titleHeight) / 2
+        let y = Int((iconCenterY + metrics.previewPlaceholderIconSize / 2 + 4 * scale) * 2)
+        let shadow = try #require(bitmap.colorAt(x: Int(size.width), y: y))
+        let bare = try #require(bitmap.colorAt(x: Int((size.width / 2 + 90 * scale) * 2), y: y))
+        #expect(bare.redComponent - shadow.redComponent > 0.05)
     }
 
     /// The global list is the first thing in the app that routinely outgrows the display, so the
