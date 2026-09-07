@@ -99,6 +99,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let minimumSpaceSwitchDuration: TimeInterval = 0
     public static let maximumSpaceSwitchDuration: TimeInterval = 0.4
 
+    public var features: FeatureSettings
     public var launchAtLogin: Bool
     /// Off makes Debut an agent again — no Dock icon and no menu bar, reachable only from its
     /// status item. Its own Settings window then leaves the space manager with it, because
@@ -162,6 +163,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var previewCacheTTL: TimeInterval
 
     public init() {
+        self.features = FeatureSettings()
         self.launchAtLogin = true
         self.showsDockIcon = true
         self.excludedBundleIDs = []
@@ -194,6 +196,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        features = try container.decodeIfPresent(FeatureSettings.self, forKey: .features) ?? FeatureSettings()
         launchAtLogin = try container.decode(Bool.self, forKey: .launchAtLogin)
         showsDockIcon = try container.decodeIfPresent(
             Bool.self,

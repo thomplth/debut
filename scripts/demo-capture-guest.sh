@@ -10,6 +10,7 @@ APP_ARCHIVE="$SHARE_DIR/${1:?missing app archive name}"
 DEMO_SOURCE="$SHARE_DIR/${2:?missing demo executable name}"
 DOCS_ARCHIVE="$SHARE_DIR/${3:?missing docs archive name}"
 DISPLAY_MODE="${4:-1440x900}"
+PROVISION_SOURCE="$SHARE_DIR/${5:?missing desktop provisioner}"
 MEDIA_DIR="$SHARE_DIR/media"
 APP_PATH="/Applications/Debut.app"
 SYSTEM_TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
@@ -55,7 +56,18 @@ grant kTCCServiceScreenCapture "com.thomplth.Debut" 0 "$APP_PATH"
 grant kTCCServiceAccessibility "$DEMO_SOURCE" 1 "$DEMO_SOURCE"
 grant kTCCServiceScreenCapture "$DEMO_SOURCE" 1 "$DEMO_SOURCE"
 grant kTCCServicePostEvent "$DEMO_SOURCE" 1 "$DEMO_SOURCE"
+grant kTCCServiceAccessibility "$PROVISION_SOURCE" 1 "$PROVISION_SOURCE"
+grant kTCCServicePostEvent "$PROVISION_SOURCE" 1 "$PROVISION_SOURCE"
 sudo killall tccd 2>/dev/null || true
+# Clear periodic capture reminders in the disposable guest, as the E2E fixture does.
+screen_capture_approvals="$console_home/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
+for approval_client in "com.thomplth.Debut" "$DEMO_SOURCE" "$PROVISION_SOURCE" "/usr/libexec/sshd-keygen-wrapper"; do
+    as_console env HOME="$console_home" defaults write "$screen_capture_approvals" "$approval_client" -date "3024-01-01 00:00:00 +0000"
+done
+as_console killall cfprefsd 2>/dev/null || true
+as_console killall UserNotificationCenter 2>/dev/null || true
+as_console killall universalAccessAuthWarn 2>/dev/null || true
+as_console killall -9 replayd 2>/dev/null || true
 
 echo "Clearing prior state and quieting the desktop..."
 as_console pkill -f "Debut.app" 2>/dev/null || true
@@ -74,6 +86,7 @@ echo "  survivors after the kill: $(pgrep -lx Terminal | wc -l | tr -d ' ') Term
 as_console rm -rf "$console_home/Library/Saved Application State"
 sudo find "$console_home/Library/Daemon Containers" -type d -name "*.savedState" -maxdepth 5 -exec rm -rf {} + 2>/dev/null || true
 rm -rf /tmp/debut-e2e-fixtures
+as_console rm -f "$console_home/Desktop/SPACE-LAB-SENTINEL.txt"
 as_console env HOME="$console_home" defaults write com.apple.Terminal NSQuitAlwaysKeepsWindows -bool false
 as_console env HOME="$console_home" defaults write -g NSQuitAlwaysKeepsWindows -bool false
 # Debut manages windows, so the desk needs windows: left alone Safari folds every `open` into
@@ -89,6 +102,20 @@ as_console tee "$console_home/Library/DoNotDisturb/DB/Assertions.json" >/dev/nul
 {"storeAssertionRecords":[{"assertionDetails":{"assertionDetailsModeIdentifier":"com.apple.donotdisturb.mode.default"},"assertionStartDateTimestamp":0}]}
 JSON
 as_console killall NotificationCenter 2>/dev/null || true
+
+echo "Preparing the display before Debut starts..."
+as_console env HOME="$console_home" "$DEMO_SOURCE" --prepare-display --display "$DISPLAY_MODE"
+# Keep demonstration traffic out of anonymous performance summaries.
+as_console mkdir -p "$console_home/Library/Application Support/Debut"
+as_console tee "$console_home/Library/Application Support/Debut/settings.json" >/dev/null <<'JSON'
+{"launchAtLogin":false,"excludedBundleIDs":[],"shareAnonymousTelemetry":false,"glassStyle":"Clear","stageCornerRadius":40,"inactiveStageScale":0.7}
+JSON
+
+echo "Provisioning three real desktops through Mission Control..."
+as_console env HOME="$console_home" "$PROVISION_SOURCE" provision-desktops 3
+as_console env HOME="$console_home" "$PROVISION_SOURCE" switch-to-desktop 0
+as_console pkill -f "Debut.app" 2>/dev/null || true
+sleep 2
 
 echo "Opening a desk worth photographing..."
 rm -rf "$DESK_DIR"
@@ -208,7 +235,7 @@ mkdir -p "$MEDIA_DIR"
 chown "$console_user" "$MEDIA_DIR" 2>/dev/null || true
 set +e
 as_console env HOME="$console_home" "$DEMO_SOURCE" \
-    --output "$MEDIA_DIR" --display "$DISPLAY_MODE" "${@:5}"
+    --output "$MEDIA_DIR" "${@:6}"
 status=$?
 set -e
 

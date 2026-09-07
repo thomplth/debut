@@ -694,12 +694,19 @@ struct ScreenshotTests {
         #expect(vm.displayStackCount == 2)
     }
 
+    @Test("Launch settings sections render independently", arguments: SettingsSection.allCases)
+    func settingsSections(_ section: SettingsSection) throws {
+        let view = SettingsView(viewModel: SettingsViewModel(), selectedSection: section)
+        let image = try #require(renderSwiftUI(view, size: NSSize(width: 820, height: 620)))
+        try saveImage(image, name: "settings_\(section.rawValue)")
+    }
+
     @Test("Onboarding welcome screen")
     func onboardingWelcome() throws {
         let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())
         guard let img = renderSwiftUI(
-            OnboardingView(viewModel: vm),
-            size: NSSize(width: 760, height: 560)
+            OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")),
+            size: NSSize(width: 760, height: 640)
         ) else {
             throw ScreenshotError.renderFailed
         }
@@ -707,13 +714,23 @@ struct ScreenshotTests {
         #expect(vm.page == .welcome)
     }
 
+    @Test("Onboarding feature choices")
+    func onboardingFeatures() throws {
+        let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())
+        vm.continueFromWelcome()
+        let image = try #require(renderSwiftUI(OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")), size: NSSize(width: 760, height: 640)))
+        try saveImage(image, name: "07_onboarding_features")
+        #expect(vm.page == .features)
+    }
+
     @Test("Onboarding permission screen")
     func onboardingPermissions() throws {
         let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient())
         vm.continueFromWelcome()
+        vm.continueFromFeatures()
         guard let img = renderSwiftUI(
-            OnboardingView(viewModel: vm),
-            size: NSSize(width: 760, height: 560)
+            OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")),
+            size: NSSize(width: 760, height: 640)
         ) else {
             throw ScreenshotError.renderFailed
         }
@@ -730,10 +747,11 @@ struct ScreenshotTests {
             )
         )
         vm.continueFromWelcome()
+        vm.continueFromFeatures()
         vm.startTutorial()
         guard let img = renderSwiftUI(
-            OnboardingView(viewModel: vm),
-            size: NSSize(width: 760, height: 560)
+            OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")),
+            size: NSSize(width: 760, height: 640)
         ) else {
             throw ScreenshotError.renderFailed
         }

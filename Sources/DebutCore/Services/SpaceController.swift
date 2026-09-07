@@ -248,6 +248,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var keyboardServiceStarted: Bool = false
     public var overlayPresentationDelay: TimeInterval
     public var previewRefreshPolicy: PreviewRefreshPolicy
+    public var windowPreviewsEnabled = true {
+        didSet {
+            if !windowPreviewsEnabled {
+                previewCaptureTask?.cancel()
+                previewCaptureGeneration &+= 1
+                windowPreviews.removeAll()
+                previewCacheEntries.removeAll()
+                variedWindowPreviewIDs.removeAll()
+            }
+        }
+    }
     public var previewCacheTTL: TimeInterval
 
     /// The model rendered by the overlay, including interactions that are still waiting for
@@ -1219,6 +1230,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             jumpToSpace(index: index - 1)
         case .jumpToLastSpace:
             jumpToSpace(index: spaceManager.spaces.count - 1)
+        case .switchAdjacentSpace(let offset):
+            if let index = spaceManager.spaces.firstIndex(where: { $0.id == spaceManager.activeSpaceID }) {
+                quickSwitchToSpace(index: index + offset, keepingCurrentApplication: false)
+            }
         case .switchToSpace(let position):
             quickSwitchToSpace(index: position - 1, keepingCurrentApplication: false)
         case .switchToSpaceKeepingCurrentApplication(let position):
@@ -1675,6 +1690,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// The windows whose cached preview cannot be trusted for this activation. Everything else
     /// is served from `windowPreviews` without a capture.
     private func windowIDsNeedingCapture() -> [CGWindowID] {
+        guard windowPreviewsEnabled else { return [] }
         let assignedWindows = spaceManager.allSpaces.flatMap(\.windows)
         guard previewRefreshPolicy == .lastActiveOnly else {
             return assignedWindows.map(\.windowID)
@@ -1729,6 +1745,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         overlayPresentation: OverlayPresentationContext? = nil,
         reason: String
     ) {
+        guard windowPreviewsEnabled else { return }
         previewCaptureTask?.cancel()
         previewCaptureGeneration &+= 1
         let generation = previewCaptureGeneration

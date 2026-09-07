@@ -4,8 +4,13 @@ import SwiftUI
 public struct OnboardingView: View {
     @State private var viewModel: OnboardingViewModel
 
-    public init(viewModel: OnboardingViewModel) {
+    private let workspacePreviewImage: NSImage?
+    private let allWindowsPreviewImage: NSImage?
+
+    public init(viewModel: OnboardingViewModel, previewDirectory: URL? = Bundle.main.resourceURL) {
         self._viewModel = State(initialValue: viewModel)
+        self.workspacePreviewImage = previewDirectory.flatMap { NSImage(contentsOf: $0.appendingPathComponent("overlay.jpg")) }
+        self.allWindowsPreviewImage = previewDirectory.flatMap { NSImage(contentsOf: $0.appendingPathComponent("all-windows.jpg")) }
     }
 
     public var body: some View {
@@ -29,6 +34,8 @@ public struct OnboardingView: View {
                     switch viewModel.page {
                     case .welcome:
                         welcomePage
+                    case .features:
+                        featuresPage
                     case .permissions:
                         permissionsPage
                     case .tutorial:
@@ -62,62 +69,81 @@ public struct OnboardingView: View {
     }
 
     private var welcomePage: some View {
-        VStack(spacing: 24) {
-            Spacer()
-
-            ZStack {
-                RoundedRectangle(cornerRadius: 28)
-                    .fill(Color.accentColor.opacity(0.14))
-                    .frame(width: 116, height: 116)
-                Image(systemName: "rectangle.stack.badge.play")
-                    .font(.system(size: 54, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
+        VStack(spacing: 20) {
+            Spacer(minLength: 10)
+            Text("Make room for focused work.")
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+            Text("See the right window. Stay in your workspace. Get there faster.")
+                .font(.title3).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            onboardingPreview(allWindows: false)
+            HStack(alignment: .top, spacing: 20) {
+                benefit("See your windows", detail: "Screenshot previews in both switchers.", icon: "macwindow.on.rectangle")
+                benefit("Focus this workspace", detail: "Command–Tab stays on this desktop.", icon: "rectangle.3.group")
+                benefit("Switch faster", detail: "Your shortcuts and trackpad, your pace.", icon: "bolt")
             }
-
-            VStack(spacing: 12) {
-                Text("Meet Debut")
-                    .font(.system(size: 38, weight: .bold, design: .rounded))
-                Text(viewModel.introduction)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 560)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack(spacing: 22) {
-                welcomeFeature(icon: "macwindow.on.rectangle", label: "See every window")
-                welcomeFeature(icon: "rectangle.3.group", label: "Organize spaces")
-                welcomeFeature(icon: "keyboard", label: "Stay on the keyboard")
-            }
-
-            Toggle(
-                "Share anonymous usage and performance data",
-                isOn: Binding(
-                    get: { viewModel.shareAnonymousTelemetry },
-                    set: { viewModel.setShareAnonymousTelemetry($0) }
-                )
-            )
-            .toggleStyle(.switch)
-            .help("Shares only bucketed aggregate measurements. Never shares app or window identity, screenshots, paths, or raw diagnostics.")
-            .accessibilityIdentifier("onboarding-anonymous-telemetry")
-
-            Spacer()
-
-            Button("Continue") {
-                viewModel.continueFromWelcome()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .keyboardShortcut(.defaultAction)
-            .accessibilityIdentifier("onboarding-continue")
+            Spacer(minLength: 10)
+            Button("Make it yours") { viewModel.continueFromWelcome() }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("onboarding-continue")
         }
     }
 
-    private func welcomeFeature(icon: String, label: String) -> some View {
-        Label(label, systemImage: icon)
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(.secondary)
+    private func benefit(_ title: String, detail: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Label(title, systemImage: icon).font(.headline)
+            Text(detail).font(.subheadline).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func onboardingPreview(allWindows: Bool) -> some View {
+        if let image = allWindows ? allWindowsPreviewImage : workspacePreviewImage {
+            Image(nsImage: image).resizable().scaledToFit()
+                .frame(maxHeight: 230)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .accessibilityLabel(allWindows ? "All-windows switcher" : "Windows grouped by desktop in Debut")
+        } else {
+            Image(systemName: "macwindow.on.rectangle")
+                .font(.system(size: 80, weight: .light))
+                .foregroundStyle(Color.accentColor)
+                .frame(height: 180)
+        }
+    }
+
+    private var featuresPage: some View {
+        VStack(spacing: 20) {
+            VStack(spacing: 8) {
+                Text("Your desktop. Your workspace.")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                Text(viewModel.introduction)
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, 20)
+
+            ScrollView {
+                FeatureControlsView(features: Binding(
+                    get: { viewModel.features },
+                    set: { viewModel.setFeatures($0) }
+                ))
+                .padding(20)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            }
+            Text("Spaces are your real macOS desktops. Add or remove them in Mission Control.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("Change any choice later in Settings.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Back") { viewModel.returnToWelcome() }
+                Button("Continue") { viewModel.continueFromFeatures() }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("onboarding-continue")
+            }
+        }
     }
 
     private var permissionsPage: some View {
@@ -125,7 +151,7 @@ public struct OnboardingView: View {
             Spacer(minLength: 22)
 
             VStack(spacing: 8) {
-                Text("A little access, clearly explained")
+                Text("Enable Debut on your Mac")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                 Text("Debut only asks for what makes the switcher work.")
                     .font(.title3)
@@ -136,7 +162,7 @@ public struct OnboardingView: View {
                 permissionCard(
                     icon: "accessibility",
                     title: "Accessibility",
-                    detail: "Required to discover, focus, and arrange your app windows. Debut cannot manage spaces without it.",
+                    detail: "Used to handle your shortcuts and focus or move windows between desktops.",
                     badge: "Required",
                     isGranted: viewModel.permissions.accessibilityGranted,
                     action: viewModel.requestAccessibility
@@ -152,6 +178,14 @@ public struct OnboardingView: View {
             }
             .frame(maxWidth: 620)
 
+            Toggle("Share anonymous usage and performance data", isOn: Binding(
+                get: { viewModel.shareAnonymousTelemetry },
+                set: { viewModel.setShareAnonymousTelemetry($0) }
+            ))
+            .toggleStyle(.switch)
+            .help("Only bucketed measurements. No screenshots, app or window names, or persistent identifiers.")
+            .accessibilityIdentifier("onboarding-anonymous-telemetry")
+
             if !viewModel.canStartTutorial {
                 Label(
                     "After allowing access in System Settings, return to Debut to continue.",
@@ -165,7 +199,7 @@ public struct OnboardingView: View {
 
             HStack {
                 Button("Back") {
-                    viewModel.returnToWelcome()
+                    viewModel.returnToFeatures()
                 }
                 .controlSize(.large)
 
@@ -240,7 +274,7 @@ public struct OnboardingView: View {
             Spacer(minLength: 8)
 
             VStack(spacing: 6) {
-                Text("Try it now")
+                Text("A few shortcuts to get you moving")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                 Text("Step \(viewModel.tutorialStep.rawValue + 1) of \(OnboardingTutorialStep.allCases.count)")
                     .foregroundStyle(.secondary)
@@ -253,11 +287,9 @@ public struct OnboardingView: View {
             }
 
             let content = tutorialContent(for: viewModel.tutorialStep)
-            VStack(spacing: 20) {
-                Image(systemName: content.icon)
-                    .font(.system(size: 52, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(height: 62)
+            VStack(spacing: 10) {
+                onboardingPreview(allWindows: viewModel.tutorialStep == .allWindows)
+                    .frame(maxHeight: 150)
 
                 Text(content.title)
                     .font(.title2.bold())
@@ -322,15 +354,31 @@ public struct OnboardingView: View {
                 icon: "command",
                 shortTitle: "Switch",
                 title: "Open Debut’s switcher",
-                detail: "Press Command–Tab, then keep holding Command. Release Command when the window you want is selected.",
+                detail: viewModel.features.workspaceIsolation
+                    ? "Hold Command–Tab to see this desktop’s windows. Release Command to focus your selection. Other work stays on its own desktop."
+                    : "Workspace isolation is off, so Command–Tab uses the native app switcher. You can enable workspace switching later in Settings.",
                 shortcut: "⌘ Tab · hold ⌘"
+            )
+        case .switchSpaces:
+            TutorialContent(
+                icon: "rectangle.3.group", shortTitle: "Spaces",
+                title: "Move to another workspace",
+                detail: "Hold Command–Option–Tab to browse your desktops. Release to switch. The numbered shortcuts and gestures you enabled offer a direct route.",
+                shortcut: "⌘ ⌥ Tab"
+            )
+        case .allWindows:
+            TutorialContent(
+                icon: "macwindow.on.rectangle", shortTitle: "All windows",
+                title: "Find a window across your Mac",
+                detail: "Option–Tab shows windows from every desktop in one visual list. Choose one and Debut takes you to its workspace.",
+                shortcut: "⌥ Tab · hold ⌥"
             )
         case .moveWindow:
             TutorialContent(
                 icon: "rectangle.portrait.and.arrow.forward",
                 shortTitle: "Move",
                 title: "Move a window between spaces",
-                detail: "Select a window and press the Down Arrow, or drag its card onto another space. Debut keeps each window in one space.",
+                detail: "Hold Command–Option–Tab, then move a selected window with Up or Down, or drag it onto another desktop’s card. Add desktops in Mission Control first.",
                 shortcut: "↓  or  drag"
             )
         }

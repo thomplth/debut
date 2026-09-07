@@ -56,17 +56,19 @@ TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift build -c release -
 ARTIFACT_ID="$(date +%s)-$$"
 APP_ARTIFACT="DebutDemo-$ARTIFACT_ID.app.zip"
 DRIVER_ARTIFACT="DebutDemoDriver-$ARTIFACT_ID"
+PROVISION_ARTIFACT="DebutDemoProvisioner-$ARTIFACT_ID"
 DOCS_ARTIFACT="DebutDemoDocs-$ARTIFACT_ID.zip"
 GUEST_ARTIFACT="demo-capture-guest-$ARTIFACT_ID.sh"
 
 mkdir -p "$SHARE_DIR"
 shopt -s nullglob
-old=( "$SHARE_DIR"/DebutDemo-*.app.zip "$SHARE_DIR"/DebutDemoDriver-* "$SHARE_DIR"/DebutDemoDocs-*.zip "$SHARE_DIR"/demo-capture-guest-*.sh )
+old=( "$SHARE_DIR"/DebutDemo-*.app.zip "$SHARE_DIR"/DebutDemoDriver-* "$SHARE_DIR"/DebutDemoProvisioner-* "$SHARE_DIR"/DebutDemoDocs-*.zip "$SHARE_DIR"/demo-capture-guest-*.sh )
 shopt -u nullglob
 (( ${#old[@]} > 0 )) && rm -f -- "${old[@]}"
 
 /usr/bin/ditto -c -k --keepParent "$PROJECT_DIR/.build/Debut.app" "$SHARE_DIR/$APP_ARTIFACT"
 /usr/bin/install -m 755 "$PROJECT_DIR/.build/release/DebutDemo" "$SHARE_DIR/$DRIVER_ARTIFACT"
+/usr/bin/install -m 755 "$PROJECT_DIR/.build/release/DebutE2E" "$SHARE_DIR/$PROVISION_ARTIFACT"
 /usr/bin/install -m 755 "$SCRIPT_DIR/demo-capture-guest.sh" "$SHARE_DIR/$GUEST_ARTIFACT"
 # The guest browses the project's own doc site, which needs no network and is honest about
 # what is on screen.
@@ -97,9 +99,9 @@ tart exec "$VM_NAME" /bin/bash -c '
 
 echo "Capturing inside $VM_NAME..."
 guest_ip="$(tart ip "$VM_NAME")"
-printf -v remote_command '/bin/bash %q %q %q %q %q' \
+printf -v remote_command '/bin/bash %q %q %q %q %q %q' \
     "/Volumes/My Shared Files/$GUEST_ARTIFACT" "$APP_ARTIFACT" "$DRIVER_ARTIFACT" \
-    "$DOCS_ARTIFACT" "$DISPLAY_MODE"
+    "$DOCS_ARTIFACT" "$DISPLAY_MODE" "$PROVISION_ARTIFACT"
 [[ -n "$CLIPS" ]] && printf -v remote_command '%s --clips %q' "$remote_command" "$CLIPS"
 ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
     -o UserKnownHostsFile="$KNOWN_HOSTS" "admin@$guest_ip" "$remote_command"

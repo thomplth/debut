@@ -21,6 +21,16 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private var quickSwitchKeysDown: Set<Int64> = []
     private let configurationLock = NSLock()
     private var cachedFrontmostAppBundleIdentifier: String?
+    private var storedDesktopNavigationAvailable = true
+    public var desktopNavigationAvailable: Bool {
+        get { configurationLock.withLock { storedDesktopNavigationAvailable } }
+        set { configurationLock.withLock { storedDesktopNavigationAvailable = newValue } }
+    }
+    private var storedFeatures = FeatureSettings()
+    public var features: FeatureSettings {
+        get { configurationLock.withLock { storedFeatures } }
+        set { configurationLock.withLock { storedFeatures = newValue } }
+    }
     private var storedOverlayVisible: Bool = false
     private var storedKeyBindings: KeyBindings = KeyBindings()
     private var storedExcludedBundleIDs: Set<String> = []
@@ -266,6 +276,9 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             }
         }
 
+        // A feature can be disabled while its physical key is still held. Drain the
+        // whole claimed press, including repeats, before returning that key to macOS.
+        if type == .keyDown, quickSwitchKeysDown.contains(keyCode) { return nil }
         if type == .keyUp, quickSwitchKeysDown.remove(keyCode) != nil {
             return nil
         }
@@ -293,7 +306,21 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             return event
         }
 
-        if type == .keyDown {
+        if type == .keyDown, features.controlArrows, desktopNavigationAvailable,
+           flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]) == .maskControl,
+           keyCode == Int64(kVK_LeftArrow) || keyCode == Int64(kVK_RightArrow) {
+            let excluded = configurationLock.withLock {
+                cachedFrontmostAppBundleIdentifier.map { storedQuickSwitchExcludedBundleIDs.contains($0) } ?? false
+            }
+            if excluded { return event }
+            if quickSwitchKeysDown.insert(keyCode).inserted {
+                deliver(.switchAdjacentSpace(keyCode == Int64(kVK_RightArrow) ? 1 : -1),
+                        asynchronously: deliverAsynchronously)
+            }
+            return nil
+        }
+
+        if type == .keyDown, features.numberShortcuts {
             let quickSwitchConfiguration = configurationLock.withLock {
                 (
                     storedQuickSwitchModifiers,
@@ -332,6 +359,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         if type == .keyDown,
            let globalAction = configuredAction(keyCode: keyCode, flags: flags, scope: .global) {
             if globalAction.quickSwitchPosition != nil { return event }
+            if !features.workspaceIsolation,
+               globalAction == .activateNextWindow || globalAction == .activatePreviousWindow || globalAction.isSameAppCycle {
+                return event
+            }
 
             // Same-app cycling is Debut's replacement for macOS's Cmd-` handling. Excluded
             // apps have no tracked windows, so leave that shortcut untouched for macOS.
