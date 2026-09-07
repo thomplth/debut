@@ -96,17 +96,23 @@ public struct RuntimeWindowReconciliationResult: Equatable, Sendable {
     public let addedCount: Int
     public let reassignedCount: Int
     public let dormantCount: Int
+    /// Live windows left unassigned because no source could say which desktop they are on.
+    /// A refusal changes nothing, so without a count it is indistinguishable from a window
+    /// the snapshot never carried.
+    public let refusedCount: Int
     public let events: [WindowAssignmentEvent]
 
     public init(
         addedCount: Int = 0,
         reassignedCount: Int = 0,
         dormantCount: Int = 0,
+        refusedCount: Int = 0,
         events: [WindowAssignmentEvent] = []
     ) {
         self.addedCount = addedCount
         self.reassignedCount = reassignedCount
         self.dormantCount = dormantCount
+        self.refusedCount = refusedCount
         self.events = events
     }
 
@@ -356,6 +362,7 @@ public struct RuntimeWindowReconciler: Sendable {
             spaceManager.allSpaces.contains(where: { $0.id == requestedID }) ? requestedID : nil
         } ?? spaceManager.activeSpaceID
         var addedWindowIDs = Set<CGWindowID>()
+        var refusedCount = 0
         for info in snapshot.liveWindows where
             !consumedLiveWindowIDs.contains(info.windowID) &&
             spaceManager.spaceContainingWindow(windowID: info.windowID) == nil {
@@ -364,6 +371,18 @@ public struct RuntimeWindowReconciler: Sendable {
                 snapshot: snapshot,
                 spaceManager: spaceManager
             )
+            // A window on no desktop is not on the one showing. The showing desktop is a fair
+            // guess for a window whose desktop merely has no *single* answer — a window on
+            // every desktop is on that one too — but SkyLight placing it nowhere is a positive
+            // statement that the guess is wrong, and the guess creates a live assignment rather
+            // than only misplacing one. Dia's fullscreen window sits on a Space that is not a
+            // desktop, which is how each fullscreen cycle stood a second Dia card in stage 1.
+            if desktopSpaceID == nil,
+               let placedWindowIDs = snapshot.skyLightWindowIDs,
+               !placedWindowIDs.contains(info.windowID) {
+                refusedCount += 1
+                continue
+            }
             let strandedSpaceID = unambiguousStrandedSpaceID(
                 forBundleID: info.ownerBundleID,
                 strandedSpaceIDs: strandedSpaceIDs,
@@ -453,6 +472,7 @@ public struct RuntimeWindowReconciler: Sendable {
             addedCount: addedCount,
             reassignedCount: reassignedCount,
             dormantCount: dormantCount,
+            refusedCount: refusedCount,
             events: events
         )
     }

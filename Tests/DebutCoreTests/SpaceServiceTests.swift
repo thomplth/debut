@@ -402,4 +402,28 @@ struct SpaceServiceWindowEnumerationTests {
 
         #expect(locations[windowID] == nil)
     }
+
+    // Dropping the all-desktops window from windowLocations() is right for placement and wrong
+    // for presence: absence from the placement set is what tells the reconciler SkyLight has a
+    // window on no desktop at all, and a window on every desktop is the opposite of that.
+    @Test("placedWindowIDs keeps the window windowLocations omits",
+          .enabled(if: BridgedWindowManagementTests.hasSecondDesktop, "needs at least two user desktops"))
+    @MainActor func placedWindowIDsIncludesAllSpacesWindow() throws {
+        let service = SpaceService()
+        #expect(service.userDesktops().count >= 2)
+
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.collectionBehavior.insert(.canJoinAllSpaces)
+        window.orderFront(nil)
+        defer { window.close() }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+
+        let windowID = CGWindowID(window.windowNumber)
+        #expect(service.spaces(forWindow: windowID).count > 1)
+
+        #expect(service.windowLocations()[windowID] == nil)
+        #expect(service.placedWindowIDs().contains(windowID))
+    }
 }
