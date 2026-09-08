@@ -126,7 +126,7 @@ nightly_publish_job="$(sed -n '/^  publish:/,$p' "$nightly")"
 if grep -Eq '^    secrets: inherit$' <<< "$nightly_publish_job"; then
     fail "the nightly caller must not inherit stable release secrets"
 fi
-expect_contains "$publish_contract" "environment:.*(nightly-release|stable-release)" \
+expect_contains "$publish_contract" "environment: stable$" \
     "release secrets must be isolated by channel environment"
 expect_contains "$publish_contract" 'validate-release-credentials\.sh' \
     "publishing must fail before stamping or tagging when protected credentials are unavailable"

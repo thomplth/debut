@@ -67,7 +67,7 @@ silently skipping if none is available.
 ## Nightly signing and recovery
 
 KHA-648 enables Developer ID signing and notarization for nightlies. The
-`nightly-release` environment contains only the certificate, export password, and
+`nightly` environment contains only the certificate, export password, and
 App Store Connect notary key, plus the identity/key/issuer variables, and accepts
 only `main`. The nightly job binds that environment directly rather than relying
 on reusable-workflow secret inheritance. Both channels invoke the same composite

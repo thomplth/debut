@@ -64,7 +64,7 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/release-publish.yml
-    # GitHub only resolves the called job's stable-release environment secrets when the
+    # GitHub only resolves the called job's stable environment secrets when the
     # same-repository caller enables secret inheritance. The called job still selects and gates
     # the protected environment; the nightly caller deliberately does not inherit secrets.
     secrets: inherit

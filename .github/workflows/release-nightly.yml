@@ -63,7 +63,7 @@ jobs:
       contents: write
     runs-on: macos-26
     timeout-minutes: 30
-    environment: nightly-release
+    environment: nightly
     env:
       DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
       DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}

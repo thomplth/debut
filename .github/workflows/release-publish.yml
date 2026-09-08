@@ -35,7 +35,7 @@ jobs:
     if: inputs.channel == 'stable'
     runs-on: macos-26
     timeout-minutes: 30
-    environment: stable-release
+    environment: stable
 
     env:
       DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
