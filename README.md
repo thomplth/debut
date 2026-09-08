@@ -168,7 +168,7 @@ screenshot tests. Never run E2E against the developer’s foreground session.
 The demo fixture provisions real desktops through Mission Control before launching
 Debut. The images and clips in `docs/media` show the running app and real windows.
 See [local E2E setup](docs/local-e2e.md), [settings](spec/settings.md), and
-[architecture guidance](AGENTS.md).
+[contribution guidance](CONTRIBUTING.md).
 
 Desktop switching uses synthetic DockSwipe events, based on
 [InstantSpaceSwitcher](https://github.com/jurplel/InstantSpaceSwitcher) and
@@ -182,8 +182,7 @@ reconciliation use macOS notifications; captures refresh when needed.
 notarized and offered through automatic updates. Nightly builds are prereleases with
 their own automatic-update feed and Sparkle identity; stable and nightly installations
 never consume one another's updates. Release workflows gate on CI and E2E and tag
-the tested commit. A single explicit release request authorizes a stable patch, minor,
-or major release. Nightlies are also Developer ID-signed and notarized, using credentials isolated
+the tested commit. Nightlies are also Developer ID-signed and notarized, using credentials isolated
 from stable signing. See [release verification](docs/release-verification.md).
 A local build reports `0.0.0-dev`.
 

@@ -1,18 +1,4 @@
-# Release verification and version migration
-
-Verified against GitHub main `bba36cc` on 2026-09-08 (KHA-645): `v0.4.0`
-was the latest stable release and included `appcast.xml`. Both `v0.3.0` and
-`v0.4.0` had completed Developer ID signing and notarization. The original plan's
-“first stable signing path has never run” premise was obsolete. Action SHA pins,
-restricted secret file modes, cleanup, and read-only repository Actions defaults
-were already present. Dependabot was missing. The three misclassified historical
-prereleases (`v0.1.1`, `v0.1.2`, `v0.2.1`) were corrected on GitHub;
-`v0.4.0` remains latest stable.
-
-The published `v0.4.0` DMG's EdDSA signature was independently verified against
-the public key inside that artifact. Gatekeeper accepted the disk image and app.
-The actual `v0.3.0` → `v0.4.0` Sparkle replacement and relaunch passed in a
-separate headless Tart VM, using untouched, signed release binaries.
+# Release verification
 
 ## Version records
 
@@ -70,7 +56,7 @@ must pass the same real update test against the previous compatible nightly.
 
 ## Nightly signing and recovery
 
-KHA-648 enables Developer ID signing and notarization for nightlies. The
+Nightlies require Developer ID signing and notarization. The
 `nightly` environment contains the certificate, export password, App Store Connect
 notary key, and a Sparkle keypair distinct from stable, and accepts only `main`.
 The nightly job binds that environment directly rather than relying on reusable-workflow

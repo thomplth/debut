@@ -5,10 +5,11 @@ stay inside the guest, so the suite never takes over the developer's desktop.
 Building stays on the host for fast incremental iteration; only compressed,
 cache-busted app and `DebutE2E` artifacts are shared with the guest.
 
-AGENTS.md decides *when* E2E is warranted: high-risk changes only. The preferred headless
-path is the Tart VM, while the GitHub-hosted macOS workflow is the fallback when Tart is
-unavailable. Routine changes use unit and screenshot tests. This document covers only how
-to run high-risk verification.
+Use E2E for high-risk changes only; see [contributor guidance](../CONTRIBUTING.md).
+The preferred headless path is the Tart VM. If Tart is unavailable or cannot exercise
+a scenario, report the limitation. Never substitute foreground desktop automation or
+agent-triggered hosted E2E. GitHub-hosted E2E runs as part of the release gates.
+Routine changes use unit and screenshot tests.
 
 ## One-time setup
 
