@@ -1133,6 +1133,14 @@ public struct StageOverlayView: View {
     }
 
     public var body: some View {
+        if let scope = viewModel.tutorialScope, let coach = viewModel.tutorialCoachmark {
+            TutorialSwitcherView(rows: viewModel.stages.filter { scope.desktopIndices.contains($0.index) },
+                scope: scope, coach: coach, selectedWindowID: viewModel.selectedWindow?.windowID,
+                selectedDesktop: viewModel.activeSpaceIndex, appearance: viewModel.appearance)
+        } else { standardBody }
+    }
+
+    @ViewBuilder private var standardBody: some View {
         let stages = viewModel.stages
         let windowLayoutKey = StageMotion.windowLayoutKey(for: stages)
         let hasCommittedSettlingDrop = settlingWindowDrop.map {

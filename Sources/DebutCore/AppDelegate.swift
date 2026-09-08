@@ -10,6 +10,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var onboardingTargetWindow: NSWindow?
+    private var onboardingWindowNeedsReplacement = false
+    private var onboardingWindowAwaitingPlacement = false
     private var pendingTutorialTarget: OnboardingTarget?
     private var preparingTutorialTarget = false
     private var tutorialGeneration = 0
@@ -129,10 +131,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         _ sender: NSApplication,
         hasVisibleWindows: Bool
     ) -> Bool {
-        if let onboardingWindow {
-            admitSettingsWindowToSpaceManager(onboardingWindow)
-            refreshOnboardingEnvironment()
-            onboardingWindow.makeKeyAndOrderFront(nil)
+        if onboardingWindow != nil {
+            showOnboarding()
             return true
         }
         guard !hasVisibleWindows else { return true }
@@ -300,6 +300,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                     self.debouncedSaver?.scheduleSave(controller.spaceManager)
                 }
                 self.publishTutorialTargetIfDiscovered()
+                // New AppKit windows receive a desktop asynchronously. Discovery is the
+                // event that makes preparation safe after a lesson has been reopened.
+                if self.onboardingWindowAwaitingPlacement { self.prepareTutorialTarget() }
             }
         }
         discovery.onWindowClosed = { [weak self] windowID in
@@ -541,7 +544,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             spaceController?.windowPreviewsEnabled = captureEnabled
             if captureEnabled { spaceController?.prewarmWindowPreviews() }
         }
-        if let onboardingWindow { admitSettingsWindowToSpaceManager(onboardingWindow) }
+        if let onboardingWindow, !onboardingWindowNeedsReplacement { admitSettingsWindowToSpaceManager(onboardingWindow) }
         prepareTutorialTarget()
         stopAccessibilityObservation()
     }
@@ -782,16 +785,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let createdHostingView = if spaceController.overlayMode == .altTab {
             overlayWindow.update(altTab: altTabViewModel(spaceController: spaceController))
         } else {
-            overlayWindow.update(viewModel: StageOverlayViewModel(
-                spaceManager: spaceController.overlaySpaceManager,
-                activeSpaceIndex: spaceController.selectedSpaceIndex,
-                selectedWindowIndex: spaceController.selectedWindowIndex,
-                windowPreviews: spaceController.windowPreviews,
-                windowSizes: spaceController.windowSizes,
-                appearance: currentSettings,
-                wallpaperLuminance: nil,
-                forceDisplayStackIndicator: forceDisplayStackIndicator
-            ))
+            overlayWindow.update(viewModel: stageViewModel(spaceController: spaceController))
         }
         if let overlayPresentation {
             spaceController.updateOverlayHostingView(
@@ -807,6 +801,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             )
             self.diag.report("overlay_presentation_completed", level: .transient, details: [
                 "outcome": OverlayPresentationOutcome.presented.rawValue,
+                "traceID": overlayPresentation.traceID.uuidString,
             ])
         }
         if let overlayPresentation {
@@ -867,27 +862,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             overlayWindow.update(altTab: altTabViewModel(spaceController: spaceController))
             return
         }
-        let vm = StageOverlayViewModel(
-            spaceManager: spaceController.overlaySpaceManager,
-            activeSpaceIndex: spaceController.selectedSpaceIndex,
-            selectedWindowIndex: spaceController.selectedWindowIndex,
-            windowPreviews: spaceController.windowPreviews,
-            windowSizes: spaceController.windowSizes,
-            appearance: currentSettings,
-            wallpaperLuminance: nil,
-            forceDisplayStackIndicator: forceDisplayStackIndicator
-        )
-        overlayWindow.update(viewModel: vm)
+        overlayWindow.update(viewModel: stageViewModel(spaceController: spaceController))
+    }
+
+    private func stageViewModel(spaceController: SpaceController) -> StageOverlayViewModel {
+        var vm = StageOverlayViewModel(spaceManager: spaceController.overlaySpaceManager,
+            activeSpaceIndex: spaceController.selectedSpaceIndex, selectedWindowIndex: spaceController.selectedWindowIndex,
+            windowPreviews: spaceController.windowPreviews, windowSizes: spaceController.windowSizes,
+            appearance: currentSettings, wallpaperLuminance: nil, forceDisplayStackIndicator: forceDisplayStackIndicator)
+        vm.tutorialScope = spaceController.activeTutorialScope
+        vm.tutorialCoachmark = spaceController.tutorialCoachmark
+        return vm
     }
 
     private func altTabViewModel(spaceController: SpaceController) -> AltTabOverlayViewModel {
-        AltTabOverlayViewModel(
-            entries: spaceController.altTabEntries,
-            selectedIndex: spaceController.altTabSelectionIndex,
-            windowPreviews: spaceController.windowPreviews,
-            windowSizes: spaceController.windowSizes,
-            appearance: currentSettings
-        )
+        var vm = AltTabOverlayViewModel(entries: spaceController.altTabEntries,
+            selectedIndex: spaceController.altTabSelectionIndex, windowPreviews: spaceController.windowPreviews,
+            windowSizes: spaceController.windowSizes, appearance: currentSettings)
+        vm.tutorialScope = spaceController.activeTutorialScope
+        vm.tutorialCoachmark = spaceController.tutorialCoachmark
+        return vm
     }
 
     /// The screen the stages belong on: the one holding the focused window. Accessibility
@@ -1034,14 +1028,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func showOnboarding() {
-        if let onboardingWindow, onboardingWindow.isVisible {
-            onboardingWindow.makeKeyAndOrderFront(nil)
+        if onboardingWindowNeedsReplacement, let model = onboardingViewModel {
+            // A closed AppKit window can reuse its CG ID, which discovery correctly retired.
+            // Give the resumed lesson a new window instead of reviving a destroyed identity.
+            onboardingWindow = makeOnboardingWindow(model)
+            onboardingWindowNeedsReplacement = false
+            onboardingWindow?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+            if let onboardingWindow { admitSettingsWindowToSpaceManager(onboardingWindow) }
+            restartTutorialExercise()
+            refreshOnboardingEnvironment()
             return
         }
         if let onboardingWindow {
             onboardingWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+            admitSettingsWindowToSpaceManager(onboardingWindow)
+            refreshOnboardingEnvironment()
             return
         }
 
@@ -1085,7 +1088,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         viewModel.onOpenMissionControl = {
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app"))
         }
-        let view = OnboardingView(viewModel: viewModel)
+        let window = makeOnboardingWindow(viewModel)
+        onboardingWindowNeedsReplacement = false
+
+        onboardingViewModel = viewModel
+        onboardingWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        refreshOnboardingEnvironment()
+        admitSettingsWindowToSpaceManager(window)
+        prepareTutorialTarget()
+        diag.report("onboarding_shown", details: [
+            "forced": "\(ProcessInfo.processInfo.arguments.contains("--show-onboarding"))",
+        ])
+    }
+
+    private func makeOnboardingWindow(_ viewModel: OnboardingViewModel) -> NSWindow {
+        onboardingWindowAwaitingPlacement = true
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 820, height: 650),
             styleMask: [.titled, .closable, .miniaturizable],
@@ -1100,19 +1119,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         window.title = "Debut Tutorial"
         window.collectionBehavior = []
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: view)
+        window.contentView = NSHostingView(rootView: OnboardingView(viewModel: viewModel))
         window.center()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-
-        onboardingViewModel = viewModel
-        refreshOnboardingEnvironment()
-        onboardingWindow = window
-        admitSettingsWindowToSpaceManager(window)
-        prepareTutorialTarget()
-        diag.report("onboarding_shown", details: [
-            "forced": "\(ProcessInfo.processInfo.arguments.contains("--show-onboarding"))",
-        ])
+        return window
     }
 
     private func refreshOnboardingEnvironment() {
@@ -1125,6 +1134,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func restartTutorialExercise() {
+        spaceController?.tutorialScope = nil
         tutorialGeneration += 1
         pendingTutorialTarget = nil
         preparingTutorialTarget = false
@@ -1135,19 +1145,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func prepareTutorialTarget() {
-        guard !preparingTutorialTarget, pendingTutorialTarget == nil, let model = onboardingViewModel,
+        guard !onboardingWindowNeedsReplacement, !preparingTutorialTarget, pendingTutorialTarget == nil, let model = onboardingViewModel,
               let tutorial = onboardingWindow, let service = spaceService,
               model.permissions.accessibilityGranted, model.desktopCount >= 2,
               model.page == .workspace || model.page == .previews else { return }
         if model.page == .previews, model.features.windowPreviews,
            !model.permissions.screenRecordingGranted { return }
-        if model.target != nil, onboardingTargetWindow != nil { return }
+        if let target = model.target, onboardingTargetWindow != nil {
+            configureTutorialScope(target)
+            return
+        }
         onboardingTargetWindow?.close()
         onboardingTargetWindow = nil
         guard let origin = service.desktopIndex(forWindow: CGWindowID(tutorial.windowNumber)) else {
-            model.targetError = "The tutorial is not on a regular desktop. Move it to a desktop, then restart this exercise."
+            if !onboardingWindowAwaitingPlacement {
+                model.targetError = "The tutorial is not on a regular desktop. Move it to a desktop, then restart this exercise."
+            }
             return
         }
+        onboardingWindowAwaitingPlacement = false
         let adjacent = origin + 1 < model.desktopCount ? origin + 1 : origin - 1
         let title: String
         let placement: Int
@@ -1180,7 +1196,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         target.title = title
         target.isReleasedWhenClosed = false
         let hosting = NSHostingView(rootView: OnboardingDestinationView(title: title, onReturn: { [weak self] in
-            guard let self, let tutorial = self.onboardingWindow else { return }
+            guard let self else { return }
+            if self.onboardingWindowNeedsReplacement {
+                self.showOnboarding()
+                return
+            }
+            guard let tutorial = self.onboardingWindow else { return }
             if let controller = self.spaceController,
                let spaceID = controller.spaceManager.spaceContainingWindow(windowID: CGWindowID(tutorial.windowNumber)) {
                 controller.switchToSpace(id: spaceID, raiseWindowID: CGWindowID(tutorial.windowNumber))
@@ -1196,12 +1217,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         tutorial.makeKeyAndOrderFront(nil)
         onboardingTargetWindow = target
         let windowID = CGWindowID(target.windowNumber)
+        configureTutorialScope(.init(windowID: windowID, originDesktop: origin,
+                                     destinationDesktop: destination, title: title))
         let finish: @Sendable (Bool) -> Void = { [weak self] moved in
             DispatchQueue.main.async {
                 guard let self, self.tutorialGeneration == generation,
                       self.onboardingTargetWindow === target else { return }
                 self.preparingTutorialTarget = false
                 guard moved, service.desktopIndex(forWindow: windowID) == placement else {
+                    self.spaceController?.tutorialScope = nil
                     target.close()
                     self.onboardingTargetWindow = nil
                     model.targetError = "The tutorial target could not be placed on the desktop. Restart this exercise to try again."
@@ -1217,6 +1241,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         else { service.moveWindow(windowID: windowID, toDesktop: placement, completion: finish) }
     }
 
+    private func configureTutorialScope(_ target: OnboardingTarget) {
+        guard let lesson = onboardingWindow, let model = onboardingViewModel else { return }
+        let practice: OnboardingPractice = model.page == .previews ? .allWindows
+            : model.exercise == .switchWindow ? .workspace : model.exercise == .switchDesktop ? .desktop : .moveWindow
+        spaceController?.tutorialScope = .init(lessonWindowID: CGWindowID(lesson.windowNumber), target: target, practice: practice)
+    }
+
     private func publishTutorialTargetIfDiscovered() {
         guard let target = pendingTutorialTarget, let model = onboardingViewModel,
               let window = onboardingTargetWindow, CGWindowID(window.windowNumber) == target.windowID,
@@ -1225,10 +1256,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
               }) == true else { return }
         pendingTutorialTarget = nil
         model.setTarget(target)
+        configureTutorialScope(target)
         diag.report("onboarding_target_created", details: [
             "windowID": "\(target.windowID)", "title": target.title,
             "placementDesktop": "\(spaceService?.desktopIndex(forWindow: target.windowID) ?? -1)",
             "destinationDesktop": "\(target.destinationDesktop)",
+            "lessonWindowID": "\(onboardingWindow?.windowNumber ?? -1)",
             "originDesktop": "\(target.originDesktop)",
             "exercise": model.exercise.rawValue, "page": "\(model.page)",
             "currentDesktop": "\(spaceService?.currentDesktopIndex() ?? -1)",
@@ -1250,6 +1283,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
               let desktop = spaceService?.desktopIndex(forWindow: windowID),
               spaceService?.currentDesktopIndex() == desktop,
               model.recordPractice(practice, windowID: windowID, desktopIndex: desktop) else { return }
+        spaceController?.tutorialScope = nil
         let previous = onboardingWindow
         onboardingWindow = target
         onboardingTargetWindow = nil
@@ -1267,6 +1301,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func completeOnboarding() {
+        spaceController?.tutorialScope = nil
         OnboardingLaunchPolicy.markCompleted()
         UserDefaults.standard.removeObject(forKey: "onboardingCheckpoint")
         onboardingTargetWindow?.close()
@@ -1434,6 +1469,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     public func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
+        if window === onboardingWindow { onboardingWindowNeedsReplacement = true }
+        if window === onboardingTargetWindow || window === onboardingWindow { spaceController?.tutorialScope = nil }
         if window === onboardingTargetWindow {
             onboardingTargetWindow = nil
             onboardingViewModel?.setTarget(nil)

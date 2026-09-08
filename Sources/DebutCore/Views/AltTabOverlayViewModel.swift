@@ -5,6 +5,8 @@ import Foundation
 /// list. Cards are `StageWindowData` and the grid is `StageWindowLayout`, so a card here and a
 /// card on a stage cannot disagree about how big it is or what it is called.
 public struct AltTabOverlayViewModel: Sendable {
+    public var tutorialScope: TutorialSwitcherScope?
+    public var tutorialCoachmark: TutorialCoachmark?
     public let windows: [StageWindowData]
     public var selectedIndex: Int
     public var appearance: AppSettings

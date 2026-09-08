@@ -992,6 +992,30 @@ struct ScreenshotTests {
         try saveImage(image, name: "settings_\(section.rawValue)")
     }
 
+    @Test("Tutorial coachmarks fit beside only the practice windows", arguments: ["windows", "desktops", "move", "release", "previews", "dark"])
+    func tutorialCoachmarks(_ state: String) throws {
+        let practice: OnboardingPractice = state == "previews" ? .allWindows : state == "desktops" ? .desktop : state == "move" || state == "release" ? .moveWindow : .workspace
+        let (controller, _, _) = TutorialSwitcherTests().fixture(practice: practice)
+        controller.handleKeyEvent(practice == .allWindows ? .altTabHold : .cmdTabHold)
+        if state == "release" { controller.handleKeyEvent(.moveWindowDown) }
+        let size = NSSize(width: 1024, height: 768)
+        if practice == .allWindows {
+            var vm = AltTabOverlayViewModel(entries: controller.altTabEntries, selectedIndex: controller.altTabSelectionIndex)
+            vm.tutorialScope = controller.activeTutorialScope
+            vm.tutorialCoachmark = controller.tutorialCoachmark
+            let image = try #require(renderSwiftUI(AltTabOverlayView(viewModel: vm), size: size))
+            try saveImage(image, name: "tutorial_coach_\(state)")
+        } else {
+            var vm = StageOverlayViewModel(spaceManager: controller.overlaySpaceManager,
+                activeSpaceIndex: controller.selectedSpaceIndex, selectedWindowIndex: controller.selectedWindowIndex)
+            vm.tutorialScope = controller.activeTutorialScope
+            vm.tutorialCoachmark = controller.tutorialCoachmark
+            let image = try #require(renderSwiftUI(StageOverlayView(viewModel: vm).environment(\.colorScheme, state == "dark" ? .dark : .light), size: size))
+            try saveImage(image, name: "tutorial_coach_\(state)")
+        }
+        controller.handleKeyEvent(.escape)
+    }
+
     @Test("Onboarding pages and permission states fit the window", arguments: ["welcome", "permission", "one-desktop", "practice", "desktop-switch", "window-move", "previews", "previews-active", "previews-disabled", "speed", "ready", "small-speed"])
     func onboardingPages(_ state: String) throws {
         let smallScreen = state == "small-speed"
