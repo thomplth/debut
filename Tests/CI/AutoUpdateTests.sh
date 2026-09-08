@@ -8,11 +8,11 @@ plist="$repo_root/Resources/Info.plist"
 package="$repo_root/Package.swift"
 build="$repo_root/scripts/build-app.sh"
 package_dmg="$repo_root/scripts/package-dmg.sh"
-daily="$repo_root/.github/workflows/release-daily.yml"
+nightly="$repo_root/.github/workflows/release-nightly.yml"
 manual="$repo_root/.github/workflows/release-manual.yml"
 publish="$repo_root/.github/workflows/release-publish.yml"
 validate_credentials="$repo_root/scripts/validate-release-credentials.sh"
-# The stable wrapper and direct daily job execute one shared composite action.
+# The stable wrapper and direct nightly job execute one shared composite action.
 publish_contract="$(mktemp)"
 trap 'rm -f "$publish_contract"' EXIT
 cat "$publish" "$(dirname "$publish")/../actions/publish-release/action.yml" > "$publish_contract"
@@ -35,8 +35,8 @@ expect_contains() {
 if [[ -x "$eligibility" ]]; then
     [[ "$($eligibility stable 1.2.0)" == "eligible=true" ]] \
         || fail "a stable .0 release must be update eligible"
-    [[ "$($eligibility daily 1.2.1)" == "eligible=false" ]] \
-        || fail "a daily release must not be update eligible"
+    [[ "$($eligibility nightly 1.2.1-nightly.20260908)" == "eligible=false" ]] \
+        || fail "a nightly release must not be update eligible"
     if ! "$eligibility" stable 1.2.1 >/dev/null 2>&1; then
         fail "a promoted patch release must be accepted"
     fi
@@ -58,8 +58,8 @@ if [[ -x "$validate_credentials" ]]; then
         SPARKLE_EDDSA_PRIVATE_KEY=sparkle-key \
         "$validate_credentials" stable >/dev/null \
         || fail "stable releases must accept a complete credential set"
-    if "$validate_credentials" daily >/dev/null 2>&1; then
-        fail "daily releases must reject missing signing credentials"
+    if "$validate_credentials" nightly >/dev/null 2>&1; then
+        fail "nightly releases must reject missing signing credentials"
     fi
 fi
 
@@ -116,23 +116,23 @@ expect_contains "$build" 'Installer\.xpc' "Sparkle nested code must be signed ex
 expect_contains "$package_dmg" 'codesign.*\$DMG' \
     "stable packaging must sign the outer disk image before notarization"
 
-expect_contains "$daily" 'channel: daily' "daily releases must identify the daily channel"
+expect_contains "$nightly" 'channel: nightly' "nightly releases must identify the nightly channel"
 expect_contains "$manual" 'channel: stable' "manual releases must identify the stable channel"
 manual_publish_job="$(sed -n '/^  publish:/,$p' "$manual")"
 if ! grep -Eq '^    secrets: inherit$' <<< "$manual_publish_job"; then
     fail "the stable caller must enable protected environment secrets in the reusable workflow"
 fi
-daily_publish_job="$(sed -n '/^  publish:/,$p' "$daily")"
-if grep -Eq '^    secrets: inherit$' <<< "$daily_publish_job"; then
-    fail "the daily caller must not inherit stable release secrets"
+nightly_publish_job="$(sed -n '/^  publish:/,$p' "$nightly")"
+if grep -Eq '^    secrets: inherit$' <<< "$nightly_publish_job"; then
+    fail "the nightly caller must not inherit stable release secrets"
 fi
-expect_contains "$publish_contract" "environment:.*(daily-release|stable-release)" \
+expect_contains "$publish_contract" "environment:.*(nightly-release|stable-release)" \
     "release secrets must be isolated by channel environment"
 expect_contains "$publish_contract" 'validate-release-credentials\.sh' \
     "publishing must fail before stamping or tagging when protected credentials are unavailable"
 expect_contains "$publish_contract" 'stable-update-eligibility\.sh' \
     "publishing must enforce stable update eligibility"
-expect_contains "$publish_contract" -- '--prerelease' "daily GitHub releases must be prereleases"
+expect_contains "$publish_contract" -- '--prerelease' "nightly GitHub releases must be prereleases"
 expect_contains "$publish_contract" 'notarytool submit' "stable releases must be notarized"
 expect_contains "$publish_contract" 'stapler staple' "stable releases must staple the notarization ticket"
 expect_contains "$publish_contract" 'generate-appcast\.sh' "stable releases must generate an appcast"

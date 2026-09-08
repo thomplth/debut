@@ -3,7 +3,7 @@ import Sparkle
 
 final class VersionOrderingTests: XCTestCase {
     func testPublishedVersionsMigrateToMonotonicBuilds() {
-        // Last stable/daily before migration, then nightly, patch, minor. Tags and
+        // Last stable/automated prerelease before migration, then nightly, patch, minor. Tags and
         // display versions do not participate in Sparkle's installed-build order.
         let versions = ["0.3.0", "0.4.0", "0.4.3", "10000", "10001", "10002"]
         let comparator = SUStandardVersionComparator.default

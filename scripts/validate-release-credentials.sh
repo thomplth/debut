@@ -1,15 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-channel="${1:?usage: validate-release-credentials.sh <daily|stable>}"
+channel="${1:?usage: validate-release-credentials.sh <nightly|stable>}"
 
 case "$channel" in
-    daily|stable) ;;
+    nightly|stable) ;;
     *) echo "Unknown release channel: $channel" >&2; exit 1 ;;
 esac
 
-if [[ "$channel" == daily && -n "${SPARKLE_EDDSA_PRIVATE_KEY:-}" ]]; then
-    echo "Daily signing must not receive the Sparkle private key." >&2
+if [[ "$channel" == nightly && -n "${SPARKLE_EDDSA_PRIVATE_KEY:-}" ]]; then
+    echo "Nightly signing must not receive the Sparkle private key." >&2
     exit 1
 fi
 

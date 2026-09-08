@@ -6,7 +6,7 @@
 
 A visual window switcher for macOS that makes each desktop a workspace.
 
-[![Daily Release](https://github.com/thomplth/debut/actions/workflows/release-daily.yml/badge.svg)](https://github.com/thomplth/debut/actions/workflows/release-daily.yml)
+[![Nightly Release](https://github.com/thomplth/debut/actions/workflows/release-nightly.yml/badge.svg)](https://github.com/thomplth/debut/actions/workflows/release-nightly.yml)
 [![Latest release](https://img.shields.io/github/v/release/thomplth/debut?label=download)](https://github.com/thomplth/debut/releases/latest)
 ![Platform](https://img.shields.io/badge/macOS-26%20Tahoe-black)
 ![Architecture](https://img.shields.io/badge/Apple%20Silicon-arm64-black)

@@ -1,6 +1,6 @@
-name: Verify Daily Signing
+name: Verify Nightly Signing
 
-# A read-only rehearsal of the same action and environment used by the daily job.
+# A read-only rehearsal of the same action and environment used by the nightly job.
 # No E2E is dispatched here and neither a tag nor a release can be published.
 on:
   workflow_dispatch:
@@ -9,14 +9,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: daily-signing-verification
+  group: nightly-signing-verification
   cancel-in-progress: false
 
 jobs:
   verify:
     runs-on: macos-26
     timeout-minutes: 30
-    environment: daily-release
+    environment: nightly-release
     env:
       DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
       DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
@@ -34,10 +34,10 @@ jobs:
       - name: Plan the verification build
         id: plan
         run: ./scripts/release-plan.sh nightly | tee -a "$GITHUB_OUTPUT"
-      - name: Rehearse daily signing without publication
+      - name: Rehearse nightly signing without publication
         uses: ./.github/actions/publish-release
         with:
-          channel: daily
+          channel: nightly
           version: ${{ steps.plan.outputs.version }}
           build_version: ${{ steps.plan.outputs.build_version }}
           previous_tag: ${{ steps.plan.outputs.previous_tag }}

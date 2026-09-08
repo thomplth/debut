@@ -60,7 +60,7 @@ if [[ -x "$plan" ]]; then
     expect_equal "$(field "$output" previous_tag)" "v0.1.0" "the plan must report the tag it bumped from"
     rm -rf "$repo"
 
-    # The daily job must not cut an identical release when main has not moved.
+    # The nightly job must not cut an identical release when main has not moved.
     repo="$(make_repo)"
     git -C "$repo" tag v0.1.0
     output="$(cd "$repo" && "$plan" patch --require-changes)"

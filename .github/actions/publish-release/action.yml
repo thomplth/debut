@@ -2,7 +2,7 @@ name: Publish signed Debut release
 description: Build, sign, notarize, verify, and optionally publish the tested commit
 inputs:
   channel:
-    description: daily or stable
+    description: nightly or stable
     required: true
   version:
     description: Display version without v
@@ -73,7 +73,7 @@ runs:
       shell: bash
       run: |
         ./scripts/release-notes.sh "$PREVIOUS_TAG" "v$VERSION" | tee "$RUNNER_TEMP/notes.md"
-        if [[ "${{ inputs.channel }}" == "daily" ]]; then
+        if [[ "${{ inputs.channel }}" == "nightly" ]]; then
             cat >> "$RUNNER_TEMP/notes.md" <<'NOTES'
 
         This nightly is an experimental build, signed with Developer ID and
@@ -195,7 +195,7 @@ runs:
       run: |
         flags=()
         assets=(.build/Debut.dmg)
-        if [[ "${{ inputs.channel }}" == "daily" ]]; then
+        if [[ "${{ inputs.channel }}" == "nightly" ]]; then
             flags+=(--prerelease)
         else
             assets+=(.build/appcast.xml)
