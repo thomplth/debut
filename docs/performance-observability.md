@@ -53,6 +53,5 @@ confirmation and focus-delivery evidence alongside request timing. Likewise,
 window, and `wallpaper_capture` remains in the schema without an active production
 wallpaper-capture path.
 
-Agent-driven installed-app input and pixel validation stays in Tart. Profiling
-commands that only inspect an existing process are distinct from E2E; do not turn
-local profiling into a foreground global-input test. See [local E2E](local-e2e.md).
+Installed-app input and pixel validation runs in Tart. Profiling commands that
+only inspect an existing process are distinct from the global-input E2E harness.
