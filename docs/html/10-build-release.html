@@ -275,8 +275,8 @@ Worth knowing before you look for it:
   patch, minor, or major release uses the protected <code>stable-release</code>
   environment, Developer ID signing, Apple notarisation and a Sparkle EdDSA-signed appcast.
   A single explicit release request authorises the complete workflow without a separate
-  environment approval. Nightly builds are prereleases and never enter that appcast. They currently remain
-  ad-hoc signed and unnotarised pending separate daily signing credentials.</li>
+  environment approval. Nightly builds are prereleases and never enter that appcast. They are also
+  Developer ID-signed and notarised, using their own environment without the Sparkle key.</li>
   <li><strong>No bespoke icon.</strong> The build derives an icon from the system's
   generic application icon.</li>
   <li><strong>Sparkle is the only external runtime dependency.</strong> It is pinned through

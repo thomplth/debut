@@ -66,11 +66,20 @@ silently skipping if none is available.
 
 ## Daily signing and recovery
 
-`daily-release` currently has no signing credentials. Nightlies remain ad-hoc
-signed and unnotarized, and their release notes state that Gatekeeper blocks
-normal first launch. Daily notarization requires separately provisioning Developer
-ID and notary credentials in that environment and enabling the signing steps.
-Do not copy the Sparkle private key or inherit all stable secrets into daily jobs.
+KHA-648 enables Developer ID signing and notarization for nightlies. The
+`daily-release` environment contains only the certificate, export password, and
+App Store Connect notary key, plus the identity/key/issuer variables, and accepts
+only `main`. The daily job binds that environment directly rather than relying
+on reusable-workflow secret inheritance. Both channels invoke the same composite
+publishing action. Daily validation refuses an unexpected Sparkle private key;
+only stable publication can generate an appcast.
+
+`verify-daily-signing.yml` is a manual, non-publishing rehearsal of that exact
+signing action. It has `contents: read`, uses `dry-run: true`, and retains the
+notarized DMG as a workflow artifact for inspection in Tart. Signing credentials
+are removed on success and failure. It runs no GUI/E2E against the hosted runner.
+Use it to verify credential provisioning without creating a GitHub release or
+altering the stable feed.
 
 Sparkle supports key rotation while keeping the other signing identity unchanged;
 the EdDSA key is not permanently immutable. See [Sparkle's rotation rules](https://sparkle-project.org/documentation/#rotating-signing-keys).
