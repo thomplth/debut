@@ -30,9 +30,11 @@ The full label is stamped into `DebutCore.version`; the bundle's short version
 is numeric (`0.5.0`). A separate integer `CFBundleVersion` starts at 10000 and
 increments for every publication across both channels. Each annotated tag records
 it as `Debut-build: N`. The appcast uses that build, not the display version.
-A nightly may consequently update to a later-published stable hotfix; returning
-to the stable channel is intentional even if the nightly's display version is
-higher. Tests run the actual Sparkle comparator across the migration boundary.
+Stable and nightly releases now have separate appcast URLs and separate Sparkle
+keypairs. A build accepts updates only from the channel stamped into its packaged
+Info.plist. Existing nightlies from before this split retain their historical stable
+feed; the first newly isolated nightly bootstraps the nightly feed, and subsequent
+nightlies update only from a compatible nightly.
 
 ## Publication gates
 
@@ -61,25 +63,32 @@ tart clone debut-e2e-tahoe debut-update-tahoe
 
 Use a separate VM; the wrapper stops only `debut-update-tahoe` (overridable with
 `DEBUT_UPDATE_VM`). Evidence is in `~/Library/Caches/Debut/TartUpdate/evidence`.
-The release gate requires a previous signed stable release and fails rather than
-silently skipping if none is available.
+The stable release gate requires a previous signed stable release and fails rather
+than silently skipping if none is available. The first isolated nightly has no
+compatible predecessor and explicitly bootstraps its feed; later nightly releases
+must pass the same real update test against the previous compatible nightly.
 
 ## Nightly signing and recovery
 
 KHA-648 enables Developer ID signing and notarization for nightlies. The
-`nightly` environment contains only the certificate, export password, and
-App Store Connect notary key, plus the identity/key/issuer variables, and accepts
-only `main`. The nightly job binds that environment directly rather than relying
-on reusable-workflow secret inheritance. Both channels invoke the same composite
-publishing action. Nightly validation refuses an unexpected Sparkle private key;
-only stable publication can generate an appcast.
+`nightly` environment contains the certificate, export password, App Store Connect
+notary key, and a Sparkle keypair distinct from stable, and accepts only `main`.
+The nightly job binds that environment directly rather than relying on reusable-workflow
+secret inheritance. Both channels invoke the same composite publishing action and
+generate independently signed appcasts. Validation refuses a nightly public key that
+matches the checked-in stable identity.
 
 `verify-nightly-signing.yml` is a manual, non-publishing rehearsal of that exact
 signing action. It has `contents: read`, uses `dry-run: true`, and retains the
-notarized DMG as a workflow artifact for inspection in Tart. Signing credentials
+notarized DMG and signed nightly appcast as workflow artifacts for inspection in Tart. Signing credentials
 are removed on success and failure. It runs no GUI/E2E against the hosted runner.
 Use it to verify credential provisioning without creating a GitHub release or
-altering the stable feed.
+altering either live feed.
+
+GitHub's `releases/latest` URL excludes prereleases and remains the stable feed.
+The permanent `nightly-feed` prerelease carries only the moving nightly `appcast.xml`;
+the DMG referenced by that appcast remains attached to its immutable versioned nightly
+release. Updating this carrier never changes the stable release or stable appcast.
 
 Sparkle supports key rotation while keeping the other signing identity unchanged;
 the EdDSA key is not permanently immutable. See [Sparkle's rotation rules](https://sparkle-project.org/documentation/#rotating-signing-keys).

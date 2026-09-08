@@ -17,17 +17,20 @@ with tempfile.TemporaryDirectory() as d:
     commit(); git('tag', 'v0.4.0'); commit(); git('tag', 'v0.4.1'); commit(); git('tag', 'v0.4.3')
     p = plan('patch')
     assert p['previous_tag'] == 'v0.4.0', p
+    assert p['previous_update_tag'] == 'v0.4.0', p
     assert p['version'] == '0.4.4', p # Never reuse an old automated prerelease tag.
     assert p['channel'] == 'stable' and p['build_version'] == '10000', p
     p = plan('nightly', '--require-changes')
     assert p['version'] == '0.5.0-nightly.20260908', p
+    assert p['previous_update_tag'] == '', p
     assert p['should_release'] == 'false', p
     commit()
     p = plan('nightly', '--require-changes')
     assert p['channel'] == 'nightly' and p['should_release'] == 'true', p
-    git('tag', '-a', p['tag'], '-m', 'Debut '+p['tag']+'\n\nDebut-build: 10000')
+    git('tag', '-a', p['tag'], '-m', 'Debut '+p['tag']+'\n\nDebut-build: 10000\n\nDebut-update-channel: nightly-v1')
     p = plan('nightly', '--require-changes')
     assert p['should_release'] == 'false', p
+    assert p['previous_update_tag'] == 'v0.5.0-nightly.20260908', p
     assert p['version'] == '0.5.0-nightly.20260908.2' and p['build_version'] == '10001', p
     commit(); git('tag', '-a', 'v0.4.4', '-m', 'Debut v0.4.4\n\nDebut-build: 10001')
     p = plan('patch')
@@ -42,10 +45,18 @@ with tempfile.TemporaryDirectory() as d:
     resources = pathlib.Path(d)/'Resources'; resources.mkdir()
     import plistlib
     plist = resources/'Info.plist'
-    plist.write_bytes(plistlib.dumps({'CFBundleShortVersionString':'0.0.0-dev','CFBundleVersion':'1'}))
-    subprocess.run([str(root/'scripts/apply-version.sh'), '0.5.0-nightly.20260908.2', '10002'], cwd=d, check=True)
+    plist.write_bytes(plistlib.dumps({
+        'CFBundleShortVersionString':'0.0.0-dev',
+        'CFBundleVersion':'1',
+        'SUFeedURL':'https://github.com/thomplth/debut/releases/latest/download/appcast.xml',
+        'SUPublicEDKey':'stable-public-key',
+    }))
+    env = {**os.environ, 'GITHUB_REPOSITORY':'thomplth/debut', 'SPARKLE_PUBLIC_ED_KEY':'nightly-public-key'}
+    subprocess.run([str(root/'scripts/apply-version.sh'), '0.5.0-nightly.20260908.2', '10002', 'nightly'], cwd=d, env=env, check=True)
     info = plistlib.loads(plist.read_bytes())
     assert info['CFBundleShortVersionString'] == '0.5.0' and info['CFBundleVersion'] == '10002', info
+    assert info['SUFeedURL'] == 'https://github.com/thomplth/debut/releases/download/nightly-feed/appcast.xml', info
+    assert info['SUPublicEDKey'] == 'nightly-public-key', info
     assert '0.5.0-nightly.20260908.2' in (source/'DebutCore.swift').read_text()
 print('PASS: release channels, migration, build ordering, and nightly stamping')
 PY

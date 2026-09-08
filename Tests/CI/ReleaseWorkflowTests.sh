@@ -203,6 +203,7 @@ s = Path(sys.argv[1]).read_text()
 assert s.index('verify-appcast-signature.swift') < s.index('git push origin')
 assert s.index('ci-update-e2e.sh') < s.index('git push origin')
 assert s.rindex('verify-release-commit.sh') > s.index('ci-update-e2e.sh')
+assert s.index('gh release create "v$VERSION"') < s.index('gh release upload nightly-feed')
 PY
 
 echo "PASS: release workflow contract"

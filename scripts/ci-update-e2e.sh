@@ -4,8 +4,24 @@ set -euo pipefail
     echo 'Use tart-update-e2e.sh for local update validation.' >&2; exit 1;
 }
 cd "$(dirname "$0")/.."
-previous="${1:?A previous signed stable release is required for the update gate}"
-build="${2:?missing build version}"
+channel="${1:?missing update channel}"
+previous="${2:-}"
+build="${3:?missing build version}"
+case "$channel" in
+    stable)
+        [[ -n "$previous" ]] || {
+            echo 'A previous signed stable release is required for the update gate.' >&2
+            exit 1
+        }
+        ;;
+    nightly)
+        if [[ -z "$previous" ]]; then
+            echo 'No compatible nightly exists yet; this release bootstraps the isolated nightly feed.'
+            exit 0
+        fi
+        ;;
+    *) echo "Unknown update channel: $channel" >&2; exit 1 ;;
+esac
 fixture="$RUNNER_TEMP/update-e2e"
 mkdir -p "$RUNNER_TEMP/update-baseline"
 gh release download "$previous" --repo "$GITHUB_REPOSITORY" --pattern Debut.dmg --dir "$RUNNER_TEMP/update-baseline"

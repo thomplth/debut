@@ -21,6 +21,7 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       build_version: ${{ steps.plan.outputs.build_version }}
       previous_tag: ${{ steps.plan.outputs.previous_tag }}
+      previous_update_tag: ${{ steps.plan.outputs.previous_update_tag }}
       should_release: ${{ steps.plan.outputs.should_release }}
       sha: ${{ github.sha }}
 
@@ -68,9 +69,11 @@ jobs:
       DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
       DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
       APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+      SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
       DEVELOPER_IDENTITY: ${{ vars.DEVELOPER_IDENTITY }}
       APP_STORE_CONNECT_API_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
       APP_STORE_CONNECT_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+      SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
 
     steps:
       - name: Check out the tested commit
@@ -85,4 +88,5 @@ jobs:
           version: ${{ needs.plan.outputs.version }}
           build_version: ${{ needs.plan.outputs.build_version }}
           previous_tag: ${{ needs.plan.outputs.previous_tag }}
+          previous_update_tag: ${{ needs.plan.outputs.previous_update_tag }}
           sha: ${{ needs.plan.outputs.sha }}
