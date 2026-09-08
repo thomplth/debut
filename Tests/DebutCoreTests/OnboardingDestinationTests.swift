@@ -48,6 +48,7 @@ struct OnboardingDestinationTests {
         let permissions = Permissions()
         let model = OnboardingViewModel(permissionClient: permissions)
         model.advance()
+        model.updateEnvironment(desktopCount: 0, windowCount: 0)
         model.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: 0, title: "Next lesson"))
         #expect(!model.recordPractice(.workspace, windowID: 42, desktopIndex: 0))
         model.updateEnvironment(desktopCount: 2, windowCount: 2)

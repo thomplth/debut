@@ -1002,12 +1002,16 @@ if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
     let appeared = waitFor(timeout: 10) { onboardingButton("Get started") != nil }
     var passed = runtimeReady && appeared && onboardingPress("Get started") && !onboardingContinueEnabled()
     if oneDesktop {
-        passed = passed && SpaceService().userDesktops().count == 1 && onboardingContains("Create a second desktop")
+        passed = passed && SpaceService().userDesktops().count == 1 && !onboardingContains("Create a second desktop")
         _ = takeScreenshot("onboarding_one_desktop")
-        passed = passed && DesktopProvisioning.ensureDesktops(2)
-        returnToOnboarding()
-        passed = passed && !onboardingContains("Create a second desktop") && !onboardingContinueEnabled()
-        _ = takeScreenshot("onboarding_desktop_added")
+        passed = passed && performOnboardingExercise(.workspace)
+        if onboardingContains("Allow Screen Recording for window previews") {
+            passed = passed && onboardingPress("Use without previews")
+        }
+        passed = passed && performOnboardingExercise(.allWindows)
+            && onboardingPress("Continue") && onboardingPress("Start using Debut")
+            && SpaceService().userDesktops().count == 1
+        _ = takeScreenshot("onboarding_one_desktop_complete")
     } else if deniedAccessibility {
         passed = passed && onboardingContains("Allow Accessibility to continue")
         _ = takeScreenshot("onboarding_accessibility_denied")
@@ -2098,7 +2102,7 @@ func selectedOnboardingWindowID() -> String? {
 @MainActor
 func performOnboardingExercise(_ practice: OnboardingPractice) -> Bool {
     let title: String = switch practice {
-    case .workspace: "Desktop switching"
+    case .workspace: SpaceService().userDesktops().count == 1 ? "Window previews" : "Desktop switching"
     case .desktop: "Move a window"
     case .moveWindow: "Window previews"
     case .allWindows: "Instant desktop switching"
@@ -2192,11 +2196,16 @@ func performOnboardingExercise(_ practice: OnboardingPractice) -> Bool {
     // shows the instructions a learner follows rather than a transient loading state.
     return waitFor(timeout: 8) {
         switch practice {
-        case .workspace: currentOnboardingTarget()?["title"] == "Move a window" && onboardingContains("Hold Command and press Tab")
-        case .desktop: currentOnboardingTarget()?["title"] == "Window previews" && onboardingContains("Hold Command and press Tab")
-        case .moveWindow: (currentOnboardingTarget()?["title"] == "Instant desktop switching" && onboardingContains("Hold Option and press Tab"))
+        case .workspace:
+            if SpaceService().userDesktops().count == 1 {
+                return onboardingContains("Allow Screen Recording for window previews")
+                    || (currentOnboardingTarget()?["title"] == "Instant desktop switching" && onboardingContains("Hold Option and press Tab"))
+            }
+            return currentOnboardingTarget()?["title"] == "Move a window" && onboardingContains("Hold Command and press Tab")
+        case .desktop: return currentOnboardingTarget()?["title"] == "Window previews" && onboardingContains("Hold Command and press Tab")
+        case .moveWindow: return (currentOnboardingTarget()?["title"] == "Instant desktop switching" && onboardingContains("Hold Option and press Tab"))
             || onboardingContains("Allow Screen Recording for window previews")
-        case .allWindows: onboardingContains("Desktop transition duration")
+        case .allWindows: return onboardingContains("Desktop transition duration")
         }
     }
 }

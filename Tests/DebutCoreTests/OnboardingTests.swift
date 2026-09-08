@@ -27,6 +27,36 @@ private final class MockOnboardingPermissionClient: OnboardingPermissionClient {
 @MainActor
 @Suite("Onboarding")
 struct OnboardingTests {
+    @Test("One desktop can finish both window exercises without creating a desktop")
+    func singleDesktop() {
+        let permissions = MockOnboardingPermissionClient()
+        permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: true)
+        let model = OnboardingViewModel(permissionClient: permissions)
+        model.advance()
+        model.updateEnvironment(desktopCount: 1, windowCount: 2)
+        model.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: 0, title: "Window previews"))
+        #expect(model.recordPractice(.workspace, windowID: 42, desktopIndex: 0))
+        #expect(model.page == .previews)
+        model.setTarget(.init(windowID: 43, originDesktop: 0, destinationDesktop: 0, title: "Instant desktop switching"))
+        #expect(model.recordPractice(.allWindows, windowID: 43, desktopIndex: 0))
+        #expect(model.page == .speed)
+        model.back()
+        model.back()
+        #expect(model.page == .workspace)
+        #expect(model.exercise == .switchWindow)
+    }
+
+    @Test("Losing the second desktop resets an unavailable exercise")
+    func desktopRemoved() {
+        let permissions = MockOnboardingPermissionClient()
+        let model = OnboardingViewModel(permissionClient: permissions,
+            checkpoint: .init(page: .workspace, exercise: .moveWindow, workspacePracticed: false, allWindowsPracticed: false))
+        model.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: 1, title: "Window previews"))
+        model.updateEnvironment(desktopCount: 1, windowCount: 2)
+        #expect(model.exercise == .switchWindow)
+        #expect(model.target == nil)
+    }
+
     @Test("Preview warmup never asks for a permission before its lesson")
     func captureGate() {
         #expect(!OnboardingCapturePolicy.isEnabled(previewsRequested: true, screenRecordingGranted: false))
