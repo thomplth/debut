@@ -233,6 +233,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var pendingPractice: (windowID: CGWindowID, practice: OnboardingPractice)?
 
     private var pendingSpaceFocus: (spaceID: UUID, windowID: CGWindowID)?
+    private var overlayPointerSelection: (spaceID: UUID, windowID: CGWindowID)?
     /// Focus restored by macOS while Debut is traversing adjacent desktops is passive. Keep
     /// only the latest positively located candidate per display stack until the coordinator
     /// says the switch stopped; intermediate candidates then fail the showing-desktop check,
@@ -1559,6 +1560,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         tutorialMovedWindowIDs = []
         pendingPractice = nil
         overlayMode = mode
+        overlayPointerSelection = nil
         let presentation = activeOverlayPresentation
         let focusedWindow = probeFocusedWindow()
         activeTutorialScope = tutorialScope.flatMap { scope in
@@ -1907,6 +1909,18 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func commitSelection() {
         guard isSpaceManagerVisible, !isStageStackCommitInFlight else { return }
+        let preview = overlaySpaceManager
+        if overlayMode == .stages, let overlayPointerSelection,
+           let spaceIndex = preview.spaces.firstIndex(where: {
+               $0.id == overlayPointerSelection.spaceID
+           }),
+           let windowIndex = preview.spaces[spaceIndex].windows.firstIndex(where: {
+               $0.windowID == overlayPointerSelection.windowID
+           }) {
+            selectedSpaceIndex = spaceIndex
+            selectedWindowIndex = windowIndex
+        }
+        overlayPointerSelection = nil
         isStageStackCommitInFlight = true
         commitStageStackTransaction { [weak self] in
             self?.finishSelectionCommit()
@@ -1947,6 +1961,29 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         ])
     }
 
+    /// Keep the pointer's highlight apart from the keyboard cursor until the session resolves.
+    /// While a card remains hovered, Command release gives that pointer selection precedence.
+    public func updateOverlayPointerSelection(spaceIndex: Int?, windowIndex: Int?) {
+        let preview = overlaySpaceManager
+        guard isSpaceManagerVisible, !isStageStackCommitInFlight, overlayMode == .stages
+        else { return }
+        guard let spaceIndex, let windowIndex else {
+            overlayPointerSelection = nil
+            return
+        }
+        guard preview.spaces.indices.contains(spaceIndex),
+              preview.spaces[spaceIndex].windows.indices.contains(windowIndex)
+        else {
+            overlayPointerSelection = nil
+            return
+        }
+
+        overlayPointerSelection = (
+            spaceID: preview.spaces[spaceIndex].id,
+            windowID: preview.spaces[spaceIndex].windows[windowIndex].windowID
+        )
+    }
+
     /// Commit a window chosen with the pointer without waiting for Command release.
     public func commitOverlaySelection(spaceIndex: Int, windowIndex: Int) {
         let preview = overlaySpaceManager
@@ -1957,6 +1994,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         selectedSpaceIndex = spaceIndex
         selectedWindowIndex = windowIndex
+        overlayPointerSelection = nil
         commitSelection()
     }
 
