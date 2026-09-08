@@ -50,6 +50,8 @@ if [[ -x "$plan" ]]; then
     expect_equal "$(field "$output" version)" "0.1.0" "an untagged repo must plan the 0.1.0 baseline"
     expect_equal "$(field "$output" should_release)" "true" "an untagged repo must be releasable"
     expect_equal "$(field "$output" previous_tag)" "" "an untagged repo must report no previous tag"
+    expect_equal "$(field "$output" previous_update_tag)" "" \
+        "an untagged repo must report no previous compatible update"
     rm -rf "$repo"
 
     repo="$(make_repo)"
@@ -58,6 +60,8 @@ if [[ -x "$plan" ]]; then
     output="$(cd "$repo" && "$plan" patch)"
     expect_equal "$(field "$output" version)" "0.1.1" "patch bumps must increment the third number"
     expect_equal "$(field "$output" previous_tag)" "v0.1.0" "the plan must report the tag it bumped from"
+    expect_equal "$(field "$output" previous_update_tag)" "v0.1.0" \
+        "stable updates must use the previous stable release"
     rm -rf "$repo"
 
     # The nightly job must not cut an identical release when main has not moved.
@@ -164,16 +168,27 @@ SWIFT
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>SUFeedURL</key>
+    <string>https://example.invalid/old.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>old-key</string>
 </dict>
 </plist>
 PLIST
-    (cd "$repo" && "$apply" 1.2.3)
+    (cd "$repo" && GITHUB_REPOSITORY=thomplth/debut \
+        SPARKLE_PUBLIC_ED_KEY=stable-public-key "$apply" 1.2.3 10003 stable)
     grep -q 'public static let version = "1.2.3"' "$repo/Sources/DebutCore/DebutCore.swift" \
         || fail "apply-version must update the version the app reports"
     grep -A1 "CFBundleShortVersionString" "$repo/Resources/Info.plist" | grep -q "<string>1.2.3</string>" \
         || fail "apply-version must update the bundle's short version string"
-    grep -A1 "<key>CFBundleVersion</key>" "$repo/Resources/Info.plist" | grep -q "<string>1.2.3</string>" \
+    grep -A1 "<key>CFBundleVersion</key>" "$repo/Resources/Info.plist" | grep -q "<string>10003</string>" \
         || fail "apply-version must keep the bundle version monotonic with the release"
+    grep -A1 "<key>SUFeedURL</key>" "$repo/Resources/Info.plist" \
+        | grep -q '<string>https://github.com/thomplth/debut/releases/latest/download/appcast.xml</string>' \
+        || fail "stable releases must embed only the stable appcast URL"
+    grep -A1 "<key>SUPublicEDKey</key>" "$repo/Resources/Info.plist" \
+        | grep -q '<string>stable-public-key</string>' \
+        || fail "stable releases must embed their own public key"
     rm -rf "$repo"
 
     # A silent no-op would ship a release whose app reports the previous version.

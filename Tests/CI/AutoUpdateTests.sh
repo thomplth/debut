@@ -2,8 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
-eligibility="$repo_root/scripts/stable-update-eligibility.sh"
+eligibility="$repo_root/scripts/update-eligibility.sh"
 appcast="$repo_root/scripts/generate-appcast.sh"
+apply_version="$repo_root/scripts/apply-version.sh"
 plist="$repo_root/Resources/Info.plist"
 package="$repo_root/Package.swift"
 build="$repo_root/scripts/build-app.sh"
@@ -28,20 +29,26 @@ expect_contains() {
     grep -Eq -- "$pattern" "$path" || fail "$message"
 }
 
-[[ -x "$eligibility" ]] || fail "missing executable stable-update-eligibility.sh"
+[[ -x "$eligibility" ]] || fail "missing executable update-eligibility.sh"
 [[ -x "$appcast" ]] || fail "missing executable generate-appcast.sh"
 [[ -x "$validate_credentials" ]] || fail "missing executable validate-release-credentials.sh"
 
 if [[ -x "$eligibility" ]]; then
     [[ "$($eligibility stable 1.2.0)" == "eligible=true" ]] \
         || fail "a stable .0 release must be update eligible"
-    [[ "$($eligibility nightly 1.2.1-nightly.20260908)" == "eligible=false" ]] \
-        || fail "a nightly release must not be update eligible"
+    [[ "$($eligibility nightly 1.3.0-nightly.20260908)" == "eligible=true" ]] \
+        || fail "a nightly release must be eligible for its own update channel"
     if ! "$eligibility" stable 1.2.1 >/dev/null 2>&1; then
         fail "a promoted patch release must be accepted"
     fi
     if "$eligibility" stable invalid >/dev/null 2>&1; then
         fail "an invalid stable version must be rejected"
+    fi
+    if "$eligibility" stable 1.3.0-nightly.20260908 >/dev/null 2>&1; then
+        fail "stable update eligibility must reject nightly versions"
+    fi
+    if "$eligibility" nightly 1.3.0 >/dev/null 2>&1; then
+        fail "nightly update eligibility must reject stable versions"
     fi
 fi
 
@@ -56,6 +63,7 @@ if [[ -x "$validate_credentials" ]]; then
         APP_STORE_CONNECT_API_KEY_ID=notary-key-id \
         APP_STORE_CONNECT_ISSUER_ID=notary-issuer-id \
         SPARKLE_EDDSA_PRIVATE_KEY=sparkle-key \
+        SPARKLE_PUBLIC_ED_KEY='CtM67t8i60pFgyqC08m0za5aNl8anza7JZv6A93SILA=' \
         "$validate_credentials" stable >/dev/null \
         || fail "stable releases must accept a complete credential set"
     if "$validate_credentials" nightly >/dev/null 2>&1; then
@@ -73,15 +81,20 @@ echo 'sparkle:edSignature="fixture-signature" length="1234"'
 SCRIPT
     chmod +x "$fake_signer"
     SPARKLE_SIGN_UPDATE="$fake_signer" GITHUB_REPOSITORY=thomplth/debut \
-        "$appcast" 1.2.0 "$fixture/Debut.dmg" "$fixture/private-key" "$fixture/appcast.xml" "$plist" \
+        "$appcast" stable 1.2.0 "$fixture/Debut.dmg" "$fixture/private-key" "$fixture/appcast.xml" "$plist" \
         >/dev/null
     expect_contains "$fixture/appcast.xml" 'releases/download/v1\.2\.0/Debut\.dmg' \
         "the appcast must point at the immutable versioned release asset"
     expect_contains "$fixture/appcast.xml" 'sparkle:edSignature="fixture-signature" length="1234"' \
         "the appcast must carry Sparkle's signature and exact archive length"
-    if SPARKLE_SIGN_UPDATE="$fake_signer" "$appcast" 1.2.1-nightly.20260908 \
+    SPARKLE_SIGN_UPDATE="$fake_signer" GITHUB_REPOSITORY=thomplth/debut \
+        "$appcast" nightly 1.3.0-nightly.20260908 "$fixture/Debut.dmg" \
+        "$fixture/private-key" "$fixture/nightly-appcast.xml" "$plist" >/dev/null
+    expect_contains "$fixture/nightly-appcast.xml" '<title>Debut Nightly Updates</title>' \
+        "nightly appcasts must identify their own channel"
+    if SPARKLE_SIGN_UPDATE="$fake_signer" "$appcast" stable 1.2.1-nightly.20260908 \
         "$fixture/Debut.dmg" "$fixture/private-key" "$fixture/patch.xml" "$plist" >/dev/null 2>&1; then
-        fail "appcast generation must refuse nightly releases"
+        fail "stable appcast generation must refuse nightly versions"
     fi
     rm -rf "$fixture"
 fi
@@ -117,6 +130,10 @@ expect_contains "$package_dmg" 'codesign.*\$DMG' \
     "stable packaging must sign the outer disk image before notarization"
 
 expect_contains "$nightly" 'channel: nightly' "nightly releases must identify the nightly channel"
+expect_contains "$nightly" 'SPARKLE_EDDSA_PRIVATE_KEY:.*secrets\.SPARKLE_EDDSA_PRIVATE_KEY' \
+    "nightly appcasts must use the protected nightly Sparkle key"
+expect_contains "$nightly" 'SPARKLE_PUBLIC_ED_KEY:.*vars\.SPARKLE_PUBLIC_ED_KEY' \
+    "nightly builds must embed the nightly public key"
 expect_contains "$manual" 'channel: stable' "manual releases must identify the stable channel"
 manual_publish_job="$(sed -n '/^  publish:/,$p' "$manual")"
 if ! grep -Eq '^    secrets: inherit$' <<< "$manual_publish_job"; then
@@ -130,14 +147,22 @@ expect_contains "$publish_contract" "environment: stable$" \
     "release secrets must be isolated by channel environment"
 expect_contains "$publish_contract" 'validate-release-credentials\.sh' \
     "publishing must fail before stamping or tagging when protected credentials are unavailable"
-expect_contains "$publish_contract" 'stable-update-eligibility\.sh' \
-    "publishing must enforce stable update eligibility"
+expect_contains "$publish_contract" 'update-eligibility\.sh' \
+    "publishing must enforce channel-specific update eligibility"
 expect_contains "$publish_contract" -- '--prerelease' "nightly GitHub releases must be prereleases"
 expect_contains "$publish_contract" 'notarytool submit' "stable releases must be notarized"
 expect_contains "$publish_contract" 'stapler staple' "stable releases must staple the notarization ticket"
-expect_contains "$publish_contract" 'generate-appcast\.sh' "stable releases must generate an appcast"
+expect_contains "$publish_contract" 'generate-appcast\.sh' "both release channels must generate an appcast"
 expect_contains "$publish_contract" 'SPARKLE_EDDSA_PRIVATE_KEY' \
-    "stable appcasts must be signed with the protected Sparkle key"
+    "appcasts must be signed with each channel's protected Sparkle key"
+expect_contains "$apply_version" 'releases/download/nightly-feed/appcast\.xml' \
+    "nightly builds must use the isolated nightly feed"
+expect_contains "$publish_contract" 'gh release (create|upload) nightly-feed' \
+    "nightly publication must maintain the dedicated feed release"
+expect_contains "$publish_contract" 'previous_update_tag' \
+    "update verification must use a previous release from the same compatible channel"
+expect_contains "$publish_contract" 'ci-update-e2e\.sh.*CHANNEL' \
+    "both channels must exercise their own Sparkle update path"
 
 if (( failures > 0 )); then
     exit 1

@@ -21,7 +21,7 @@ SWIFT
 TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift "$fixture/fixture.swift" "$fixture"
 # This is Sparkle's real signer, not the contract test's stub.
 SPARKLE_SIGN_UPDATE="${SPARKLE_SIGN_UPDATE:-$root/.build/artifacts/sparkle/Sparkle/bin/sign_update}" \
-    "$root/scripts/generate-appcast.sh" 1.2.1 "$fixture/Debut.dmg" "$fixture/private-key" "$fixture/appcast.xml" "$fixture/Info.plist"
+    "$root/scripts/generate-appcast.sh" stable 1.2.1 "$fixture/Debut.dmg" "$fixture/private-key" "$fixture/appcast.xml" "$fixture/Info.plist"
 verify() { TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift "$root/scripts/verify-appcast-signature.swift" "$fixture/appcast.xml" "$fixture/Debut.dmg" "$fixture/Info.plist"; }
 verify
 for tamper in archive length signature build minimum key; do

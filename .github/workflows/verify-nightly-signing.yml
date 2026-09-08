@@ -21,9 +21,11 @@ jobs:
       DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
       DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
       APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+      SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
       DEVELOPER_IDENTITY: ${{ vars.DEVELOPER_IDENTITY }}
       APP_STORE_CONNECT_API_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
       APP_STORE_CONNECT_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+      SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
 
     steps:
       - name: Check out main
@@ -41,11 +43,14 @@ jobs:
           version: ${{ steps.plan.outputs.version }}
           build_version: ${{ steps.plan.outputs.build_version }}
           previous_tag: ${{ steps.plan.outputs.previous_tag }}
+          previous_update_tag: ${{ steps.plan.outputs.previous_update_tag }}
           sha: ${{ github.sha }}
           dry-run: true
-      - name: Retain the notarized artifact
+      - name: Retain the notarized update rehearsal
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: debut-notarized-nightly
-          path: .build/Debut.dmg
+          path: |
+            .build/Debut.dmg
+            .build/appcast.xml
           retention-days: 7

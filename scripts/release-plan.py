@@ -55,21 +55,33 @@ else:
 # start from the previous stable, never from an intervening nightly.
 commits = {}
 maximum_build = 9999  # Greater than every pre-migration 0.x bundle version.
+compatible_nightly_tags = set()
 for tag in versions:
     commit = git('rev-parse', tag + '^{commit}')
     commits.setdefault(commit, []).append(tag)
     annotation = git('for-each-ref', '--format=%(contents)', 'refs/tags/' + tag)
     for build in re.findall(r'^Debut-build: ([1-9][0-9]*)$', annotation, re.MULTILINE):
         maximum_build = max(maximum_build, int(build))
+    if versions[tag][4] and re.search(r'^Debut-update-channel: nightly-v1$', annotation, re.MULTILINE):
+        compatible_nightly_tags.add(tag)
 previous_release = ''
-for commit in git('rev-list', '--first-parent', 'HEAD').splitlines():
+history = git('rev-list', '--first-parent', 'HEAD').splitlines()
+for commit in history:
     if commit in commits:
         previous_release = sorted(commits[commit])[0]
         break
+previous_update_tag = previous_stable if args.bump != 'nightly' else ''
+if args.bump == 'nightly':
+    for commit in history:
+        candidates = compatible_nightly_tags.intersection(commits.get(commit, []))
+        if candidates:
+            previous_update_tag = sorted(candidates)[-1]
+            break
 should_release = not (args.require_changes and previous_release and
                       not git('rev-list', previous_release + '..HEAD'))
 print('previous_tag=' + (previous_release if args.bump == 'nightly' else previous_stable))
 print('previous_stable_tag=' + previous_stable)
+print('previous_update_tag=' + previous_update_tag)
 print('version=' + version)
 print('tag=v' + version)
 print('channel=' + ('nightly' if args.bump == 'nightly' else 'stable'))

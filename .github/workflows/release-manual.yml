@@ -28,6 +28,7 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       build_version: ${{ steps.plan.outputs.build_version }}
       previous_tag: ${{ steps.plan.outputs.previous_tag }}
+      previous_update_tag: ${{ steps.plan.outputs.previous_update_tag }}
       sha: ${{ github.sha }}
 
     steps:
@@ -73,4 +74,5 @@ jobs:
       version: ${{ needs.plan.outputs.version }}
       build_version: ${{ needs.plan.outputs.build_version }}
       previous_tag: ${{ needs.plan.outputs.previous_tag }}
+      previous_update_tag: ${{ needs.plan.outputs.previous_update_tag }}
       sha: ${{ needs.plan.outputs.sha }}

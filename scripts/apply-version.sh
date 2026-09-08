@@ -4,7 +4,7 @@ set -euo pipefail
 # Rewrites the two places the app states its own version. Runs against the current directory so
 # the release tests can drive it with fixture files.
 #
-# Usage: apply-version.sh <version> [numeric-build-version]
+# Usage: apply-version.sh <version> [numeric-build-version] [nightly|stable]
 
 version="${1:-}"
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-nightly\.[0-9]{8}(\.[1-9][0-9]*)?)?$ ]]; then
@@ -14,10 +14,18 @@ fi
 
 short_version="${version%%-*}"
 build_version="${2:-$short_version}"
+channel="${3:-}"
 [[ "$build_version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "invalid numeric bundle build" >&2; exit 2; }
 if [[ "$version" == *-nightly.* && -z "${2:-}" ]]; then
     echo "nightlies require the build_version from release-plan.sh" >&2
     exit 2
+fi
+if [[ -n "$channel" ]]; then
+    "$(dirname "$0")/update-eligibility.sh" "$channel" "$version" >/dev/null
+    [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]] || {
+        echo "apply-version: missing SPARKLE_PUBLIC_ED_KEY for $channel" >&2
+        exit 1
+    }
 fi
 
 source_file="Sources/DebutCore/DebutCore.swift"
@@ -49,6 +57,16 @@ sed -E -i '' "s/(public static let version = \")[^\"]*(\")/\1$version\2/" "$sour
 set_plist_string CFBundleShortVersionString "$short_version"
 # The publish workflow supplies the monotonic build recorded in its annotated tag.
 set_plist_string CFBundleVersion "$build_version"
+if [[ -n "$channel" ]]; then
+    repository="${GITHUB_REPOSITORY:-thomplth/debut}"
+    if [[ "$channel" == stable ]]; then
+        feed_url="https://github.com/$repository/releases/latest/download/appcast.xml"
+    else
+        feed_url="https://github.com/$repository/releases/download/nightly-feed/appcast.xml"
+    fi
+    set_plist_string SUFeedURL "$feed_url"
+    set_plist_string SUPublicEDKey "$SPARKLE_PUBLIC_ED_KEY"
+fi
 
 # A rewrite that quietly matched nothing would ship a build reporting the previous version.
 verify() {
@@ -64,5 +82,11 @@ grep -A1 "<key>CFBundleShortVersionString</key>" "$plist" | grep -q "<string>$sh
     || { echo "apply-version: could not set CFBundleShortVersionString in $plist" >&2; exit 1; }
 grep -A1 "<key>CFBundleVersion</key>" "$plist" | grep -q "<string>$build_version</string>" \
     || { echo "apply-version: could not set CFBundleVersion in $plist" >&2; exit 1; }
+if [[ -n "$channel" ]]; then
+    grep -A1 "<key>SUFeedURL</key>" "$plist" | grep -Fq "<string>$feed_url</string>" \
+        || { echo "apply-version: could not set SUFeedURL in $plist" >&2; exit 1; }
+    grep -A1 "<key>SUPublicEDKey</key>" "$plist" | grep -Fq "<string>$SPARKLE_PUBLIC_ED_KEY</string>" \
+        || { echo "apply-version: could not set SUPublicEDKey in $plist" >&2; exit 1; }
+fi
 
 echo "Applied version $version"

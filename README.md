@@ -179,11 +179,12 @@ reconciliation use macOS notifications; captures refresh when needed.
 ## Releases and license
 
 [Stable releases](https://github.com/thomplth/debut/releases/latest) are signed,
-notarized and offered through automatic updates. Nightly builds are prereleases
-and do not enter the stable update feed. Release workflows gate on CI and E2E and tag
+notarized and offered through automatic updates. Nightly builds are prereleases with
+their own automatic-update feed and Sparkle identity; stable and nightly installations
+never consume one another's updates. Release workflows gate on CI and E2E and tag
 the tested commit. A single explicit release request authorizes a stable patch, minor,
 or major release. Nightlies are also Developer ID-signed and notarized, using credentials isolated
-from stable automatic-update signing. See [release verification](docs/release-verification.md).
+from stable signing. See [release verification](docs/release-verification.md).
 A local build reports `0.0.0-dev`.
 
 Debut is free software under the [GNU GPL version 3 only](LICENSE) (`GPL-3.0-only`). Source for each
