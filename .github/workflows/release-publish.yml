@@ -1,7 +1,7 @@
 name: Publish Release
 
-# Only reachable from the daily and manual release workflows, so a release can never bypass
-# the CI and E2E gates they run first.
+# Stable wrapper called only after the manual workflow passes CI and E2E.
+# Daily publication binds its environment directly and uses the shared action.
 on:
   workflow_call:
     inputs:
@@ -32,9 +32,19 @@ permissions:
 
 jobs:
   publish:
+    if: inputs.channel == 'stable'
     runs-on: macos-26
     timeout-minutes: 30
-    environment: ${{ inputs.channel == 'stable' && 'stable-release' || 'daily-release' }}
+    environment: stable-release
+
+    env:
+      DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+      DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+      SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+      DEVELOPER_IDENTITY: ${{ vars.DEVELOPER_IDENTITY }}
+      APP_STORE_CONNECT_API_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
 
     steps:
       - name: Check out the commit the gates tested
@@ -43,179 +53,11 @@ jobs:
           ref: ${{ inputs.sha }}
           fetch-depth: 0
 
-      - name: Refuse to release a commit the gates never saw
-        env:
-          SHA: ${{ inputs.sha }}
-        run: ./scripts/verify-release-commit.sh "$SHA"
-
-      - name: Enforce automatic update channel policy
-        id: update_policy
-        env:
-          CHANNEL: ${{ inputs.channel }}
-          VERSION: ${{ inputs.version }}
-        run: ./scripts/stable-update-eligibility.sh "$CHANNEL" "$VERSION" | tee -a "$GITHUB_OUTPUT"
-
-      - name: Validate stable release credentials
-        env:
-          CHANNEL: ${{ inputs.channel }}
-          DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
-          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-          DEVELOPER_IDENTITY: ${{ vars.DEVELOPER_IDENTITY }}
-          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
-          APP_STORE_CONNECT_API_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
-          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
-        run: ./scripts/validate-release-credentials.sh "$CHANNEL"
-
-      - name: Select the macOS 26 toolchain
-        run: |
-          echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> "$GITHUB_ENV"
-          echo "TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault" >> "$GITHUB_ENV"
-
-      # Stamped into the working tree for the build only. It is deliberately never committed:
-      # the tag is what records the version.
-      - name: Stamp the version into the build
-        env:
-          VERSION: ${{ inputs.version }}
-          BUILD_VERSION: ${{ inputs.build_version }}
-        run: ./scripts/apply-version.sh "$VERSION" "$BUILD_VERSION"
-
-      - name: Write the release notes
-        env:
-          VERSION: ${{ inputs.version }}
-          PREVIOUS_TAG: ${{ inputs.previous_tag }}
-        run: |
-          ./scripts/release-notes.sh "$PREVIOUS_TAG" "v$VERSION" | tee "$RUNNER_TEMP/notes.md"
-          if [[ "${{ inputs.channel }}" == "daily" ]]; then
-              cat >> "$RUNNER_TEMP/notes.md" <<'NOTES'
-
-          This nightly is an experimental, ad-hoc signed build. It is not notarized;
-          macOS Gatekeeper will block normal first launch. Use the latest stable
-          release for a signed, notarized download and automatic updates.
-          NOTES
-          fi
-
-      - name: Import the stable Developer ID identity
-        if: inputs.channel == 'stable'
-        env:
-          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-        run: |
-          umask 077
-          certificate="$RUNNER_TEMP/developer-id.p12"
-          keychain="$RUNNER_TEMP/debut-signing.keychain-db"
-          keychain_password="$(uuidgen)$(uuidgen)"
-          printf '%s' "$CERTIFICATE_BASE64" | /usr/bin/base64 -D > "$certificate"
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          security import "$certificate" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
-          security list-keychains -d user -s "$keychain"
-
-      - name: Tag the tested commit
-        env:
-          VERSION: ${{ inputs.version }}
-          BUILD_VERSION: ${{ inputs.build_version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v$VERSION" -m "Debut v$VERSION" -m "Debut-build: $BUILD_VERSION"
-          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
-
-      - name: Build the disk image
-        env:
-          DEBUT_DISTRIBUTION_SIGNING: ${{ inputs.channel == 'stable' && '1' || '0' }}
-          DEBUT_SIGNING_IDENTITY: ${{ inputs.channel == 'stable' && vars.DEVELOPER_IDENTITY || '' }}
-        run: ./scripts/package-dmg.sh
-
-      - name: Notarize and staple the stable disk image
-        if: inputs.channel == 'stable'
-        env:
-          NOTARY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
-          NOTARY_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
-          NOTARY_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          umask 077
-          key="$RUNNER_TEMP/notary-api-key.p8"
-          printf '%s' "$NOTARY_KEY" > "$key"
-          xcrun notarytool submit .build/Debut.dmg \
-            --key "$key" \
-            --key-id "$NOTARY_KEY_ID" \
-            --issuer "$NOTARY_ISSUER_ID" \
-            --wait
-          xcrun stapler staple .build/Debut.dmg
-          xcrun stapler validate .build/Debut.dmg
-
-      - name: Sign and generate the stable appcast
-        if: steps.update_policy.outputs.eligible == 'true'
-        env:
-          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
-          VERSION: ${{ inputs.version }}
-        run: |
-          umask 077
-          private_key="$RUNNER_TEMP/sparkle-eddsa.key"
-          printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$private_key"
-          ./scripts/generate-appcast.sh "$VERSION" .build/Debut.dmg "$private_key" .build/appcast.xml .build/Debut.app/Contents/Info.plist
-          swift scripts/verify-appcast-signature.swift .build/appcast.xml .build/Debut.dmg .build/Debut.app/Contents/Info.plist
-
-      - name: Assess the notarized artifact with Gatekeeper
-        if: inputs.channel == 'stable'
-        env:
-          VERSION: ${{ inputs.version }}
-          BUILD_VERSION: ${{ inputs.build_version }}
-        run: ./scripts/verify-distribution.sh .build/Debut.dmg "$VERSION" "$BUILD_VERSION" .build/appcast.xml
-
-      - name: Verify Sparkle installs and relaunches the signed candidate
-        if: inputs.channel == 'stable'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PREVIOUS_TAG: ${{ inputs.previous_tag }}
-          BUILD_VERSION: ${{ inputs.build_version }}
-        run: ./scripts/ci-update-e2e.sh "$PREVIOUS_TAG" "$BUILD_VERSION"
-
-      - name: Retain signed update rehearsal evidence
-        if: always() && inputs.channel == 'stable'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - name: Publish the signed stable release
+        uses: ./.github/actions/publish-release
         with:
-          name: debut-update-evidence
-          path: ${{ runner.temp }}/update-e2e/evidence
-          if-no-files-found: ignore
-          retention-days: 7
-
-      # Last, so a build or packaging failure leaves no tag behind claiming a release happened.
-      - name: Push the tag
-        env:
-          SHA: ${{ inputs.sha }}
-        run: |
-          ./scripts/verify-release-commit.sh "$SHA"
-          git push origin "$TAG"
-
-      - name: Publish the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
-        run: |
-          flags=()
-          assets=(.build/Debut.dmg)
-          if [[ "${{ inputs.channel }}" == "daily" ]]; then
-              flags+=(--prerelease)
-          else
-              assets+=(.build/appcast.xml)
-          fi
-          gh release create "v$VERSION" \
-            --title "Debut v$VERSION" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
-            "${flags[@]}" \
-            "${assets[@]}"
-
-      # A failing step leaves the signing material behind, so this runs unconditionally and does
-      # not fail the run: a release that succeeded must not be reported as broken by its own tidying.
-      - name: Remove the signing material from the runner
-        if: always()
-        continue-on-error: true
-        run: |
-          security delete-keychain "$RUNNER_TEMP/debut-signing.keychain-db" || true
-          rm -f "$RUNNER_TEMP/developer-id.p12"
-          rm -f "$RUNNER_TEMP/notary-api-key.p8"
-          rm -f "$RUNNER_TEMP/sparkle-eddsa.key"
+          channel: ${{ inputs.channel }}
+          version: ${{ inputs.version }}
+          build_version: ${{ inputs.build_version }}
+          previous_tag: ${{ inputs.previous_tag }}
+          sha: ${{ inputs.sha }}

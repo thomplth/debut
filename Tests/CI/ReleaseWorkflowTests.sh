@@ -11,6 +11,10 @@ e2e=".github/workflows/e2e.yml"
 agents="AGENTS.md"
 readme="README.md"
 release_guide="docs/html/10-build-release.html"
+# The stable wrapper and direct daily job execute one shared composite action.
+publish_contract="$(mktemp)"
+trap 'rm -f "$publish_contract"' EXIT
+cat "$publish" "$(dirname "$publish")/../actions/publish-release/action.yml" > "$publish_contract"
 failures=0
 
 fail() {
@@ -34,7 +38,7 @@ expect_not_contains() {
     fi
 }
 
-for workflow in "$ci" "$daily" "$manual" "$publish" "$e2e"; do
+for workflow in "$ci" "$daily" "$manual" "$publish_contract" "$e2e"; do
     [[ -f "$workflow" ]] || fail "missing $workflow"
 done
 
@@ -68,7 +72,7 @@ for workflow in "$daily" "$manual"; do
         "$name must gate the release on CI"
     expect_contains "$workflow" 'uses: \./\.github/workflows/e2e\.yml' \
         "$name must gate the release on the E2E suite"
-    expect_contains "$workflow" 'uses: \./\.github/workflows/release-publish\.yml' \
+    expect_contains "$workflow" 'uses: \./\.github/(workflows/release-publish\.yml|actions/publish-release)' \
         "$name must publish through the shared release workflow"
     expect_contains "$workflow" 'needs: \[[^]]*ci[^]]*\]' \
         "$name must not publish before CI has passed"
@@ -121,50 +125,50 @@ expect_contains "$release_guide" 'single explicit release request' \
 expect_not_contains "$agents" 'forbids any bot from updating' \
     "the agent notes must not claim protection the ruleset does not provide"
 
-if [[ -f "$publish" ]]; then
-    expect_contains "$publish" '^  workflow_call:' "the publish workflow must only run as a called gate"
-    expect_not_contains "$publish" '^  (schedule|pull_request|push):' \
+if [[ -f "$publish_contract" ]]; then
+    expect_contains "$publish_contract" '^  workflow_call:' "the publish workflow must only run as a called gate"
+    expect_not_contains "$publish_contract" '^  (schedule|pull_request|push):' \
         "the publish workflow must not be reachable without its gates"
-    expect_contains "$publish" 'contents: write' "publishing must be able to push the tag and release"
-    expect_contains "$publish" 'scripts/apply-version\.sh' \
+    expect_contains "$publish_contract" 'contents: write' "publishing must be able to push the tag and release"
+    expect_contains "$publish_contract" 'scripts/apply-version\.sh' \
         "the published build must report the version being released"
-    expect_contains "$publish" 'scripts/release-notes\.sh' \
+    expect_contains "$publish_contract" 'scripts/release-notes\.sh' \
         "release notes must come from the commits being released"
-    expect_contains "$publish" 'scripts/package-dmg\.sh' "the release must ship a disk image"
-    expect_contains "$publish" '^      sha:' "the publish workflow must take the commit its gates tested"
-    expect_contains "$publish" 'scripts/verify-release-commit\.sh' \
+    expect_contains "$publish_contract" 'scripts/package-dmg\.sh' "the release must ship a disk image"
+    expect_contains "$publish_contract" '^      sha:' "the publish workflow must take the commit its gates tested"
+    expect_contains "$publish_contract" 'scripts/verify-release-commit\.sh' \
         "the publish workflow must refuse to release a commit its gates never saw"
-    expect_contains "$publish" 'ref: \$\{\{ inputs\.sha \}\}' \
+    expect_contains "$publish_contract" 'ref: \$\{\{ inputs\.sha \}\}' \
         "the publish workflow must check out the tested commit rather than whatever main is now"
-    expect_contains "$publish" 'gh release create' "the workflow must create the GitHub release"
-    expect_contains "$publish" 'Debut\.dmg' "the release must attach the disk image"
-    expect_contains "$publish" 'git tag' "the release must be tagged"
+    expect_contains "$publish_contract" 'gh release create' "the workflow must create the GitHub release"
+    expect_contains "$publish_contract" 'Debut\.dmg' "the release must attach the disk image"
+    expect_contains "$publish_contract" 'git tag' "the release must be tagged"
     # A release that tries to push a version-bump commit dies after building, having already pushed
     # its tag. Tag the tested commit in place and push nothing but the tag.
-    expect_not_contains "$publish" 'git commit' \
+    expect_not_contains "$publish_contract" 'git commit' \
         "the publish workflow must not commit, because it has no branch to push it to"
-    expect_not_contains "$publish" 'git push .*HEAD:main|git push .*origin main' \
+    expect_not_contains "$publish_contract" 'git push .*HEAD:main|git push .*origin main' \
         "the publish workflow must never push a branch"
-    expect_contains "$publish" 'git push origin "?\$\{?TAG' \
+    expect_contains "$publish_contract" 'git push origin "?\$\{?TAG' \
         "the publish workflow must push only the tag"
 
     # The signing material is written to a runner filesystem the build steps and any script they
     # invoke can read. Restricting the mode and removing it afterwards bounds that exposure to the
     # steps that need it, whether or not the run succeeds.
-    expect_contains "$publish" 'umask 077' \
+    expect_contains "$publish_contract" 'umask 077' \
         "the publish workflow must not create secret material world-readable"
-    expect_contains "$publish" 'if: always\(\)' \
+    expect_contains "$publish_contract" 'if: always\(\)' \
         "the publish workflow must clean up its secrets even when a step fails"
-    expect_contains "$publish" 'security delete-keychain' \
+    expect_contains "$publish_contract" 'security delete-keychain' \
         "the publish workflow must delete the keychain holding the Developer ID key"
     for artefact in 'developer-id\.p12' 'notary-api-key\.p8' 'sparkle-eddsa\.key'; do
-        expect_contains "$publish" "rm -f.*$artefact" \
+        expect_contains "$publish_contract" "rm -f.*$artefact" \
             "the publish workflow must remove $artefact from the runner"
     done
 
     # A mutable tag on a third-party action is a write path into a job holding the Developer ID key
     # and the Sparkle signing key. Pin every non-local action to a commit.
-    unpinned="$(grep -E '^[[:space:]]*(- )?uses:' "$publish" \
+    unpinned="$(grep -E '^[[:space:]]*(- )?uses:' "$publish_contract" \
         | grep -v 'uses:[[:space:]]*\./' \
         | grep -Ev 'uses:[[:space:]]*[^@]+@[0-9a-f]{40}' || true)"
     if [[ -n "$unpinned" ]]; then
@@ -189,7 +193,7 @@ fi
 
 # The final signed bytes must be exercised before any tag is pushed. A release
 # gating only the earlier development bundle does not prove Sparkle can install it.
-python3 - "$publish" <<'PY'
+python3 - "$publish_contract" <<'PY'
 import sys
 from pathlib import Path
 s = Path(sys.argv[1]).read_text()

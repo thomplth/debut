@@ -1,0 +1,219 @@
+name: Publish signed Debut release
+description: Build, sign, notarize, verify, and optionally publish the tested commit
+inputs:
+  channel:
+    description: daily or stable
+    required: true
+  version:
+    description: Display version without v
+    required: true
+  build_version:
+    description: Numeric bundle build from release-plan.sh
+    required: true
+  previous_tag:
+    description: Release notes and stable update baseline
+    required: false
+    default: ''
+  sha:
+    description: Tested commit
+    required: true
+  dry-run:
+    description: Build and assess the signed artifact without pushing a tag or release
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Refuse to release a commit the gates never saw
+      env:
+        SHA: ${{ inputs.sha }}
+      shell: bash
+      run: ./scripts/verify-release-commit.sh "$SHA"
+
+    - name: Enforce automatic update channel policy
+      id: update_policy
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        VERSION: ${{ inputs.version }}
+      shell: bash
+      run: ./scripts/stable-update-eligibility.sh "$CHANNEL" "$VERSION" | tee -a "$GITHUB_OUTPUT"
+
+    - name: Validate release credentials
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        DEVELOPER_ID_CERTIFICATE_BASE64: ${{ env.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+        DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ env.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        DEVELOPER_IDENTITY: ${{ env.DEVELOPER_IDENTITY }}
+        APP_STORE_CONNECT_API_KEY_P8: ${{ env.APP_STORE_CONNECT_API_KEY_P8 }}
+        APP_STORE_CONNECT_API_KEY_ID: ${{ env.APP_STORE_CONNECT_API_KEY_ID }}
+        APP_STORE_CONNECT_ISSUER_ID: ${{ env.APP_STORE_CONNECT_ISSUER_ID }}
+        SPARKLE_EDDSA_PRIVATE_KEY: ${{ env.SPARKLE_EDDSA_PRIVATE_KEY }}
+      shell: bash
+      run: ./scripts/validate-release-credentials.sh "$CHANNEL"
+
+    - name: Select the macOS 26 toolchain
+      shell: bash
+      run: |
+        echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> "$GITHUB_ENV"
+        echo "TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault" >> "$GITHUB_ENV"
+
+    # Stamped into the working tree for the build only. It is deliberately never committed:
+    # the tag is what records the version.
+    - name: Stamp the version into the build
+      env:
+        VERSION: ${{ inputs.version }}
+        BUILD_VERSION: ${{ inputs.build_version }}
+      shell: bash
+      run: ./scripts/apply-version.sh "$VERSION" "$BUILD_VERSION"
+
+    - name: Write the release notes
+      env:
+        VERSION: ${{ inputs.version }}
+        PREVIOUS_TAG: ${{ inputs.previous_tag }}
+      shell: bash
+      run: |
+        ./scripts/release-notes.sh "$PREVIOUS_TAG" "v$VERSION" | tee "$RUNNER_TEMP/notes.md"
+        if [[ "${{ inputs.channel }}" == "daily" ]]; then
+            cat >> "$RUNNER_TEMP/notes.md" <<'NOTES'
+
+        This nightly is an experimental build, signed with Developer ID and
+        notarized by Apple. It does not enter the stable automatic-update feed.
+        NOTES
+        fi
+
+    - name: Import the Developer ID identity
+      env:
+        CERTIFICATE_BASE64: ${{ env.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+        CERTIFICATE_PASSWORD: ${{ env.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      shell: bash
+      run: |
+        umask 077
+        certificate="$RUNNER_TEMP/developer-id.p12"
+        keychain="$RUNNER_TEMP/debut-signing.keychain-db"
+        keychain_password="$(uuidgen)$(uuidgen)"
+        printf '%s' "$CERTIFICATE_BASE64" | /usr/bin/base64 -D > "$certificate"
+        security create-keychain -p "$keychain_password" "$keychain"
+        security set-keychain-settings -lut 21600 "$keychain"
+        security unlock-keychain -p "$keychain_password" "$keychain"
+        security import "$certificate" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+        security list-keychains -d user -s "$keychain"
+
+    - name: Tag the tested commit
+      env:
+        VERSION: ${{ inputs.version }}
+        BUILD_VERSION: ${{ inputs.build_version }}
+      shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git tag -a "v$VERSION" -m "Debut v$VERSION" -m "Debut-build: $BUILD_VERSION"
+        echo "TAG=v$VERSION" >> "$GITHUB_ENV"
+
+    - name: Build the disk image
+      env:
+        DEBUT_DISTRIBUTION_SIGNING: '1'
+        DEBUT_SIGNING_IDENTITY: ${{ env.DEVELOPER_IDENTITY }}
+      shell: bash
+      run: ./scripts/package-dmg.sh
+
+    - name: Notarize and staple the disk image
+      env:
+        NOTARY_KEY: ${{ env.APP_STORE_CONNECT_API_KEY_P8 }}
+        NOTARY_KEY_ID: ${{ env.APP_STORE_CONNECT_API_KEY_ID }}
+        NOTARY_ISSUER_ID: ${{ env.APP_STORE_CONNECT_ISSUER_ID }}
+      shell: bash
+      run: |
+        umask 077
+        key="$RUNNER_TEMP/notary-api-key.p8"
+        printf '%s' "$NOTARY_KEY" > "$key"
+        xcrun notarytool submit .build/Debut.dmg \
+          --key "$key" \
+          --key-id "$NOTARY_KEY_ID" \
+          --issuer "$NOTARY_ISSUER_ID" \
+          --wait
+        xcrun stapler staple .build/Debut.dmg
+        xcrun stapler validate .build/Debut.dmg
+
+    - name: Sign and generate the stable appcast
+      if: steps.update_policy.outputs.eligible == 'true'
+      env:
+        SPARKLE_EDDSA_PRIVATE_KEY: ${{ env.SPARKLE_EDDSA_PRIVATE_KEY }}
+        VERSION: ${{ inputs.version }}
+      shell: bash
+      run: |
+        umask 077
+        private_key="$RUNNER_TEMP/sparkle-eddsa.key"
+        printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$private_key"
+        ./scripts/generate-appcast.sh "$VERSION" .build/Debut.dmg "$private_key" .build/appcast.xml .build/Debut.app/Contents/Info.plist
+        swift scripts/verify-appcast-signature.swift .build/appcast.xml .build/Debut.dmg .build/Debut.app/Contents/Info.plist
+
+    - name: Assess the notarized artifact with Gatekeeper
+      env:
+        VERSION: ${{ inputs.version }}
+        BUILD_VERSION: ${{ inputs.build_version }}
+      shell: bash
+      run: |
+        appcast=()
+        if [[ "${{ inputs.channel }}" == stable ]]; then appcast=(.build/appcast.xml); fi
+        ./scripts/verify-distribution.sh .build/Debut.dmg "${VERSION%%-*}" "$BUILD_VERSION" "${appcast[@]}"
+
+    - name: Verify Sparkle installs and relaunches the signed candidate
+      if: inputs.channel == 'stable'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PREVIOUS_TAG: ${{ inputs.previous_tag }}
+        BUILD_VERSION: ${{ inputs.build_version }}
+      shell: bash
+      run: ./scripts/ci-update-e2e.sh "$PREVIOUS_TAG" "$BUILD_VERSION"
+
+    - name: Retain signed update rehearsal evidence
+      if: always() && inputs.channel == 'stable'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      with:
+        name: debut-update-evidence
+        path: ${{ runner.temp }}/update-e2e/evidence
+        if-no-files-found: ignore
+        retention-days: 7
+
+    # Last, so a build or packaging failure leaves no tag behind claiming a release happened.
+    - name: Push the tag
+      if: inputs.dry-run != 'true'
+      env:
+        SHA: ${{ inputs.sha }}
+      shell: bash
+      run: |
+        ./scripts/verify-release-commit.sh "$SHA"
+        git push origin "$TAG"
+
+    - name: Publish the GitHub release
+      if: inputs.dry-run != 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERSION: ${{ inputs.version }}
+      shell: bash
+      run: |
+        flags=()
+        assets=(.build/Debut.dmg)
+        if [[ "${{ inputs.channel }}" == "daily" ]]; then
+            flags+=(--prerelease)
+        else
+            assets+=(.build/appcast.xml)
+        fi
+        gh release create "v$VERSION" \
+          --title "Debut v$VERSION" \
+          --notes-file "$RUNNER_TEMP/notes.md" \
+          "${flags[@]}" \
+          "${assets[@]}"
+
+    # A failing step leaves the signing material behind, so this runs unconditionally and does
+    # not fail the run: a release that succeeded must not be reported as broken by its own tidying.
+    - name: Remove the signing material from the runner
+      if: always()
+      continue-on-error: true
+      shell: bash
+      run: |
+        security delete-keychain "$RUNNER_TEMP/debut-signing.keychain-db" || true
+        rm -f "$RUNNER_TEMP/developer-id.p12"
+        rm -f "$RUNNER_TEMP/notary-api-key.p8"
+        rm -f "$RUNNER_TEMP/sparkle-eddsa.key"
