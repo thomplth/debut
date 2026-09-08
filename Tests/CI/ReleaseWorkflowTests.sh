@@ -113,7 +113,7 @@ fi
 expect_contains "$agents" 'single explicit user request' \
     "the agent release policy must treat one explicit user request as authorization"
 expect_not_contains "$agents" 'approved through the protected' \
-    "the agent release policy must not require a second stable-release approval"
+    "the agent release policy must not require a second stable approval"
 expect_contains "$readme" 'single explicit release request' \
     "the public release documentation must describe one-request releases"
 expect_not_contains "$readme" 'after approval' \
