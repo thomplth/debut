@@ -24,7 +24,7 @@ root = Path(sys.argv[1])
 nightly = (root/'.github/workflows/release-nightly.yml').read_text()
 action = (root/'.github/actions/publish-release/action.yml').read_text()
 check = (root/'.github/workflows/verify-nightly-signing.yml').read_text()
-assert 'environment: nightly-release' in nightly
+assert '\n    environment: nightly\n' in nightly
 assert 'secrets: inherit' not in nightly and 'SPARKLE_EDDSA_PRIVATE_KEY' not in nightly
 assert 'needs: [plan, ci, e2e]' in nightly
 assert 'uses: ./.github/actions/publish-release' in nightly
@@ -34,7 +34,7 @@ assert "if: inputs.channel == 'stable'" not in action[action.index('- name: Impo
 assert "if: inputs.channel == 'stable'" not in action[action.index('- name: Notarize'):action.index('- name: Sign and generate')]
 assert "if: inputs.dry-run != 'true'" in action[action.index('- name: Push the tag'):]
 assert 'contents: read' in check and 'contents: write' not in check
-assert 'dry-run: true' in check and 'environment: nightly-release' in check
+assert 'dry-run: true' in check and '\n    environment: nightly\n' in check
 assert 'SPARKLE_EDDSA_PRIVATE_KEY' not in check
 assert 'Ad-hoc' not in action and 'ad-hoc' not in action
 print('PASS: nightly signing, Sparkle isolation, and non-publishing verification')
