@@ -1151,7 +1151,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private func prepareTutorialTarget() {
         guard !onboardingWindowNeedsReplacement, !preparingTutorialTarget, pendingTutorialTarget == nil, let model = onboardingViewModel,
               let tutorial = onboardingWindow, let service = spaceService,
-              model.permissions.accessibilityGranted, model.desktopCount >= 2,
+              model.permissions.accessibilityGranted, model.desktopCount >= 1,
               model.page == .workspace || model.page == .previews else { return }
         if model.page == .previews, model.features.windowPreviews,
            !model.permissions.screenRecordingGranted { return }
@@ -1168,7 +1168,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
         onboardingWindowAwaitingPlacement = false
-        let adjacent = origin + 1 < model.desktopCount ? origin + 1 : origin - 1
+        let adjacent = model.desktopCount == 1 ? origin : (origin + 1 < model.desktopCount ? origin + 1 : origin - 1)
         let title: String
         let placement: Int
         let destination: Int
@@ -1179,7 +1179,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         } else {
             switch model.exercise {
             case .switchWindow:
-                title = "Desktop switching"
+                title = model.desktopCount == 1 ? "Window previews" : "Desktop switching"
                 placement = origin
                 destination = origin
             case .switchDesktop:
