@@ -61,10 +61,28 @@ jobs:
     if: needs.plan.outputs.should_release == 'true'
     permissions:
       contents: write
-    uses: ./.github/workflows/release-publish.yml
-    with:
-      channel: daily
-      version: ${{ needs.plan.outputs.version }}
-      build_version: ${{ needs.plan.outputs.build_version }}
-      previous_tag: ${{ needs.plan.outputs.previous_tag }}
-      sha: ${{ needs.plan.outputs.sha }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    environment: daily-release
+    env:
+      DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+      DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+      DEVELOPER_IDENTITY: ${{ vars.DEVELOPER_IDENTITY }}
+      APP_STORE_CONNECT_API_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+
+    steps:
+      - name: Check out the tested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+      - name: Publish the signed nightly
+        uses: ./.github/actions/publish-release
+        with:
+          channel: daily
+          version: ${{ needs.plan.outputs.version }}
+          build_version: ${{ needs.plan.outputs.build_version }}
+          previous_tag: ${{ needs.plan.outputs.previous_tag }}
+          sha: ${{ needs.plan.outputs.sha }}

@@ -12,6 +12,10 @@ daily="$repo_root/.github/workflows/release-daily.yml"
 manual="$repo_root/.github/workflows/release-manual.yml"
 publish="$repo_root/.github/workflows/release-publish.yml"
 validate_credentials="$repo_root/scripts/validate-release-credentials.sh"
+# The stable wrapper and direct daily job execute one shared composite action.
+publish_contract="$(mktemp)"
+trap 'rm -f "$publish_contract"' EXIT
+cat "$publish" "$(dirname "$publish")/../actions/publish-release/action.yml" > "$publish_contract"
 failures=0
 
 fail() {
@@ -54,8 +58,9 @@ if [[ -x "$validate_credentials" ]]; then
         SPARKLE_EDDSA_PRIVATE_KEY=sparkle-key \
         "$validate_credentials" stable >/dev/null \
         || fail "stable releases must accept a complete credential set"
-    "$validate_credentials" daily >/dev/null \
-        || fail "daily releases must not require stable credentials"
+    if "$validate_credentials" daily >/dev/null 2>&1; then
+        fail "daily releases must reject missing signing credentials"
+    fi
 fi
 
 if [[ -x "$appcast" ]]; then
@@ -121,17 +126,17 @@ daily_publish_job="$(sed -n '/^  publish:/,$p' "$daily")"
 if grep -Eq '^    secrets: inherit$' <<< "$daily_publish_job"; then
     fail "the daily caller must not inherit stable release secrets"
 fi
-expect_contains "$publish" "environment:.*(daily-release|stable-release)" \
+expect_contains "$publish_contract" "environment:.*(daily-release|stable-release)" \
     "release secrets must be isolated by channel environment"
-expect_contains "$publish" 'validate-release-credentials\.sh' \
+expect_contains "$publish_contract" 'validate-release-credentials\.sh' \
     "publishing must fail before stamping or tagging when protected credentials are unavailable"
-expect_contains "$publish" 'stable-update-eligibility\.sh' \
+expect_contains "$publish_contract" 'stable-update-eligibility\.sh' \
     "publishing must enforce stable update eligibility"
-expect_contains "$publish" -- '--prerelease' "daily GitHub releases must be prereleases"
-expect_contains "$publish" 'notarytool submit' "stable releases must be notarized"
-expect_contains "$publish" 'stapler staple' "stable releases must staple the notarization ticket"
-expect_contains "$publish" 'generate-appcast\.sh' "stable releases must generate an appcast"
-expect_contains "$publish" 'SPARKLE_EDDSA_PRIVATE_KEY' \
+expect_contains "$publish_contract" -- '--prerelease' "daily GitHub releases must be prereleases"
+expect_contains "$publish_contract" 'notarytool submit' "stable releases must be notarized"
+expect_contains "$publish_contract" 'stapler staple' "stable releases must staple the notarization ticket"
+expect_contains "$publish_contract" 'generate-appcast\.sh' "stable releases must generate an appcast"
+expect_contains "$publish_contract" 'SPARKLE_EDDSA_PRIVATE_KEY' \
     "stable appcasts must be signed with the protected Sparkle key"
 
 if (( failures > 0 )); then

@@ -182,8 +182,8 @@ reconciliation use macOS notifications; captures refresh when needed.
 notarized and offered through automatic updates. Nightly builds are prereleases
 and do not enter the stable update feed. Release workflows gate on CI and E2E and tag
 the tested commit. A single explicit release request authorizes a stable patch, minor,
-or major release. Nightlies are currently ad-hoc signed and unnotarized; Gatekeeper
-blocks their normal first launch. See [release verification](docs/release-verification.md).
+or major release. Nightlies are also Developer ID-signed and notarized, using credentials isolated
+from stable automatic-update signing. See [release verification](docs/release-verification.md).
 A local build reports `0.0.0-dev`.
 
 Debut is free software under the [GNU GPL version 3 only](LICENSE) (`GPL-3.0-only`). Source for each

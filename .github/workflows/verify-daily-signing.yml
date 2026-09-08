@@ -1,0 +1,51 @@
+name: Verify Daily Signing
+
+# A read-only rehearsal of the same action and environment used by the daily job.
+# No E2E is dispatched here and neither a tag nor a release can be published.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-signing-verification
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: macos-26
+    timeout-minutes: 30
+    environment: daily-release
+    env:
+      DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+      DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+      DEVELOPER_IDENTITY: ${{ vars.DEVELOPER_IDENTITY }}
+      APP_STORE_CONNECT_API_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Plan the verification build
+        id: plan
+        run: ./scripts/release-plan.sh nightly | tee -a "$GITHUB_OUTPUT"
+      - name: Rehearse daily signing without publication
+        uses: ./.github/actions/publish-release
+        with:
+          channel: daily
+          version: ${{ steps.plan.outputs.version }}
+          build_version: ${{ steps.plan.outputs.build_version }}
+          previous_tag: ${{ steps.plan.outputs.previous_tag }}
+          sha: ${{ github.sha }}
+          dry-run: true
+      - name: Retain the notarized artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: debut-notarized-nightly
+          path: .build/Debut.dmg
+          retention-days: 7
