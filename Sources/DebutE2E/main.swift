@@ -2354,6 +2354,13 @@ test("Command-Option-Tab reaches the next lesson on another real desktop") { per
 _ = takeScreenshot("11_onboarding_move")
 test("Moving the named tutorial window to the requested desktop opens previews") { performOnboardingExercise(.moveWindow) }
 _ = takeScreenshot("11_onboarding_previews")
+test("The optional capture gate can continue without window previews") {
+    guard onboardingContains("Allow Screen Recording for window previews") else { return true }
+    return onboardingPress("Use without previews") && waitFor(timeout: 8) {
+        currentOnboardingTarget()?["title"] == "Instant desktop switching"
+            && onboardingContains("Hold Option and press Tab")
+    }
+}
 test("Option-Tab reaches the named target on another desktop") { performOnboardingExercise(.allWindows) }
 test("The speed lesson exposes live controls") {
     onboardingContains("Desktop transition duration") && onboardingContains("Trackpad swipe")
