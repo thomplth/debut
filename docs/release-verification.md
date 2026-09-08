@@ -6,7 +6,7 @@ was the latest stable release and included `appcast.xml`. Both `v0.3.0` and
 “first stable signing path has never run” premise was obsolete. Action SHA pins,
 restricted secret file modes, cleanup, and read-only repository Actions defaults
 were already present. Dependabot was missing. The three misclassified historical
-dailies (`v0.1.1`, `v0.1.2`, `v0.2.1`) were corrected to GitHub prereleases;
+prereleases (`v0.1.1`, `v0.1.2`, `v0.2.1`) were corrected on GitHub;
 `v0.4.0` remains latest stable.
 
 The published `v0.4.0` DMG's EdDSA signature was independently verified against
