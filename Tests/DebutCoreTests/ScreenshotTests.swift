@@ -1030,6 +1030,10 @@ struct ScreenshotTests {
         let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient(
             accessibilityGranted: state != "permission", screenRecordingGranted: state == "previews-active"),
             checkpoint: .init(page: page, exercise: state == "desktop-switch" ? .switchDesktop : state == "window-move" ? .moveWindow : .switchWindow, workspacePracticed: page.rawValue > 1, allWindowsPracticed: page.rawValue > 2))
+        if state == "one-desktop" {
+            vm.updateEnvironment(desktopCount: 1, windowCount: 2)
+            vm.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: 0, title: "Window previews"))
+        }
         if !["welcome", "permission", "one-desktop"].contains(state) {
             vm.updateEnvironment(desktopCount: 2, windowCount: 2)
             if state == "previews-disabled" { vm.useWithoutPreviews() }

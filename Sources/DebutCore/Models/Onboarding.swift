@@ -140,10 +140,11 @@ public final class OnboardingViewModel {
 
     public func back() {
         target = nil
-        if page == .workspace, exercise != .switchWindow {
+        if page == .workspace, exercise != .switchWindow, desktopCount > 1 {
             exercise = exercise == .moveWindow ? .switchDesktop : .switchWindow
         } else if let previous = OnboardingPage(rawValue: page.rawValue - 1) { page = previous }
         if page == .workspace {
+            if desktopCount < 2 { exercise = .switchWindow }
             var enabled = features
             enabled.workspaceIsolation = true
             setFeatures(enabled)
@@ -158,6 +159,11 @@ public final class OnboardingViewModel {
     public func updateEnvironment(desktopCount: Int, windowCount: Int) {
         self.desktopCount = desktopCount
         self.windowCount = windowCount
+        if desktopCount < 2, page == .workspace, exercise != .switchWindow {
+            exercise = .switchWindow
+            target = nil
+            targetError = nil
+        }
     }
 
     public func setTarget(_ target: OnboardingTarget?) {
@@ -169,14 +175,22 @@ public final class OnboardingViewModel {
     /// Merely opening the overlay, clicking a destination, or choosing another window cannot pass.
     @discardableResult
     public func recordPractice(_ practice: OnboardingPractice, windowID: UInt32, desktopIndex: Int) -> Bool {
-        guard permissions.accessibilityGranted, desktopCount >= 2,
+        guard permissions.accessibilityGranted, desktopCount >= 1,
               let target, target.windowID == windowID,
               target.destinationDesktop == desktopIndex else { return false }
         let changesDesktop = target.originDesktop != target.destinationDesktop
-        guard practice == .workspace ? !changesDesktop : changesDesktop else { return false }
+        switch practice {
+        case .workspace: guard !changesDesktop else { return false }
+        case .allWindows: guard changesDesktop || desktopCount == 1 else { return false }
+        case .desktop, .moveWindow: guard desktopCount > 1, changesDesktop else { return false }
+        }
         if page == .workspace {
             switch (exercise, practice) {
-            case (.switchWindow, .workspace): exercise = .switchDesktop
+            case (.switchWindow, .workspace):
+                if desktopCount == 1 {
+                    workspacePracticed = true
+                    page = .previews
+                } else { exercise = .switchDesktop }
             case (.switchDesktop, .desktop): exercise = .moveWindow
             case (.moveWindow, .moveWindow):
                 workspacePracticed = true

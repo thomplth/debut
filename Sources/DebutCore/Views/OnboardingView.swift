@@ -82,15 +82,6 @@ public struct OnboardingView: View {
             if !viewModel.permissions.accessibilityGranted {
                 preview("onboarding-workspace", label: "Command-Tab shows windows grouped by desktop")
                 accessibilityPrompt
-            } else if viewModel.desktopCount < 2 {
-                instruction("Create a second desktop", icon: "rectangle.badge.plus") {
-                    Text("You need two macOS desktops for this exercise.")
-                    Text("Open Mission Control, click + at the top, then return to this desktop.")
-                    HStack {
-                        Button("Open Mission Control") { viewModel.onOpenMissionControl() }
-                        Button("Check again") { viewModel.onEnvironmentRefresh() }
-                    }
-                }
             } else {
                 preview("onboarding-workspace", label: "Command-Tab shows windows grouped by desktop")
                 exerciseInstructions
@@ -202,7 +193,7 @@ public struct OnboardingView: View {
 
     private var ready: some View {
         VStack(alignment: .leading, spacing: 22) {
-            heading("Setup complete", "You have practised switching windows, switching desktops, and moving a window.")
+            heading("Setup complete", "You’re ready to use Debut.")
             Text("Open Debut from the Dock or menu bar to change settings or repeat the tutorial.")
                 .foregroundStyle(.secondary)
             Toggle("Share anonymous usage and performance data", isOn: Binding(
