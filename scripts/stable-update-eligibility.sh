@@ -4,7 +4,7 @@ set -euo pipefail
 channel="${1:-}"
 version="${2:-}"
 
-if [[ "$channel" == "daily" ]]; then
+if [[ "$channel" == "nightly" ]]; then
     [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-nightly\.[0-9]{8}(\.[1-9][0-9]*)?)?$ ]] || {
         echo "invalid release version: $version" >&2
         exit 2

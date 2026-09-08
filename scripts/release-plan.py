@@ -14,16 +14,16 @@ args = parser.parse_args()
 def git(*command):
     return subprocess.check_output(['git', *command], text=True).strip()
 
-# Immutable migration facts: these numeric tags were automated daily builds before
+# Immutable migration facts: these numeric tags were automated prereleases before
 # nightly suffixes existed. GitHub prerelease flags are mutable and cannot be the
 # source of truth for version planning. Never delete or reuse these tags.
-legacy_dailies = {'v0.1.1', 'v0.1.2', 'v0.2.1', 'v0.2.2', 'v0.3.1', 'v0.3.2',
-                  'v0.4.1', 'v0.4.2', 'v0.4.3'}
+legacy_prereleases = {'v0.1.1', 'v0.1.2', 'v0.2.1', 'v0.2.2', 'v0.3.1', 'v0.3.2',
+                      'v0.4.1', 'v0.4.2', 'v0.4.3'}
 pattern = re.compile(r'^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-nightly\.[0-9]{8}(?:\.[1-9][0-9]*)?)?$')
 tags = git('tag', '--list').splitlines()
 versions = {tag: pattern.fullmatch(tag) for tag in tags}
 versions = {tag: match for tag, match in versions.items() if match}
-stable = [tag for tag, match in versions.items() if not match[4] and tag not in legacy_dailies]
+stable = [tag for tag, match in versions.items() if not match[4] and tag not in legacy_prereleases]
 previous_stable = max(stable, key=lambda t: tuple(map(int, versions[t].group(1, 2, 3))), default='')
 major, minor, patch = map(int, versions[previous_stable].group(1, 2, 3)) if previous_stable else (0, 1, 0)
 if args.bump == 'nightly':
@@ -72,6 +72,6 @@ print('previous_tag=' + (previous_release if args.bump == 'nightly' else previou
 print('previous_stable_tag=' + previous_stable)
 print('version=' + version)
 print('tag=v' + version)
-print('channel=' + ('daily' if args.bump == 'nightly' else 'stable'))
+print('channel=' + ('nightly' if args.bump == 'nightly' else 'stable'))
 print('build_version=' + str(maximum_build + 1))
 print('should_release=' + str(should_release).lower())

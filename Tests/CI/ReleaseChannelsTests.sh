@@ -17,14 +17,14 @@ with tempfile.TemporaryDirectory() as d:
     commit(); git('tag', 'v0.4.0'); commit(); git('tag', 'v0.4.1'); commit(); git('tag', 'v0.4.3')
     p = plan('patch')
     assert p['previous_tag'] == 'v0.4.0', p
-    assert p['version'] == '0.4.4', p # Never reuse an old daily tag.
+    assert p['version'] == '0.4.4', p # Never reuse an old automated prerelease tag.
     assert p['channel'] == 'stable' and p['build_version'] == '10000', p
     p = plan('nightly', '--require-changes')
     assert p['version'] == '0.5.0-nightly.20260908', p
     assert p['should_release'] == 'false', p
     commit()
     p = plan('nightly', '--require-changes')
-    assert p['channel'] == 'daily' and p['should_release'] == 'true', p
+    assert p['channel'] == 'nightly' and p['should_release'] == 'true', p
     git('tag', '-a', p['tag'], '-m', 'Debut '+p['tag']+'\n\nDebut-build: 10000')
     p = plan('nightly', '--require-changes')
     assert p['should_release'] == 'false', p

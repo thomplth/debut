@@ -1,12 +1,12 @@
 name: Publish Release
 
 # Stable wrapper called only after the manual workflow passes CI and E2E.
-# Daily publication binds its environment directly and uses the shared action.
+# Nightly publication binds its environment directly and uses the shared action.
 on:
   workflow_call:
     inputs:
       channel:
-        description: Daily prerelease or manually promoted stable release
+        description: Nightly prerelease or manually promoted stable release
         required: true
         type: string
       version:

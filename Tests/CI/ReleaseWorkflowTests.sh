@@ -4,14 +4,14 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 ci=".github/workflows/ci.yml"
-daily=".github/workflows/release-daily.yml"
+nightly=".github/workflows/release-nightly.yml"
 manual=".github/workflows/release-manual.yml"
 publish=".github/workflows/release-publish.yml"
 e2e=".github/workflows/e2e.yml"
 agents="AGENTS.md"
 readme="README.md"
 release_guide="docs/html/10-build-release.html"
-# The stable wrapper and direct daily job execute one shared composite action.
+# The stable wrapper and direct nightly job execute one shared composite action.
 publish_contract="$(mktemp)"
 trap 'rm -f "$publish_contract"' EXIT
 cat "$publish" "$(dirname "$publish")/../actions/publish-release/action.yml" > "$publish_contract"
@@ -38,7 +38,7 @@ expect_not_contains() {
     fi
 }
 
-for workflow in "$ci" "$daily" "$manual" "$publish_contract" "$e2e"; do
+for workflow in "$ci" "$nightly" "$manual" "$publish_contract" "$e2e"; do
     [[ -f "$workflow" ]] || fail "missing $workflow"
 done
 
@@ -65,7 +65,7 @@ if [[ -f "$e2e" ]]; then
 fi
 
 # Both release paths must be gated by the same full CI and E2E suites.
-for workflow in "$daily" "$manual"; do
+for workflow in "$nightly" "$manual"; do
     [[ -f "$workflow" ]] || continue
     name="$(basename "$workflow")"
     expect_contains "$workflow" 'uses: \./\.github/workflows/ci\.yml' \
@@ -87,14 +87,14 @@ for workflow in "$daily" "$manual"; do
         "$name must publish the exact commit its gates tested"
 done
 
-if [[ -f "$daily" ]]; then
-    expect_contains "$daily" '^  schedule:' "the daily release must run on a schedule"
-    expect_contains "$daily" 'cron:' "the daily release must declare a cron expression"
-    expect_contains "$daily" '^  workflow_dispatch:' "the daily release must be runnable on demand"
-    expect_contains "$daily" 'release-plan\.sh nightly --require-changes' \
-        "the daily release must plan a nightly and skip when main has not moved"
-    expect_contains "$daily" "should_release == 'true'" \
-        "the daily release must skip its jobs when there is nothing to release"
+if [[ -f "$nightly" ]]; then
+    expect_contains "$nightly" '^  schedule:' "the nightly release must run on a schedule"
+    expect_contains "$nightly" 'cron:' "the nightly release must declare a cron expression"
+    expect_contains "$nightly" '^  workflow_dispatch:' "the nightly release must be runnable on demand"
+    expect_contains "$nightly" 'release-plan\.sh nightly --require-changes' \
+        "the nightly release must plan a nightly and skip when main has not moved"
+    expect_contains "$nightly" "should_release == 'true'" \
+        "the nightly release must skip its jobs when there is nothing to release"
 fi
 
 if [[ -f "$manual" ]]; then
@@ -180,7 +180,7 @@ fi
 # pull requests alone, and a release calls them as reusable workflows, whose runs are attributed to
 # the caller. Neither feeds a ci.yml or e2e.yml badge on main, so both would read "no status".
 if [[ -f "README.md" ]]; then
-    expect_contains "README.md" 'workflows/release-daily\.yml/badge\.svg' \
+    expect_contains "README.md" 'workflows/release-nightly\.yml/badge\.svg' \
         "the README must show whether main is releasable"
     expect_not_contains "README.md" 'workflows/(ci|e2e)\.yml/badge\.svg' \
         "the README must not show a gate badge that no run on main can ever fill"
