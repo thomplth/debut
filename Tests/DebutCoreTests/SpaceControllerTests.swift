@@ -533,6 +533,63 @@ struct SpaceControllerTests {
         #expect(windowSvc.activatedBundleID == "com.b")
     }
 
+    @Test("Command release activates the window last selected by pointer hover")
+    func pointerHoverSelectionCommitsOnCommandRelease() {
+        let (controller, windowSvc, keyboardSvc) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "Keyboard selection"
+            ),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 202,
+                ownerBundleID: "com.b",
+                ownerName: "B",
+                windowTitle: "Pointer selection"
+            ),
+            toSpaceID: spaceID
+        )
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(controller.selectedWindowIndex == 1)
+
+        controller.updateOverlayPointerSelection(spaceIndex: 0, windowIndex: 0)
+        #expect(controller.selectedWindowIndex == 1)
+        keyboardSvc.simulateEvent(.cmdRelease)
+
+        #expect(!controller.isSpaceManagerVisible)
+        #expect(windowSvc.raisedWindowID == 101)
+        #expect(windowSvc.activatedBundleID == "com.a")
+    }
+
+    @Test("Leaving a hovered preview restores the keyboard activation target")
+    func pointerHoverSelectionClearsOnExit() {
+        let (controller, windowSvc, keyboardSvc) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "First"),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Second"),
+            toSpaceID: spaceID
+        )
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        controller.updateOverlayPointerSelection(spaceIndex: 0, windowIndex: 0)
+        controller.updateOverlayPointerSelection(spaceIndex: nil, windowIndex: nil)
+        keyboardSvc.simulateEvent(.cmdRelease)
+
+        #expect(windowSvc.raisedWindowID == 202)
+        #expect(windowSvc.activatedBundleID == "com.b")
+    }
+
     @Test("Dropping a window first in the current space activates it on commit")
     func currentSpaceDropSelectionCommitsDroppedWindow() {
         let (controller, windowSvc, keyboardSvc) = makeController()

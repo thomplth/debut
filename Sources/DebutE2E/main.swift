@@ -1504,10 +1504,10 @@ test("Overlay closed after space commit") {
     return readState()["overlayVisible"] == "false"
 }
 
-// --- 9. Pointer hover and click ---
-header("9. Hover and click a window card")
-let pointerSelectionCount = readEvents().filter {
-    $0["event"] == "overlay_window_selected_by_pointer"
+// --- 9. Pointer hover and Command release ---
+header("9. Hover a window card and release Command")
+let pointerCommitCount = readEvents().filter {
+    $0["event"] == "overlay_committed"
 }.count
 let pointerHoverCount = readEvents().filter {
     $0["event"] == "overlay_pointer_selection_changed"
@@ -1544,6 +1544,7 @@ if let pointerTarget {
             $0["event"] == "overlay_pointer_selection_changed"
         }.count == pointerHoverCount
     }
+    let keyboardSelectionBeforeHover = readState()["selectedWindowIndex"]
 
     let movedPoint = CGPoint(x: pointerTarget.x + 8, y: pointerTarget.y)
     info("Moving pointer within the first window to \(movedPoint)")
@@ -1556,18 +1557,18 @@ if let pointerTarget {
         }
         return hoverEvents.count > pointerHoverCount
             && hoverEvents.last?["windowIndex"] == "0"
+            && readState()["selectedWindowIndex"] == keyboardSelectionBeforeHover
     }
-    postMouseClick(at: movedPoint)
-    wait(0.8)
     postFlagsChanged(flags: [])
+    wait(0.8)
 
-    test("Clicking a window card commits the pointer selection") {
+    test("Releasing Command commits the pointer hover selection") {
         for _ in 0..<20 {
-            let pointerEvents = readEvents().filter {
-                $0["event"] == "overlay_window_selected_by_pointer"
+            let commitEvents = readEvents().filter {
+                $0["event"] == "overlay_committed"
             }
-            if pointerEvents.count > pointerSelectionCount,
-               pointerEvents.last?["windowIndex"] == "0",
+            if commitEvents.count > pointerCommitCount,
+               commitEvents.last?["windowIndex"] == "0",
                readState()["overlayVisible"] == "false" {
                 return true
             }
@@ -1579,7 +1580,7 @@ if let pointerTarget {
     let reason = "The active space has no window card for the pointer to land on"
     skipTest("A stationary pointer does not select or magnify a window", reason: reason)
     skipTest("Moving the pointer enables hover selection", reason: reason)
-    skipTest("Clicking a window card commits the pointer selection", reason: reason)
+    skipTest("Releasing Command commits the pointer hover selection", reason: reason)
 }
 
 // --- 10. Window-drop stage refresh ---
