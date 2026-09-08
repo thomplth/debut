@@ -70,9 +70,8 @@ shopt -u nullglob
 /usr/bin/install -m 755 "$PROJECT_DIR/.build/release/DebutDemo" "$SHARE_DIR/$DRIVER_ARTIFACT"
 /usr/bin/install -m 755 "$PROJECT_DIR/.build/release/DebutE2E" "$SHARE_DIR/$PROVISION_ARTIFACT"
 /usr/bin/install -m 755 "$SCRIPT_DIR/demo-capture-guest.sh" "$SHARE_DIR/$GUEST_ARTIFACT"
-# The guest browses the project's own doc site, which needs no network and is honest about
-# what is on screen.
-/usr/bin/ditto -c -k --keepParent "$PROJECT_DIR/docs/html" "$SHARE_DIR/$DOCS_ARTIFACT"
+# Static demo pages keep capture content reproducible and independent of documentation.
+/usr/bin/ditto -c -k --keepParent "$PROJECT_DIR/Tests/Fixtures/Demo/html" "$SHARE_DIR/$DOCS_ARTIFACT"
 
 if ! tart exec "$VM_NAME" /usr/bin/true >/dev/null 2>&1; then
     echo "Starting $VM_NAME headlessly..."

@@ -37,8 +37,8 @@ expect_contains "$local_guide" 'high-risk changes only' \
     "local E2E guide must state the high-risk-only policy"
 expect_contains "$local_guide" 'preferred.*headless|headless.*preferred' \
     "local E2E guide must identify headless Tart as preferred"
-expect_contains "$local_guide" 'GitHub-hosted.*fallback|fallback.*GitHub-hosted' \
-    "local E2E guide must describe hosted CI as the fallback"
+expect_contains "$local_guide" 'report the limitation' \
+    "local E2E guide must report unavailable VM coverage"
 
 expect_contains "$readme" 'High-risk verification' \
     "README must expose the high-risk verification policy"
