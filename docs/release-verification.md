@@ -1,10 +1,9 @@
-# Release verification and version migration
+# Release verification
 
 Releases are built by GitHub Actions from the exact commit that passed CI and E2E.
 They tag that commit without creating a version commit or pushing a branch.
 The checked-in version stays `0.0.0-dev`; the release build stamps its version,
-feed, and public key temporarily. See [AGENTS.md](../AGENTS.md#releases) for the
-operating rules.
+feed, and public key temporarily.
 
 - [Manual release](../.github/workflows/release-manual.yml) accepts a patch,
   minor, or major bump and publishes stable after the gates pass.
@@ -72,7 +71,7 @@ must pass the same real update test against the previous compatible nightly.
 
 ## Nightly signing and recovery
 
-Nightlies require Developer ID signing and notarization (introduced by KHA-648). The
+Nightlies require Developer ID signing and notarization. The
 `nightly` environment contains the certificate, export password, App Store Connect
 notary key, and a Sparkle keypair distinct from stable, and accepts only `main`.
 The nightly job binds that environment directly rather than relying on reusable-workflow
@@ -96,22 +95,3 @@ Sparkle supports key rotation while keeping the other signing identity unchanged
 the EdDSA key is not permanently immutable. See [Sparkle's rotation rules](https://sparkle-project.org/documentation/#rotating-signing-keys).
 Moving the latest feed to an older release can stop further distribution, but
 cannot undo installed updates. Recovery requires a higher-build corrective release.
-
-## Historical verification evidence
-
-The following records the KHA-645 audit on 2026-09-08; it does not identify the
-latest release today or substitute for a new candidate's publication gates.
-
-Verified against GitHub main `bba36cc` on 2026-09-08 (KHA-645): `v0.4.0`
-was the latest stable release and included `appcast.xml`. Both `v0.3.0` and
-`v0.4.0` had completed Developer ID signing and notarization. The original plan's
-“first stable signing path has never run” premise was obsolete. Action SHA pins,
-restricted secret file modes, cleanup, and read-only repository Actions defaults
-were already present. Dependabot was missing. The three misclassified historical
-prereleases (`v0.1.1`, `v0.1.2`, `v0.2.1`) were corrected on GitHub;
-`v0.4.0` was latest stable at that audit.
-
-The published `v0.4.0` DMG's EdDSA signature was independently verified against
-the public key inside that artifact. Gatekeeper accepted the disk image and app.
-The actual `v0.3.0` → `v0.4.0` Sparkle replacement and relaunch passed in a
-separate headless Tart VM, using untouched, signed release binaries.
