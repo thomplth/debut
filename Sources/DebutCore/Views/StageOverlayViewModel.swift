@@ -68,6 +68,8 @@ public struct StageData: Sendable, Identifiable {
 }
 
 public struct StageOverlayViewModel: Sendable {
+    public var tutorialScope: TutorialSwitcherScope?
+    public var tutorialCoachmark: TutorialCoachmark?
     public let spaceManager: SpaceManager
     public var activeSpaceIndex: Int
     public var selectedWindowIndex: Int

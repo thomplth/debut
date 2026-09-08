@@ -30,6 +30,14 @@ public struct AltTabOverlayView: View {
     }
 
     public var body: some View {
+        if let scope = viewModel.tutorialScope, let coach = viewModel.tutorialCoachmark {
+            TutorialSwitcherView(rows: [.init(id: scope.presentationID, windows: viewModel.windows, isActive: true, index: 0)],
+                scope: scope, coach: coach, selectedWindowID: viewModel.selectedWindow?.windowID,
+                selectedDesktop: 0, appearance: viewModel.appearance, flat: true)
+        } else { standardBody }
+    }
+
+    private var standardBody: some View {
         GeometryReader { geo in
             let metrics = viewModel.metrics(containerSize: geo.size)
             let layout = viewModel.layout(containerSize: geo.size)
