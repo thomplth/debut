@@ -1,18 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
-version="${1:-}"
-dmg="${2:-}"
-private_key="${3:-}"
-output="${4:-}"
-plist="${5:?missing packaged Info.plist}"
+channel="${1:-}"
+version="${2:-}"
+dmg="${3:-}"
+private_key="${4:-}"
+output="${5:-}"
+plist="${6:?missing packaged Info.plist}"
 
 if [[ -z "$output" ]]; then
-    echo "usage: generate-appcast.sh <version> <dmg> <private-key> <output> <packaged Info.plist>" >&2
+    echo "usage: generate-appcast.sh <nightly|stable> <version> <dmg> <private-key> <output> <packaged Info.plist>" >&2
     exit 2
 fi
 
-"$(dirname "$0")/stable-update-eligibility.sh" stable "$version" >/dev/null
+"$(dirname "$0")/update-eligibility.sh" "$channel" "$version" >/dev/null
 [[ -f "$dmg" ]] || { echo "missing update archive: $dmg" >&2; exit 1; }
 [[ -f "$private_key" ]] || { echo "missing Sparkle private key: $private_key" >&2; exit 1; }
 
@@ -36,14 +37,21 @@ repository="${GITHUB_REPOSITORY:-thomplth/debut}"
 published="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S %z')"
 download_url="https://github.com/$repository/releases/download/v$version/Debut.dmg"
 release_url="https://github.com/$repository/releases/tag/v$version"
+if [[ "$channel" == nightly ]]; then
+    feed_title="Debut Nightly Updates"
+    feed_description="Nightly Debut releases"
+else
+    feed_title="Debut Stable Updates"
+    feed_description="Stable Debut releases"
+fi
 
 {
     echo '<?xml version="1.0" encoding="utf-8"?>'
     echo '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
     echo '  <channel>'
-    echo '    <title>Debut Updates</title>'
+    echo "    <title>$feed_title</title>"
     echo "    <link>$release_url</link>"
-    echo '    <description>Stable Debut releases</description>'
+    echo "    <description>$feed_description</description>"
     echo '    <language>en</language>'
     echo '    <item>'
     echo "      <title>Debut $version</title>"

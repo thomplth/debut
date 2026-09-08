@@ -11,7 +11,11 @@ inputs:
     description: Numeric bundle build from release-plan.sh
     required: true
   previous_tag:
-    description: Release notes and stable update baseline
+    description: Release notes baseline
+    required: false
+    default: ''
+  previous_update_tag:
+    description: Previous compatible release in this automatic-update channel
     required: false
     default: ''
   sha:
@@ -36,7 +40,7 @@ runs:
         CHANNEL: ${{ inputs.channel }}
         VERSION: ${{ inputs.version }}
       shell: bash
-      run: ./scripts/stable-update-eligibility.sh "$CHANNEL" "$VERSION" | tee -a "$GITHUB_OUTPUT"
+      run: ./scripts/update-eligibility.sh "$CHANNEL" "$VERSION" | tee -a "$GITHUB_OUTPUT"
 
     - name: Validate release credentials
       env:
@@ -48,6 +52,7 @@ runs:
         APP_STORE_CONNECT_API_KEY_ID: ${{ env.APP_STORE_CONNECT_API_KEY_ID }}
         APP_STORE_CONNECT_ISSUER_ID: ${{ env.APP_STORE_CONNECT_ISSUER_ID }}
         SPARKLE_EDDSA_PRIVATE_KEY: ${{ env.SPARKLE_EDDSA_PRIVATE_KEY }}
+        SPARKLE_PUBLIC_ED_KEY: ${{ env.SPARKLE_PUBLIC_ED_KEY }}
       shell: bash
       run: ./scripts/validate-release-credentials.sh "$CHANNEL"
 
@@ -61,10 +66,12 @@ runs:
     # the tag is what records the version.
     - name: Stamp the version into the build
       env:
+        CHANNEL: ${{ inputs.channel }}
         VERSION: ${{ inputs.version }}
         BUILD_VERSION: ${{ inputs.build_version }}
+        SPARKLE_PUBLIC_ED_KEY: ${{ env.SPARKLE_PUBLIC_ED_KEY }}
       shell: bash
-      run: ./scripts/apply-version.sh "$VERSION" "$BUILD_VERSION"
+      run: ./scripts/apply-version.sh "$VERSION" "$BUILD_VERSION" "$CHANNEL"
 
     - name: Write the release notes
       env:
@@ -77,7 +84,7 @@ runs:
             cat >> "$RUNNER_TEMP/notes.md" <<'NOTES'
 
         This nightly is an experimental build, signed with Developer ID and
-        notarized by Apple. It does not enter the stable automatic-update feed.
+        notarized by Apple. It receives updates only from the nightly channel.
         NOTES
         fi
 
@@ -107,7 +114,8 @@ runs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git tag -a "v$VERSION" -m "Debut v$VERSION" -m "Debut-build: $BUILD_VERSION"
+        git tag -a "v$VERSION" -m "Debut v$VERSION" -m "Debut-build: $BUILD_VERSION" \
+          -m "Debut-update-channel: $CHANNEL-v1"
         echo "TAG=v$VERSION" >> "$GITHUB_ENV"
 
     - name: Build the disk image
@@ -135,7 +143,7 @@ runs:
         xcrun stapler staple .build/Debut.dmg
         xcrun stapler validate .build/Debut.dmg
 
-    - name: Sign and generate the stable appcast
+    - name: Sign and generate the channel appcast
       if: steps.update_policy.outputs.eligible == 'true'
       env:
         SPARKLE_EDDSA_PRIVATE_KEY: ${{ env.SPARKLE_EDDSA_PRIVATE_KEY }}
@@ -145,7 +153,7 @@ runs:
         umask 077
         private_key="$RUNNER_TEMP/sparkle-eddsa.key"
         printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$private_key"
-        ./scripts/generate-appcast.sh "$VERSION" .build/Debut.dmg "$private_key" .build/appcast.xml .build/Debut.app/Contents/Info.plist
+        ./scripts/generate-appcast.sh "${{ inputs.channel }}" "$VERSION" .build/Debut.dmg "$private_key" .build/appcast.xml .build/Debut.app/Contents/Info.plist
         swift scripts/verify-appcast-signature.swift .build/appcast.xml .build/Debut.dmg .build/Debut.app/Contents/Info.plist
 
     - name: Assess the notarized artifact with Gatekeeper
@@ -154,21 +162,20 @@ runs:
         BUILD_VERSION: ${{ inputs.build_version }}
       shell: bash
       run: |
-        appcast=()
-        if [[ "${{ inputs.channel }}" == stable ]]; then appcast=(.build/appcast.xml); fi
-        ./scripts/verify-distribution.sh .build/Debut.dmg "${VERSION%%-*}" "$BUILD_VERSION" "${appcast[@]}"
+        ./scripts/verify-distribution.sh .build/Debut.dmg "${VERSION%%-*}" "$BUILD_VERSION" .build/appcast.xml
 
     - name: Verify Sparkle installs and relaunches the signed candidate
-      if: inputs.channel == 'stable'
+      if: steps.update_policy.outputs.eligible == 'true'
       env:
         GH_TOKEN: ${{ github.token }}
-        PREVIOUS_TAG: ${{ inputs.previous_tag }}
+        CHANNEL: ${{ inputs.channel }}
+        PREVIOUS_UPDATE_TAG: ${{ inputs.previous_update_tag }}
         BUILD_VERSION: ${{ inputs.build_version }}
       shell: bash
-      run: ./scripts/ci-update-e2e.sh "$PREVIOUS_TAG" "$BUILD_VERSION"
+      run: ./scripts/ci-update-e2e.sh "$CHANNEL" "$PREVIOUS_UPDATE_TAG" "$BUILD_VERSION"
 
     - name: Retain signed update rehearsal evidence
-      if: always() && inputs.channel == 'stable'
+      if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
         name: debut-update-evidence
@@ -194,17 +201,35 @@ runs:
       shell: bash
       run: |
         flags=()
-        assets=(.build/Debut.dmg)
+        assets=(.build/Debut.dmg .build/appcast.xml)
         if [[ "${{ inputs.channel }}" == "nightly" ]]; then
             flags+=(--prerelease)
-        else
-            assets+=(.build/appcast.xml)
         fi
         gh release create "v$VERSION" \
           --title "Debut v$VERSION" \
           --notes-file "$RUNNER_TEMP/notes.md" \
           "${flags[@]}" \
           "${assets[@]}"
+
+    # GitHub's /releases/latest endpoint deliberately excludes prereleases. A permanent
+    # prerelease provides the nightly channel with a stable appcast URL while versioned
+    # nightly releases and their DMGs remain immutable.
+    - name: Publish the nightly update feed
+      if: inputs.dry-run != 'true' && inputs.channel == 'nightly'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SHA: ${{ inputs.sha }}
+      shell: bash
+      run: |
+        if gh release view nightly-feed >/dev/null 2>&1; then
+            gh release upload nightly-feed .build/appcast.xml --clobber
+        else
+            gh release create nightly-feed .build/appcast.xml \
+              --target "$SHA" \
+              --title "Debut nightly update feed" \
+              --notes "Infrastructure release carrying the current nightly Sparkle appcast." \
+              --prerelease
+        fi
 
     # A failing step leaves the signing material behind, so this runs unconditionally and does
     # not fail the run: a release that succeeded must not be reported as broken by its own tidying.

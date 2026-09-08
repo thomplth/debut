@@ -22,6 +22,11 @@ on:
         required: false
         default: ''
         type: string
+      previous_update_tag:
+        description: Previous compatible release in this automatic-update channel
+        required: false
+        default: ''
+        type: string
       sha:
         description: The commit the CI and E2E gates tested
         required: true
@@ -42,6 +47,7 @@ jobs:
       DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
       APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
       SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+      SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
       DEVELOPER_IDENTITY: ${{ vars.DEVELOPER_IDENTITY }}
       APP_STORE_CONNECT_API_KEY_ID: ${{ vars.APP_STORE_CONNECT_API_KEY_ID }}
       APP_STORE_CONNECT_ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
@@ -60,4 +66,5 @@ jobs:
           version: ${{ inputs.version }}
           build_version: ${{ inputs.build_version }}
           previous_tag: ${{ inputs.previous_tag }}
+          previous_update_tag: ${{ inputs.previous_update_tag }}
           sha: ${{ inputs.sha }}
