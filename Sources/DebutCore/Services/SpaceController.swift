@@ -216,6 +216,18 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public var onDesktopReveal: (() -> Void)?
     public var onPracticeVerified: ((OnboardingPractice) -> Void)?
     public var onTutorialSelectionVerified: ((CGWindowID, OnboardingPractice) -> Void)?
+    public var tutorialScope: TutorialSwitcherScope?
+    public private(set) var activeTutorialScope: TutorialSwitcherScope?
+
+    public var tutorialCoachmark: TutorialCoachmark? {
+        guard let scope = activeTutorialScope else { return nil }
+        let preview = overlaySpaceManager
+        let selected = overlayMode == .altTab ? altTabSelection?.window.windowID
+            : preview.spaces[safe: selectedSpaceIndex]?.windows[safe: selectedWindowIndex]?.windowID
+        let targetDesktop = preview.spaces.firstIndex { $0.windowIDs.contains(scope.target.windowID) }
+        return scope.coachmark(mode: overlayMode, selectedWindowID: selected, selectedDesktop: selectedSpaceIndex, targetDesktop: targetDesktop)
+    }
+
     private var tutorialMovedWindowIDs: Set<CGWindowID> = []
     private var overlayPractice: OnboardingPractice?
     private var pendingPractice: (windowID: CGWindowID, practice: OnboardingPractice)?
@@ -273,7 +285,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         for pid in terminationPendingProcessIDs {
             preview.removeAllWindows(forOwnerPID: pid)
         }
-        return preview
+        return activeTutorialScope?.filtering(preview) ?? preview
     }
 
     /// Window previews captured when overlay opens
@@ -460,6 +472,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 .joined(separator: ","),
             "windowAspectsBySpace": Self.encode(windowAspectsBySpace),
             "windowIDsBySpace": Self.encode(windowIDsBySpace),
+            "tutorialOverlay": String(isSpaceManagerVisible && activeTutorialScope != nil),
+            "tutorialCoachAction": tutorialCoachmark?.action ?? "",
             "windowPreviewCount": "\(windowPreviews.count)",
             "variedWindowPreviewCount": "\(variedWindowPreviewIDs.count)",
         ]
@@ -1168,6 +1182,16 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
         diag.report("key_event", level: .transient, details: ["keyEvent": "\(event)"])
 
+        if isSpaceManagerVisible, activeTutorialScope != nil {
+            switch event {
+            case .quitSelectedApp, .closeSelectedWindow, .nextDisplayStack,
+                 .switchAdjacentSpace, .switchToSpace, .switchToSpaceKeepingCurrentApplication,
+                 .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick, .cmdShiftBacktickRepeat,
+                 .moveWindowLeft, .moveWindowRight, .jumpToSpace, .jumpToLastSpace:
+                return
+            default: break
+            }
+        }
         if isSpaceManagerVisible, overlayMode == .altTab, Self.isStageOnly(event) {
             diag.report("alt_tab_ignored_stage_action", level: .transient, details: [
                 "keyEvent": "\(event)",
@@ -1383,6 +1407,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func handleCmdTabTap() {
+        if let scope = tutorialScope, let focused = probeFocusedWindow().windowID, scope.windowIDs.contains(focused) {
+            openOverlay(selectNextWindow: true)
+            commitSelection()
+            return
+        }
         let activeSpace = spaceManager.activeSpace
         let focusableWindows = activeSpace.windows.filter { !isTerminationPending($0) }
         let frontWindowIsFocusable = activeSpace.windows.first.map {
@@ -1410,18 +1439,16 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func openOverlay(selectNextSpace: Bool) {
         setupOverlay()
+        overlayPractice = .workspace
         selectedWindowIndex = 0
-        if spaceManager.spaces.count > 1 {
-            selectedSpaceIndex = (selectedSpaceIndex + 1) % spaceManager.spaces.count
-        }
+        cycleSpace(forward: true)
     }
 
     private func openOverlay(selectPreviousSpace: Bool) {
         setupOverlay()
+        overlayPractice = .workspace
         selectedWindowIndex = 0
-        if spaceManager.spaces.count > 1 {
-            selectedSpaceIndex = (selectedSpaceIndex - 1 + spaceManager.spaces.count) % spaceManager.spaces.count
-        }
+        cycleSpace(forward: false)
     }
 
     // MARK: - Alt-tab switcher
@@ -1534,6 +1561,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         overlayMode = mode
         let presentation = activeOverlayPresentation
         let focusedWindow = probeFocusedWindow()
+        activeTutorialScope = tutorialScope.flatMap { scope in
+            focusedWindow.windowID.map { scope.windowIDs.contains($0) } == true ? scope : nil
+        }
         focusedWindowID = focusedWindow.windowID
         focusedWindowFrame = focusedWindow.frame
         focusedWindowIsFullscreen = focusedWindow.isFullscreen
@@ -1564,7 +1594,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let assignedWindowIDs = spaceManager.allSpaces.flatMap { $0.windows.map(\.windowID) }
         pruneWindowPreviews(assignedWindowIDs: Set(assignedWindowIDs))
         let cachedCount = variedWindowPreviewIDs.intersection(assignedWindowIDs).count
-        pendingPreviewCaptureIDs = windowIDsNeedingCapture()
+        pendingPreviewCaptureIDs = windowIDsNeedingCapture().filter { activeTutorialScope?.windowIDs.contains($0) ?? true }
         if let presentation {
             let workload = PerformanceWorkload(
                 spaces: spaceManager.spaces.count,
@@ -1654,9 +1684,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         if let focusedWindowSnapshotProvider {
             return focusedWindowSnapshotProvider()
         }
-        guard let frontApp = NSWorkspace.shared.frontmostApplication,
-              frontApp.bundleIdentifier != "com.thomplth.Debut"
-        else { return .unfocused }
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return .unfocused }
+        if frontApp.bundleIdentifier == "com.thomplth.Debut" {
+            guard let window = NSApp.keyWindow, tutorialScope?.windowIDs.contains(CGWindowID(window.windowNumber)) == true else { return .unfocused }
+            let frame = window.frame
+            let top = NSScreen.screens.first?.frame.maxY ?? frame.maxY
+            return .init(windowID: CGWindowID(window.windowNumber), frame: CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height), isFullscreen: false)
+        }
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
         AXUIElementSetMessagingTimeout(axApp, Float(Self.focusProbeTimeout))
@@ -1881,6 +1915,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func finishSelectionCommit() {
         guard isSpaceManagerVisible, isStageStackCommitInFlight else { return }
+        defer { activeTutorialScope = nil }
         isStageStackCommitInFlight = false
         isSpaceManagerVisible = false
         if let tapService = keyboardService as? EventTapKeyboardService {
@@ -1902,6 +1937,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             else { practice = .workspace }
             pendingPractice = (raiseWindowID, practice)
         }
+        if activeTutorialScope != nil && raiseWindowID == nil { return }
         switchToSpace(id: targetSpace.id, raiseWindowID: raiseWindowID)
 
         diag.report("overlay_committed", details: [
@@ -1939,6 +1975,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     /// Close the switcher and expose Finder's real desktop surface.
     public func revealDesktop() {
+        guard activeTutorialScope == nil else { return }
         guard isSpaceManagerVisible, !isStageStackCommitInFlight else { return }
         stageStackTransaction.discard()
         isSpaceManagerVisible = false
@@ -1967,6 +2004,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
               })
         else { return false }
 
+        if let scope = activeTutorialScope {
+            guard scope.practice == .moveWindow, windowID == scope.target.windowID,
+                  scope.desktopIndices.contains(toSpaceIndex) else { return false }
+        }
         let fromSpaceID = preview.spaces[fromSpaceIndex].id
         let toSpaceID = preview.spaces[toSpaceIndex].id
         stageStackTransaction.spaceMove(
@@ -1992,6 +2033,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// Next Cmd+Tab or Cmd+Option+Tab reopens the overlay.
     private func discardOverlay() {
         guard isSpaceManagerVisible, !isStageStackCommitInFlight else { return }
+        defer { activeTutorialScope = nil }
         stageStackTransaction.discard()
         isSpaceManagerVisible = false
         if let tapService = keyboardService as? EventTapKeyboardService {
@@ -2030,16 +2072,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private func cycleSpace(forward: Bool) {
         guard isSpaceManagerVisible, !spaceManager.spaces.isEmpty else { return }
 
-        if forward {
-            selectedSpaceIndex = (selectedSpaceIndex + 1) % spaceManager.spaces.count
-        } else {
-            selectedSpaceIndex = (selectedSpaceIndex - 1 + spaceManager.spaces.count) % spaceManager.spaces.count
-        }
+        let indices = (activeTutorialScope?.desktopIndices ?? Array(spaceManager.spaces.indices))
+            .filter { spaceManager.spaces.indices.contains($0) }
+        guard !indices.isEmpty else { return }
+        let current = indices.firstIndex(of: selectedSpaceIndex) ?? 0
+        selectedSpaceIndex = indices[(current + (forward ? 1 : indices.count - 1)) % indices.count]
         selectedWindowIndex = 0
         notifyOverlayUpdated()
     }
 
     private func cycleDisplayStack() {
+        guard activeTutorialScope == nil else { return }
         guard isSpaceManagerVisible else { return }
         let previous = spaceManager.selectedSpaceStackID
         spaceManager.selectNextSpaceStack()
@@ -2067,6 +2110,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     public func jumpToSpace(index: Int) {
+        guard activeTutorialScope?.desktopIndices.contains(index) ?? true else { return }
         guard isSpaceManagerVisible,
               spaceManager.spaces.indices.contains(index) else { return }
         selectedSpaceIndex = index
@@ -2166,6 +2210,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         case .down:
             guard selectedSpaceIndex < preview.spaces.count - 1 else { return }
             targetSpaceIndex = selectedSpaceIndex + 1
+        }
+        if let scope = activeTutorialScope {
+            guard scope.practice == .moveWindow, window.windowID == scope.target.windowID,
+                  scope.desktopIndices.contains(targetSpaceIndex) else { return }
         }
         guard canRelocate(from: selectedSpaceIndex, to: targetSpaceIndex) else {
             diag.report("window_move_refused", details: [

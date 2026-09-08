@@ -81,7 +81,11 @@ func test(_ name: String, _ body: () -> Bool) {
     }
     totalCount += 1
     if body() { passCount += 1; pass(name) }
-    else { failCount += 1; fail(name) }
+    else {
+        failCount += 1; fail(name)
+        let failureURL = URL(fileURLWithPath: "/tmp/debut-e2e-screenshots/failure-\(totalCount).json")
+        if let data = try? Data(contentsOf: diagnosticFile) { try? data.write(to: failureURL) }
+    }
 }
 
 // MARK: - Diagnostic file
@@ -2105,14 +2109,42 @@ func performOnboardingExercise(_ practice: OnboardingPractice) -> Bool {
         return false
     }
     let flags: CGEventFlags = practice == .allWindows ? .maskAlternate : .maskCommand
-    let presentationCount = readEvents().filter { $0["event"] == "overlay_presentation_completed" }.count
+    let previousPresentation = readEvents().last { $0["event"] == "overlay_presentation_completed" }?["traceID"]
     postFlagsChanged(flags: flags)
     postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: flags)
     guard waitFor(timeout: 15, {
-        overlayWindowIsOnScreen() && readEvents().filter { $0["event"] == "overlay_presentation_completed" }.count > presentationCount
+        guard overlayWindowIsOnScreen(),
+              let trace = readEvents().last(where: { $0["event"] == "overlay_presentation_completed" })?["traceID"] else { return false }
+        return trace != previousPresentation
     }) else { postFlagsChanged(flags: []); return false }
     postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: flags)
     guard overlayWindowIsOnScreen() else { postFlagsChanged(flags: []); return false }
+    let shownIDs = Set((readState()["windowIDsBySpace"] ?? "").split { $0 == ";" || $0 == "," }.map(String.init))
+    let allowedIDs = Set([id, target["lessonWindowID"] ?? ""])
+    guard readState()["tutorialOverlay"] == "true", shownIDs == allowedIDs,
+          let action = readState()["tutorialCoachAction"], !action.isEmpty, onboardingContains(action) else {
+        info("  Tutorial isolation or visible coach failed: shown=\(shownIDs) allowed=\(allowedIDs), state=\(readState())")
+        postFlagsChanged(flags: []); return false
+    }
+    _ = takeScreenshot("onboarding_\(practice)_coach_start")
+    if practice == .moveWindow {
+        let origin = readState()["selectedSpaceIndex"]
+        let chord: CGEventFlags = [.maskCommand, .maskAlternate]
+        postFlagsChanged(flags: chord)
+        postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: chord)
+        postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: chord)
+        guard waitFor(timeout: 15, { readState()["selectedSpaceIndex"] == String(destination)
+            && (readState()["tutorialCoachAction"] ?? "").contains("Hold Option") }) else {
+            postFlagsChanged(flags: []); return false
+        }
+        _ = takeScreenshot("onboarding_move_empty_desktop_recovery")
+        postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: chord)
+        postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: chord)
+        guard waitFor(timeout: 15, { readState()["selectedSpaceIndex"] == origin }) else {
+            postFlagsChanged(flags: []); return false
+        }
+        postFlagsChanged(flags: .maskCommand)
+    }
     if practice == .desktop {
         for _ in 0..<10 {
             if readState()["selectedSpaceIndex"] == String(destination) { break }
@@ -2144,7 +2176,10 @@ func performOnboardingExercise(_ practice: OnboardingPractice) -> Bool {
         let arrow = destination > origin ? kVK_DownArrow : kVK_UpArrow
         postKeyDown(keyCode: CGKeyCode(arrow), flags: flags)
         postKeyUp(keyCode: CGKeyCode(arrow), flags: flags)
-        wait(0.3)
+        guard waitFor({ (readState()["tutorialCoachAction"] ?? "").contains("Release Command") }) else {
+            postFlagsChanged(flags: []); return false
+        }
+        _ = takeScreenshot("onboarding_move_coach_release")
     }
     postFlagsChanged(flags: [])
     let verified = selected && waitFor(timeout: 8) {
@@ -2156,9 +2191,9 @@ func performOnboardingExercise(_ practice: OnboardingPractice) -> Bool {
     // shows the instructions a learner follows rather than a transient loading state.
     return waitFor(timeout: 8) {
         switch practice {
-        case .workspace: onboardingContains("Open “Move a window” to continue")
-        case .desktop: onboardingContains("Open “Window previews” to continue")
-        case .moveWindow: onboardingContains("Open “Instant desktop switching” on Desktop")
+        case .workspace: currentOnboardingTarget()?["title"] == "Move a window" && onboardingContains("Hold Command and press Tab")
+        case .desktop: currentOnboardingTarget()?["title"] == "Window previews" && onboardingContains("Hold Command and press Tab")
+        case .moveWindow: (currentOnboardingTarget()?["title"] == "Instant desktop switching" && onboardingContains("Hold Option and press Tab"))
             || onboardingContains("Allow Screen Recording for window previews")
         case .allWindows: onboardingContains("Desktop transition duration")
         }
@@ -2245,6 +2280,40 @@ test("Closing the target explains recovery and restart creates another window") 
         && onboardingPress("Restart exercise")
         && waitFor { currentOnboardingTarget()?["windowID"] != String(id) }
 }
+test("The target's Return button recreates a closed lesson without losing progress") {
+    guard let oldLessonID = currentOnboardingTarget()?["lessonWindowID"].flatMap(UInt32.init),
+          AccessibilityWindowService().closeWindow(windowID: oldLessonID),
+          onboardingPress("Return to tutorial") else {
+        info("  Return recovery could not close or press; target=\(String(describing: currentOnboardingTarget()))")
+        return false
+    }
+    let resumed = waitFor {
+        guard let newLessonID = currentOnboardingTarget()?["lessonWindowID"] else { return false }
+        return newLessonID != String(oldLessonID) && onboardingContains("Switch windows on this desktop")
+            && onboardingContains("Hold Command and press Tab")
+    }
+    if !resumed { info("  Return recovery timed out: old=\(oldLessonID), target=\(String(describing: currentOnboardingTarget())), UI=\(accessibilityStrings(for: onboardingApplication?.processIdentifier ?? 0))") }
+    return resumed
+}
+test("Reopening a closed lesson from the Tutorial menu restores isolation") {
+    guard let target = currentOnboardingTarget(),
+          let lessonID = target["lessonWindowID"].flatMap(UInt32.init),
+          AccessibilityWindowService().closeWindow(windowID: lessonID),
+          let menuItem = onboardingButton("Tutorial...", role: kAXMenuItemRole),
+          AXUIElementPerformAction(menuItem, kAXPressAction as CFString) == .success,
+          waitFor({
+              guard let resumed = currentOnboardingTarget()?["lessonWindowID"] else { return false }
+              return resumed != String(lessonID) && onboardingContains("Hold Command and press Tab")
+          }) else { return false }
+    postFlagsChanged(flags: .maskCommand)
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+    let isolated = waitFor { overlayWindowIsOnScreen() && readState()["tutorialOverlay"] == "true" }
+    postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+    postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: .maskCommand)
+    postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: .maskCommand)
+    postFlagsChanged(flags: [])
+    return isolated && waitFor { readState()["overlayVisible"] == "false" }
+}
 test("Cancelling the switcher cannot complete an exercise") {
     postFlagsChanged(flags: .maskCommand)
     postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
@@ -2256,6 +2325,27 @@ test("Cancelling the switcher cannot complete an exercise") {
     postFlagsChanged(flags: [])
     wait(0.5)
     return visible && titleVisible && onboardingContains("Switch windows on this desktop")
+}
+test("Switching from another app during onboarding uses the ordinary switcher") {
+    let service = AccessibilityWindowService()
+    guard let other = service.listWindows().first(where: { $0.ownerBundleID == "com.apple.TextEdit" }) else { return false }
+    _ = service.frontWindow(windowID: other.windowID, ownerPID: other.ownerPID)
+    _ = service.raiseWindow(windowID: other.windowID)
+    wait(0.4)
+    postFlagsChanged(flags: .maskCommand)
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+    let visible = waitFor { overlayWindowIsOnScreen() }
+    postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+    let ordinary = readState()["tutorialOverlay"] == "false" && readState()["tutorialCoachAction"] == ""
+        && (readState()["windowIDsBySpace"] ?? "").contains(String(other.windowID))
+    postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: .maskCommand)
+    postFlagsChanged(flags: [])
+    if let id = currentOnboardingTarget()?["lessonWindowID"].flatMap(UInt32.init), let app = onboardingApplication {
+        _ = service.frontWindow(windowID: id, ownerPID: app.processIdentifier)
+        _ = service.raiseWindow(windowID: id)
+    }
+    wait(0.4)
+    return visible && ordinary
 }
 test("The named Command-Tab target becomes the desktop lesson") { performOnboardingExercise(.workspace) }
 _ = takeScreenshot("11_onboarding_desktops")
