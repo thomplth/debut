@@ -1,4 +1,4 @@
-name: Daily Release
+name: Nightly Release
 
 on:
   schedule:
@@ -63,7 +63,7 @@ jobs:
       contents: write
     runs-on: macos-26
     timeout-minutes: 30
-    environment: daily-release
+    environment: nightly-release
     env:
       DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
       DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
@@ -81,7 +81,7 @@ jobs:
       - name: Publish the signed nightly
         uses: ./.github/actions/publish-release
         with:
-          channel: daily
+          channel: nightly
           version: ${{ needs.plan.outputs.version }}
           build_version: ${{ needs.plan.outputs.build_version }}
           previous_tag: ${{ needs.plan.outputs.previous_tag }}

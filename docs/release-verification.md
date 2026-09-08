@@ -16,7 +16,7 @@ separate headless Tart VM, using untouched, signed release binaries.
 
 ## Version records
 
-Tags remain the sole release-version record. Known pre-migration daily tags
+Tags remain the sole release-version record. Known pre-migration automated prerelease tags
 (`v0.1.1`, `v0.1.2`, `v0.2.1`, `v0.2.2`, `v0.3.1`, `v0.3.2`, `v0.4.1`,
 `v0.4.2`, `v0.4.3`) are excluded from the stable baseline but remain reserved.
 From `v0.4.0`, a manual patch therefore plans `v0.4.4`, not `v0.4.1`.
@@ -24,7 +24,7 @@ From `v0.4.0`, a manual patch therefore plans `v0.4.4`, not `v0.4.1`.
 Nightlies target the next minor and use `v0.5.0-nightly.YYYYMMDD[.N]` tags.
 Stable release notes start at the previous stable. Nightly notes and change
 detection use the last release on the first-parent history, including a stable
-publication, so unchanged commits do not produce repeated daily releases.
+publication, so unchanged commits do not produce repeated nightly releases.
 
 The full label is stamped into `DebutCore.version`; the bundle's short version
 is numeric (`0.5.0`). A separate integer `CFBundleVersion` starts at 10000 and
@@ -64,17 +64,17 @@ Use a separate VM; the wrapper stops only `debut-update-tahoe` (overridable with
 The release gate requires a previous signed stable release and fails rather than
 silently skipping if none is available.
 
-## Daily signing and recovery
+## Nightly signing and recovery
 
 KHA-648 enables Developer ID signing and notarization for nightlies. The
-`daily-release` environment contains only the certificate, export password, and
+`nightly-release` environment contains only the certificate, export password, and
 App Store Connect notary key, plus the identity/key/issuer variables, and accepts
-only `main`. The daily job binds that environment directly rather than relying
+only `main`. The nightly job binds that environment directly rather than relying
 on reusable-workflow secret inheritance. Both channels invoke the same composite
-publishing action. Daily validation refuses an unexpected Sparkle private key;
+publishing action. Nightly validation refuses an unexpected Sparkle private key;
 only stable publication can generate an appcast.
 
-`verify-daily-signing.yml` is a manual, non-publishing rehearsal of that exact
+`verify-nightly-signing.yml` is a manual, non-publishing rehearsal of that exact
 signing action. It has `contents: read`, uses `dry-run: true`, and retains the
 notarized DMG as a workflow artifact for inspection in Tart. Signing credentials
 are removed on success and failure. It runs no GUI/E2E against the hosted runner.
