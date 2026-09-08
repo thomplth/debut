@@ -37,8 +37,8 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Share anonymous usage and performance data | Off; the user may opt in during onboarding or later in Settings |
 
 Cache age is evaluated when capture work is requested; it is not a recurring
-refresh timer. The code remains authoritative for control ranges and decoding
-fallbacks. See [switcher shortcuts](space-manager.md#shipped-shortcuts) for bindings.
+refresh timer. The code remains authoritative for control ranges, decoding
+fallbacks, and [default bindings](../Sources/DebutCore/Models/KeyBinding.swift).
 
 ## Feature behavior and permissions
 

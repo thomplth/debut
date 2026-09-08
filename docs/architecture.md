@@ -105,8 +105,7 @@ of an active wallpaper rendering path.
 The saved model is a recovery aid. Window IDs and PIDs appear in local state, but
 must be validated against current identities. Desktop UUIDs join records to real
 desktops, while macOS continues to decide their order and current window membership.
-See [system behaviors](../spec/behaviors.md) for recovery, tombstone, and dormancy
-rules and [privacy](privacy.md) for what is kept locally.
+See [privacy](privacy.md) for what is kept locally.
 
 ## Verification map
 
@@ -116,9 +115,8 @@ cover defaults, feature gates, and bindings. Screenshot tests cover stage layout
 selectors, settings, onboarding, and indicator presentation. Shell contracts in
 `Tests/CI` cover packaging, release policy, and execution wrappers.
 
-Real global-input, window-server, and presentation checks run in the headless
-Tart VM for agent work. Their assertions must inspect the actual desktop/window
+Real global-input, window-server, and presentation checks run in a headless
+Tart VM. Their assertions must inspect the actual desktop/window
 outcome, not just Debut's requested state. A non-nil image is also insufficient:
 capture validation must establish that it contains real, varied content.
-See [local E2E](local-e2e.md) and [agent guidance](../AGENTS.md) for the required
-workflow, toolchain, and verification scope.
+See [contributor guidance](../CONTRIBUTING.md) for setup and verification.

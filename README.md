@@ -37,7 +37,7 @@ Open the DMG, drag Debut to Applications, and launch it. Grant Accessibility and
 Screen Recording for window control and screenshot previews. Previews can be
 disabled if you prefer icons and titles.
 
-[Documentation](docs/README.md) · [Privacy](docs/privacy.md) · [GPL-3.0-only license](LICENSE)
+[Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md) · [Privacy](docs/privacy.md) · [GPL-3.0-only license](LICENSE)
 
 Debut's desktop switching builds on work from
 [InstantSpaceSwitcher](https://github.com/jurplel/InstantSpaceSwitcher),
