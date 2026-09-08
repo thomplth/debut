@@ -758,6 +758,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         overlayWindow.onPointerSelectionChanged = { [weak self] spaceIndex, windowIndex in
+            self?.spaceController?.updateOverlayPointerSelection(
+                spaceIndex: spaceIndex,
+                windowIndex: windowIndex
+            )
             self?.diag.report("overlay_pointer_selection_changed", level: .transient, details: [
                 "spaceIndex": spaceIndex.map(String.init) ?? "none",
                 "windowIndex": windowIndex.map(String.init) ?? "none",
