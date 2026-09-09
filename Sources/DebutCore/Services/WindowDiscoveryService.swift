@@ -21,6 +21,17 @@ struct RetiredWindowRecord: Codable, Equatable, Sendable {
 }
 
 public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
+    typealias FocusProbeScheduler = @Sendable (
+        pid_t,
+        @escaping @Sendable (CGWindowID?) -> Void
+    ) -> Void
+
+    static let focusProbeTimeout: TimeInterval = 0.05
+    private static let focusProbeQueue = DispatchQueue(
+        label: "com.thomplth.Debut.focusProbe",
+        qos: .userInitiated
+    )
+
     private let diag: DiagnosticReporter
     private let windowService: any WindowService
     public var onWindowsDiscovered: (([WindowInfo]) -> Void)?
@@ -37,7 +48,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// window. Without it the reconciler falls back to guessing from the active space.
     public var spaceSwitcher: (any SpaceSwitching)?
 
-    private let focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)?
+    private let focusProbeScheduler: FocusProbeScheduler
     private let frontmostPIDProvider: @Sendable () -> pid_t?
     private let launchDiscoveryDelay: TimeInterval
     private let processExitMonitor: any ProcessExitMonitoring
@@ -142,6 +153,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// The app a refused registration is still retrying for, and how many retries it has spent.
     private var pendingFocusObserverPID: pid_t?
     private var focusObserverAttempt = 0
+    private var activationProbeGeneration = 0
+    private var activatedPID: pid_t?
+    private var focusChangeProbeGeneration = 0
+    private var launchProbeGeneration = 0
 
     // Per-app AXObservers for window lifecycle (destroyed, title changed)
     private var perAppObservers: [pid_t: AXObserver] = [:]
@@ -171,6 +186,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     init(
         windowService: any WindowService,
         focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)? = nil,
+        focusProbeScheduler: FocusProbeScheduler? = nil,
         frontmostPIDProvider: (@Sendable () -> pid_t?)? = nil,
         launchDiscoveryDelay: TimeInterval = 0.5,
         processExitMonitor: any ProcessExitMonitoring,
@@ -178,7 +194,22 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     ) {
         self.diag = diagnosticReporter
         self.windowService = windowService
-        self.focusedWindowProvider = focusedWindowProvider
+        if let focusProbeScheduler {
+            self.focusProbeScheduler = focusProbeScheduler
+        } else if let focusedWindowProvider {
+            // Test providers are deterministic and preserve the synchronous semantics used by
+            // the service's unit tests. Production always takes the worker-queue path below.
+            self.focusProbeScheduler = { pid, completion in
+                completion(focusedWindowProvider(pid))
+            }
+        } else {
+            self.focusProbeScheduler = { pid, completion in
+                Self.focusProbeQueue.async {
+                    let windowID = Self.boundedFocusedWindowID(for: pid)
+                    DispatchQueue.main.async { completion(windowID) }
+                }
+            }
+        }
         self.frontmostPIDProvider = frontmostPIDProvider ?? {
             NSWorkspace.shared.frontmostApplication?.processIdentifier
         }
@@ -810,11 +841,20 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     fileprivate func handleFocusChanged() {
-        guard let pid = observedPID,
-              let windowID = focusedWindowID(for: pid)
-        else { return }
-        trackAndRegister(windowID: windowID, pid: pid)
-        onWindowActivated?(windowID)
+        guard let pid = observedPID else { return }
+        focusChangeProbeGeneration += 1
+        let generation = focusChangeProbeGeneration
+        let activationGeneration = activationProbeGeneration
+        focusProbeScheduler(pid) { [weak self] windowID in
+            guard let self,
+                  self.observedPID == pid,
+                  self.focusChangeProbeGeneration == generation,
+                  self.activationProbeGeneration == activationGeneration,
+                  let windowID
+            else { return }
+            self.trackAndRegister(windowID: windowID, pid: pid)
+            self.onWindowActivated?(windowID)
+        }
     }
 
     // MARK: - NSWorkspace notifications
@@ -899,13 +939,19 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         onWindowsDiscovered?(windows)
 
         guard frontmostPIDProvider() == pid else { return }
-        let focusedWindowID = focusedWindowProvider?(pid)
-            ?? focusedWindowID(for: pid)
-            ?? windows.first?.windowID
-        if let focusedWindowID,
-           windows.contains(where: { $0.windowID == focusedWindowID }) {
-            trackAndRegister(windowID: focusedWindowID, pid: pid)
-            onWindowActivated?(focusedWindowID)
+        launchProbeGeneration += 1
+        let generation = launchProbeGeneration
+        focusProbeScheduler(pid) { [weak self] probedWindowID in
+            guard let self,
+                  self.launchProbeGeneration == generation,
+                  self.frontmostPIDProvider() == pid
+            else { return }
+            let focusedWindowID = probedWindowID.flatMap { candidate in
+                windows.contains(where: { $0.windowID == candidate }) ? candidate : nil
+            } ?? windows.first?.windowID
+            guard let focusedWindowID else { return }
+            self.trackAndRegister(windowID: focusedWindowID, pid: pid)
+            self.onWindowActivated?(focusedWindowID)
         }
     }
 
@@ -942,23 +988,45 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     func handleAppActivation(_ app: AppInfo) {
+        activationProbeGeneration += 1
+        activatedPID = app.pid
+        let generation = activationProbeGeneration
+
         // A switcher is never the app the user switched to. Debut's activation policy used to
         // keep it out of this notification; as a regular app it arrives like anything else, and
         // answering would name Debut the frontmost app every time its own window took focus.
-        guard app.bundleID != "com.thomplth.Debut" else { return }
+        guard app.bundleID != "com.thomplth.Debut" else {
+            activatedPID = nil
+            return
+        }
         onFrontmostAppChanged?(app.bundleID)
 
         let pid = app.pid
         let shouldTrackActivation = !excludedBundleIDs.contains(app.bundleID)
-        let sampledFocusedWindowID: CGWindowID?
-
-        // Sample focus before performing any enumeration so transient activation
-        // windows are not introduced by reconciliation latency.
-        if shouldTrackActivation {
-            sampledFocusedWindowID = focusedWindowProvider?(pid) ?? self.focusedWindowID(for: pid)
-        } else {
-            sampledFocusedWindowID = nil
+        guard shouldTrackActivation else {
+            finishAppActivation(app, sampledFocusedWindowID: nil, generation: generation)
+            return
         }
+        let focusGeneration = focusChangeProbeGeneration
+        focusProbeScheduler(pid) { [weak self] sampledFocusedWindowID in
+            self?.finishAppActivation(
+                app,
+                sampledFocusedWindowID: sampledFocusedWindowID,
+                generation: generation,
+                focusGeneration: focusGeneration
+            )
+        }
+    }
+
+    private func finishAppActivation(
+        _ app: AppInfo,
+        sampledFocusedWindowID: CGWindowID?,
+        generation: Int,
+        focusGeneration: Int? = nil
+    ) {
+        guard activationProbeGeneration == generation, activatedPID == app.pid else { return }
+        let pid = app.pid
+        let shouldTrackActivation = !excludedBundleIDs.contains(app.bundleID)
         let runningApps = windowService.listRunningApps()
         var runningPIDs = Set(runningApps.map(\.pid))
         // The activation notification is authoritative even if Launch Services has not
@@ -985,11 +1053,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
            activatedWindowIDs.contains(sampledFocusedWindowID) {
             focusedWindowID = sampledFocusedWindowID
         } else if shouldTrackActivation {
-            let refreshedFocusedWindowID = focusedWindowProvider?(pid)
-                ?? self.focusedWindowID(for: pid)
-            focusedWindowID = refreshedFocusedWindowID.flatMap {
-                activatedWindowIDs.contains($0) ? $0 : nil
-            } ?? activatedWindows.first?.windowID
+            focusedWindowID = activatedWindows.first?.windowID
         } else {
             focusedWindowID = nil
         }
@@ -1005,7 +1069,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             desktopLocations: desktopLocations(for: liveWindows),
             skyLightWindowIDs: skyLightWindowIDs()
         ))
-        if let focusedWindowID {
+        if let focusedWindowID,
+           focusGeneration == nil || focusChangeProbeGeneration == focusGeneration {
             onWindowActivated?(focusedWindowID)
         }
     }
@@ -1039,13 +1104,19 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     // MARK: - Helpers
 
     public func focusedWindowID(for pid: pid_t) -> CGWindowID? {
+        Self.boundedFocusedWindowID(for: pid)
+    }
+
+    private static func boundedFocusedWindowID(for pid: pid_t) -> CGWindowID? {
         let axApp = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(axApp, Float(focusProbeTimeout))
         var windowRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &windowRef) == .success else {
             return nil
         }
         guard let windowRef else { return nil }
         let window = windowRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(window, Float(focusProbeTimeout))
         var cgWindowID: CGWindowID = 0
         guard _AXUIElementGetWindow(window, &cgWindowID) == .success else {
             return nil

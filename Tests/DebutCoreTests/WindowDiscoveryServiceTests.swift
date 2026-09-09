@@ -39,6 +39,25 @@ final class MockProcessExitMonitor: ProcessExitMonitoring, @unchecked Sendable {
     }
 }
 
+final class DeferredFocusProbe: @unchecked Sendable {
+    typealias Completion = @Sendable (CGWindowID?) -> Void
+
+    private let lock = NSLock()
+    private var pending: [(pid_t, Completion)] = []
+
+    func schedule(pid: pid_t, completion: @escaping Completion) {
+        lock.withLock { pending.append((pid, completion)) }
+    }
+
+    func resolve(pid: pid_t, windowID: CGWindowID?) {
+        let completion: Completion? = lock.withLock {
+            guard let index = pending.firstIndex(where: { $0.0 == pid }) else { return nil }
+            return pending.remove(at: index).1
+        }
+        completion?(windowID)
+    }
+}
+
 @Suite("WindowDiscoveryService")
 struct WindowDiscoveryServiceTests {
     private func liveWindow(_ windowID: CGWindowID, ownerPID: pid_t = 10) -> WindowInfo {
@@ -85,6 +104,72 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshotWindowIDs == [1, 2, 3, 4])
         #expect(snapshotAllWindowIDs == [1, 2, 3, 4, 99])
         #expect(snapshotFocusedWindowID == 4)
+    }
+
+    @Test("A delayed AX focus probe does not hold app activation")
+    func delayedFocusProbeDoesNotHoldActivation() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1)]
+        let probe = DeferredFocusProbe()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusProbeScheduler: probe.schedule,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var callbackOrder: [String] = []
+        service.onFrontmostAppChanged = { _ in callbackOrder.append("app") }
+        service.onAppActivated = { _ in callbackOrder.append("snapshot") }
+        service.onWindowActivated = { _ in callbackOrder.append("focus") }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)
+        )
+
+        #expect(callbackOrder == ["app"])
+
+        probe.resolve(pid: 10, windowID: 1)
+
+        #expect(callbackOrder == ["app", "snapshot", "focus"])
+    }
+
+    @Test("A superseded AX focus probe cannot publish stale activation")
+    func supersededFocusProbeCannotPublishActivation() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "app.a", name: "A", pid: 10, isHidden: false),
+            AppInfo(bundleID: "app.b", name: "B", pid: 20, isHidden: false),
+        ]
+        windowService.windowList = [liveWindow(1, ownerPID: 10), liveWindow(2, ownerPID: 20)]
+        let probe = DeferredFocusProbe()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusProbeScheduler: probe.schedule,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var activatedPIDs: [pid_t] = []
+        var focusedWindowIDs: [CGWindowID] = []
+        service.onAppActivated = { snapshot in
+            if let focusedWindowID = snapshot.focusedWindowID,
+               let window = snapshot.liveWindows.first(where: { $0.windowID == focusedWindowID }) {
+                activatedPIDs.append(window.ownerPID)
+            }
+        }
+        service.onWindowActivated = { focusedWindowIDs.append($0) }
+
+        service.handleAppActivation(AppInfo(bundleID: "app.a", name: "A", pid: 10, isHidden: false))
+        service.handleAppActivation(AppInfo(bundleID: "app.b", name: "B", pid: 20, isHidden: false))
+        probe.resolve(pid: 20, windowID: 2)
+        probe.resolve(pid: 10, windowID: 1)
+
+        #expect(activatedPIDs == [20])
+        #expect(focusedWindowIDs == [2])
+    }
+
+    @Test("Cross-process AX focus reads use a short timeout")
+    func focusProbeTimeoutIsBounded() {
+        #expect(WindowDiscoveryService.focusProbeTimeout > 0)
+        #expect(WindowDiscoveryService.focusProbeTimeout <= 0.1)
     }
 
     // A switcher is never the app the user switched to. As an accessory app Debut was filtered
