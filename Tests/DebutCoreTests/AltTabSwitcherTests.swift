@@ -168,6 +168,44 @@ struct AltTabSwitcherTests {
         #expect(windowService.raisedWindowIDs.contains(101))
     }
 
+    @Test("Option release commits the hovered flat-list preview")
+    func pointerHoverCommitsOnOptionRelease() {
+        let (controller, windowService) = makeTwoSpaceController()
+        let spaceA = controller.spaceManager.spaces[0].id
+
+        controller.handleKeyEvent(.altTabHold)
+        #expect(controller.altTabSelection?.window.windowID == 202)
+        controller.updateAltTabPointerSelection(index: 0)
+        #expect(controller.altTabSelection?.window.windowID == 202, "Hover remains provisional")
+        controller.handleKeyEvent(.cmdRelease)
+
+        #expect(controller.spaceManager.activeSpaceID == spaceA)
+        #expect(windowService.raisedWindowIDs.contains(101))
+    }
+
+    @Test("A flat-list command promotes the hovered preview before dispatch")
+    func pointerHoverTargetsAltTabCommand() {
+        let (controller, windowService) = makeTwoSpaceController()
+
+        controller.handleKeyEvent(.altTabHold)
+        controller.updateAltTabPointerSelection(index: 0)
+        controller.handleKeyEvent(.quitSelectedApp)
+
+        #expect(windowService.terminatedPIDs == [11])
+    }
+
+    @Test("Leaving a flat-list hover restores its keyboard target")
+    func pointerHoverExitRestoresAltTabKeyboardTarget() {
+        let (controller, windowService) = makeTwoSpaceController()
+
+        controller.handleKeyEvent(.altTabHold)
+        controller.updateAltTabPointerSelection(index: 0)
+        controller.updateAltTabPointerSelection(index: nil)
+        controller.handleKeyEvent(.closeSelectedWindow)
+
+        #expect(windowService.closedWindowIDs == [202])
+    }
+
     /// Quit and close read the stage cursor, so this is the check that the alt-tab cursor is
     /// mirrored onto it — otherwise they would act on whichever window the stage happened to
     /// have selected, on a different space entirely.

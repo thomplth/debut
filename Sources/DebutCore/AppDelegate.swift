@@ -769,6 +769,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         overlayWindow.onAltTabPointerSelectionChanged = { [weak self] index in
+            self?.spaceController?.updateAltTabPointerSelection(index: index)
             self?.diag.report("overlay_pointer_selection_changed", level: .transient, details: [
                 "altTabIndex": index.map(String.init) ?? "none",
             ])
