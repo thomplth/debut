@@ -40,7 +40,13 @@ enum DesktopProvisioning {
         while desktops.count < target {
             let before = desktops.count
             toggleMissionControl()
-            guard let addButton = element(in: dockElement, identifier: addButtonIdentifier) else {
+            var addButton: AXUIElement?
+            for _ in 0..<40 {
+                addButton = element(in: dockElement, identifier: addButtonIdentifier)
+                if addButton != nil { break }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            guard let addButton else {
                 print("Cannot provision desktops: Mission Control has no \(addButtonIdentifier).")
                 toggleMissionControl()
                 return false

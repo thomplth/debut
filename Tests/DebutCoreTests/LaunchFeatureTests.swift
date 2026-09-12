@@ -57,4 +57,44 @@ struct LaunchFeatureTests {
         service.desktopNavigationAvailable = false
         #expect(service.handleCGEvent(type: .keyDown, event: event(kVK_RightArrow, true, .maskControl)) != nil)
     }
+
+    @Test("Control-arrow remains native throughout an overview and resumes on the next press")
+    func controlArrowOverviewPassthrough() {
+        let overview = OverviewState()
+        let service = EventTapKeyboardService(desktopNavigationBlocked: { overview.active })
+        let delegate = TestKeyboardDelegate()
+        _ = service.start(delegate: delegate)
+        defer { service.stop() }
+        service.features.controlArrows = true
+        overview.active = true
+
+        func event(_ down: Bool) -> CGEvent {
+            let event = CGEvent(
+                keyboardEventSource: nil,
+                virtualKey: CGKeyCode(kVK_RightArrow),
+                keyDown: down
+            )!
+            event.flags = down ? .maskControl : []
+            return event
+        }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: event(true)) != nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: event(false)) != nil)
+        #expect(delegate.receivedEvents.isEmpty)
+
+        overview.active = false
+        #expect(service.handleCGEvent(type: .keyDown, event: event(true)) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: event(false)) == nil)
+        #expect(delegate.receivedEvents == [.switchAdjacentSpace(1)])
+    }
+}
+
+private final class OverviewState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedActive = false
+
+    var active: Bool {
+        get { lock.withLock { storedActive } }
+        set { lock.withLock { storedActive = newValue } }
+    }
 }

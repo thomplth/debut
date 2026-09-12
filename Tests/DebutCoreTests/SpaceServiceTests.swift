@@ -162,6 +162,18 @@ struct SpaceSwitchCoordinatorTests {
         #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
         #expect(coordinator.desktopDidChange(to: topology(current: 1)).isEmpty)
     }
+
+    @Test("Opening a Dock overview cancels an unconfirmed switch")
+    func overviewCancelsPendingSwitch() {
+        var coordinator = SpaceSwitchCoordinator()
+        _ = coordinator.request(to: location(1), in: topology(current: 0))
+        #expect(coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+
+        coordinator.cancelPendingSwitches()
+
+        #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+        #expect(coordinator.request(to: location(1), in: topology(current: 0)) != .coalesced)
+    }
 }
 
 @Suite("SpaceService switch speed")

@@ -17,6 +17,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var tutorialGeneration = 0
     private var desktopSwipeService: DesktopSwipeService?
     private var desktopNavigationStackID: String?
+    private var desktopNavigationEligibility: DesktopNavigationEligibility?
     private var onboardingViewModel: OnboardingViewModel?
     private var coachmarkPopover: NSPopover?
     private var statusItem: NSStatusItem?
@@ -77,6 +78,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         debouncedSaver = DebouncedSaver(store: store)
         pendingSpaceManager = (try? store.load()) ?? SpaceManager()
         currentSettings = (try? store.loadSettings()) ?? AppSettings()
+        let spaceService = SpaceService()
+        spaceService.switchDuration = currentSettings.spaceSwitchDuration
+        self.spaceService = spaceService
+        let navigationEligibility = DesktopNavigationEligibility(
+            canSwitchSpaces: { spaceService.canSwitchSpaces },
+            overviewActive: DockOverviewDetector.isActive,
+            topology: { spaceService.spaceTopology() }
+        )
+        desktopNavigationEligibility = navigationEligibility
+        let desktopNavigationBlocked: @Sendable () -> Bool = {
+            guard let reason = navigationEligibility.blockReason() else { return false }
+            DiagnosticReporter.shared.report(
+                "desktop_navigation_input_yielded",
+                level: .transient,
+                details: ["reason": reason.rawValue]
+            )
+            return true
+        }
         activationPolicy.apply(showsDockIcon: currentSettings.showsDockIcon)
         launchAtLogin.apply(enabled: currentSettings.launchAtLogin)
         setupTelemetry()
@@ -90,7 +109,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             verdictQueue.async { try? store.saveContradictions(records) }
         }
         windowService = accessibility
-        keyboardService = EventTapKeyboardService()
+        keyboardService = EventTapKeyboardService(
+            desktopNavigationBlocked: desktopNavigationBlocked
+        )
 
         overlayWindow = OverlayWindow()
         setupMenuBar()
@@ -141,7 +162,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func setupController() {
-        guard let windowService, let keyboardService else { return }
+        guard let windowService, let keyboardService, let spaceService,
+              let desktopNavigationEligibility else { return }
         guard spaceController == nil else { return }
 
         var spaceManager = pendingSpaceManager ?? SpaceManager()
@@ -168,9 +190,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         discovery.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
         keyboardService.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
 
-        let spaceService = SpaceService()
-        spaceService.switchDuration = currentSettings.spaceSwitchDuration
-        self.spaceService = spaceService
         discovery.spaceSwitcher = spaceService
         windowService.spaceSwitcher = spaceService
 
@@ -257,9 +276,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         keyboardService.quickSwitchModifiers = currentSettings.quickSwitchModifiers
         keyboardService.quickSwitchSameApplicationModifiers =
             currentSettings.quickSwitchSameApplicationModifiers
-        let swipeService = DesktopSwipeService { [weak controller] offset in
-            controller?.handleKeyEvent(.switchAdjacentSpace(offset))
-        }
+        let swipeService = DesktopSwipeService(
+            desktopNavigationBlocked: {
+                guard let reason = desktopNavigationEligibility.blockReason() else { return false }
+                DiagnosticReporter.shared.report(
+                    "desktop_navigation_input_yielded",
+                    level: .transient,
+                    details: ["reason": reason.rawValue]
+                )
+                return true
+            },
+            switchDesktop: { [weak controller] offset in
+                controller?.handleKeyEvent(.switchAdjacentSpace(offset))
+            }
+        )
         desktopSwipeService = swipeService
         if !swipeService.setEnabled(currentSettings.features.trackpadSwipes) {
             diag.report("desktop_swipe_tap_failed")
@@ -469,13 +499,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         observingAccessibilityChanges = false
     }
 
-    /// Keep input callbacks free of queries, and leave fullscreen navigation to macOS.
+    /// Keep only the selected display stack cached. The input services resolve overview,
+    /// topology, and OS capability live after an exact shortcut or gesture Began matches.
     private func refreshDesktopNavigationAvailability() {
         let stackID = spaceController?.spaceManager.selectedSpaceStackID
         desktopNavigationStackID = stackID
-        let available = stackID.flatMap { spaceService?.spaceTopology().stack(id: $0)?.currentDesktopIndex } != nil
-        keyboardService?.desktopNavigationAvailable = available
-        desktopSwipeService?.desktopNavigationAvailable = available
+        desktopNavigationEligibility?.updateStackID(stackID)
     }
 
     /// Fires for Debut's own switches as well as the user's. Debut's own switches are the
@@ -493,7 +522,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
     }
 
-    /// Mission Control opened or closed, so the desktop list may have been rearranged.
+    /// Mission Control changed the desktop list, or is about to make it mutable.
     ///
     /// Only the space order is re-read. Reordering desktops does not change which desktop a
     /// window is on — each space travels with its `desktopUUID` — so refreshing window
@@ -501,6 +530,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     /// window server's list settles, so the reassignment lands on a stale read and can pull a
     /// window that is mid-move back to the desktop it just left.
     @objc private func desktopLayoutMayHaveChanged(_ notification: Notification) {
+        if let event = notification.object as? DesktopReconfigurationEvent,
+           !event.desktopListIsSettled {
+            // A synthetic hop has no completion signal once Mission Control takes over.
+            // Clear it now so a later request cannot coalesce behind stale state, and drain
+            // a physical gesture whose Began Debut may already have claimed. Do not sample
+            // topology here: 1327 arrives while the current desktop is transiently absent.
+            desktopNavigationEligibility?.overviewWillOpen()
+            spaceService?.cancelPendingSwitches()
+            desktopSwipeService?.cancelActiveGesture()
+            diag.report("desktop_navigation_overview_will_open", level: .transient)
+            return
+        }
         spaceController?.reconcileSpacesWithDesktops()
         refreshDesktopNavigationAvailability()
         refreshOnboardingEnvironment()
