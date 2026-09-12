@@ -216,6 +216,23 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let windowID: CGWindowID
     }
 
+    /// Q and W only request a lifecycle change. Keep the request separate from both the
+    /// assignment model and overlay presentation so a sheet can temporarily take over without
+    /// pretending its document or process has disappeared.
+    private struct PendingOverlayAction {
+        enum Kind: Equatable { case closeWindow, quitApplication }
+
+        let kind: Kind
+        let sourceWindowID: CGWindowID
+        let fallbackLocation: DesktopLocation?
+    }
+
+    private struct PendingSystemAttentionFocus {
+        let windowID: CGWindowID
+        let ownerPID: pid_t
+        let location: DesktopLocation
+    }
+
     public var spaceManager: SpaceManager
     public let windowService: any WindowService
     public let keyboardService: any KeyboardService
@@ -240,6 +257,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var pendingPractice: (windowID: CGWindowID, practice: OnboardingPractice)?
 
     private var pendingSpaceFocus: (spaceID: UUID, windowID: CGWindowID)?
+    private var pendingSystemAttentionFocus: PendingSystemAttentionFocus?
     private var provisionalPointerTarget: OverlayTarget?
     /// Focus restored by macOS while Debut is traversing adjacent desktops is passive. Keep
     /// only the latest positively located candidate per display stack until the coordinator
@@ -248,13 +266,12 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var deferredSwitchActivations: [String: CGWindowID] = [:]
     private var stageStackTransaction = StageStackTransaction()
     private var isStageStackCommitInFlight = false
-    /// A successful terminate request is only a request: the process can remain alive while
-    /// closing windows or presenting confirmation UI. Keep its assignments committed until the
-    /// process-exit signal, but remove them from every focus surface so Debut cannot reactivate
-    /// the app while it is trying to quit.
-    private var terminationPendingProcessIDs: Set<pid_t> = []
+    private var pendingOverlayActions: [pid_t: PendingOverlayAction] = [:]
 
     public private(set) var isSpaceManagerVisible: Bool = false
+    /// The input session continues after the visual overlay yields to confirmation UI. Its
+    /// staged transaction is committed, without refocusing the selection, on modifier release.
+    public private(set) var isOverlaySessionYielded: Bool = false
     public var selectedSpaceIndex: Int = 0
     public var selectedWindowIndex: Int = 0
 
@@ -289,10 +306,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// The model rendered by the overlay, including interactions that are still waiting for
     /// the session commit. The persisted `spaceManager` remains the last committed state.
     public var overlaySpaceManager: SpaceManager {
-        var preview = stageStackTransaction.preview(applyingTo: spaceManager)
-        for pid in terminationPendingProcessIDs {
-            preview.removeAllWindows(forOwnerPID: pid)
-        }
+        let preview = stageStackTransaction.preview(applyingTo: spaceManager)
         return activeTutorialScope?.filtering(preview) ?? preview
     }
 
@@ -472,7 +486,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             "selectedWindowIndex": "\(selectedWindowIndex)",
             "eventTapRunning": "\(keyboardService.isRunning)",
             "eventTapStarted": "\(keyboardServiceStarted)",
-            "terminationPendingProcessCount": "\(terminationPendingProcessIDs.count)",
+            "pendingOverlayActionCount": "\(pendingOverlayActions.count)",
+            "overlaySessionYielded": "\(isOverlaySessionYielded)",
             "windowsInActiveSpace": "\(visibleSpaceManager.activeSpace.windows.count)",
             "maxWindowsInSpace": "\(visibleSpaceManager.spaces.map(\.windows.count).max() ?? 0)",
             "windowCountsBySpace": visibleSpaceManager.spaces
@@ -667,6 +682,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// leaving, because the Dock consumes the forged swipe asynchronously. macOS then
     /// restored its own idea of focus as the Space settled and overwrote the choice.
     private func applyPendingSpaceFocus() {
+        if applyPendingSystemAttentionFocus() { return }
         guard let pending = pendingSpaceFocus else { return }
         guard let stackID = spaceManager.spaceStackID(containingSpaceID: pending.spaceID),
               let index = spaceManager.spaceIndex(id: pending.spaceID),
@@ -690,14 +706,50 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         delegate?.spaceControllerDidMutateState(self)
     }
 
+    /// Confirmation UI is not part of Debut's managed-window model, but follows the same
+    /// notification-gated focus rule as an ordinary cross-Space activation.
+    @discardableResult
+    private func applyPendingSystemAttentionFocus() -> Bool {
+        guard let pending = pendingSystemAttentionFocus else { return false }
+        guard let switcher = spaceSwitcher,
+              let stack = switcher.spaceTopology().stack(id: pending.location.stackID)
+        else {
+            pendingSystemAttentionFocus = nil
+            focusSystemAttention(windowID: pending.windowID, ownerPID: pending.ownerPID)
+            return true
+        }
+        guard stack.currentDesktopID == pending.location.desktopID else {
+            if switcher.isSwitchInFlight(stackID: pending.location.stackID) { return true }
+            pendingSystemAttentionFocus = nil
+            return true
+        }
+        pendingSystemAttentionFocus = nil
+        focusSystemAttention(windowID: pending.windowID, ownerPID: pending.ownerPID)
+        return true
+    }
+
+    private func focusSystemAttention(windowID: CGWindowID, ownerPID: pid_t) {
+        let fronted = windowService.frontWindow(windowID: windowID, ownerPID: ownerPID)
+        if fronted {
+            scheduleFrontVerification(windowID: windowID, ownerPID: ownerPID)
+        } else {
+            _ = windowService.activateApp(pid: ownerPID)
+        }
+        _ = windowService.raiseWindow(windowID: windowID)
+        diag.report("overlay_action_attention_focused", details: [
+            "windowID": "\(windowID)",
+            "ownerPID": "\(ownerPID)",
+            "fronted": "\(fronted)",
+        ])
+    }
+
     private func focusWindow(_ windowID: CGWindowID, inSpaceID spaceID: UUID) {
         guard let window = spaceManager.allSpaces.first(where: { $0.id == spaceID })?
-            .windows.first(where: { $0.windowID == windowID }),
-              !isTerminationPending(window)
+            .windows.first(where: { $0.windowID == windowID })
         else {
             diag.report("window_focus_skipped", details: [
                 "windowID": "\(windowID)",
-                "reason": "app_termination_pending",
+                "reason": "window_not_managed",
             ])
             return
         }
@@ -847,9 +899,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         // Resolved before the switch because the destination's front process has to be seeded
         // while its desktop is still hidden — see `seedFrontProcess`.
-        let fallbackFocusWindowID = targetSpace?.windows.first(where: {
-            !isTerminationPending($0)
-        })?.windowID
+        let fallbackFocusWindowID = targetSpace?.windows.first?.windowID
         let focusWindowID = focusesWindow ? raiseWindowID ?? fallbackFocusWindowID : nil
 
         if previousID != targetID {
@@ -921,7 +971,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                                   desktopID: CGSSpaceID, switcher: any SpaceSwitching) {
         guard let window = spaceManager.allSpaces.first(where: { $0.id == spaceID })?
             .windows.first(where: { $0.windowID == windowID }),
-              !isTerminationPending(window),
               let ownerPID = window.ownerPID
         else { return }
         let seeded = switcher.setFrontProcess(pid: ownerPID, onDesktop: desktopID)
@@ -1022,16 +1071,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 "windowID": "\(windowID)",
             ])
             return
-        }
-
-        if let ownerPID = spaceManager.allSpaces.lazy.flatMap(\.windows)
-            .first(where: { $0.windowID == windowID })?.ownerPID,
-           terminationPendingProcessIDs.remove(ownerPID) != nil {
-            diag.report("app_termination_pending_resolved", details: [
-                "ownerPID": "\(ownerPID)",
-                "reason": "app_activated",
-            ])
-            if isSpaceManagerVisible { handleLiveWindowsRemoved() }
         }
 
         // A cycle step has already written its landing window to the MRU, so the app's own focus
@@ -1189,6 +1228,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             )
         }
         diag.report("key_event", level: .transient, details: ["keyEvent": "\(event)"])
+
+        // Once system-owned confirmation UI takes over, the held keyboard session has no
+        // visible selector to navigate. Only its release boundary remains meaningful: it
+        // commits the transaction the user already staged without taking focus back.
+        if isOverlaySessionYielded {
+            if event == .cmdRelease { commitYieldedOverlaySession() }
+            diag.refreshState()
+            return
+        }
 
         if isSpaceManagerVisible, activeTutorialScope != nil {
             switch event {
@@ -1351,9 +1399,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func handleCmdBacktick(reverse: Bool, wraps: Bool = true) {
         let activeSpace = spaceManager.activeSpace
-        guard let frontWindow = activeSpace.windows.first,
-              !isTerminationPending(frontWindow)
-        else { return }
+        guard let frontWindow = activeSpace.windows.first else { return }
 
         let bundleID = frontWindow.ownerBundleID
         let sameAppWindows = activeSpace.windows.filter { $0.ownerBundleID == bundleID }
@@ -1428,13 +1474,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
         let activeSpace = spaceManager.activeSpace
-        let focusableWindows = activeSpace.windows.filter { !isTerminationPending($0) }
-        let frontWindowIsFocusable = activeSpace.windows.first.map {
-            !isTerminationPending($0)
-        } ?? false
-        let targetIndex = frontmostAppIsExcluded || !frontWindowIsFocusable ? 0 : 1
-        guard focusableWindows.indices.contains(targetIndex) else { return }
-        focusWindow(focusableWindows[targetIndex].windowID, inSpaceID: activeSpace.id)
+        let targetIndex = frontmostAppIsExcluded ? 0 : 1
+        guard activeSpace.windows.indices.contains(targetIndex) else { return }
+        focusWindow(activeSpace.windows[targetIndex].windowID, inSpaceID: activeSpace.id)
         delegate?.spaceControllerDidMutateState(self)
     }
 
@@ -1575,6 +1617,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         pendingPractice = nil
         overlayMode = mode
         provisionalPointerTarget = nil
+        isOverlaySessionYielded = false
         let presentation = activeOverlayPresentation
         let focusedWindow = probeFocusedWindow()
         activeTutorialScope = tutorialScope.flatMap { scope in
@@ -1930,6 +1973,19 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
+    private func commitYieldedOverlaySession() {
+        guard isOverlaySessionYielded, !isStageStackCommitInFlight else { return }
+        provisionalPointerTarget = nil
+        isStageStackCommitInFlight = true
+        commitStageStackTransaction { [weak self] in
+            guard let self else { return }
+            self.isStageStackCommitInFlight = false
+            self.isOverlaySessionYielded = false
+            self.activeTutorialScope = nil
+            self.diag.report("overlay_yielded_transaction_committed")
+        }
+    }
+
     private func finishSelectionCommit() {
         guard isSpaceManagerVisible, isStageStackCommitInFlight else { return }
         defer { activeTutorialScope = nil }
@@ -2213,6 +2269,98 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         notifyOverlayUpdated()
     }
 
+    /// The Accessibility destroy notification is the authoritative close result. It removes the
+    /// window from both committed state and any still-open transaction; a close request alone
+    /// never reaches this path.
+    public func recordWindowDestruction(windowID: CGWindowID) {
+        let existed = spaceManager.allSpaces.contains { $0.windowIDs.contains(windowID) }
+        stageStackTransaction.removeWindow(windowID: windowID)
+        for space in spaceManager.allSpaces {
+            spaceManager.removeWindow(windowID: windowID, fromSpaceID: space.id)
+        }
+        pendingOverlayActions = pendingOverlayActions.filter { _, action in
+            !(action.kind == .closeWindow && action.sourceWindowID == windowID)
+        }
+        guard existed else { return }
+        delegate?.spaceControllerDidMutateState(self)
+        handleLiveWindowsRemoved()
+    }
+
+    /// A focused/created modal belonging to an outstanding Q/W request temporarily owns the
+    /// interaction. The overlay yields, but its staged moves remain intact until release.
+    public func recordOverlayActionAttention(windowID: CGWindowID, ownerPID: pid_t) {
+        guard let action = pendingOverlayActions[ownerPID],
+              windowID != action.sourceWindowID
+        else { return }
+        pendingOverlayActions.removeValue(forKey: ownerPID)
+
+        if isSpaceManagerVisible {
+            isSpaceManagerVisible = false
+            isOverlaySessionYielded = true
+            provisionalPointerTarget = nil
+            if let tapService = keyboardService as? EventTapKeyboardService {
+                tapService.overlayVisible = false
+            }
+            dismissOverlayPresentation()
+            diag.report("overlay_yielded_to_system_attention", details: [
+                "windowID": "\(windowID)",
+                "ownerPID": "\(ownerPID)",
+            ])
+        }
+
+        routeSystemAttention(
+            windowID: windowID,
+            ownerPID: ownerPID,
+            location: spaceSwitcher?.desktopLocation(forWindow: windowID) ?? action.fallbackLocation
+        )
+    }
+
+    private func routeSystemAttention(
+        windowID: CGWindowID,
+        ownerPID: pid_t,
+        location: DesktopLocation?
+    ) {
+        pendingSpaceFocus = nil
+        guard let location,
+              let switcher = spaceSwitcher,
+              let stack = switcher.spaceTopology().stack(id: location.stackID),
+              let targetIndex = stack.desktopIDs.firstIndex(of: location.desktopID)
+        else {
+            pendingSystemAttentionFocus = nil
+            focusSystemAttention(windowID: windowID, ownerPID: ownerPID)
+            return
+        }
+
+        if let targetSpaceID = spaceManager.spaceID(stackID: location.stackID, at: targetIndex) {
+            spaceManager.selectSpaceStack(id: location.stackID)
+            if spaceManager.activeSpaceID != targetSpaceID {
+                previousSpaceID = spaceManager.activeSpaceID
+                spaceManager.activateSpace(id: targetSpaceID)
+                delegate?.spaceControllerDidMutateState(self)
+                delegate?.spaceControllerDidSwitchSpace(self)
+            }
+        }
+
+        guard stack.currentDesktopID != location.desktopID else {
+            pendingSystemAttentionFocus = nil
+            focusSystemAttention(windowID: windowID, ownerPID: ownerPID)
+            return
+        }
+
+        _ = switcher.setFrontProcess(pid: ownerPID, onDesktop: location.desktopID)
+        let settling = switcher.switchToDesktop(location)
+        if settling {
+            pendingSystemAttentionFocus = PendingSystemAttentionFocus(
+                windowID: windowID,
+                ownerPID: ownerPID,
+                location: location
+            )
+        } else {
+            pendingSystemAttentionFocus = nil
+            focusSystemAttention(windowID: windowID, ownerPID: ownerPID)
+        }
+    }
+
     /// Drops removed windows from the flat list by filtering the list the user is looking at,
     /// rather than re-deriving it: a fresh `globalWindowOrder()` would be free to reshuffle the
     /// remaining cards under the selector partway through a cycle.
@@ -2422,7 +2570,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         let requested = windowService.terminateApp(pid: ownerPID)
         if requested {
-            terminationPendingProcessIDs.insert(ownerPID)
+            pendingOverlayActions[ownerPID] = PendingOverlayAction(
+                kind: .quitApplication,
+                sourceWindowID: window.windowID,
+                fallbackLocation: spaceSwitcher?.desktopLocation(forWindow: window.windowID)
+            )
         }
         diag.report("quit_selected_app", details: [
             "windowID": "\(window.windowID)",
@@ -2430,27 +2582,21 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             "ownerPID": "\(ownerPID)",
             "requested": "\(requested)",
         ])
-        if requested { handleLiveWindowsRemoved() }
     }
 
-    /// Releases runtime-only suppression after the kernel or workspace confirms exit. The
-    /// caller makes the committed assignments dormant separately; keeping those operations
-    /// distinct prevents a mere quit request from becoming a destructive state change.
+    /// Clears a request after the kernel or workspace confirms exit. The caller makes the
+    /// assignments dormant separately; a mere quit request never mutates them.
     public func recordAppTermination(ownerPID: pid_t) {
-        guard terminationPendingProcessIDs.remove(ownerPID) != nil else { return }
-        diag.report("app_termination_pending_resolved", details: [
+        guard pendingOverlayActions.removeValue(forKey: ownerPID) != nil else { return }
+        diag.report("overlay_action_resolved", details: [
             "ownerPID": "\(ownerPID)",
             "reason": "process_exited",
         ])
     }
 
-    private func isTerminationPending(_ window: SpaceWindow) -> Bool {
-        window.ownerPID.map(terminationPendingProcessIDs.contains) ?? false
-    }
-
-    /// The accessibility close action belongs to the selected window, not its owning app. Remove
-    /// a successfully requested close from both the committed model and the open overlay at
-    /// once; the later AX destruction notification is then harmlessly idempotent.
+    /// The accessibility close action belongs to the selected window, not its owning app. Its
+    /// Boolean result means only that the request was accepted; destruction remains a separate
+    /// lifecycle event because the app may put a confirmation sheet in between.
     private func closeSelectedWindow() {
         guard isSpaceManagerVisible,
               overlaySpaceManager.spaces.indices.contains(selectedSpaceIndex) else { return }
@@ -2459,22 +2605,19 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let window = space.windows[selectedWindowIndex]
 
         let requested = windowService.closeWindow(windowID: window.windowID)
-        if requested {
-            stageStackTransaction.removeWindow(windowID: window.windowID)
-            if let spaceID = spaceManager.spaceContainingWindow(windowID: window.windowID) {
-                spaceManager.removeWindow(windowID: window.windowID, fromSpaceID: spaceID)
-            } else {
-                spaceManager.removeLiveWindowFromAllSpaces(windowID: window.windowID)
-            }
-            delegate?.spaceControllerDidMutateState(self)
+        if requested, let ownerPID = window.ownerPID {
+            pendingOverlayActions[ownerPID] = PendingOverlayAction(
+                kind: .closeWindow,
+                sourceWindowID: window.windowID,
+                fallbackLocation: spaceSwitcher?.desktopLocation(forWindow: window.windowID)
+            )
         }
         diag.report("close_selected_window", details: [
             "windowID": "\(window.windowID)",
             "bundleID": window.ownerBundleID,
             "cardLabel": window.displayTitle,
             "requested": "\(requested)",
-            "removed": "\(requested)",
+            "removed": "false",
         ])
-        if requested { handleLiveWindowsRemoved() }
     }
 }

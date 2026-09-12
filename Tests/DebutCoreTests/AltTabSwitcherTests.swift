@@ -341,12 +341,15 @@ struct AltTabSwitcherTests {
 
     /// A closed window has to leave the flat list too. Leaving it there would let the next cycle
     /// land on a card for a window that no longer exists.
-    @Test("Closing a window drops it from the flat list and clamps the selection")
+    @Test("A confirmed window destruction drops it from the flat list and clamps selection")
     func closeRefreshesTheFlatList() {
         let (controller, _) = makeTwoSpaceController()
 
         controller.handleKeyEvent(.altTabHold)
         controller.handleKeyEvent(.closeSelectedWindow)
+        #expect(controller.altTabEntries.map(\.window.windowID) == [101, 202])
+
+        controller.recordWindowDestruction(windowID: 202)
 
         #expect(controller.altTabEntries.map(\.window.windowID) == [101])
         #expect(controller.altTabSelection?.window.windowID == 101)
