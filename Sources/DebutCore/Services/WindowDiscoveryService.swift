@@ -37,6 +37,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onWindowsDiscovered: (([WindowInfo]) -> Void)?
     public var onWindowClosed: ((CGWindowID) -> Void)?
     public var onWindowActivated: ((CGWindowID) -> Void)?
+    /// Focus/creation events carry their process identity so an outstanding overlay action can
+    /// recognize system UI that needs the interaction without admitting that UI to the model.
+    public var onSystemAttentionRequested: ((CGWindowID, pid_t) -> Void)?
     public var onWindowTitleChanged: ((CGWindowID, String) -> Void)?
     public var onWindowResized: ((CGWindowID, CGSize) -> Void)?
     public var onFrontmostAppChanged: ((String?) -> Void)?
@@ -588,6 +591,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             kAXWindowResizedNotification as CFString,
             selfPtr
         )
+        _ = AXObserverAddNotification(
+            observer,
+            lifecycleTarget,
+            kAXWindowCreatedNotification as CFString,
+            selfPtr
+        )
+        _ = AXObserverAddNotification(
+            observer,
+            lifecycleTarget,
+            kAXSheetCreatedNotification as CFString,
+            selfPtr
+        )
         return .armed
     }
 
@@ -703,6 +718,71 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         unarmedWindowIDs.remove(windowID)
         windowOwnerPIDs.removeValue(forKey: windowID)
         onWindowClosed?(windowID)
+    }
+
+    static func isSystemAttentionAXWindow(
+        role: String,
+        subrole: String,
+        isModal: Bool
+    ) -> Bool {
+        isModal || role == kAXSheetRole as String ||
+            subrole == kAXDialogSubrole as String ||
+            subrole == kAXSystemDialogSubrole as String
+    }
+
+    fileprivate func handleSystemAttention(element: AXUIElement) {
+        let candidate: AXUIElement
+        var roleRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+            element,
+            kAXRoleAttribute as CFString,
+            &roleRef
+        ) == .success,
+           let role = roleRef as? String,
+           role == kAXWindowRole as String || role == kAXSheetRole as String {
+            candidate = element
+        } else {
+            var focusedRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                element,
+                kAXFocusedWindowAttribute as CFString,
+                &focusedRef
+            ) == .success,
+                  let focused = focusedRef,
+                  CFGetTypeID(focused) == AXUIElementGetTypeID()
+            else { return }
+            candidate = unsafeDowncast(focused, to: AXUIElement.self)
+        }
+
+        func stringAttribute(_ name: String) -> String? {
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(candidate, name as CFString, &value) == .success
+            else { return nil }
+            return value as? String
+        }
+        func boolAttribute(_ name: String) -> Bool {
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(candidate, name as CFString, &value) == .success
+            else { return false }
+            return value as? Bool ?? false
+        }
+        guard let role = stringAttribute(kAXRoleAttribute),
+              let subrole = stringAttribute(kAXSubroleAttribute),
+              Self.isSystemAttentionAXWindow(
+                  role: role,
+                  subrole: subrole,
+                  isModal: boolAttribute(kAXModalAttribute)
+              )
+        else { return }
+
+        var ownerPID: pid_t = 0
+        var windowID: CGWindowID = 0
+        guard AXUIElementGetPid(candidate, &ownerPID) == .success,
+              _AXUIElementGetWindow(candidate, &windowID) == .success,
+              ownerPID > 0,
+              windowID > 0
+        else { return }
+        onSystemAttentionRequested?(windowID, ownerPID)
     }
 
     private func trackedWindowID(for element: AXUIElement) -> CGWindowID? {
@@ -1142,6 +1222,8 @@ private func windowLifecycleCallback(
         service.handleWindowTitleChanged(element: element)
     } else if name == kAXWindowResizedNotification {
         service.handleWindowResized(element: element)
+    } else if name == kAXWindowCreatedNotification || name == kAXSheetCreatedNotification {
+        service.handleSystemAttention(element: element)
     }
 }
 

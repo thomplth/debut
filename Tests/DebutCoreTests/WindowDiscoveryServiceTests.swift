@@ -106,6 +106,30 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshotFocusedWindowID == 4)
     }
 
+    @Test("Only sheets and modal or dialog windows request system attention")
+    func systemAttentionClassification() {
+        #expect(WindowDiscoveryService.isSystemAttentionAXWindow(
+            role: kAXSheetRole as String,
+            subrole: kAXUnknownSubrole as String,
+            isModal: false
+        ))
+        #expect(WindowDiscoveryService.isSystemAttentionAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXDialogSubrole as String,
+            isModal: false
+        ))
+        #expect(WindowDiscoveryService.isSystemAttentionAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: true
+        ))
+        #expect(!WindowDiscoveryService.isSystemAttentionAXWindow(
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+    }
+
     @Test("A delayed AX focus probe does not hold app activation")
     func delayedFocusProbeDoesNotHoldActivation() {
         let windowService = MockWindowService()

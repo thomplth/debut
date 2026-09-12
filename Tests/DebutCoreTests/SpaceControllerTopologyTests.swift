@@ -166,6 +166,45 @@ struct SpaceControllerSpaceTests {
         return (controller, windowService, keyboardService)
     }
 
+    @Test("Confirmation switches to its desktop before taking focus")
+    @MainActor
+    func confirmationAttentionSwitchesDesktopBeforeFocus() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+        let targetSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 202,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "Unsaved",
+                ownerPID: 22
+            ),
+            toSpaceID: targetSpaceID
+        )
+        spaces.windowDesktops[202] = 1
+        spaces.windowDesktops[909] = 1
+
+        keyboardService.simulateEvent(.cmdOptionTabHold)
+        keyboardService.simulateEvent(.closeSelectedWindow)
+        controller.recordOverlayActionAttention(windowID: 909, ownerPID: 22)
+
+        #expect(spaces.operations == [
+            .setFrontProcess(pid: 22, desktop: 101),
+            .switchToDesktop(1),
+        ])
+        #expect(windowService.frontedWindows.isEmpty)
+
+        spaces.current = 1
+        controller.desktopDidChange()
+
+        #expect(windowService.frontedWindows == [FrontWindowRequest(windowID: 909, ownerPID: 22)])
+        #expect(windowService.raisedWindowID == 909)
+        #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
+    }
+
     @Test("Switching space switches to the matching desktop")
     func switchesDesktop() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)

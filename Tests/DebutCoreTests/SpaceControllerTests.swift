@@ -1440,7 +1440,7 @@ struct SpaceControllerTests {
         #expect(windowService.raisedWindowID == 101)
     }
 
-    @Test("Quit hides every window owned by the terminating app without making it dormant")
+    @Test("Quit keeps every window visible until process exit confirms removal")
     func quitSelectedApp() {
         let (controller, windowService, keyboardService) = makeController()
         let spaceID = controller.spaceManager.activeSpaceID
@@ -1469,13 +1469,13 @@ struct SpaceControllerTests {
         #expect(controller.isSpaceManagerVisible)
         #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [101, 202, 303, 404])
         #expect(controller.spaceManager.dormantWindowAssignments.isEmpty)
-        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101, 404])
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101, 202, 303, 404])
         #expect(controller.selectedWindowIndex == 1)
 
         keyboardService.simulateEvent(.cmdRelease)
 
-        #expect(windowService.raisedWindowID == 404)
-        #expect(windowService.frontedWindows == [FrontWindowRequest(windowID: 404, ownerPID: 33)])
+        #expect(windowService.raisedWindowID == 202)
+        #expect(windowService.frontedWindows == [FrontWindowRequest(windowID: 202, ownerPID: 22)])
     }
 
     @Test("A rejected quit leaves the selected app available")
@@ -1503,8 +1503,8 @@ struct SpaceControllerTests {
         #expect(windowService.frontedWindows == [FrontWindowRequest(windowID: 202, ownerPID: 22)])
     }
 
-    @Test("External activation restores an app whose quit is still pending")
-    func activationResolvesPendingQuit() {
+    @Test("Ordinary activation does not manufacture a quit outcome")
+    func activationDoesNotResolvePendingQuit() {
         let (controller, _, keyboardService) = makeController()
         let spaceID = controller.spaceManager.activeSpaceID
         controller.spaceManager.addWindow(
@@ -1518,7 +1518,7 @@ struct SpaceControllerTests {
 
         keyboardService.simulateEvent(.cmdTabHold)
         keyboardService.simulateEvent(.quitSelectedApp)
-        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101])
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101, 202])
 
         controller.recordWindowActivation(windowID: 202)
 
@@ -1540,7 +1540,7 @@ struct SpaceControllerTests {
 
         keyboardService.simulateEvent(.cmdTabHold)
         keyboardService.simulateEvent(.quitSelectedApp)
-        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101])
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101, 202])
 
         _ = controller.spaceManager.removeAllWindows(forOwnerPID: 22)
         controller.recordAppTermination(ownerPID: 22)
@@ -1562,7 +1562,7 @@ struct SpaceControllerTests {
         #expect(windowService.terminatedPIDs.isEmpty)
     }
 
-    @Test("Close requests the selected window, not its owning app")
+    @Test("Close keeps the selected window until its destruction notification")
     func closeSelectedWindow() {
         let (controller, windowService, keyboardService) = makeController()
         let delegate = PreviewRefreshDelegate()
@@ -1585,6 +1585,12 @@ struct SpaceControllerTests {
         #expect(windowService.closedWindowIDs == [202])
         #expect(windowService.terminatedPIDs.isEmpty)
         #expect(controller.isSpaceManagerVisible)
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [101, 202])
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101, 202])
+        #expect(controller.selectedWindowIndex == 1)
+
+        controller.recordWindowDestruction(windowID: 202)
+
         #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [101])
         #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101])
         #expect(controller.selectedWindowIndex == 0)
@@ -1618,6 +1624,121 @@ struct SpaceControllerTests {
         #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [101])
         #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [101])
         #expect(controller.selectedWindowIndex == 0)
+    }
+
+    @Test("Confirmation yields the overlay but modifier release still commits staged moves")
+    func confirmationYieldPreservesStagedTransaction() {
+        let (controller, windowService, keyboardService) = makeController()
+        let sourceSpaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.createSpace(position: .below)
+        let destinationSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.activateSpace(id: sourceSpaceID)
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "Unsaved",
+                ownerPID: 11
+            ),
+            toSpaceID: sourceSpaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.moveWindowDown)
+        keyboardService.simulateEvent(.closeSelectedWindow)
+
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 101) == sourceSpaceID)
+        #expect(controller.overlaySpaceManager.spaceContainingWindow(windowID: 101) == destinationSpaceID)
+
+        controller.recordOverlayActionAttention(windowID: 909, ownerPID: 11)
+
+        #expect(!controller.isSpaceManagerVisible)
+        #expect(controller.isOverlaySessionYielded)
+        #expect(windowService.frontedWindows == [FrontWindowRequest(windowID: 909, ownerPID: 11)])
+        #expect(controller.overlaySpaceManager.spaceContainingWindow(windowID: 101) == destinationSpaceID)
+
+        keyboardService.simulateEvent(.cmdRelease)
+
+        #expect(!controller.isOverlaySessionYielded)
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 101) == destinationSpaceID)
+        #expect(windowService.frontedWindows == [FrontWindowRequest(windowID: 909, ownerPID: 11)],
+                "Release must not replace the confirmation focus with the overlay selection")
+    }
+
+    @Test("Attention from an unrelated app does not yield the overlay")
+    func unrelatedAttentionDoesNotYieldOverlay() {
+        let (controller, _, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "Unsaved",
+                ownerPID: 11
+            ),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.quitSelectedApp)
+        controller.recordOverlayActionAttention(windowID: 909, ownerPID: 22)
+
+        #expect(controller.isSpaceManagerVisible)
+        #expect(!controller.isOverlaySessionYielded)
+    }
+
+    @Test("The source window refocusing after a request is not mistaken for confirmation")
+    func sourceWindowFocusDoesNotYieldOverlay() {
+        let (controller, _, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "Unsaved",
+                ownerPID: 11
+            ),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.closeSelectedWindow)
+        controller.recordOverlayActionAttention(windowID: 101, ownerPID: 11)
+
+        #expect(controller.isSpaceManagerVisible)
+
+        controller.recordOverlayActionAttention(windowID: 909, ownerPID: 11)
+
+        #expect(!controller.isSpaceManagerVisible)
+        #expect(controller.isOverlaySessionYielded)
+    }
+
+    @Test("Confirmation arriving after modifier release still takes focus")
+    func lateConfirmationStillTakesFocus() {
+        let (controller, windowService, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "Unsaved",
+                ownerPID: 11
+            ),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.quitSelectedApp)
+        keyboardService.simulateEvent(.cmdRelease)
+        controller.recordOverlayActionAttention(windowID: 909, ownerPID: 11)
+
+        #expect(!controller.isOverlaySessionYielded)
+        #expect(windowService.frontedWindows.last == FrontWindowRequest(windowID: 909, ownerPID: 11))
+        #expect(windowService.raisedWindowID == 909)
     }
 
     @Test("A quit app's windows leave the open overlay and pull the selection back in range")
