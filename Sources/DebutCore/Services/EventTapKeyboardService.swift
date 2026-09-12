@@ -48,6 +48,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private let monotonicNanoseconds: @Sendable () -> UInt64
     private let overlayPresentationRecorder: OverlayPresentationRecorder
     private let performanceRecorder: PerformanceRecorder
+    private let desktopNavigationBlocked: @Sendable () -> Bool
 
     public var overlayVisible: Bool {
         get { configurationLock.withLock { storedOverlayVisible } }
@@ -80,12 +81,14 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     }
 
     public init(
+        desktopNavigationBlocked: @escaping @Sendable () -> Bool = { false },
         overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
         performanceRecorder: PerformanceRecorder = .shared,
         monotonicNanoseconds: @escaping @Sendable () -> UInt64 = {
             DispatchTime.now().uptimeNanoseconds
         }
     ) {
+        self.desktopNavigationBlocked = desktopNavigationBlocked
         self.overlayPresentationRecorder = overlayPresentationRecorder
         self.performanceRecorder = performanceRecorder
         self.monotonicNanoseconds = monotonicNanoseconds
@@ -313,6 +316,9 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                 cachedFrontmostAppBundleIdentifier.map { storedQuickSwitchExcludedBundleIDs.contains($0) } ?? false
             }
             if excluded { return event }
+            // The Dock owns this shortcut while an overview is visible. Query only after the
+            // exact chord matches so ordinary keyboard delivery never pays for a window scan.
+            if desktopNavigationBlocked() { return event }
             if quickSwitchKeysDown.insert(keyCode).inserted {
                 deliver(.switchAdjacentSpace(keyCode == Int64(kVK_RightArrow) ? 1 : -1),
                         asynchronously: deliverAsynchronously)

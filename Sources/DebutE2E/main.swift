@@ -934,6 +934,16 @@ func toggleSystemWindowOverview(mode: Int) {
     wait(1.5)
 }
 
+func systemWindowOverviewActive() -> Bool {
+    guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+        as? [[String: Any]]
+    else { return false }
+    return windows.contains { window in
+        (window[kCGWindowLayer as String] as? NSNumber)?.int32Value == 18
+            && (window[kCGWindowOwnerName as String] as? String) == "Dock"
+    }
+}
+
 func wait(_ seconds: Double) {
     Thread.sleep(forTimeInterval: seconds)
 }
@@ -2005,24 +2015,37 @@ let featureReady = waitForDebutReady(featureApplication)
 let featureSpaces = SpaceService()
 
 if featureSpaces.userDesktops().count >= 2 {
+    func postControlArrow(_ keyCode: Int) {
+        // The Dock tracks the modifier around native Mission Control shortcuts. A bare arrow
+        // carrying a Control flag exercises Debut's chord match, but is not a complete physical
+        // press once Debut yields it to macOS.
+        postKeyDown(keyCode: CGKeyCode(kVK_Control), flags: .maskControl)
+        postKeyDown(keyCode: CGKeyCode(keyCode), flags: .maskControl)
+        postKeyUp(keyCode: CGKeyCode(keyCode), flags: .maskControl)
+        postKeyUp(keyCode: CGKeyCode(kVK_Control), flags: [])
+    }
+
     let baselineReady = quickSwitch(to: 0, using: featureSpaces)
-    postKeyDown(keyCode: CGKeyCode(kVK_RightArrow), flags: .maskControl)
-    postKeyUp(keyCode: CGKeyCode(kVK_RightArrow), flags: .maskControl)
+    postControlArrow(kVK_RightArrow)
     test("Enabled Control-arrow reaches the adjacent real desktop through Debut") {
         featureReady && baselineReady && waitFor { featureSpaces.currentDesktopIndex() == 1 }
             && readEvents().contains { $0["keyEvent"] == "switchAdjacentSpace(1)" }
     }
     wait(0.5)
-    // Emulate the unmarked DockSwipe stream a physical desktop gesture produces.
+    // Emulate the unmarked DockSwipe stream a physical desktop gesture produces. Every
+    // DockControl payload has a generic gesture envelope; omitting those is harmless while
+    // Debut swallows the stream, but leaves Dock with an invalid stream when Debut yields it.
     // Debut's marked replacement must pass through its own tap without a second hop.
     func postPhysicalSwipe(phase: Int64, progress: Double) {
-        guard let event = CGEvent(source: nil) else { return }
+        guard let event = CGEvent(source: nil), let envelope = CGEvent(source: nil) else { return }
         for (field, value) in [(55, Int64(30)), (110, Int64(23)), (123, Int64(1)), (132, phase)] {
             event.setIntegerValueField(CGEventField(rawValue: UInt32(field))!, value: value)
         }
         event.setDoubleValueField(CGEventField(rawValue: 139)!, value: Double(Float.leastNonzeroMagnitude))
         event.setDoubleValueField(CGEventField(rawValue: 124)!, value: progress)
         event.post(tap: .cgSessionEventTap)
+        envelope.setIntegerValueField(CGEventField(rawValue: 55)!, value: 29)
+        envelope.post(tap: .cgSessionEventTap)
     }
     postPhysicalSwipe(phase: 1, progress: 0)
     wait(0.03)
@@ -2034,6 +2057,56 @@ if featureSpaces.userDesktops().count >= 2 {
     test("A desktop swipe reaches the previous desktop without recapturing its replacement") {
         waitFor { featureSpaces.currentDesktopIndex() == 0 }
             && readEvents().contains { $0["keyEvent"] == "switchAdjacentSpace(-1)" }
+    }
+
+    let adjacentEventsBeforeOverview = readEvents().filter {
+        ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
+    }.count
+    toggleSystemWindowOverview(mode: 0)
+    let yieldedToOverview = waitFor { systemWindowOverviewActive() }
+    postControlArrow(kVK_RightArrow)
+    wait(0.3)
+    let overviewInputsStayedNative = readEvents().filter {
+        ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
+    }.count == adjacentEventsBeforeOverview
+    postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [])
+    postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: [])
+    let resumedAfterOverview = waitFor { !systemWindowOverviewActive() }
+
+    test("Control-arrow stays native inside Mission Control") {
+        yieldedToOverview && overviewInputsStayedNative
+    }
+
+    // The layer-18 overview marker disappears at the start of Dock's dismissal animation.
+    // Let that native transition settle before asking the event tap to prove its next claimed
+    // shortcut; events posted into the transition can be discarded before they reach Debut.
+    wait(0.5)
+    let resetAfterOverview = quickSwitch(to: 0, using: featureSpaces)
+    postControlArrow(kVK_RightArrow)
+    wait(0.3)
+    let yieldedNavigationEvents = readEvents().filter {
+        $0["event"] == "desktop_navigation_input_yielded"
+    }
+    info(
+        "Overview recovery: markerGone=\(resumedAfterOverview) reset=\(resetAfterOverview) "
+            + "desktop=\(String(describing: featureSpaces.currentDesktopIndex())) "
+            + "yielded=\(yieldedNavigationEvents)"
+    )
+    test("The first switch after Mission Control is yielded to macOS for recovery") {
+        resumedAfterOverview && resetAfterOverview
+            && yieldedNavigationEvents.contains { $0["reason"] == "dockOverviewRecovery" }
+    }
+
+    wait(0.5)
+    // Session-posted keyboard events do not invoke Dock's symbolic-hotkey action, so the
+    // native recovery chord above proves passthrough but cannot move the VM's desktop. The
+    // next chord proves Debut did not leave that recovery latched or its coordinator pending.
+    postControlArrow(kVK_RightArrow)
+    test("Faster desktop switching resumes after Mission Control recovery") {
+        waitFor { featureSpaces.currentDesktopIndex() == 1 }
+            && readEvents().filter {
+                ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
+            }.count > adjacentEventsBeforeOverview
     }
 } else {
     test("Launch input fixture has at least two desktops") { false }
