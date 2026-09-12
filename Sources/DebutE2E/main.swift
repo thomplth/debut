@@ -2511,19 +2511,42 @@ _ = waitFor(timeout: 5) {
     readState()["overlayVisible"] == "true"
         && (Int(readState()["windowsInActiveSpace"] ?? "0") ?? 0) >= 2
 }
-postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand, .maskShift])
-postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand, .maskShift])
 _ = waitFor(timeout: 2) {
-    readState()["selectedWindowIndex"] == "0"
+    readState()["selectedWindowIndex"] == "1"
 }
 wait(0.3)
 
 let dismissalStateBefore = readState()
 let windowsBeforeDismissal = Int(dismissalStateBefore["windowsInActiveSpace"] ?? "0") ?? 0
+let keyboardSelectionBeforeDismissalHover = dismissalStateBefore["selectedWindowIndex"]
+let dismissalActiveSpaceIndex = Int(dismissalStateBefore["activeSpaceIndex"] ?? "")
+let dismissalWindowOrder = SpaceController.decodeWindowIDs(
+    dismissalStateBefore["windowIDsBySpace"] ?? ""
+)
+let hoveredWindowIDBeforeDismissal = dismissalActiveSpaceIndex.flatMap { index in
+    dismissalWindowOrder.indices.contains(index) ? dismissalWindowOrder[index].first : nil
+}
 let selectedCardCenter = firstWindowCenter(in: dismissalStateBefore)
 let dismissalScreen = CGDisplayBounds(CGMainDisplayID())
 let dismissalMetrics = drawnMetrics(cardAspects: [activeSpaceCardAspects(in: dismissalStateBefore)])
+let dismissalHoverCount = readEvents().filter {
+    $0["event"] == "overlay_pointer_selection_changed"
+}.count
 postMouseMove(to: CGPoint(x: dismissalScreen.maxX - 20, y: dismissalScreen.maxY - 20))
+let dismissalHoverReady: Bool
+if let selectedCardCenter {
+    postMouseMove(to: selectedCardCenter)
+    dismissalHoverReady = waitFor(timeout: 2) {
+        let events = readEvents().filter {
+            $0["event"] == "overlay_pointer_selection_changed"
+        }
+        return events.count > dismissalHoverCount
+            && events.last?["windowIndex"] == "0"
+            && readState()["selectedWindowIndex"] == "1"
+    }
+} else {
+    dismissalHoverReady = false
+}
 _ = takeScreenshot("14_selected_window_before_dismissal")
 let accessibleBeforeDismissal = dismissalPID.map(accessibilityStrings(for:)) ?? []
 
@@ -2641,12 +2664,18 @@ test("Command-W visibly animates the selected card during dismissal") {
         && dismissalIntermediateSpread >= dismissalMotionFloor
 }
 
-test("Command-W dismisses the selected card before any further selection input") {
+test("Command-W dismisses the targeted card while the overlay stays open") {
     guard windowsBeforeDismissal >= 2, selectedCardLabel != nil else { return false }
     return readState()["overlayVisible"] == "true"
         && readState()["selectedWindowIndex"] == "0"
         && selectedTitleCountBefore > 0
         && selectedTitleCountAfter < selectedTitleCountBefore
+}
+
+test("Command-W promotes the hovered card over the keyboard selection") {
+    return keyboardSelectionBeforeDismissalHover == "1"
+        && dismissalHoverReady
+        && closedWindowID == hoveredWindowIDBeforeDismissal
 }
 
 postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
