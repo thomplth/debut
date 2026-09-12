@@ -14,10 +14,21 @@ final class DesktopSwipeService: @unchecked Sendable {
     private var enabled = false
     private var tracking = false
     private var committed = false
+    private let desktopNavigationBlocked: @Sendable () -> Bool
     private let switchDesktop: (Int) -> Void
 
-    init(switchDesktop: @escaping (Int) -> Void) {
+    init(
+        desktopNavigationBlocked: @escaping @Sendable () -> Bool = { false },
+        switchDesktop: @escaping (Int) -> Void
+    ) {
+        self.desktopNavigationBlocked = desktopNavigationBlocked
         self.switchDesktop = switchDesktop
+    }
+
+    /// Keep swallowing the tail of a gesture whose Began Debut already claimed, but prevent
+    /// that stream from initiating or completing a desktop hop after an overview starts.
+    func cancelActiveGesture() {
+        if tracking { committed = true }
     }
 
     @discardableResult
@@ -98,14 +109,18 @@ final class DesktopSwipeService: @unchecked Sendable {
 
         let phase = event.getIntegerValueField(kCGEventGesturePhase)
         if phase == kCGSGesturePhaseBegan {
-            guard enabled && desktopNavigationAvailable else { return event }
+            // The layer check happens once per candidate gesture, never per Changed sample.
+            guard enabled && desktopNavigationAvailable && !desktopNavigationBlocked() else {
+                return event
+            }
             DiagnosticReporter.shared.report("desktop_swipe_claimed")
             tracking = true
             committed = false
             return nil
         }
         guard tracking else { return event }
-        if phase == kCGSGesturePhaseChanged && enabled && !committed {
+        if phase == kCGSGesturePhaseChanged,
+           enabled, desktopNavigationAvailable, !committed {
             let progress = event.getDoubleValueField(kCGEventGestureSwipeProgress)
             if abs(progress) >= 0.05 {
                 committed = true
@@ -114,7 +129,7 @@ final class DesktopSwipeService: @unchecked Sendable {
         }
         if phase == kCGSGesturePhaseEnded {
             let velocity = event.getDoubleValueField(kCGEventGestureSwipeVelocityX)
-            if enabled && !committed && abs(velocity) >= 0.05 {
+            if enabled && desktopNavigationAvailable && !committed && abs(velocity) >= 0.05 {
                 switchDesktop(velocity > 0 ? 1 : -1)
             }
             tracking = false

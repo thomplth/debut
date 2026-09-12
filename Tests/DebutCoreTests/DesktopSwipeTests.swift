@@ -1,5 +1,6 @@
 import Testing
 import CoreGraphics
+import Foundation
 @testable import DebutCore
 
 @MainActor
@@ -57,5 +58,57 @@ struct DesktopSwipeTests {
         #expect(moves == [1])
         service.desktopNavigationAvailable = false
         #expect(service.handle(event(1), enabled: true) != nil)
+    }
+
+    @Test("An overview receives the complete native gesture and interception resumes afterwards")
+    func overviewPassthroughDoesNotLeaveTrackingState() {
+        var moves: [Int] = []
+        let overview = SwipeOverviewState(active: true)
+        let service = DesktopSwipeService(
+            desktopNavigationBlocked: { overview.active },
+            switchDesktop: { moves.append($0) }
+        )
+
+        #expect(service.handle(event(1), enabled: true) != nil)
+        #expect(service.handle(event(2, 0.4), enabled: true) != nil)
+        #expect(service.handle(event(4, 0.4), enabled: true) != nil)
+        #expect(moves.isEmpty)
+
+        overview.active = false
+        #expect(service.handle(event(1), enabled: true) == nil)
+        #expect(service.handle(event(2, 0.4), enabled: true) == nil)
+        #expect(service.handle(event(4, 0.4), enabled: true) == nil)
+        #expect(moves == [1])
+    }
+
+    @Test("An overview arriving during a claimed gesture drains it without switching")
+    func overviewDrainsClaimedGesture() {
+        var moves: [Int] = []
+        let service = DesktopSwipeService { moves.append($0) }
+
+        #expect(service.handle(event(1), enabled: true) == nil)
+        service.cancelActiveGesture()
+        #expect(service.handle(event(2, 0.4), enabled: true) == nil)
+        #expect(service.handle(event(4, 0.4), enabled: true) == nil)
+        #expect(moves.isEmpty)
+
+        #expect(service.handle(event(1), enabled: true) == nil)
+        #expect(service.handle(event(2, -0.4), enabled: true) == nil)
+        #expect(service.handle(event(4, -0.4), enabled: true) == nil)
+        #expect(moves == [-1])
+    }
+}
+
+private final class SwipeOverviewState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedActive: Bool
+
+    init(active: Bool) {
+        storedActive = active
+    }
+
+    var active: Bool {
+        get { lock.withLock { storedActive } }
+        set { lock.withLock { storedActive = newValue } }
     }
 }

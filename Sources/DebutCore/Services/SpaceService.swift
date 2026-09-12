@@ -378,6 +378,13 @@ struct SpaceSwitchCoordinator {
         return nextHops
     }
 
+    /// Drops every unconfirmed gesture. A Dock overview owns desktop navigation while it is
+    /// visible, so a synthetic hop interrupted by that overview has no completion signal and
+    /// must not keep later requests coalesced behind it forever.
+    mutating func cancelPendingSwitches() {
+        pendingByStackID.removeAll()
+    }
+
     mutating func postingFailed(_ hop: SpaceSwitchHop) {
         guard let pending = pendingByStackID[hop.stackID],
               pending.originDesktopID == hop.fromDesktopID,
@@ -621,6 +628,8 @@ public protocol SpaceSwitching: AnyObject {
     func isSwitchInFlight(stackID: String) -> Bool
     /// Advances a confirmed multi-hop switch from the topology macOS now reports.
     func spaceDidChange()
+    /// Cancels unconfirmed synthetic hops before a Dock overview takes ownership of navigation.
+    func cancelPendingSwitches()
     /// Whether this conformer can reassign a window's desktop at all. False means the move
     /// commands should stay inert rather than mutate the model and lie about the result.
     var canMoveWindows: Bool { get }
@@ -641,6 +650,7 @@ public extension SpaceSwitching {
     func placedWindowIDs() -> Set<CGWindowID> { Set(windowLocations().keys) }
     func isSwitchInFlight(stackID: String) -> Bool { false }
     func spaceDidChange() {}
+    func cancelPendingSwitches() {}
     func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool { false }
 
     func spaceTopology() -> SpaceTopology {
@@ -1044,6 +1054,12 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             switchCoordinatorLock.withLock {
                 switchCoordinator.postingFailed(hop)
             }
+        }
+    }
+
+    public func cancelPendingSwitches() {
+        switchCoordinatorLock.withLock {
+            switchCoordinator.cancelPendingSwitches()
         }
     }
 
