@@ -1270,6 +1270,132 @@ struct SpaceControllerTests {
         #expect(controller.spaceManager.spaces[1].windows.isEmpty)
     }
 
+    @Test("Command-Q quits the app owning the hovered preview")
+    func pointerHoverSelectionTargetsQuit() {
+        let (controller, windowService, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.hovered",
+                ownerName: "Hovered",
+                windowTitle: "Pointer target",
+                ownerPID: 11
+            ),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 202,
+                ownerBundleID: "com.keyboard",
+                ownerName: "Keyboard",
+                windowTitle: "Keyboard target",
+                ownerPID: 22
+            ),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(controller.selectedWindowIndex == 1)
+        controller.updateOverlayPointerSelection(spaceIndex: 0, windowIndex: 0)
+        keyboardService.simulateEvent(.quitSelectedApp)
+
+        #expect(windowService.terminatedPIDs == [11])
+    }
+
+    @Test("Command-W closes the hovered preview")
+    func pointerHoverSelectionTargetsClose() {
+        let (controller, windowService, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.hovered",
+                ownerName: "Hovered",
+                windowTitle: "Pointer target",
+                ownerPID: 11
+            ),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 202,
+                ownerBundleID: "com.keyboard",
+                ownerName: "Keyboard",
+                windowTitle: "Keyboard target",
+                ownerPID: 22
+            ),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(controller.selectedWindowIndex == 1)
+        controller.updateOverlayPointerSelection(spaceIndex: 0, windowIndex: 0)
+        keyboardService.simulateEvent(.closeSelectedWindow)
+
+        #expect(windowService.closedWindowIDs == [101])
+    }
+
+    @Test("Leaving a hovered preview restores the keyboard target for overlay commands")
+    func pointerHoverExitRestoresKeyboardCommandTarget() {
+        let (controller, windowService, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.hovered",
+                ownerName: "Hovered",
+                windowTitle: "Pointer target",
+                ownerPID: 11
+            ),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 202,
+                ownerBundleID: "com.keyboard",
+                ownerName: "Keyboard",
+                windowTitle: "Keyboard target",
+                ownerPID: 22
+            ),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        controller.updateOverlayPointerSelection(spaceIndex: 0, windowIndex: 0)
+        controller.updateOverlayPointerSelection(spaceIndex: nil, windowIndex: nil)
+        keyboardService.simulateEvent(.quitSelectedApp)
+
+        #expect(windowService.terminatedPIDs == [22])
+    }
+
+    @Test("An arrow promotes the hovered preview before moving the selection")
+    func pointerHoverSelectionBecomesKeyboardSelectionForArrowCommand() {
+        let (controller, _, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        for windowID in [CGWindowID(101), 202, 303] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.example.\(windowID)",
+                    ownerName: "Window \(windowID)",
+                    windowTitle: "Window \(windowID)"
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(controller.selectedWindowIndex == 1)
+        controller.updateOverlayPointerSelection(spaceIndex: 0, windowIndex: 0)
+        #expect(controller.selectedWindowIndex == 1, "Hover remains provisional")
+
+        keyboardService.simulateEvent(.moveWindowRight)
+
+        #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [202, 101, 303])
+        #expect(controller.selectedWindowIndex == 1, "The arrow starts from the promoted hover target")
+    }
+
     @Test("Held backward Tab stops at the first window and a fresh press wraps")
     func backwardTabCycle() {
         let (controller, _, keyboardSvc) = makeController()
