@@ -311,19 +311,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 let window = self.spaceController?.spaceManager.allSpaces
                     .flatMap(\.windows)
                     .first { $0.windowID == windowID }
-                for space in self.spaceController?.spaceManager.allSpaces ?? [] {
-                    self.spaceController?.spaceManager.removeWindow(windowID: windowID, fromSpaceID: space.id)
-                }
                 self.diag.report("window_retired", details: [
                     "windowID": "\(windowID)",
                     "bundleID": window?.ownerBundleID ?? "unknown",
                     "windowTitle": window?.windowTitle ?? "unknown",
                     "reason": "destroyed",
                 ])
-                if let sm = self.spaceController?.spaceManager {
-                    self.debouncedSaver?.scheduleSave(sm)
-                }
-                self.spaceController?.handleLiveWindowsRemoved()
+                self.spaceController?.recordWindowDestruction(windowID: windowID)
             }
         }
         discovery.onWindowTitleChanged = { [weak self] windowID, newTitle in
@@ -344,6 +338,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.spaceController?.recordWindowActivation(windowID: windowID)
+            }
+        }
+        discovery.onSystemAttentionRequested = { [weak self] windowID, ownerPID in
+            DispatchQueue.main.async {
+                self?.spaceController?.recordOverlayActionAttention(
+                    windowID: windowID,
+                    ownerPID: ownerPID
+                )
             }
         }
         discovery.onFrontmostAppChanged = { [weak self, weak keyboardService] bundleID in
