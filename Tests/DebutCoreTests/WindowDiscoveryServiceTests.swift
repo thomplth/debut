@@ -77,6 +77,23 @@ final class DeferredWindowCreationRetryScheduler: @unchecked Sendable {
     }
 }
 
+final class FrontmostPIDBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pid: pid_t?
+
+    init(_ pid: pid_t?) {
+        self.pid = pid
+    }
+
+    func read() -> pid_t? {
+        lock.withLock { pid }
+    }
+
+    func write(_ pid: pid_t?) {
+        lock.withLock { self.pid = pid }
+    }
+}
+
 @Suite("WindowDiscoveryService")
 struct WindowDiscoveryServiceTests {
     private func makeTempDirectory() throws -> URL {
@@ -1721,6 +1738,96 @@ struct WindowDiscoveryServiceTests {
         // A dismissed panel can stay in CGWindowList for the life of its process, so the
         // window is still listed here and only the destroy notification proves it is gone.
         #expect(service.discoverRunningWindows().isEmpty)
+    }
+
+    @Test("Destroying a frontmost app window transfers focus to its surviving window")
+    func destroyedWindowTransfersFocusToSurvivor() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7), liveWindow(8)]
+        windowService.apps = [
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false),
+        ]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 8 },
+            frontmostPIDProvider: { 10 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let destroyedElement = AXUIElementCreateApplication(70)
+        let survivingElement = AXUIElementCreateApplication(80)
+        service.windowElementOverride = { windowID, _ in
+            windowID == 7 ? destroyedElement : survivingElement
+        }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 7, pid: 10)
+        service.registerTracking(windowID: 8, pid: 10)
+        var activatedWindowIDs: [CGWindowID] = []
+        service.onWindowActivated = { activatedWindowIDs.append($0) }
+
+        service.handleWindowDestroyed(element: destroyedElement)
+
+        #expect(activatedWindowIDs == [8])
+        #expect(service.retiredWindowIDs == [7])
+    }
+
+    @Test("Destroy focus recovery is discarded after another app takes focus")
+    func destroyedWindowFocusRecoveryRequiresSameFrontmostApp() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7), liveWindow(8)]
+        windowService.apps = [
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false),
+        ]
+        let probe = DeferredFocusProbe()
+        let frontmostPID = FrontmostPIDBox(10)
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusProbeScheduler: probe.schedule,
+            frontmostPIDProvider: frontmostPID.read,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let destroyedElement = AXUIElementCreateApplication(70)
+        service.windowElementOverride = { _, _ in destroyedElement }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 7, pid: 10)
+        var activatedWindowIDs: [CGWindowID] = []
+        service.onWindowActivated = { activatedWindowIDs.append($0) }
+
+        service.handleWindowDestroyed(element: destroyedElement)
+        frontmostPID.write(20)
+        probe.resolve(pid: 10, windowID: 8)
+
+        #expect(activatedWindowIDs.isEmpty)
+    }
+
+    @Test("Destroy focus recovery rejects the retired or an unknown window")
+    func destroyedWindowFocusRecoveryRequiresLiveSurvivor() {
+        func recoveredWindow(for focusedWindowID: CGWindowID?) -> [CGWindowID] {
+            let windowService = MockWindowService()
+            windowService.windowList = [liveWindow(7), liveWindow(8)]
+            windowService.apps = [
+                AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false),
+            ]
+            let service = WindowDiscoveryService(
+                windowService: windowService,
+                focusedWindowProvider: { _ in focusedWindowID },
+                frontmostPIDProvider: { 10 },
+                processExitMonitor: MockProcessExitMonitor()
+            )
+            let destroyedElement = AXUIElementCreateApplication(70)
+            service.windowElementOverride = { _, _ in destroyedElement }
+            service.armingOverride = { _, _ in .armed }
+            service.registerTracking(windowID: 7, pid: 10)
+            var activatedWindowIDs: [CGWindowID] = []
+            service.onWindowActivated = { activatedWindowIDs.append($0) }
+
+            service.handleWindowDestroyed(element: destroyedElement)
+
+            return activatedWindowIDs
+        }
+
+        #expect(recoveredWindow(for: nil).isEmpty)
+        #expect(recoveredWindow(for: 7).isEmpty)
+        #expect(recoveredWindow(for: 9).isEmpty)
     }
 
     @Test("A window ID recycled by another process is admitted again")
