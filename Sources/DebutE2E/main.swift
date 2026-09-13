@@ -2423,12 +2423,16 @@ test("Switching from another app during onboarding uses the ordinary switcher") 
         && (readState()["windowIDsBySpace"] ?? "").contains(String(other.windowID))
     postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: .maskCommand)
     postFlagsChanged(flags: [])
+    var tutorialRestored = false
     if let id = currentOnboardingTarget()?["lessonWindowID"].flatMap(UInt32.init), let app = onboardingApplication {
-        _ = service.frontWindow(windowID: id, ownerPID: app.processIdentifier)
-        _ = service.raiseWindow(windowID: id)
+        tutorialRestored = waitFor(timeout: 4) {
+            _ = service.frontWindow(windowID: id, ownerPID: app.processIdentifier)
+            _ = service.raiseWindow(windowID: id)
+            return service.frontmostApplicationPID() == app.processIdentifier
+                && currentOnboardingTarget()?["keyWindowID"] == String(id)
+        }
     }
-    wait(0.4)
-    return visible && ordinary
+    return visible && ordinary && tutorialRestored
 }
 test("The named Command-Tab target becomes the desktop lesson") { performOnboardingExercise(.workspace) }
 _ = takeScreenshot("11_onboarding_desktops")

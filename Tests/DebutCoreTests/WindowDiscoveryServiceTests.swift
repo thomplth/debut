@@ -332,6 +332,37 @@ struct WindowDiscoveryServiceTests {
         #expect(createdSnapshots == 0)
     }
 
+    @Test("Debut's own windows stay on their explicit discovery path")
+    func ownWindowCreationDoesNotEnterGenericDiscovery() {
+        let windowService = MockWindowService()
+        windowService.windowList = [WindowInfo(
+            windowID: 701,
+            ownerBundleID: "com.thomplth.Debut",
+            ownerName: "Debut",
+            ownerPID: 10,
+            title: "Debut Tutorial",
+            bounds: .zero,
+            isOnScreen: true
+        )]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var createdSnapshots = 0
+        service.onWindowCreated = { _ in createdSnapshots += 1 }
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 701,
+            ownerPID: 10,
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+
+        #expect(createdSnapshots == 0)
+        #expect(service.diagnosticTrackingSnapshot.knownWindowIDs.isEmpty)
+    }
+
     @Test("A full scan reports a window that no earlier event detected")
     func laterFullScanReportsMissedWindowDetection() throws {
         let directory = try makeTempDirectory()
