@@ -177,6 +177,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private var activatedPID: pid_t?
     private var focusChangeProbeGeneration = 0
     private var launchProbeGeneration = 0
+    private var destructionProbeGeneration = 0
 
     // Per-app AXObservers for window lifecycle (destroyed, title changed)
     private var perAppObservers: [pid_t: AXObserver] = [:]
@@ -721,12 +722,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     func handleWindowDestroyed(element: AXUIElement) {
         guard let windowID = trackedWindowID(for: element) else { return }
-        if let owner = windowOwnerPIDs[windowID] {
+        let ownerPID = windowOwnerPIDs[windowID]
+        if let ownerPID {
             retiredWindowOwners[windowID] = RetiredWindowRecord(
                 windowID: windowID,
-                ownerPID: owner,
+                ownerPID: ownerPID,
                 ownerBundleID: windowService.listRunningApps()
-                    .first { $0.pid == owner }?.bundleID ?? ""
+                    .first { $0.pid == ownerPID }?.bundleID ?? ""
             )
         }
         trackedWindowElements.removeValue(forKey: windowID)
@@ -735,6 +737,43 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         unarmedWindowIDs.remove(windowID)
         windowOwnerPIDs.removeValue(forKey: windowID)
         onWindowClosed?(windowID)
+
+        if let ownerPID {
+            recoverFocus(afterDestroying: windowID, ownerPID: ownerPID)
+        }
+    }
+
+    /// Closing a key window does not reliably produce a usable focused-window notification.
+    /// Dictionary is a measured case: it restores Settings as key beside its main window, then
+    /// silently returns focus to the main window when Settings closes. The destroy notification
+    /// is the event that makes that transfer observable, so sample once after retiring the old
+    /// identity and credit only a still-live successor in the same still-frontmost process.
+    private func recoverFocus(afterDestroying windowID: CGWindowID, ownerPID: pid_t) {
+        guard frontmostPIDProvider() == ownerPID else { return }
+
+        destructionProbeGeneration += 1
+        let generation = destructionProbeGeneration
+        let activationGeneration = activationProbeGeneration
+        let focusGeneration = focusChangeProbeGeneration
+        focusProbeScheduler(ownerPID) { [weak self] focusedWindowID in
+            guard let self,
+                  self.destructionProbeGeneration == generation,
+                  self.activationProbeGeneration == activationGeneration,
+                  self.focusChangeProbeGeneration == focusGeneration,
+                  self.frontmostPIDProvider() == ownerPID,
+                  let focusedWindowID,
+                  focusedWindowID != windowID,
+                  let focusedWindow = self.excludingRetired(self.windowService.listWindows())
+                    .first(where: {
+                        $0.windowID == focusedWindowID &&
+                            $0.ownerPID == ownerPID &&
+                            !self.excludedBundleIDs.contains($0.ownerBundleID)
+                    })
+            else { return }
+
+            self.trackAndRegister(windowID: focusedWindow.windowID, pid: focusedWindow.ownerPID)
+            self.onWindowActivated?(focusedWindow.windowID)
+        }
     }
 
     static func isSystemAttentionAXWindow(
