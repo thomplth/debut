@@ -1828,6 +1828,53 @@ struct WindowDiscoveryServiceTests {
         #expect(service.discoverRunningWindows().isEmpty)
     }
 
+    @Test("A new creation event revives a retired window ID in the same process")
+    func creationEventRevivesRetiredWindowIdentity() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7)]
+        windowService.apps = [
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false),
+        ]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementOverride = { _, _ in element }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 7, pid: 10)
+        service.handleWindowDestroyed(element: element)
+
+        // The window-server surface is not proof of a new lifetime.
+        #expect(service.discoverRunningWindows().isEmpty)
+        #expect(service.retiredWindowIDs == [7])
+
+        var snapshots: [RuntimeWindowSnapshot] = []
+        service.onWindowCreated = { snapshots.append($0) }
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 7,
+            ownerPID: 10,
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+        reporter.flush()
+
+        #expect(snapshots.first?.liveWindows.map(\.windowID) == [7])
+        #expect(service.retiredWindowIDs.isEmpty)
+        #expect(service.diagnosticTrackingSnapshot.knownWindowIDs == [7])
+        let revival = try #require(durableDiagnosticEvents(in: directory).first {
+            $0["event"] == "window_retirement_cleared"
+        })
+        #expect(revival["reason"] == "creation_event")
+        #expect(revival["ownerPID"] == "10")
+        #expect(revival["windowID"] == "7")
+    }
+
     @Test("Destroying a frontmost app window transfers focus to its surviving window")
     func destroyedWindowTransfersFocusToSurvivor() {
         let windowService = MockWindowService()

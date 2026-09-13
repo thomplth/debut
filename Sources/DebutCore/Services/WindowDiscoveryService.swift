@@ -1014,17 +1014,6 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             return
         }
 
-        if retiredWindowOwners[metadata.windowID]?.ownerPID == metadata.ownerPID {
-            reportWindowCreationAttempt(
-                metadata: metadata,
-                probeID: probeID,
-                attempt: attempt,
-                result: "retired_ignored"
-            )
-            pendingWindowCreations.removeValue(forKey: probeID)
-            return
-        }
-
         guard let info = windowService.listWindows().first(where: {
             $0.windowID == metadata.windowID && $0.ownerPID == metadata.ownerPID
         }) else {
@@ -1068,6 +1057,23 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 metadata: metadata
             )
             return
+        }
+
+        // A destroy notification retires the old window lifetime even when Core Graphics keeps
+        // its surface. Dia can later reuse that ID in the same process for a new DevTools window.
+        // Only this explicit creation notification, after the new window resolves through both
+        // discovery layers, is strong enough to start a new lifetime and clear the tombstone.
+        if let retired = retiredWindowOwners[metadata.windowID],
+           retired.ownerPID == metadata.ownerPID {
+            retiredWindowOwners.removeValue(forKey: metadata.windowID)
+            diag.report("window_retirement_cleared", details: [
+                "bundleID": info.ownerBundleID,
+                "ownerPID": "\(metadata.ownerPID)",
+                "reason": "creation_event",
+                "retiredBundleID": retired.ownerBundleID,
+                "windowID": "\(metadata.windowID)",
+                "windowTitle": info.title,
+            ])
         }
 
         trackAndRegister(windowID: metadata.windowID, pid: metadata.ownerPID)
