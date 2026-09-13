@@ -166,6 +166,139 @@ struct SpaceControllerSpaceTests {
         return (controller, windowService, keyboardService)
     }
 
+    /// NSWorkspace announces the frontmost application before Debut's bounded AX focused-window
+    /// probe completes. A launcher such as Spotlight or BetterTouchTool can therefore put Dia on
+    /// screen while the model still says the application being left is in front. When exactly one
+    /// managed Dia window is on a showing desktop, the bundle-level activation is already enough
+    /// to update the MRU without guessing which of several windows the user chose.
+    @Test("External app activation immediately credits its only visible window")
+    func externalActivationCreditsOnlyVisibleWindowBeforeFocusProbe() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+        let visibleSpaceID = controller.spaceManager.spaces[0].id
+        let hiddenSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 182,
+                ownerBundleID: "notion.id",
+                ownerName: "Notion",
+                windowTitle: "Shop",
+                ownerPID: 660
+            ),
+            toSpaceID: visibleSpaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 104_661,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                windowTitle: "Leisure",
+                ownerPID: 22_502
+            ),
+            toSpaceID: visibleSpaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 104_663,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                windowTitle: "Develop",
+                ownerPID: 22_502
+            ),
+            toSpaceID: hiddenSpaceID
+        )
+        spaces.windowDesktops = [182: 0, 104_661: 0, 104_663: 1]
+
+        controller.updateFrontmostApp(bundleID: "company.thebrowser.dia")
+
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [104_661, 182])
+
+        // Dia's delayed AX answer can name the window it remembers on another desktop. That
+        // rejected answer must not undo the bundle-level attribution made at activation time.
+        controller.recordWindowActivation(windowID: 104_663)
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [104_661, 182])
+
+        // A quick release before the AX probe resolves must return to Notion, rather than select
+        // the Dia window that is already on screen and appear to do nothing.
+        keyboardService.simulateEvent(.cmdTabTap)
+        #expect(windowService.frontedWindows.last == FrontWindowRequest(windowID: 182, ownerPID: 660))
+    }
+
+    /// A bundle activation identifies an application, not a particular window. If two of that
+    /// app's windows are showing, only the later focused-window report can choose between them.
+    @Test("External app activation does not guess between visible windows")
+    func externalActivationLeavesAmbiguousVisibleWindowsForFocusProbe() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+        let visibleSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 182,
+                ownerBundleID: "notion.id",
+                ownerName: "Notion",
+                windowTitle: "Shop",
+                ownerPID: 660
+            ),
+            toSpaceID: visibleSpaceID
+        )
+        for windowID in [104_661, 104_662] as [CGWindowID] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "company.thebrowser.dia",
+                    ownerName: "Dia",
+                    windowTitle: "Dia \(windowID)",
+                    ownerPID: 22_502
+                ),
+                toSpaceID: visibleSpaceID
+            )
+            spaces.windowDesktops[windowID] = 0
+        }
+
+        controller.updateFrontmostApp(bundleID: "company.thebrowser.dia")
+
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [182, 104_661, 104_662])
+    }
+
+    /// During a desktop transition the currently showing desktop is intentionally unsettled.
+    /// The active-space notification will provide the authoritative destination, so an app
+    /// activation in this interval must not be attributed against the desktop being left.
+    @Test("External app activation waits while a desktop switch is in flight")
+    func externalActivationWaitsForDesktopSwitch() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+        let visibleSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 182,
+                ownerBundleID: "notion.id",
+                ownerName: "Notion",
+                windowTitle: "Shop",
+                ownerPID: 660
+            ),
+            toSpaceID: visibleSpaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 104_661,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                windowTitle: "Leisure",
+                ownerPID: 22_502
+            ),
+            toSpaceID: visibleSpaceID
+        )
+        spaces.windowDesktops = [182: 0, 104_661: 0]
+        spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
+
+        controller.updateFrontmostApp(bundleID: "company.thebrowser.dia")
+
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [182, 104_661])
+    }
+
     @Test("Confirmation switches to its desktop before taking focus")
     @MainActor
     func confirmationAttentionSwitchesDesktopBeforeFocus() {
