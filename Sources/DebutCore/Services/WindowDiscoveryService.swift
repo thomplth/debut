@@ -95,6 +95,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     public var retiredWindowIDs: Set<CGWindowID> { Set(retiredWindowOwners.keys) }
 
+    /// Samples the focused window off the event-tap path. SpaceController uses this to verify
+    /// that macOS moved the keyboard to the exact window it requested, rather than merely
+    /// accepting the front-process call or bringing the right process forward.
+    public func probeFocusDelivery(
+        for pid: pid_t,
+        completion: @escaping @Sendable (pid_t?, CGWindowID?) -> Void
+    ) {
+        focusProbeScheduler(pid) { [weak self] windowID in
+            completion(self?.frontmostPIDProvider(), windowID)
+        }
+    }
+
     /// The tombstone as a question, for the admission paths that never take a discovery snapshot
     /// and so cannot be covered by `excludingRetired`.
     public func isRetired(windowID: CGWindowID, ownerPID: pid_t) -> Bool {

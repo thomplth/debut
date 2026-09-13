@@ -209,6 +209,11 @@ public extension SpaceControllerDelegate {
 }
 
 public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
+    public typealias FocusDeliveryProbe = @Sendable (
+        pid_t,
+        @escaping @Sendable (pid_t?, CGWindowID?) -> Void
+    ) -> Void
+
     /// A pointer hover is a provisional overlay target. It uses stable identities because the
     /// preview can be rebuilt between the hover event and the command that consumes it.
     private struct OverlayTarget: Equatable {
@@ -429,6 +434,25 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// The window Debut last asked the window server to front, pending the focus report it causes.
     private var focusRequest: (windowID: CGWindowID, ownerPID: pid_t, at: Date)?
     private var pendingFront: (windowID: CGWindowID, ownerPID: pid_t)?
+    private enum FocusCommand: String {
+        case commandTab = "command_tab"
+        case commandBacktick = "command_backtick"
+        case general
+    }
+    private struct PendingFocusDelivery {
+        let windowID: CGWindowID
+        let ownerPID: pid_t
+        let spaceID: UUID
+        let sourceWindowID: CGWindowID?
+        let command: FocusCommand
+        let requiresExactWindow: Bool
+        var attempt: Int
+        var revision: UInt
+    }
+    private var pendingFocusDelivery: PendingFocusDelivery?
+    private var focusDeliveryRevision: UInt = 0
+    private let focusDeliveryProbe: FocusDeliveryProbe?
+    private let focusDeliveryVerificationDelay: TimeInterval
     private let diag = DiagnosticReporter.shared
     private let overlayPresentationRecorder: OverlayPresentationRecorder
     private var activeOverlayPresentation: OverlayPresentationContext?
@@ -439,6 +463,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         spaceManager: SpaceManager = SpaceManager(),
         overlayPresentationDelay: TimeInterval = AppSettings.defaultOverlayPresentationDelay,
         focusedWindowSnapshotProvider: (() -> FocusedWindowSnapshot)? = nil,
+        focusDeliveryProbe: FocusDeliveryProbe? = nil,
+        focusDeliveryVerificationDelay: TimeInterval = 0.12,
         overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
         previewRefreshPolicy: PreviewRefreshPolicy = .lastActiveOnly,
         previewCacheTTL: TimeInterval = AppSettings.defaultPreviewCacheTTL,
@@ -449,6 +475,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         self.spaceManager = spaceManager
         self.overlayPresentationDelay = overlayPresentationDelay
         self.focusedWindowSnapshotProvider = focusedWindowSnapshotProvider
+        self.focusDeliveryProbe = focusDeliveryProbe
+        self.focusDeliveryVerificationDelay = focusDeliveryVerificationDelay
         self.overlayPresentationRecorder = overlayPresentationRecorder
         self.previewRefreshPolicy = previewRefreshPolicy
         self.previewCacheTTL = previewCacheTTL
@@ -744,7 +772,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         ])
     }
 
-    private func focusWindow(_ windowID: CGWindowID, inSpaceID spaceID: UUID) {
+    private func focusWindow(
+        _ windowID: CGWindowID,
+        inSpaceID spaceID: UUID,
+        command: FocusCommand = .general
+    ) {
         guard let window = spaceManager.allSpaces.first(where: { $0.id == spaceID })?
             .windows.first(where: { $0.windowID == windowID })
         else {
@@ -759,6 +791,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         if outcome != .refused, let ownerPID = window.ownerPID {
             focusRequest = (windowID: windowID, ownerPID: ownerPID, at: clock())
             scheduleFrontVerification(windowID: windowID, ownerPID: ownerPID)
+            if command != .general {
+                beginFocusDeliveryVerification(
+                    windowID: windowID,
+                    ownerPID: ownerPID,
+                    spaceID: spaceID,
+                    sourceWindowID: spaceManager.activeSpace.windows.first?.windowID,
+                    command: command
+                )
+            }
         }
         _ = windowService.raiseWindow(windowID: windowID)
         spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: spaceID)
@@ -766,6 +807,176 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             "windowID": "\(windowID)",
             "via": outcome.rawValue,
         ])
+    }
+
+    /// The front-process call reports only that macOS accepted the request. Its existing
+    /// readback checks the process, which cannot distinguish Dia's DevTools and browser windows.
+    /// This second readback samples the exact AX focused window after the event-tap callback has
+    /// returned. A missed first delivery is retried once without advancing the MRU again.
+    private static let maximumFocusDeliveryAttempts = 2
+
+    private func beginFocusDeliveryVerification(
+        windowID: CGWindowID,
+        ownerPID: pid_t,
+        spaceID: UUID,
+        sourceWindowID: CGWindowID?,
+        command: FocusCommand
+    ) {
+        guard focusDeliveryProbe != nil else { return }
+        let sourceOwnerPID = sourceWindowID.flatMap { sourceWindowID in
+            spaceManager.allSpaces.lazy.flatMap(\.windows)
+                .first(where: { $0.windowID == sourceWindowID })?.ownerPID
+        }
+        focusDeliveryRevision &+= 1
+        pendingFocusDelivery = PendingFocusDelivery(
+            windowID: windowID,
+            ownerPID: ownerPID,
+            spaceID: spaceID,
+            sourceWindowID: sourceWindowID,
+            command: command,
+            requiresExactWindow: command == .commandBacktick || sourceOwnerPID == ownerPID,
+            attempt: 1,
+            revision: focusDeliveryRevision
+        )
+        diag.report("window_focus_delivery_requested", details: [
+            "attempt": "1",
+            "command": command.rawValue,
+            "requiresExactWindow": "\(command == .commandBacktick || sourceOwnerPID == ownerPID)",
+            "sourceWindowID": sourceWindowID.map(String.init) ?? "none",
+            "windowID": "\(windowID)",
+        ])
+        scheduleFocusDeliveryVerification(revision: focusDeliveryRevision)
+    }
+
+    private func scheduleFocusDeliveryVerification(revision: UInt) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + focusDeliveryVerificationDelay) {
+            [weak self] in
+            guard self?.pendingFocusDelivery?.revision == revision else { return }
+            self?.verifyPendingFocusDelivery()
+        }
+    }
+
+    /// Invocable by tests without waiting for wall time. Production always reaches this from the
+    /// delayed main-queue hop above, and the probe itself runs on discovery's AX worker queue.
+    @discardableResult
+    func verifyPendingFocusDelivery() -> Bool {
+        guard let request = pendingFocusDelivery, let focusDeliveryProbe else { return false }
+        let revision = request.revision
+        focusDeliveryProbe(request.ownerPID) { [weak self] frontmostPID, focusedWindowID in
+            self?.finishFocusDeliveryVerification(
+                revision: revision,
+                frontmostPID: frontmostPID,
+                focusedWindowID: focusedWindowID
+            )
+        }
+        return true
+    }
+
+    private func finishFocusDeliveryVerification(
+        revision: UInt,
+        frontmostPID: pid_t?,
+        focusedWindowID: CGWindowID?
+    ) {
+        guard var request = pendingFocusDelivery, request.revision == revision else { return }
+        let processArrived = frontmostPID == request.ownerPID
+        let exactWindowArrived = focusedWindowID == request.windowID
+        if processArrived, !request.requiresExactWindow || exactWindowArrived {
+            pendingFocusDelivery = nil
+            if exactWindowArrived, focusRequest?.windowID == request.windowID {
+                focusRequest = nil
+            }
+            diag.report("window_focus_delivery_confirmed", details: [
+                "attempt": "\(request.attempt)",
+                "command": request.command.rawValue,
+                "windowID": "\(request.windowID)",
+            ])
+            return
+        }
+
+        guard request.attempt < Self.maximumFocusDeliveryAttempts else {
+            pendingFocusDelivery = nil
+            if focusRequest?.windowID == request.windowID { focusRequest = nil }
+            let showingSpaceIDs = Set(
+                spaceManager.connectedSpaceStacks.map(\.activeSpaceID)
+            )
+            let restoredWindowID = (frontmostPID == request.ownerPID ? focusedWindowID : nil)
+                .flatMap { windowID in
+                    guard let spaceID = spaceOwningWindow(windowID: windowID),
+                          showingSpaceIDs.contains(spaceID)
+                    else { return nil }
+                    return windowID
+                } ?? request.sourceWindowID
+            if let restoredWindowID,
+               let restoredSpaceID = spaceOwningWindow(windowID: restoredWindowID) {
+                spaceManager.bringWindowToFront(
+                    windowID: restoredWindowID,
+                    inSpaceID: restoredSpaceID
+                )
+                delegate?.spaceControllerDidMutateState(self)
+            }
+            endBacktickCycle()
+            diag.report("window_focus_delivery_failed", details: [
+                "attempts": "\(request.attempt)",
+                "command": request.command.rawValue,
+                "frontmostPID": frontmostPID.map(String.init) ?? "none",
+                "focusedWindowID": focusedWindowID.map(String.init) ?? "none",
+                "restoredWindowID": restoredWindowID.map(String.init) ?? "none",
+                "windowID": "\(request.windowID)",
+            ])
+            return
+        }
+
+        request.attempt += 1
+        focusDeliveryRevision &+= 1
+        request.revision = focusDeliveryRevision
+        pendingFocusDelivery = request
+        issueFocusDeliveryRetry(
+            request,
+            reason: "verification_mismatch",
+            frontmostPID: frontmostPID,
+            focusedWindowID: focusedWindowID
+        )
+    }
+
+    private func issueFocusDeliveryRetry(
+        _ request: PendingFocusDelivery,
+        reason: String,
+        frontmostPID: pid_t? = nil,
+        focusedWindowID: CGWindowID? = nil
+    ) {
+        guard let window = spaceManager.allSpaces.first(where: { $0.id == request.spaceID })?
+            .windows.first(where: { $0.windowID == request.windowID })
+        else {
+            pendingFocusDelivery = nil
+            return
+        }
+        let outcome = activateOwner(of: window, raising: request.windowID)
+        if outcome != .refused {
+            focusRequest = (windowID: request.windowID, ownerPID: request.ownerPID, at: clock())
+            scheduleFrontVerification(windowID: request.windowID, ownerPID: request.ownerPID)
+        }
+        _ = windowService.raiseWindow(windowID: request.windowID)
+        if request.command == .commandBacktick { backtickCycleSteppedAt = clock() }
+        diag.report("window_focus_delivery_retried", details: [
+            "attempt": "\(request.attempt)",
+            "command": request.command.rawValue,
+            "frontmostPID": frontmostPID.map(String.init) ?? "none",
+            "focusedWindowID": focusedWindowID.map(String.init) ?? "none",
+            "reason": reason,
+            "via": outcome.rawValue,
+            "windowID": "\(request.windowID)",
+        ])
+        scheduleFocusDeliveryVerification(revision: request.revision)
+    }
+
+    private func retryUnconfirmedFocusDelivery(for command: FocusCommand) -> Bool {
+        guard var request = pendingFocusDelivery, request.command == command else { return false }
+        focusDeliveryRevision &+= 1
+        request.revision = focusDeliveryRevision
+        request.attempt = min(request.attempt + 1, Self.maximumFocusDeliveryAttempts)
+        pendingFocusDelivery = request
+        issueFocusDeliveryRetry(request, reason: "repeated_shortcut")
+        return true
     }
 
     /// How long to leave the window server to apply a front request before reading back who is in
@@ -1074,6 +1285,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
 
+        if pendingFocusDelivery?.windowID == reportedWindowID {
+            let request = pendingFocusDelivery
+            pendingFocusDelivery = nil
+            diag.report("window_focus_delivery_confirmed", details: [
+                "attempt": "\(request?.attempt ?? 1)",
+                "command": request?.command.rawValue ?? FocusCommand.general.rawValue,
+                "source": "focus_observer",
+                "windowID": "\(reportedWindowID)",
+            ])
+        }
+
         // A cycle step has already written its landing window to the MRU, so the app's own focus
         // report answering that raise must not demote it — and for a same-app cycle that report
         // regularly names the window the step moved away from. The suppression cannot outlive the
@@ -1189,6 +1411,18 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     ) {
         frontmostAppBundleID = bundleID
         frontmostAppIsExcluded = bundleID.map(excludedBundleIDs.contains) ?? false
+        if let request = pendingFocusDelivery,
+           let requestedBundleID = spaceManager.allSpaces.lazy.flatMap(\.windows)
+               .first(where: { $0.windowID == request.windowID })?.ownerBundleID,
+           bundleID != requestedBundleID {
+            pendingFocusDelivery = nil
+            if focusRequest?.windowID == request.windowID { focusRequest = nil }
+            diag.report("window_focus_delivery_cancelled", details: [
+                "frontmostBundleID": bundleID ?? "none",
+                "reason": "another_app_activated",
+                "windowID": "\(request.windowID)",
+            ])
+        }
         guard let bundleID, !frontmostAppIsExcluded else { return }
 
         // NSWorkspace tells us which application is in front synchronously, before the bounded
@@ -1467,6 +1701,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     // MARK: - Private
 
     private func handleCmdBacktick(reverse: Bool, wraps: Bool = true) {
+        // A repeat event belongs to one held traversal and may advance immediately. A second
+        // discrete press after an unconfirmed delivery is a retry, not evidence that the model's
+        // optimistic landing actually became the front window.
+        if wraps, retryUnconfirmedFocusDelivery(for: .commandBacktick) { return }
         let activeSpace = spaceManager.activeSpace
         guard let frontWindow = activeSpace.windows.first else { return }
 
@@ -1496,12 +1734,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         let targetID = backtickCycleWindows[destination]
         backtickCycleSteppedAt = clock()
-        if let targetWindow = sameAppWindows.first(where: { $0.windowID == targetID }) {
-            activateOwner(of: targetWindow, raising: targetID)
-        }
-        _ = windowService.raiseWindow(windowID: targetID)
-
-        spaceManager.bringWindowToFront(windowID: targetID, inSpaceID: spaceManager.activeSpaceID)
+        focusWindow(targetID, inSpaceID: spaceManager.activeSpaceID, command: .commandBacktick)
         // Nothing else reports this activation, so without it an MRU head the user moved by
         // Command-backtick leaves no trace and a wrong order has to be reproduced live.
         diag.report("same_app_cycle_stepped", details: [
@@ -1537,6 +1770,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func handleCmdTabTap() {
+        if retryUnconfirmedFocusDelivery(for: .commandTab) { return }
         if let scope = tutorialScope, let focused = probeFocusedWindow().windowID, scope.windowIDs.contains(focused) {
             openOverlay(selectNextWindow: true)
             commitSelection()
@@ -1545,7 +1779,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let activeSpace = spaceManager.activeSpace
         let targetIndex = frontmostAppIsExcluded ? 0 : 1
         guard activeSpace.windows.indices.contains(targetIndex) else { return }
-        focusWindow(activeSpace.windows[targetIndex].windowID, inSpaceID: activeSpace.id)
+        focusWindow(
+            activeSpace.windows[targetIndex].windowID,
+            inSpaceID: activeSpace.id,
+            command: .commandTab
+        )
         delegate?.spaceControllerDidMutateState(self)
     }
 

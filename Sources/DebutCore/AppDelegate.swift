@@ -252,6 +252,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             keyboardService: keyboardService,
             spaceManager: spaceManager,
             overlayPresentationDelay: currentSettings.overlayPresentationDelay,
+            focusDeliveryProbe: { [weak discovery] pid, completion in
+                guard let discovery else {
+                    completion(nil, nil)
+                    return
+                }
+                discovery.probeFocusDelivery(for: pid, completion: completion)
+            },
             previewRefreshPolicy: currentSettings.previewRefreshPolicy,
             previewCacheTTL: currentSettings.previewCacheTTL
         )

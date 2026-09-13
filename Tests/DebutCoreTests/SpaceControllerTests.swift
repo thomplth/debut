@@ -1893,6 +1893,192 @@ struct SpaceControllerTests {
         #expect(activeWindowIDs(controller) == [101, 303, 202, 404])
     }
 
+    /// The window server can accept a same-process front request while leaving the source
+    /// window focused. The optimistic MRU write must not make the next discrete press walk back
+    /// to that source; until the target is confirmed, another press retries the same target.
+    @Test("An unconfirmed app-window cycle retries its target")
+    func unconfirmedAppWindowCycleRetriesTarget() {
+        let focusedWindowID = Locked<CGWindowID?>(101)
+        let windowService = MockWindowService()
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryProbe: { _, completion in completion(22_502, focusedWindowID.get()) },
+            focusDeliveryVerificationDelay: 60
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        for windowID in [CGWindowID(101), 202] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "company.thebrowser.dia",
+                    ownerName: "Dia",
+                    windowTitle: windowID == 101 ? "DevTools" : "Browser",
+                    ownerPID: 22_502
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdBacktick)
+        // The delayed focus report still names DevTools: the requested Browser window did not
+        // take focus, even though the window-server request itself returned success.
+        controller.recordWindowActivation(windowID: 101)
+        keyboardService.simulateEvent(.cmdBacktick)
+
+        #expect(windowService.frontedWindows.map(\.windowID) == [202, 202])
+    }
+
+    @Test("A missed app-window focus is retried without another shortcut")
+    func missedAppWindowFocusRetriesAutomatically() {
+        let focusedWindowID = Locked<CGWindowID?>(101)
+        let windowService = MockWindowService()
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryProbe: { _, completion in completion(22_502, focusedWindowID.get()) },
+            focusDeliveryVerificationDelay: 60
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        for windowID in [CGWindowID(101), 202] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "company.thebrowser.dia",
+                    ownerName: "Dia",
+                    windowTitle: windowID == 101 ? "DevTools" : "Browser",
+                    ownerPID: 22_502
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdBacktick)
+        #expect(controller.verifyPendingFocusDelivery())
+
+        #expect(windowService.frontedWindows.map(\.windowID) == [202, 202])
+        focusedWindowID.set(202)
+        #expect(controller.verifyPendingFocusDelivery())
+        keyboardService.simulateEvent(.cmdBacktick)
+        #expect(windowService.frontedWindows.map(\.windowID) == [202, 202, 101])
+    }
+
+    /// Cross-application switching has the same optimistic-write failure. Its existing PID
+    /// verification sees the miss, so the next tap must retry the failed target rather than
+    /// choosing the source from the now-fictional MRU head.
+    @Test("A Command-Tab target not taken is retried on the next tap")
+    func unconfirmedCommandTabRetriesTarget() {
+        // A background app retains its own AX-focused window. The exact window can therefore
+        // look right even while the source process is still globally frontmost.
+        let focusedWindowID = Locked<CGWindowID?>(202)
+        let windowService = MockWindowService()
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryProbe: { _, completion in completion(11, focusedWindowID.get()) },
+            focusDeliveryVerificationDelay: 60
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.example.Source",
+                ownerName: "Source",
+                windowTitle: "Source",
+                ownerPID: 11
+            ),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 202,
+                ownerBundleID: "com.example.Target",
+                ownerName: "Target",
+                windowTitle: "Target",
+                ownerPID: 22
+            ),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabTap)
+        #expect(controller.verifyPendingFocusDelivery())
+        keyboardService.simulateEvent(.cmdTabTap)
+
+        #expect(windowService.frontedWindows.map(\.windowID) == [202, 202, 202])
+    }
+
+    /// Across processes, global frontmost identity is authoritative. Some apps keep reporting a
+    /// remembered window on another desktop, so requiring an exact AX match here would turn a
+    /// successful Command-Tab into a false failure and undo KHA-665's attribution fix.
+    @Test("Command-Tab accepts the target process despite a stale exact-window answer")
+    func commandTabAcceptsTargetProcessWithStaleWindowProbe() {
+        let windowService = MockWindowService()
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryProbe: { _, completion in completion(22, 999) },
+            focusDeliveryVerificationDelay: 60
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.source", ownerName: "Source",
+                        windowTitle: "Source", ownerPID: 11),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.target", ownerName: "Target",
+                        windowTitle: "Target", ownerPID: 22),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabTap)
+        #expect(controller.verifyPendingFocusDelivery())
+
+        #expect(!controller.verifyPendingFocusDelivery())
+        #expect(windowService.frontedWindows.map(\.windowID) == [202])
+    }
+
+    @Test("Two missed focus deliveries restore the window that remained focused")
+    func repeatedFocusDeliveryFailureRestoresSourceMRU() {
+        let windowService = MockWindowService()
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryProbe: { _, completion in completion(22_502, 101) },
+            focusDeliveryVerificationDelay: 60
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        for windowID in [CGWindowID(101), 202] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "company.thebrowser.dia",
+                            ownerName: "Dia", windowTitle: "Dia \(windowID)", ownerPID: 22_502),
+                toSpaceID: spaceID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdBacktick)
+        #expect(controller.verifyPendingFocusDelivery())
+        #expect(controller.verifyPendingFocusDelivery())
+
+        #expect(activeWindowIDs(controller) == [101, 202])
+        #expect(!controller.verifyPendingFocusDelivery())
+
+        // The failed request no longer owns later focus reports. A real click on the source
+        // must stay credited to the source instead of being rewritten to the failed target.
+        controller.recordWindowActivation(windowID: 101)
+        #expect(activeWindowIDs(controller) == [101, 202])
+    }
+
     /// Each step rewrites the MRU, so the walk order cannot be re-derived from it — that would
     /// bounce between the two most recent windows instead of visiting the third.
     @Test("A held cycle walks every window although each step rewrites the MRU")

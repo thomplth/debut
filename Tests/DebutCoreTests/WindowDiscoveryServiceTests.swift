@@ -58,6 +58,19 @@ final class DeferredFocusProbe: @unchecked Sendable {
     }
 }
 
+final class FocusDeliveryRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: (frontmostPID: pid_t?, windowID: CGWindowID?)?
+
+    func record(frontmostPID: pid_t?, windowID: CGWindowID?) {
+        lock.withLock { value = (frontmostPID, windowID) }
+    }
+
+    var snapshot: (frontmostPID: pid_t?, windowID: CGWindowID?)? {
+        lock.withLock { value }
+    }
+}
+
 @Suite("WindowDiscoveryService")
 struct WindowDiscoveryServiceTests {
     private func makeTempDirectory() throws -> URL {
@@ -120,6 +133,24 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshotWindowIDs == [1, 2, 3, 4])
         #expect(snapshotAllWindowIDs == [1, 2, 3, 4, 99])
         #expect(snapshotFocusedWindowID == 4)
+    }
+
+    @Test("Focus delivery probe reports both global process and exact app window")
+    func focusDeliveryProbeIncludesFrontmostProcess() {
+        let recorder = FocusDeliveryRecorder()
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            focusedWindowProvider: { _ in 202 },
+            frontmostPIDProvider: { 11 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+
+        service.probeFocusDelivery(for: 22) { frontmostPID, windowID in
+            recorder.record(frontmostPID: frontmostPID, windowID: windowID)
+        }
+
+        #expect(recorder.snapshot?.frontmostPID == 11)
+        #expect(recorder.snapshot?.windowID == 202)
     }
 
     @Test("Only sheets and modal or dialog windows request system attention")
