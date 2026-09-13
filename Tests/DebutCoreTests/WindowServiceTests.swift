@@ -575,6 +575,29 @@ struct WindowServiceTests {
         #expect(svc.listWindows().count == 2)
     }
 
+    @Test("Visible app window follows Core Graphics front-to-back order")
+    func visibleFrontWindowOrder() {
+        let windows: [[CFString: Any]] = [
+            [kCGWindowNumber: CGWindowID(999), kCGWindowOwnerPID: pid_t(22),
+             kCGWindowLayer: 25],
+            [kCGWindowNumber: CGWindowID(101), kCGWindowOwnerPID: pid_t(11),
+             kCGWindowLayer: 0],
+            [kCGWindowNumber: CGWindowID(202), kCGWindowOwnerPID: pid_t(22),
+             kCGWindowLayer: 0],
+            [kCGWindowNumber: CGWindowID(303), kCGWindowOwnerPID: pid_t(22),
+             kCGWindowLayer: 0],
+        ]
+
+        #expect(AccessibilityWindowService.frontmostLayerZeroWindowID(
+            ownerPID: 22,
+            in: windows
+        ) == 202)
+        let trace = AccessibilityWindowService.visibleWindowZOrder(ownerPID: 22, in: windows)
+        #expect(trace.map(\.windowID) == [999, 202, 303])
+        #expect(trace.map(\.orderIndex) == [0, 2, 3])
+        #expect(trace.map(\.layer) == [25, 0, 0])
+    }
+
     @Test("Raise window")
     func raiseWindow() {
         let svc = MockWindowService()

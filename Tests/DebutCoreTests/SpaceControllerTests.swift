@@ -714,6 +714,36 @@ struct SpaceControllerTests {
         #expect(!controller.isSpaceManagerVisible)
     }
 
+    @Test("A quick Command-Tab release verifies and retries the committed target")
+    func quickCmdTabReleaseRetriesMissedDelivery() {
+        let windowService = MockWindowService()
+        windowService.frontmostPID = 11
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryVerificationDelay: 60
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.source", ownerName: "Source",
+                        windowTitle: "Source", ownerPID: 11),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.target", ownerName: "Target",
+                        windowTitle: "Target", ownerPID: 22),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.cmdRelease)
+        #expect(controller.verifyPendingFocusDelivery())
+
+        #expect(windowService.frontedWindows.map(\.windowID) == [202, 202])
+    }
+
     @Test("Held Cmd+Tab presents overlay UI after a short delay")
     func heldCmdTabPresentsOverlayAfterDelay() {
         let (controller, _, keyboardService) = makeController()
@@ -1933,8 +1963,11 @@ struct SpaceControllerTests {
 
     @Test("A missed app-window focus is retried without another shortcut")
     func missedAppWindowFocusRetriesAutomatically() {
-        let focusedWindowID = Locked<CGWindowID?>(101)
+        // Dia can update AXFocusedWindow to the requested browser window even while DevTools
+        // remains visibly in front. The window server's front-to-back order is the outcome.
+        let focusedWindowID = Locked<CGWindowID?>(202)
         let windowService = MockWindowService()
+        windowService.visibleFrontWindowID = 101
         let keyboardService = MockKeyboardService()
         let controller = SpaceController(
             windowService: windowService,
@@ -1961,10 +1994,148 @@ struct SpaceControllerTests {
         #expect(controller.verifyPendingFocusDelivery())
 
         #expect(windowService.frontedWindows.map(\.windowID) == [202, 202])
-        focusedWindowID.set(202)
+        windowService.visibleFrontWindowID = 202
         #expect(controller.verifyPendingFocusDelivery())
         keyboardService.simulateEvent(.cmdBacktick)
         #expect(windowService.frontedWindows.map(\.windowID) == [202, 202, 101])
+    }
+
+    @Test("A visibly front app window wins over a stale Accessibility focus answer")
+    func visibleAppWindowConfirmsDespiteStaleAccessibilityFocus() {
+        let windowService = MockWindowService()
+        windowService.visibleFrontWindowID = 202
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryProbe: { _, completion in completion(22_502, 101) },
+            focusDeliveryVerificationDelay: 60
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        for windowID in [CGWindowID(101), 202] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "company.thebrowser.dia",
+                            ownerName: "Dia", windowTitle: "Dia \(windowID)", ownerPID: 22_502),
+                toSpaceID: spaceID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdBacktick)
+        #expect(controller.verifyPendingFocusDelivery())
+
+        #expect(!controller.verifyPendingFocusDelivery())
+        #expect(windowService.frontedWindows.map(\.windowID) == [202])
+    }
+
+    @Test("Production focus verification works without an injected test probe")
+    func productionFocusVerificationUsesWindowService() {
+        let windowService = MockWindowService()
+        windowService.frontmostPID = 22_502
+        windowService.visibleFrontWindowID = 101
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryVerificationDelay: 60
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        for windowID in [CGWindowID(101), 202] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "company.thebrowser.dia",
+                            ownerName: "Dia", windowTitle: "Dia \(windowID)", ownerPID: 22_502),
+                toSpaceID: spaceID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdBacktick)
+        #expect(controller.verifyPendingFocusDelivery())
+
+        #expect(windowService.frontedWindows.map(\.windowID) == [202, 202])
+    }
+
+    @Test("App-window cycle diagnostics distinguish stale model, WindowServer, and AX sources")
+    func appWindowCycleDiagnosticsExposeSourceMismatch() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DebutCycleDiagnostics-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let reporter = DiagnosticReporter(directory: directory)
+        let windowService = MockWindowService()
+        windowService.frontWindowDeliveryTrace = FrontWindowDeliveryTrace(
+            accepted: true,
+            processSerialNumberStatus: 0,
+            frontRequestStatus: 0,
+            keyWindowEventStatus: 0,
+            frontProcessSymbolResolved: true,
+            processSerialNumberSymbolResolved: true,
+            keyWindowEventSymbolResolved: true
+        )
+        windowService.focusObservation = WindowFocusObservation(
+            frontmostApplicationPID: 22_502,
+            axFocusedWindowID: 202,
+            visibleWindows: [
+                WindowZOrderEntry(
+                    orderIndex: 3,
+                    windowID: 202,
+                    layer: 0,
+                    alpha: 1,
+                    bounds: CGRect(x: 0, y: 0, width: 2_333, height: 1_440),
+                    title: "Browser"
+                ),
+                WindowZOrderEntry(
+                    orderIndex: 4,
+                    windowID: 101,
+                    layer: 0,
+                    alpha: 1,
+                    bounds: CGRect(x: 1_347, y: 0, width: 1_213, height: 1_440),
+                    title: "Developer Tools"
+                ),
+            ]
+        )
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryVerificationDelay: 60,
+            diagnosticReporter: reporter
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Developer Tools", ownerPID: 22_502),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "company.thebrowser.dia",
+                        ownerName: "Dia", windowTitle: "Browser", ownerPID: 22_502),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdBacktick)
+        reporter.flush()
+
+        let data = try Data(contentsOf: directory.appendingPathComponent("diagnostic.json"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let events = try #require(object["events"] as? [[String: String]])
+        let sourceEvent = events.last(where: {
+            $0["event"] == "window_focus_delivery_observed" && $0["phase"] == "before_request"
+        })
+        let source = try #require(sourceEvent)
+        #expect(source["modelFrontWindowID"] == "101")
+        #expect(source["windowServerFrontWindowID"] == "202")
+        #expect(source["axFocusedWindowID"] == "202")
+        #expect(source["visibleZOrder"] == "202@0,101@0")
+        #expect(source["targetWindowID"] == "202")
+        let actionEvent = events.last(where: { $0["event"] == "window_focus_delivery_action" })
+        let action = try #require(actionEvent)
+        #expect(action["frontRequestAccepted"] == "true")
+        #expect(action["frontRequestStatus"] == "0")
+        #expect(action["keyWindowEventStatus"] == "0")
+        #expect(action["raiseAccepted"] == "true")
     }
 
     /// Cross-application switching has the same optimistic-write failure. Its existing PID

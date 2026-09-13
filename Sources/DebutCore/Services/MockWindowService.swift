@@ -30,6 +30,9 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     /// cannot refuse can only ever prove Debut asked, never that it noticed the answer — which is
     /// how an activation that macOS had stopped honouring stayed green for a day.
     public var frontWindowResult: Bool = true
+    public var frontWindowDeliveryTrace: FrontWindowDeliveryTrace?
+    public var visibleFrontWindowID: CGWindowID?
+    public var focusObservation: WindowFocusObservation?
     /// Who macOS reports as frontmost afterwards, which is a separate answer from the one above:
     /// the window server takes a request it then does not honour, and reports success either way.
     public var frontmostPID: pid_t?
@@ -84,6 +87,43 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public func frontWindow(windowID: CGWindowID, ownerPID: pid_t) -> Bool {
         frontedWindows.append(FrontWindowRequest(windowID: windowID, ownerPID: ownerPID))
         return frontWindowResult
+    }
+
+    public func frontWindowWithTrace(
+        windowID: CGWindowID,
+        ownerPID: pid_t
+    ) -> FrontWindowDeliveryTrace {
+        frontedWindows.append(FrontWindowRequest(windowID: windowID, ownerPID: ownerPID))
+        return frontWindowDeliveryTrace ?? FrontWindowDeliveryTrace(
+            accepted: frontWindowResult,
+            processSerialNumberStatus: nil,
+            frontRequestStatus: nil,
+            keyWindowEventStatus: nil,
+            frontProcessSymbolResolved: true,
+            processSerialNumberSymbolResolved: true,
+            keyWindowEventSymbolResolved: true
+        )
+    }
+
+    public func frontmostWindowID(ownerPID: pid_t) -> CGWindowID? {
+        focusObservation?.frontmostLayerZeroWindowID ?? visibleFrontWindowID
+    }
+
+    public func focusObservation(ownerPID: pid_t) -> WindowFocusObservation {
+        focusObservation ?? WindowFocusObservation(
+            frontmostApplicationPID: frontmostPID,
+            axFocusedWindowID: nil,
+            visibleWindows: visibleFrontWindowID.map {
+                [WindowZOrderEntry(
+                    orderIndex: 0,
+                    windowID: $0,
+                    layer: 0,
+                    alpha: 1,
+                    bounds: .zero,
+                    title: ""
+                )]
+            } ?? []
+        )
     }
 
     public func frontmostApplicationPID() -> pid_t? { frontmostPID }

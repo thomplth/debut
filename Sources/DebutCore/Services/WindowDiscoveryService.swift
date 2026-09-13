@@ -16,6 +16,14 @@ public enum FrontmostAppObservationSource: String, Sendable {
     case workspaceActivation = "workspace_activation"
 }
 
+struct AXWindowCreationMetadata: Equatable, Sendable {
+    let windowID: CGWindowID
+    let ownerPID: pid_t
+    let role: String
+    let subrole: String
+    let isModal: Bool
+}
+
 /// One window a destroy notification proved gone, named together with the process that owned
 /// it. The bundle ID is only there to survive being written to disk: on reload it is what
 /// distinguishes the original owner from whatever process inherited its PID.
@@ -32,6 +40,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     ) -> Void
 
     static let focusProbeTimeout: TimeInterval = 0.05
+    static let windowCreationRetryDelays: [TimeInterval] = [0.05, 0.1, 0.25, 0.5]
     private static let focusProbeQueue = DispatchQueue(
         label: "com.thomplth.Debut.focusProbe",
         qos: .userInitiated
@@ -42,6 +51,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onWindowsDiscovered: (([WindowInfo]) -> Void)?
     public var onWindowClosed: ((CGWindowID) -> Void)?
     public var onWindowActivated: ((CGWindowID) -> Void)?
+    /// Publishes one standard window found from its creation event. This is separate from the
+    /// app-launch batch because a creation event is a targeted update, not a complete app list.
+    public var onWindowCreated: ((RuntimeWindowSnapshot) -> Void)?
     /// Focus/creation events carry their process identity so an outstanding overlay action can
     /// recognize system UI that needs the interaction without admitting that UI to the model.
     public var onSystemAttentionRequested: ((CGWindowID, pid_t) -> Void)?
@@ -94,18 +106,6 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     var onRetiredWindowsChanged: (([RetiredWindowRecord]) -> Void)?
 
     public var retiredWindowIDs: Set<CGWindowID> { Set(retiredWindowOwners.keys) }
-
-    /// Samples the focused window off the event-tap path. SpaceController uses this to verify
-    /// that macOS moved the keyboard to the exact window it requested, rather than merely
-    /// accepting the front-process call or bringing the right process forward.
-    public func probeFocusDelivery(
-        for pid: pid_t,
-        completion: @escaping @Sendable (pid_t?, CGWindowID?) -> Void
-    ) {
-        focusProbeScheduler(pid) { [weak self] windowID in
-            completion(self?.frontmostPIDProvider(), windowID)
-        }
-    }
 
     /// The tombstone as a question, for the admission paths that never take a discovery snapshot
     /// and so cannot be covered by `excludingRetired`.
@@ -166,6 +166,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// without waiting on wall time. Production leaves this nil.
     var focusObserverRetryScheduler: ((TimeInterval, @escaping () -> Void) -> Void)?
 
+    /// Replaces the bounded creation-readiness delay in tests. Production leaves this nil.
+    var windowCreationRetryScheduler: ((TimeInterval, @escaping () -> Void) -> Void)?
+
     // AXObserver for tracking focused window changes within the frontmost app
     private var focusObserver: AXObserver?
     private var observedPID: pid_t?
@@ -177,6 +180,22 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private var activatedPID: pid_t?
     private var focusChangeProbeGeneration = 0
     private var launchProbeGeneration = 0
+
+    private struct WindowOwnerIdentity: Hashable {
+        let windowID: CGWindowID
+        let ownerPID: pid_t
+    }
+
+    private struct PendingWindowCreation {
+        let element: AXUIElement?
+        let fixedMetadata: AXWindowCreationMetadata?
+        let startedAt: UInt64
+        var identity: WindowOwnerIdentity?
+    }
+
+    private var pendingWindowCreations: [UUID: PendingWindowCreation] = [:]
+    private var creationNotificationsSeen: Set<WindowOwnerIdentity> = []
+    private var creationDetectionFailures: [WindowOwnerIdentity: (reason: String, attempts: Int)] = [:]
 
     // Per-app AXObservers for window lifecycle (destroyed, title changed)
     private var perAppObservers: [pid_t: AXObserver] = [:]
@@ -523,6 +542,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         monitoredProcessIDs.removeAll()
         retiredWindowOwners.removeAll()
         handledExitedProcessIDs.removeAll()
+        pendingWindowCreations.removeAll()
+        creationNotificationsSeen.removeAll()
+        creationDetectionFailures.removeAll()
     }
 
     // MARK: - Per-window lifecycle tracking
@@ -608,19 +630,42 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             kAXWindowResizedNotification as CFString,
             selfPtr
         )
-        _ = AXObserverAddNotification(
+        let windowCreated = AXObserverAddNotification(
             observer,
             lifecycleTarget,
             kAXWindowCreatedNotification as CFString,
             selfPtr
         )
-        _ = AXObserverAddNotification(
+        reportOptionalLifecycleRegistration(
+            windowCreated,
+            notification: kAXWindowCreatedNotification,
+            pid: pid
+        )
+        let sheetCreated = AXObserverAddNotification(
             observer,
             lifecycleTarget,
             kAXSheetCreatedNotification as CFString,
             selfPtr
         )
+        reportOptionalLifecycleRegistration(
+            sheetCreated,
+            notification: kAXSheetCreatedNotification,
+            pid: pid
+        )
         return .armed
+    }
+
+    private func reportOptionalLifecycleRegistration(
+        _ result: AXError,
+        notification: String,
+        pid: pid_t
+    ) {
+        guard result != .success, result != .notificationAlreadyRegistered else { return }
+        diag.report("window_lifecycle_notification_registration_failed", details: [
+            "error": "\(result.rawValue)",
+            "notification": notification,
+            "ownerPID": "\(pid)",
+        ])
     }
 
     /// Observe descendants through the stable application element. Preview can dispose an
@@ -747,7 +792,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             subrole == kAXSystemDialogSubrole as String
     }
 
-    fileprivate func handleSystemAttention(element: AXUIElement) {
+    private static func windowCreationMetadata(
+        for element: AXUIElement
+    ) -> AXWindowCreationMetadata? {
         let candidate: AXUIElement
         var roleRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(
@@ -767,7 +814,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             ) == .success,
                   let focused = focusedRef,
                   CFGetTypeID(focused) == AXUIElementGetTypeID()
-            else { return }
+            else { return nil }
             candidate = unsafeDowncast(focused, to: AXUIElement.self)
         }
 
@@ -783,23 +830,287 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             else { return false }
             return value as? Bool ?? false
         }
-        guard let role = stringAttribute(kAXRoleAttribute),
-              let subrole = stringAttribute(kAXSubroleAttribute),
-              Self.isSystemAttentionAXWindow(
-                  role: role,
-                  subrole: subrole,
-                  isModal: boolAttribute(kAXModalAttribute)
-              )
-        else { return }
-
         var ownerPID: pid_t = 0
         var windowID: CGWindowID = 0
-        guard AXUIElementGetPid(candidate, &ownerPID) == .success,
+        guard let role = stringAttribute(kAXRoleAttribute),
+              let subrole = stringAttribute(kAXSubroleAttribute),
+              AXUIElementGetPid(candidate, &ownerPID) == .success,
               _AXUIElementGetWindow(candidate, &windowID) == .success,
               ownerPID > 0,
               windowID > 0
-        else { return }
-        onSystemAttentionRequested?(windowID, ownerPID)
+        else { return nil }
+        return AXWindowCreationMetadata(
+            windowID: windowID,
+            ownerPID: ownerPID,
+            role: role,
+            subrole: subrole,
+            isModal: boolAttribute(kAXModalAttribute)
+        )
+    }
+
+    static func isPotentialStandardAXWindow(
+        role: String,
+        subrole: String,
+        isModal: Bool
+    ) -> Bool {
+        role == kAXWindowRole as String &&
+            !isModal &&
+            (subrole == kAXStandardWindowSubrole as String ||
+                subrole == kAXUnknownSubrole as String)
+    }
+
+    fileprivate func handleWindowCreated(element: AXUIElement, notification: String) {
+        beginWindowCreationProbe(element: element, fixedMetadata: nil, notification: notification)
+    }
+
+    /// Test entry point for the part after AX has supplied the new window identity.
+    func handleWindowCreated(_ metadata: AXWindowCreationMetadata) {
+        beginWindowCreationProbe(
+            element: nil,
+            fixedMetadata: metadata,
+            notification: kAXWindowCreatedNotification
+        )
+    }
+
+    private func beginWindowCreationProbe(
+        element: AXUIElement?,
+        fixedMetadata: AXWindowCreationMetadata?,
+        notification: String
+    ) {
+        let probeID = UUID()
+        pendingWindowCreations[probeID] = PendingWindowCreation(
+            element: element,
+            fixedMetadata: fixedMetadata,
+            startedAt: DispatchTime.now().uptimeNanoseconds,
+            identity: nil
+        )
+        var details = [
+            "notification": notification,
+            "probeID": probeID.uuidString,
+        ]
+        if let fixedMetadata {
+            details["ownerPID"] = "\(fixedMetadata.ownerPID)"
+            details["windowID"] = "\(fixedMetadata.windowID)"
+        }
+        diag.report("window_creation_notification_received", details: details)
+        attemptWindowCreationDetection(probeID: probeID, attempt: 1)
+    }
+
+    private func attemptWindowCreationDetection(probeID: UUID, attempt: Int) {
+        guard var pending = pendingWindowCreations[probeID] else { return }
+        let metadata = pending.fixedMetadata ?? pending.element.flatMap(Self.windowCreationMetadata(for:))
+        guard let metadata else {
+            retryWindowCreationDetection(
+                probeID: probeID,
+                attempt: attempt,
+                reason: "ax_identity_unresolved",
+                metadata: nil
+            )
+            return
+        }
+
+        let identity = WindowOwnerIdentity(
+            windowID: metadata.windowID,
+            ownerPID: metadata.ownerPID
+        )
+        pending.identity = identity
+        pendingWindowCreations[probeID] = pending
+        creationNotificationsSeen.insert(identity)
+
+        if Self.isSystemAttentionAXWindow(
+            role: metadata.role,
+            subrole: metadata.subrole,
+            isModal: metadata.isModal
+        ) {
+            reportWindowCreationAttempt(
+                metadata: metadata,
+                probeID: probeID,
+                attempt: attempt,
+                result: "system_attention"
+            )
+            pendingWindowCreations.removeValue(forKey: probeID)
+            onSystemAttentionRequested?(metadata.windowID, metadata.ownerPID)
+            return
+        }
+
+        guard Self.isPotentialStandardAXWindow(
+            role: metadata.role,
+            subrole: metadata.subrole,
+            isModal: metadata.isModal
+        ) else {
+            reportWindowCreationAttempt(
+                metadata: metadata,
+                probeID: probeID,
+                attempt: attempt,
+                result: "auxiliary_ignored"
+            )
+            pendingWindowCreations.removeValue(forKey: probeID)
+            return
+        }
+
+        if windowOwnerPIDs[metadata.windowID] == metadata.ownerPID {
+            reportWindowCreationAttempt(
+                metadata: metadata,
+                probeID: probeID,
+                attempt: attempt,
+                result: "already_detected"
+            )
+            pendingWindowCreations.removeValue(forKey: probeID)
+            return
+        }
+
+        if retiredWindowOwners[metadata.windowID]?.ownerPID == metadata.ownerPID {
+            reportWindowCreationAttempt(
+                metadata: metadata,
+                probeID: probeID,
+                attempt: attempt,
+                result: "retired_ignored"
+            )
+            pendingWindowCreations.removeValue(forKey: probeID)
+            return
+        }
+
+        guard let info = windowService.listWindows().first(where: {
+            $0.windowID == metadata.windowID && $0.ownerPID == metadata.ownerPID
+        }) else {
+            retryWindowCreationDetection(
+                probeID: probeID,
+                attempt: attempt,
+                reason: "window_not_listed",
+                metadata: metadata
+            )
+            return
+        }
+        guard !excludedBundleIDs.contains(info.ownerBundleID) else {
+            reportWindowCreationAttempt(
+                metadata: metadata,
+                probeID: probeID,
+                attempt: attempt,
+                result: "excluded_ignored"
+            )
+            pendingWindowCreations.removeValue(forKey: probeID)
+            return
+        }
+
+        let locations = spaceSwitcher?.desktopLocations(forWindows: [metadata.windowID]) ?? [:]
+        if spaceSwitcher != nil, locations[metadata.windowID] == nil {
+            retryWindowCreationDetection(
+                probeID: probeID,
+                attempt: attempt,
+                reason: "desktop_unresolved",
+                metadata: metadata
+            )
+            return
+        }
+
+        trackAndRegister(windowID: metadata.windowID, pid: metadata.ownerPID)
+        creationDetectionFailures.removeValue(forKey: identity)
+        reportWindowCreationAttempt(
+            metadata: metadata,
+            probeID: probeID,
+            attempt: attempt,
+            result: "detected",
+            extra: ["armed": "\(armedWindowIDs.contains(metadata.windowID))"]
+        )
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - pending.startedAt
+        diag.report("window_creation_detected", details: [
+            "attempts": "\(attempt)",
+            "bundleID": info.ownerBundleID,
+            "elapsedMilliseconds": String(
+                format: "%.3f",
+                Double(elapsedNanoseconds) / 1_000_000
+            ),
+            "ownerPID": "\(metadata.ownerPID)",
+            "windowID": "\(metadata.windowID)",
+            "windowTitle": info.title,
+        ])
+        pendingWindowCreations.removeValue(forKey: probeID)
+        onWindowCreated?(RuntimeWindowSnapshot(
+            liveWindows: [info],
+            allWindowIDs: nil,
+            unarmedWindowIDs: unarmedWindowIDs,
+            desktopIndexes: locations.mapValues(\.index),
+            desktopLocations: locations,
+            skyLightWindowIDs: spaceSwitcher == nil ? nil : Set(locations.keys)
+        ))
+
+        guard frontmostPIDProvider() == metadata.ownerPID else { return }
+        focusProbeScheduler(metadata.ownerPID) { [weak self] focusedWindowID in
+            guard let self,
+                  self.frontmostPIDProvider() == metadata.ownerPID,
+                  focusedWindowID == metadata.windowID
+            else { return }
+            self.onWindowActivated?(metadata.windowID)
+        }
+    }
+
+    private func retryWindowCreationDetection(
+        probeID: UUID,
+        attempt: Int,
+        reason: String,
+        metadata: AXWindowCreationMetadata?
+    ) {
+        if let metadata {
+            reportWindowCreationAttempt(
+                metadata: metadata,
+                probeID: probeID,
+                attempt: attempt,
+                result: reason
+            )
+        } else {
+            diag.report("window_creation_detection_attempted", details: [
+                "attempt": "\(attempt)",
+                "probeID": probeID.uuidString,
+                "result": reason,
+                "windowID": "unresolved",
+            ])
+        }
+
+        guard attempt <= Self.windowCreationRetryDelays.count else {
+            if let identity = pendingWindowCreations[probeID]?.identity {
+                creationDetectionFailures[identity] = (reason, attempt)
+            }
+            diag.report("window_creation_detection_failed", details: [
+                "attempts": "\(attempt)",
+                "ownerPID": metadata.map { "\($0.ownerPID)" } ?? "unresolved",
+                "probeID": probeID.uuidString,
+                "reason": reason,
+                "windowID": metadata.map { "\($0.windowID)" } ?? "unresolved",
+            ])
+            pendingWindowCreations.removeValue(forKey: probeID)
+            return
+        }
+
+        let delay = Self.windowCreationRetryDelays[attempt - 1]
+        let work: @Sendable () -> Void = { [weak self] in
+            self?.attemptWindowCreationDetection(probeID: probeID, attempt: attempt + 1)
+        }
+        if let windowCreationRetryScheduler {
+            windowCreationRetryScheduler(delay, work)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
+
+    private func reportWindowCreationAttempt(
+        metadata: AXWindowCreationMetadata,
+        probeID: UUID,
+        attempt: Int,
+        result: String,
+        extra: [String: String] = [:]
+    ) {
+        var details: [String: String] = [
+            "attempt": "\(attempt)",
+            "isModal": "\(metadata.isModal)",
+            "ownerPID": "\(metadata.ownerPID)",
+            "probeID": probeID.uuidString,
+            "result": result,
+            "role": metadata.role,
+            "subrole": metadata.subrole,
+            "windowID": "\(metadata.windowID)",
+        ]
+        details.merge(extra) { _, new in new }
+        diag.report("window_creation_detection_attempted", details: details)
     }
 
     private func trackedWindowID(for element: AXUIElement) -> CGWindowID? {
@@ -1073,6 +1384,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let liveWindows = excludingRetired(windowService.listWindows()).filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
+        reportWindowsDetectedByLaterScan(liveWindows, trigger: "desktop_changed")
+        for window in liveWindows where windowOwnerPIDs[window.windowID] != window.ownerPID {
+            trackAndRegister(windowID: window.windowID, pid: window.ownerPID)
+        }
         onDesktopsChanged?(RuntimeWindowSnapshot(
             liveWindows: liveWindows,
             allWindowIDs: windowService.listAllWindowIDs(),
@@ -1146,10 +1461,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let liveWindows = excludingRetired(windowService.listWindows()).filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
+        reportWindowsDetectedByLaterScan(liveWindows, trigger: "app_activation")
         // The full snapshot drives reconciliation, but only the activated app needs
-        // fresh AX lifecycle registration here. Other apps are registered when they
-        // activate, avoiding cross-process AX work for every window on every switch.
-        for window in liveWindows where window.ownerPID == pid {
+        // a retry when its earlier registration failed. A full scan can also find a window
+        // from another app whose creation event was missed; arm only those newly found windows
+        // rather than doing cross-process AX work for every window on every switch.
+        for window in liveWindows where
+            window.ownerPID == pid || windowOwnerPIDs[window.windowID] != window.ownerPID {
             trackAndRegister(windowID: window.windowID, pid: window.ownerPID)
         }
         // AX focus can be nil while an app launches, or can briefly retain the ID of a
@@ -1217,7 +1535,39 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // Clean up per-window lifecycle observer for this app
         removeAppObserver(for: pid)
 
+        pendingWindowCreations = pendingWindowCreations.filter { $0.value.identity?.ownerPID != pid }
+        creationNotificationsSeen = creationNotificationsSeen.filter { $0.ownerPID != pid }
+        creationDetectionFailures = creationDetectionFailures.filter { $0.key.ownerPID != pid }
+
         onAppTerminated?(pid)
+    }
+
+    /// A full scan is a safety net, not the normal creation path. A window that first appears
+    /// here was not delivered by launch, creation, or focus tracking soon enough. Report the
+    /// available observer state before arming it so the diagnostic preserves that failure.
+    private func reportWindowsDetectedByLaterScan(
+        _ windows: [WindowInfo],
+        trigger: String
+    ) {
+        for window in windows where windowOwnerPIDs[window.windowID] != window.ownerPID {
+            let identity = WindowOwnerIdentity(
+                windowID: window.windowID,
+                ownerPID: window.ownerPID
+            )
+            let failure = creationDetectionFailures[identity]
+            diag.report("window_detection_late", details: [
+                "bundleID": window.ownerBundleID,
+                "creationAttempts": failure.map { "\($0.attempts)" } ?? "0",
+                "creationFailureReason": failure?.reason ?? "none",
+                "creationNotificationSeen": "\(creationNotificationsSeen.contains(identity))",
+                "focusObserverPresent": "\(observedPID == window.ownerPID)",
+                "lifecycleObserverPresent": "\(perAppObservers[window.ownerPID] != nil)",
+                "ownerPID": "\(window.ownerPID)",
+                "trigger": trigger,
+                "windowID": "\(window.windowID)",
+                "windowTitle": window.title,
+            ])
+        }
     }
 
     // MARK: - Helpers
@@ -1262,7 +1612,7 @@ private func windowLifecycleCallback(
     } else if name == kAXWindowResizedNotification {
         service.handleWindowResized(element: element)
     } else if name == kAXWindowCreatedNotification || name == kAXSheetCreatedNotification {
-        service.handleSystemAttention(element: element)
+        service.handleWindowCreated(element: element, notification: name)
     }
 }
 

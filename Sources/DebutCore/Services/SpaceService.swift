@@ -124,13 +124,60 @@ public enum FrontProcessManagement {
     /// Fronts `windowID`'s process and makes that window key. Returns whether the window server
     /// took the front request — not whether the window arrived, which nothing here can observe.
     public static func front(windowID: CGWindowID, ownerPID: pid_t) -> Bool {
-        guard let slpsSetFrontProcessWithOptions, let getProcessForPID else { return false }
+        frontWithTrace(windowID: windowID, ownerPID: ownerPID).accepted
+    }
+
+    public static func frontWithTrace(
+        windowID: CGWindowID,
+        ownerPID: pid_t
+    ) -> FrontWindowDeliveryTrace {
+        let readiness = readiness
+        guard let slpsSetFrontProcessWithOptions, let getProcessForPID else {
+            return FrontWindowDeliveryTrace(
+                accepted: false,
+                processSerialNumberStatus: nil,
+                frontRequestStatus: nil,
+                keyWindowEventStatus: nil,
+                frontProcessSymbolResolved: readiness.frontProcessResolved,
+                processSerialNumberSymbolResolved: readiness.processSerialNumberResolved,
+                keyWindowEventSymbolResolved: readiness.eventRecordPostResolved
+            )
+        }
         var psn = ProcessSerialNumber()
-        guard getProcessForPID(ownerPID, &psn) == noErr else { return false }
-        guard slpsSetFrontProcessWithOptions(&psn, windowID, kSLPSUserGenerated) == .success
-        else { return false }
-        makeKeyWindow(windowID: windowID, of: &psn)
-        return true
+        let processStatus = getProcessForPID(ownerPID, &psn)
+        guard processStatus == noErr else {
+            return FrontWindowDeliveryTrace(
+                accepted: false,
+                processSerialNumberStatus: processStatus,
+                frontRequestStatus: nil,
+                keyWindowEventStatus: nil,
+                frontProcessSymbolResolved: readiness.frontProcessResolved,
+                processSerialNumberSymbolResolved: readiness.processSerialNumberResolved,
+                keyWindowEventSymbolResolved: readiness.eventRecordPostResolved
+            )
+        }
+        let frontStatus = slpsSetFrontProcessWithOptions(&psn, windowID, kSLPSUserGenerated)
+        guard frontStatus == .success else {
+            return FrontWindowDeliveryTrace(
+                accepted: false,
+                processSerialNumberStatus: processStatus,
+                frontRequestStatus: frontStatus.rawValue,
+                keyWindowEventStatus: nil,
+                frontProcessSymbolResolved: readiness.frontProcessResolved,
+                processSerialNumberSymbolResolved: readiness.processSerialNumberResolved,
+                keyWindowEventSymbolResolved: readiness.eventRecordPostResolved
+            )
+        }
+        let keyStatus = makeKeyWindow(windowID: windowID, of: &psn)
+        return FrontWindowDeliveryTrace(
+            accepted: true,
+            processSerialNumberStatus: processStatus,
+            frontRequestStatus: frontStatus.rawValue,
+            keyWindowEventStatus: keyStatus?.rawValue,
+            frontProcessSymbolResolved: readiness.frontProcessResolved,
+            processSerialNumberSymbolResolved: readiness.processSerialNumberResolved,
+            keyWindowEventSymbolResolved: readiness.eventRecordPostResolved
+        )
     }
 
     /// Fronting a process does not decide which of its windows holds the keyboard, and naming the
@@ -138,10 +185,13 @@ public enum FrontProcessManagement {
     /// alt-tab-macos, the front call alone leaves the app's previous window key, which reads to
     /// the user as the switch having done nothing. Posting the event a click on the window would
     /// have produced is what moves the keyboard, and the app answers nothing either way.
-    private static func makeKeyWindow(windowID: CGWindowID, of psn: inout ProcessSerialNumber) {
-        guard let slpsPostEventRecordTo else { return }
+    private static func makeKeyWindow(
+        windowID: CGWindowID,
+        of psn: inout ProcessSerialNumber
+    ) -> CGError? {
+        guard let slpsPostEventRecordTo else { return nil }
         var record = keyWindowEventRecord(for: windowID)
-        _ = slpsPostEventRecordTo(&psn, &record)
+        return slpsPostEventRecordTo(&psn, &record)
     }
 
     /// The `CGSEventRecord` a left click on `windowID` would have produced.
