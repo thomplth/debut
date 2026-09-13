@@ -252,13 +252,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             keyboardService: keyboardService,
             spaceManager: spaceManager,
             overlayPresentationDelay: currentSettings.overlayPresentationDelay,
-            focusDeliveryProbe: { [weak discovery] pid, completion in
-                guard let discovery else {
-                    completion(nil, nil)
-                    return
-                }
-                discovery.probeFocusDelivery(for: pid, completion: completion)
-            },
             previewRefreshPolicy: currentSettings.previewRefreshPolicy,
             previewCacheTTL: currentSettings.previewCacheTTL
         )
@@ -339,6 +332,29 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 self.publishTutorialTargetIfDiscovered()
                 // New AppKit windows receive a desktop asynchronously. Discovery is the
                 // event that makes preparation safe after a lesson has been reopened.
+                if self.onboardingWindowAwaitingPlacement { self.prepareTutorialTarget() }
+            }
+        }
+        discovery.onWindowCreated = { [weak self] snapshot in
+            DispatchQueue.main.async {
+                guard let self, let controller = self.spaceController else { return }
+                controller.recordWindowSizes(snapshot.liveWindows)
+                let result = self.runtimeWindowReconciler.reconcile(
+                    snapshot,
+                    spaceManager: &controller.spaceManager,
+                    allowDormantBundleFallback: false
+                )
+                self.diag.report("runtime_windows_reconciled", details: [
+                    "added": "\(result.addedCount)",
+                    "reassigned": "\(result.reassignedCount)",
+                    "refused": "\(result.refusedCount)",
+                    "trigger": "window_created",
+                ])
+                self.reportAssignmentEvents(result.events, trigger: "window_created")
+                if result.didMutate {
+                    self.debouncedSaver?.scheduleSave(controller.spaceManager)
+                }
+                self.publishTutorialTargetIfDiscovered()
                 if self.onboardingWindowAwaitingPlacement { self.prepareTutorialTarget() }
             }
         }

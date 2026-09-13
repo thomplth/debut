@@ -34,6 +34,86 @@ public struct AppInfo: Sendable, Equatable {
     }
 }
 
+/// One visible surface in WindowServer's global front-to-back list. This is diagnostic evidence,
+/// not the managed-window model: auxiliary surfaces and non-zero layers are kept deliberately so
+/// a focus failure cannot hide behind the model's admission filters.
+public struct WindowZOrderEntry: Sendable, Equatable {
+    public let orderIndex: Int
+    public let windowID: CGWindowID
+    public let layer: Int
+    public let alpha: Double
+    public let bounds: CGRect
+    public let title: String
+
+    public init(
+        orderIndex: Int,
+        windowID: CGWindowID,
+        layer: Int,
+        alpha: Double,
+        bounds: CGRect,
+        title: String
+    ) {
+        self.orderIndex = orderIndex
+        self.windowID = windowID
+        self.layer = layer
+        self.alpha = alpha
+        self.bounds = bounds
+        self.title = title
+    }
+}
+
+/// Independent answers to “which window is current?” captured at one focus-delivery boundary.
+public struct WindowFocusObservation: Sendable, Equatable {
+    public let frontmostApplicationPID: pid_t?
+    public let axFocusedWindowID: CGWindowID?
+    public let visibleWindows: [WindowZOrderEntry]
+
+    public init(
+        frontmostApplicationPID: pid_t?,
+        axFocusedWindowID: CGWindowID?,
+        visibleWindows: [WindowZOrderEntry]
+    ) {
+        self.frontmostApplicationPID = frontmostApplicationPID
+        self.axFocusedWindowID = axFocusedWindowID
+        self.visibleWindows = visibleWindows
+    }
+
+    public var frontmostLayerZeroWindowID: CGWindowID? {
+        visibleWindows.first(where: { $0.layer == 0 })?.windowID
+    }
+}
+
+/// The synchronous answers from every low-level step used to front and key a foreign window.
+/// A zero status means the API accepted that step; none means its private symbol was unavailable
+/// or an earlier prerequisite failed before the step could be attempted.
+public struct FrontWindowDeliveryTrace: Sendable, Equatable {
+    public let accepted: Bool
+    public let processSerialNumberStatus: Int32?
+    public let frontRequestStatus: Int32?
+    public let keyWindowEventStatus: Int32?
+    public let frontProcessSymbolResolved: Bool
+    public let processSerialNumberSymbolResolved: Bool
+    public let keyWindowEventSymbolResolved: Bool
+
+    public init(
+        accepted: Bool,
+        processSerialNumberStatus: Int32?,
+        frontRequestStatus: Int32?,
+        keyWindowEventStatus: Int32?,
+        frontProcessSymbolResolved: Bool,
+        processSerialNumberSymbolResolved: Bool,
+        keyWindowEventSymbolResolved: Bool
+    ) {
+        self.accepted = accepted
+        self.processSerialNumberStatus = processSerialNumberStatus
+        self.frontRequestStatus = frontRequestStatus
+        self.keyWindowEventStatus = keyWindowEventStatus
+        self.frontProcessSymbolResolved = frontProcessSymbolResolved
+        self.processSerialNumberSymbolResolved = processSerialNumberSymbolResolved
+        self.keyWindowEventSymbolResolved = keyWindowEventSymbolResolved
+    }
+}
+
 public struct WindowImageCapture: @unchecked Sendable {
     public let windowID: CGWindowID
     public let image: CGImage
@@ -202,6 +282,18 @@ public protocol WindowService: Sendable {
     /// AppKit's activation is advisory from macOS 14 and is declined outright for a background
     /// regular application, which Debut is whenever its Dock icon is on.
     func frontWindow(windowID: CGWindowID, ownerPID: pid_t) -> Bool
+    /// Same operation as `frontWindow`, retaining the individual private-API results for a focus
+    /// trace. The default preserves conformers that cannot expose those internal steps.
+    func frontWindowWithTrace(
+        windowID: CGWindowID,
+        ownerPID: pid_t
+    ) -> FrontWindowDeliveryTrace
+    /// The first visible layer-zero window for this process in the window server's front-to-back
+    /// order. Unlike Accessibility focus, this describes which app window is actually in front.
+    func frontmostWindowID(ownerPID: pid_t) -> CGWindowID?
+    /// Captures the independent process, AX focus, and complete visible z-order answers used to
+    /// diagnose focus delivery. Call only after keyboard input has left the event-tap callback.
+    func focusObservation(ownerPID: pid_t) -> WindowFocusObservation
     /// The process macOS currently shows as frontmost. `frontWindow` reports whether the window
     /// server accepted a request, never whether the app arrived, so this is the only way to find
     /// out that a switch did nothing.
@@ -223,5 +315,27 @@ public extension WindowService {
     func listAXContradictedWindowIDs() -> Set<CGWindowID> { [] }
     func listParentedWindowIDs() -> Set<CGWindowID> { [] }
     func closeWindow(windowID: CGWindowID) -> Bool { false }
+    func frontWindowWithTrace(
+        windowID: CGWindowID,
+        ownerPID: pid_t
+    ) -> FrontWindowDeliveryTrace {
+        FrontWindowDeliveryTrace(
+            accepted: frontWindow(windowID: windowID, ownerPID: ownerPID),
+            processSerialNumberStatus: nil,
+            frontRequestStatus: nil,
+            keyWindowEventStatus: nil,
+            frontProcessSymbolResolved: false,
+            processSerialNumberSymbolResolved: false,
+            keyWindowEventSymbolResolved: false
+        )
+    }
+    func frontmostWindowID(ownerPID: pid_t) -> CGWindowID? { nil }
+    func focusObservation(ownerPID: pid_t) -> WindowFocusObservation {
+        WindowFocusObservation(
+            frontmostApplicationPID: frontmostApplicationPID(),
+            axFocusedWindowID: nil,
+            visibleWindows: []
+        )
+    }
     func frontmostApplicationPID() -> pid_t? { nil }
 }

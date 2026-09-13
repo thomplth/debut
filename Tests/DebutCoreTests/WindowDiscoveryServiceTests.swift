@@ -58,16 +58,22 @@ final class DeferredFocusProbe: @unchecked Sendable {
     }
 }
 
-final class FocusDeliveryRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: (frontmostPID: pid_t?, windowID: CGWindowID?)?
+final class DeferredWindowCreationRetryScheduler: @unchecked Sendable {
+    private(set) var delays: [TimeInterval] = []
+    private var pending: [() -> Void] = []
 
-    func record(frontmostPID: pid_t?, windowID: CGWindowID?) {
-        lock.withLock { value = (frontmostPID, windowID) }
+    func schedule(delay: TimeInterval, work: @escaping () -> Void) {
+        delays.append(delay)
+        pending.append(work)
     }
 
-    var snapshot: (frontmostPID: pid_t?, windowID: CGWindowID?)? {
-        lock.withLock { value }
+    func runNext() {
+        guard !pending.isEmpty else { return }
+        pending.removeFirst()()
+    }
+
+    func runAll() {
+        while !pending.isEmpty { runNext() }
     }
 }
 
@@ -135,24 +141,6 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshotFocusedWindowID == 4)
     }
 
-    @Test("Focus delivery probe reports both global process and exact app window")
-    func focusDeliveryProbeIncludesFrontmostProcess() {
-        let recorder = FocusDeliveryRecorder()
-        let service = WindowDiscoveryService(
-            windowService: MockWindowService(),
-            focusedWindowProvider: { _ in 202 },
-            frontmostPIDProvider: { 11 },
-            processExitMonitor: MockProcessExitMonitor()
-        )
-
-        service.probeFocusDelivery(for: 22) { frontmostPID, windowID in
-            recorder.record(frontmostPID: frontmostPID, windowID: windowID)
-        }
-
-        #expect(recorder.snapshot?.frontmostPID == 11)
-        #expect(recorder.snapshot?.windowID == 202)
-    }
-
     @Test("Only sheets and modal or dialog windows request system attention")
     func systemAttentionClassification() {
         #expect(WindowDiscoveryService.isSystemAttentionAXWindow(
@@ -175,6 +163,281 @@ struct WindowDiscoveryServiceTests {
             subrole: kAXStandardWindowSubrole as String,
             isModal: false
         ))
+    }
+
+    @Test("A standard window creation is discovered and focused without another app activation")
+    func standardWindowCreationIsDiscoveredImmediately() throws {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 22_502, isHidden: false),
+        ]
+        windowService.windowList = [liveWindow(116_040, ownerPID: 22_502)]
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.windowDesktops = [116_040: 0]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 116_040 },
+            frontmostPIDProvider: { 22_502 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        service.armingOverride = { _, _ in .armed }
+        var snapshots: [RuntimeWindowSnapshot] = []
+        var activatedWindowIDs: [CGWindowID] = []
+        service.onWindowCreated = { snapshots.append($0) }
+        service.onWindowActivated = { activatedWindowIDs.append($0) }
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 116_040,
+            ownerPID: 22_502,
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+
+        let snapshot = try #require(snapshots.first)
+        #expect(snapshot.liveWindows.map(\.windowID) == [116_040])
+        #expect(snapshot.desktopIndexes == [116_040: 0])
+        #expect(activatedWindowIDs == [116_040])
+        #expect(service.diagnosticTrackingSnapshot.knownWindowIDs == [116_040])
+    }
+
+    @Test("A standard creation retries until Core Graphics and the desktop can resolve it")
+    func standardWindowCreationRetriesUntilReady() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let retry = DeferredWindowCreationRetryScheduler()
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 22_502, isHidden: false),
+        ]
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 116_040 },
+            frontmostPIDProvider: { 22_502 },
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+        service.spaceSwitcher = spaces
+        service.armingOverride = { _, _ in .armed }
+        service.windowCreationRetryScheduler = retry.schedule
+        var snapshots: [RuntimeWindowSnapshot] = []
+        service.onWindowCreated = { snapshots.append($0) }
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 116_040,
+            ownerPID: 22_502,
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+        #expect(snapshots.isEmpty)
+        #expect(retry.delays.count == 1)
+
+        windowService.windowList = [liveWindow(116_040, ownerPID: 22_502)]
+        spaces.windowDesktops = [116_040: 0]
+        retry.runNext()
+        reporter.flush()
+
+        #expect(snapshots.count == 1)
+        #expect(retry.delays == [WindowDiscoveryService.windowCreationRetryDelays[0]])
+        let attempts = durableDiagnosticEvents(in: directory).filter {
+            $0["event"] == "window_creation_detection_attempted"
+        }
+        #expect(attempts.map { $0["result"] } == ["window_not_listed", "detected"])
+    }
+
+    @Test("A listed standard window waits for its desktop assignment")
+    func standardWindowCreationRetriesUntilDesktopIsReady() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let retry = DeferredWindowCreationRetryScheduler()
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(116_040, ownerPID: 22_502)]
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+        service.spaceSwitcher = spaces
+        service.armingOverride = { _, _ in .armed }
+        service.windowCreationRetryScheduler = retry.schedule
+        var snapshots: [RuntimeWindowSnapshot] = []
+        service.onWindowCreated = { snapshots.append($0) }
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 116_040,
+            ownerPID: 22_502,
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+        #expect(snapshots.isEmpty)
+
+        spaces.windowDesktops = [116_040: 0]
+        retry.runNext()
+        reporter.flush()
+
+        #expect(snapshots.count == 1)
+        let attempts = durableDiagnosticEvents(in: directory).filter {
+            $0["event"] == "window_creation_detection_attempted"
+        }
+        #expect(attempts.map { $0["result"] } == ["desktop_unresolved", "detected"])
+    }
+
+    @Test("A dialog creation requests attention but is not discovered as a standard window")
+    func dialogCreationDoesNotEnterStandardDiscovery() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(700, ownerPID: 10)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var attention: [(CGWindowID, pid_t)] = []
+        var createdSnapshots = 0
+        service.onSystemAttentionRequested = { attention.append(($0, $1)) }
+        service.onWindowCreated = { _ in createdSnapshots += 1 }
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 700,
+            ownerPID: 10,
+            role: kAXWindowRole as String,
+            subrole: kAXDialogSubrole as String,
+            isModal: false
+        ))
+
+        #expect(attention.map(\.0) == [700])
+        #expect(attention.map(\.1) == [10])
+        #expect(createdSnapshots == 0)
+    }
+
+    @Test("A full scan reports a window that no earlier event detected")
+    func laterFullScanReportsMissedWindowDetection() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false),
+            AppInfo(bundleID: "com.openai.codex", name: "Codex", pid: 20, isHidden: false),
+        ]
+        windowService.windowList = [
+            liveWindow(1, ownerPID: 10),
+            liveWindow(2, ownerPID: 20),
+        ]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 2 },
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 2, pid: 20)
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "com.openai.codex", name: "Codex", pid: 20, isHidden: false)
+        )
+        reporter.flush()
+
+        let event = try #require(durableDiagnosticEvents(in: directory).first {
+            $0["event"] == "window_detection_late" && $0["windowID"] == "1"
+        })
+        #expect(event["trigger"] == "app_activation")
+        #expect(event["bundleID"] == "notion.id")
+        #expect(event["creationNotificationSeen"] == "false")
+        #expect(event["lifecycleObserverPresent"] == "false")
+    }
+
+    @Test("A later scan reports why creation detection exhausted its retries")
+    func laterFullScanCarriesCreationFailure() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let retry = DeferredWindowCreationRetryScheduler()
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 22_502, isHidden: false),
+        ]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 116_040 },
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+        service.armingOverride = { _, _ in .armed }
+        service.windowCreationRetryScheduler = retry.schedule
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 116_040,
+            ownerPID: 22_502,
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+        retry.runAll()
+
+        windowService.windowList = [liveWindow(116_040, ownerPID: 22_502)]
+        service.handleAppActivation(
+            AppInfo(
+                bundleID: "company.thebrowser.dia",
+                name: "Dia",
+                pid: 22_502,
+                isHidden: false
+            )
+        )
+        reporter.flush()
+
+        let event = try #require(durableDiagnosticEvents(in: directory).first {
+            $0["event"] == "window_detection_late" && $0["windowID"] == "116040"
+        })
+        #expect(event["creationNotificationSeen"] == "true")
+        #expect(event["creationFailureReason"] == "window_not_listed")
+        #expect(event["creationAttempts"] == "5")
+    }
+
+    @Test("A promptly detected creation is not reported as late by the next full scan")
+    func promptCreationIsNotReportedLate() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 22_502, isHidden: false),
+        ]
+        windowService.windowList = [liveWindow(116_040, ownerPID: 22_502)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 116_040 },
+            frontmostPIDProvider: { 22_502 },
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+        service.armingOverride = { _, _ in .armed }
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 116_040,
+            ownerPID: 22_502,
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+        service.handleAppActivation(
+            AppInfo(
+                bundleID: "company.thebrowser.dia",
+                name: "Dia",
+                pid: 22_502,
+                isHidden: false
+            )
+        )
+        reporter.flush()
+
+        #expect(!durableDiagnosticEvents(in: directory).contains {
+            $0["event"] == "window_detection_late" && $0["windowID"] == "116040"
+        })
     }
 
     @Test("A delayed AX focus probe does not hold app activation")
