@@ -1020,6 +1020,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             )
             return
         }
+        // Debut admits its own Settings and tutorial windows explicitly. Sending those windows
+        // through this generic path as well races the tutorial's replace-and-prepare sequence.
+        guard info.ownerBundleID != "com.thomplth.Debut" else {
+            reportWindowCreationAttempt(
+                metadata: metadata,
+                probeID: probeID,
+                attempt: attempt,
+                result: "self_managed_ignored"
+            )
+            pendingWindowCreations.removeValue(forKey: probeID)
+            return
+        }
         guard !excludedBundleIDs.contains(info.ownerBundleID) else {
             reportWindowCreationAttempt(
                 metadata: metadata,
