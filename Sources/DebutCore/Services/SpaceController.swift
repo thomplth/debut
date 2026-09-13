@@ -425,6 +425,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// question itself rather than relying on discovery's already-filtered snapshots.
     public var excludedBundleIDs: Set<String> = []
     private var frontmostAppIsExcluded = false
+    private var frontmostAppBundleID: String?
     /// The window Debut last asked the window server to front, pending the focus report it causes.
     private var focusRequest: (windowID: CGWindowID, ownerPID: pid_t, at: Date)?
     private var pendingFront: (windowID: CGWindowID, ownerPID: pid_t)?
@@ -1182,8 +1183,66 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         delegate?.spaceControllerDidMutateState(self)
     }
 
-    public func updateFrontmostApp(bundleID: String?) {
+    public func updateFrontmostApp(
+        bundleID: String?,
+        source: FrontmostAppObservationSource = .workspaceActivation
+    ) {
+        frontmostAppBundleID = bundleID
         frontmostAppIsExcluded = bundleID.map(excludedBundleIDs.contains) ?? false
+        guard let bundleID, !frontmostAppIsExcluded else { return }
+
+        // NSWorkspace tells us which application is in front synchronously, before the bounded
+        // AX query can tell us which of its windows is focused. That gap is user-visible: a quick
+        // Command-Tab can read the previous MRU head even though the launcher already put the new
+        // app on screen. Bundle identity is enough only when exactly one managed window for that
+        // app is on a desktop currently showing; any wider choice remains the AX probe's job.
+        let visibleMatches: [(spaceID: UUID, stackID: String, window: SpaceWindow)] =
+            spaceManager.connectedSpaceStacks.flatMap { stack
+                -> [(spaceID: UUID, stackID: String, window: SpaceWindow)] in
+                guard let activeSpace = stack.spaces.first(where: { $0.id == stack.activeSpaceID })
+                else { return [] }
+                return activeSpace.windows.compactMap { window in
+                    window.ownerBundleID == bundleID
+                        ? (spaceID: activeSpace.id, stackID: stack.id, window: window)
+                        : nil
+                }
+            }
+        let candidateIDs = visibleMatches.map { "\($0.window.windowID)" }.joined(separator: ",")
+        guard visibleMatches.count == 1, let match = visibleMatches.first else {
+            diag.report("app_activation_attribution_skipped", details: [
+                "bundleID": bundleID,
+                "candidateCount": "\(visibleMatches.count)",
+                "candidateWindowIDs": candidateIDs,
+                "reason": visibleMatches.isEmpty ? "no_visible_window" : "ambiguous_visible_windows",
+                "source": source.rawValue,
+            ])
+            return
+        }
+        guard spaceSwitcher?.isSwitchInFlight(stackID: match.stackID) != true else {
+            diag.report("app_activation_attribution_skipped", details: [
+                "bundleID": bundleID,
+                "candidateCount": "1",
+                "candidateWindowIDs": candidateIDs,
+                "reason": "space_switch_in_flight",
+                "source": source.rawValue,
+            ])
+            return
+        }
+
+        spaceManager.bringWindowToFront(
+            windowID: match.window.windowID,
+            inSpaceID: match.spaceID,
+            activatedAt: clock()
+        )
+        diag.report("app_activation_attributed", details: [
+            "bundleID": bundleID,
+            "candidateCount": "1",
+            "source": source.rawValue,
+            "space": spaceLabel(forID: match.spaceID),
+            "windowID": "\(match.window.windowID)",
+            "order": windowOrderDescription(spaceID: match.spaceID),
+        ])
+        delegate?.spaceControllerDidMutateState(self)
     }
 
     public func markOverlayPresentation(
@@ -1227,7 +1286,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 for: overlayPresentation
             )
         }
-        diag.report("key_event", level: .transient, details: ["keyEvent": "\(event)"])
+        var keyEventDetails = ["keyEvent": "\(event)"]
+        switch event {
+        case .cmdTabTap, .cmdTabHold, .cmdShiftTabHold:
+            keyEventDetails["frontmostBundleID"] = frontmostAppBundleID ?? "unknown"
+            keyEventDetails["mruOrder"] = windowOrderDescription(
+                spaceID: spaceManager.activeSpaceID
+            )
+        default:
+            break
+        }
+        diag.report("key_event", level: .transient, details: keyEventDetails)
 
         // Once system-owned confirmation UI takes over, the held keyboard session has no
         // visible selector to navigate. Only its release boundary remains meaningful: it

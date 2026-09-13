@@ -60,6 +60,22 @@ final class DeferredFocusProbe: @unchecked Sendable {
 
 @Suite("WindowDiscoveryService")
 struct WindowDiscoveryServiceTests {
+    private func makeTempDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DebutWindowDiscoveryTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    private func durableDiagnosticEvents(in directory: URL) -> [[String: String]] {
+        let url = directory.appendingPathComponent("diagnostic.jsonl")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { line in
+            guard let data = line.data(using: .utf8) else { return nil }
+            return try? JSONSerialization.jsonObject(with: data) as? [String: String]
+        }
+    }
+
     private func liveWindow(_ windowID: CGWindowID, ownerPID: pid_t = 10) -> WindowInfo {
         WindowInfo(
             windowID: windowID,
@@ -87,7 +103,7 @@ struct WindowDiscoveryServiceTests {
         var snapshotWindowIDs: Set<CGWindowID> = []
         var snapshotAllWindowIDs: Set<CGWindowID>?
         var snapshotFocusedWindowID: CGWindowID?
-        service.onFrontmostAppChanged = { bundleID in
+        service.onFrontmostAppChanged = { bundleID, _ in
             callbackOrder.append("app:\(bundleID ?? "nil")")
         }
         service.onWindowActivated = { _ in callbackOrder.append("focus") }
@@ -142,7 +158,7 @@ struct WindowDiscoveryServiceTests {
             processExitMonitor: MockProcessExitMonitor()
         )
         var callbackOrder: [String] = []
-        service.onFrontmostAppChanged = { _ in callbackOrder.append("app") }
+        service.onFrontmostAppChanged = { _, _ in callbackOrder.append("app") }
         service.onAppActivated = { _ in callbackOrder.append("snapshot") }
         service.onWindowActivated = { _ in callbackOrder.append("focus") }
 
@@ -155,6 +171,49 @@ struct WindowDiscoveryServiceTests {
         probe.resolve(pid: 10, windowID: 1)
 
         #expect(callbackOrder == ["app", "snapshot", "focus"])
+    }
+
+    @Test("App activation diagnostics bracket the focused-window probe")
+    func appActivationDiagnosticsBracketFocusProbe() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 22_502, isHidden: false),
+        ]
+        windowService.windowList = [liveWindow(104_661, ownerPID: 22_502)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 104_663 },
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+
+        service.handleAppActivation(
+            AppInfo(
+                bundleID: "company.thebrowser.dia",
+                name: "Dia",
+                pid: 22_502,
+                isHidden: false
+            )
+        )
+        reporter.flush()
+
+        let events = durableDiagnosticEvents(in: directory)
+        let observed = try #require(events.first { $0["event"] == "app_activation_observed" })
+        let probed = try #require(events.first { $0["event"] == "app_activation_focus_probed" })
+        #expect(observed["source"] == "workspace_activation")
+        #expect(observed["ownerPID"] == "22502")
+        #expect(probed["sampledWindowID"] == "104663")
+        #expect(probed["resolvedWindowID"] == "104661")
+        #expect(probed["elapsedMilliseconds"].flatMap(Double.init) != nil)
+        #expect(
+            observed["uptimeNanoseconds"].flatMap(UInt64.init)
+                .flatMap { start in
+                    probed["uptimeNanoseconds"].flatMap(UInt64.init).map { $0 >= start }
+                } == true
+        )
     }
 
     @Test("A superseded AX focus probe cannot publish stale activation")
@@ -213,7 +272,9 @@ struct WindowDiscoveryServiceTests {
             processExitMonitor: MockProcessExitMonitor()
         )
         var callbackOrder: [String] = []
-        service.onFrontmostAppChanged = { callbackOrder.append("app:\($0 ?? "nil")") }
+        service.onFrontmostAppChanged = { bundleID, _ in
+            callbackOrder.append("app:\(bundleID ?? "nil")")
+        }
         service.onWindowActivated = { _ in callbackOrder.append("focus") }
         service.onAppActivated = { _ in callbackOrder.append("snapshot") }
 

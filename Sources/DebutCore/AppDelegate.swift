@@ -378,10 +378,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 )
             }
         }
-        discovery.onFrontmostAppChanged = { [weak self, weak keyboardService] bundleID in
+        discovery.onFrontmostAppChanged = { [weak self, weak keyboardService] bundleID, source in
             keyboardService?.updateFrontmostApp(bundleIdentifier: bundleID)
             guard let self else { return }
-            self.spaceController?.updateFrontmostApp(bundleID: bundleID)
+            self.spaceController?.updateFrontmostApp(bundleID: bundleID, source: source)
         }
         discovery.onAppActivated = { [weak self] snapshot in
             DispatchQueue.main.async {

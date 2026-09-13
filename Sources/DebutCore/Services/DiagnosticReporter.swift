@@ -83,6 +83,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         details: [String: String] = [:]
     ) {
         let occurredAt = Date()
+        let uptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
 
         // Snapshot controller state on the caller's thread. Evaluating the
         // provider later on the queue can race the controller's next mutation.
@@ -96,6 +97,10 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
             var entry = details
             entry["event"] = event
             entry["timestamp"] = Self.timestampFormatter.string(from: occurredAt)
+            // Wall-clock timestamps are readable but only serialize to whole seconds. A
+            // monotonic timestamp preserves the exact order and spacing between a workspace
+            // activation, its asynchronous AX probe, and a quick Command-Tab in that gap.
+            entry["uptimeNanoseconds"] = "\(uptimeNanoseconds)"
             self.eventLog.append(entry)
             if self.eventLog.count > 100 {
                 self.eventLog.removeFirst(self.eventLog.count - 100)
