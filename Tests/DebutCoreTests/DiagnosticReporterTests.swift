@@ -41,6 +41,9 @@ struct DiagnosticReporterTests {
         #expect(lines.map { $0["event"] } == ["window_assigned", "window_assigned", "window_retired"])
         #expect(lines[1]["windowID"] == "2")
         #expect(lines.allSatisfy { $0["timestamp"]?.isEmpty == false })
+        #expect(lines.allSatisfy { line in
+            line["uptimeNanoseconds"].flatMap(UInt64.init) != nil
+        })
     }
 
     @Test("Transient events never reach the durable log")
