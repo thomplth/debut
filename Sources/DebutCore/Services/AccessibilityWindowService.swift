@@ -184,8 +184,95 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         FrontProcessManagement.front(windowID: windowID, ownerPID: ownerPID)
     }
 
+    public func frontWindowWithTrace(
+        windowID: CGWindowID,
+        ownerPID: pid_t
+    ) -> FrontWindowDeliveryTrace {
+        FrontProcessManagement.frontWithTrace(windowID: windowID, ownerPID: ownerPID)
+    }
+
     public func frontmostApplicationPID() -> pid_t? {
         NSWorkspace.shared.frontmostApplication?.processIdentifier
+    }
+
+    public func frontmostWindowID(ownerPID: pid_t) -> CGWindowID? {
+        focusObservation(ownerPID: ownerPID).frontmostLayerZeroWindowID
+    }
+
+    public func focusObservation(ownerPID: pid_t) -> WindowFocusObservation {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
+            as? [[CFString: Any]]
+        else {
+            return WindowFocusObservation(
+                frontmostApplicationPID: frontmostApplicationPID(),
+                axFocusedWindowID: boundedFocusedWindowID(for: ownerPID),
+                visibleWindows: []
+            )
+        }
+        return WindowFocusObservation(
+            frontmostApplicationPID: frontmostApplicationPID(),
+            axFocusedWindowID: boundedFocusedWindowID(for: ownerPID),
+            visibleWindows: Self.visibleWindowZOrder(ownerPID: ownerPID, in: windows)
+        )
+    }
+
+    /// Core Graphics returns this array front-to-back. Restricting the answer to visible,
+    /// layer-zero windows makes it a statement about the app window the user actually sees,
+    /// rather than an AX focus flag that may move without the z-order following it.
+    static func frontmostLayerZeroWindowID(
+        ownerPID: pid_t,
+        in windows: [[CFString: Any]]
+    ) -> CGWindowID? {
+        visibleWindowZOrder(ownerPID: ownerPID, in: windows)
+            .first(where: { $0.layer == 0 })?.windowID
+    }
+
+    static func visibleWindowZOrder(
+        ownerPID: pid_t,
+        in windows: [[CFString: Any]]
+    ) -> [WindowZOrderEntry] {
+        windows.enumerated().compactMap { orderIndex, window in
+            guard (window[kCGWindowOwnerPID] as? NSNumber)?.int32Value == ownerPID,
+                  let windowNumber = window[kCGWindowNumber] as? NSNumber,
+                  let layer = window[kCGWindowLayer] as? NSNumber
+            else { return nil }
+            let components = window[kCGWindowBounds] as? [String: CGFloat]
+            let bounds = CGRect(
+                x: components?["X"] ?? 0,
+                y: components?["Y"] ?? 0,
+                width: components?["Width"] ?? 0,
+                height: components?["Height"] ?? 0
+            )
+            return WindowZOrderEntry(
+                orderIndex: orderIndex,
+                windowID: CGWindowID(windowNumber.uint32Value),
+                layer: layer.intValue,
+                alpha: (window[kCGWindowAlpha] as? NSNumber)?.doubleValue ?? 0,
+                bounds: bounds,
+                title: window[kCGWindowName] as? String ?? ""
+            )
+        }
+    }
+
+    private func boundedFocusedWindowID(for pid: pid_t) -> CGWindowID? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.05)
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            app,
+            kAXFocusedWindowAttribute as CFString,
+            &focusedRef
+        ) == .success,
+        let focusedRef
+        else { return nil }
+        let window = focusedRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(window, 0.05)
+        var windowID: CGWindowID = 0
+        guard _AXUIElementGetWindow(window, &windowID) == .success, windowID != 0 else {
+            return nil
+        }
+        return windowID
     }
 
     public func activateApp(bundleID: String) -> Bool {
