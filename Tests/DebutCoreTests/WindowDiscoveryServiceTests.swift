@@ -306,8 +306,8 @@ struct WindowDiscoveryServiceTests {
         #expect(attempts.map { $0["result"] } == ["desktop_unresolved", "detected"])
     }
 
-    @Test("A dialog creation requests attention but is not discovered as a standard window")
-    func dialogCreationDoesNotEnterStandardDiscovery() {
+    @Test("A non-modal dialog requests attention and remains eligible for discovery")
+    func nonModalDialogCreationEntersStandardDiscovery() {
         let windowService = MockWindowService()
         windowService.windowList = [liveWindow(700, ownerPID: 10)]
         let service = WindowDiscoveryService(
@@ -324,6 +324,63 @@ struct WindowDiscoveryServiceTests {
             ownerPID: 10,
             role: kAXWindowRole as String,
             subrole: kAXDialogSubrole as String,
+            isModal: false
+        ))
+
+        #expect(attention.map(\.0) == [700])
+        #expect(attention.map(\.1) == [10])
+        #expect(createdSnapshots == 1)
+    }
+
+    @Test("A non-modal dialog retries discovery without repeating system attention")
+    func nonModalDialogCreationRetriesUntilListed() {
+        let retry = DeferredWindowCreationRetryScheduler()
+        let windowService = MockWindowService()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.windowCreationRetryScheduler = retry.schedule
+        var attention: [(CGWindowID, pid_t)] = []
+        var createdSnapshots = 0
+        service.onSystemAttentionRequested = { attention.append(($0, $1)) }
+        service.onWindowCreated = { _ in createdSnapshots += 1 }
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 700,
+            ownerPID: 10,
+            role: kAXWindowRole as String,
+            subrole: kAXDialogSubrole as String,
+            isModal: false
+        ))
+        #expect(attention.count == 1)
+        #expect(createdSnapshots == 0)
+
+        windowService.windowList = [liveWindow(700, ownerPID: 10)]
+        retry.runNext()
+
+        #expect(attention.count == 1)
+        #expect(createdSnapshots == 1)
+    }
+
+    @Test("A system dialog requests attention without entering window discovery")
+    func systemDialogCreationDoesNotEnterStandardDiscovery() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(700, ownerPID: 10)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var attention: [(CGWindowID, pid_t)] = []
+        var createdSnapshots = 0
+        service.onSystemAttentionRequested = { attention.append(($0, $1)) }
+        service.onWindowCreated = { _ in createdSnapshots += 1 }
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 700,
+            ownerPID: 10,
+            role: kAXWindowRole as String,
+            subrole: kAXSystemDialogSubrole as String,
             isModal: false
         ))
 

@@ -192,6 +192,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let fixedMetadata: AXWindowCreationMetadata?
         let startedAt: UInt64
         var identity: WindowOwnerIdentity?
+        var systemAttentionRequested: Bool
     }
 
     private var pendingWindowCreations: [UUID: PendingWindowCreation] = [:]
@@ -895,6 +896,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         role == kAXWindowRole as String &&
             !isModal &&
             (subrole == kAXStandardWindowSubrole as String ||
+                subrole == kAXDialogSubrole as String ||
                 subrole == kAXUnknownSubrole as String)
     }
 
@@ -921,7 +923,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             element: element,
             fixedMetadata: fixedMetadata,
             startedAt: DispatchTime.now().uptimeNanoseconds,
-            identity: nil
+            identity: nil,
+            systemAttentionRequested: false
         )
         var details = [
             "notification": notification,
@@ -961,15 +964,28 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             subrole: metadata.subrole,
             isModal: metadata.isModal
         ) {
-            reportWindowCreationAttempt(
-                metadata: metadata,
-                probeID: probeID,
-                attempt: attempt,
-                result: "system_attention"
-            )
-            pendingWindowCreations.removeValue(forKey: probeID)
-            onSystemAttentionRequested?(metadata.windowID, metadata.ownerPID)
-            return
+            if !pending.systemAttentionRequested {
+                reportWindowCreationAttempt(
+                    metadata: metadata,
+                    probeID: probeID,
+                    attempt: attempt,
+                    result: "system_attention"
+                )
+                pending.systemAttentionRequested = true
+                pendingWindowCreations[probeID] = pending
+                onSystemAttentionRequested?(metadata.windowID, metadata.ownerPID)
+            }
+            // A non-modal AXDialog is also a trackable window. Dia reports DevTools this way
+            // during creation, then exposes it as a standard window. Keep probing instead of
+            // treating the first subrole snapshot as a final exclusion verdict.
+            guard Self.isPotentialStandardAXWindow(
+                role: metadata.role,
+                subrole: metadata.subrole,
+                isModal: metadata.isModal
+            ) else {
+                pendingWindowCreations.removeValue(forKey: probeID)
+                return
+            }
         }
 
         guard Self.isPotentialStandardAXWindow(
