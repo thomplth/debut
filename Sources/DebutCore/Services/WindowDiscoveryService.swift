@@ -896,8 +896,17 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         role == kAXWindowRole as String &&
             !isModal &&
             (subrole == kAXStandardWindowSubrole as String ||
-                subrole == kAXDialogSubrole as String ||
-                subrole == kAXUnknownSubrole as String)
+                subrole == kAXDialogSubrole as String)
+    }
+
+    static func isPendingStandardAXWindowClassification(
+        role: String,
+        subrole: String,
+        isModal: Bool
+    ) -> Bool {
+        role == kAXWindowRole as String &&
+            !isModal &&
+            subrole == kAXUnknownSubrole as String
     }
 
     fileprivate func handleWindowCreated(element: AXUIElement, notification: String) {
@@ -986,6 +995,25 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 pendingWindowCreations.removeValue(forKey: probeID)
                 return
             }
+        }
+
+        // AXUnknown is the absence of a classification, not evidence that the new object is a
+        // standard window. Dia emits transient, untitled internal surfaces this way, and Core
+        // Graphics briefly gives them every plausible-window signal. Keep re-reading the AX
+        // element so a real window can graduate to AXStandardWindow or AXDialog, but do not
+        // publish an object whose classification never settles during the bounded probe.
+        if Self.isPendingStandardAXWindowClassification(
+            role: metadata.role,
+            subrole: metadata.subrole,
+            isModal: metadata.isModal
+        ) {
+            retryWindowCreationDetection(
+                probeID: probeID,
+                attempt: attempt,
+                reason: "ax_classification_pending",
+                metadata: metadata
+            )
+            return
         }
 
         guard Self.isPotentialStandardAXWindow(
