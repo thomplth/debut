@@ -266,6 +266,60 @@ struct WindowDiscoveryServiceTests {
         #expect(attempts.map { $0["result"] } == ["window_not_listed", "detected"])
     }
 
+    // Dia emits AXWindowCreated for short-lived internal surfaces that look like full-size,
+    // layer-0 windows to Core Graphics but remain AXUnknown and untitled. Window 122707 was
+    // admitted to Stage 1 on 2026-09-14 even though Dia had only one real browser window; it
+    // could not be focused and vanished thirteen seconds later. AXUnknown is inconclusive in
+    // full discovery and cannot become positive evidence merely because a creation event fired.
+    @Test("An AX-unknown creation is not published as a standard window")
+    func unknownWindowCreationRemainsUnadmitted() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let retry = DeferredWindowCreationRetryScheduler()
+        let windowService = MockWindowService()
+        windowService.windowList = [WindowInfo(
+            windowID: 122_707,
+            ownerBundleID: "company.thebrowser.dia",
+            ownerName: "Dia",
+            ownerPID: 22_502,
+            title: "",
+            bounds: CGRect(x: 0, y: 0, width: 2469, height: 1440),
+            isOnScreen: true
+        )]
+        let spaces = MockSpaceSwitcher(desktops: 4, current: 0)
+        spaces.windowDesktops = [122_707: 0]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+        service.spaceSwitcher = spaces
+        service.windowCreationRetryScheduler = retry.schedule
+        var snapshots: [RuntimeWindowSnapshot] = []
+        service.onWindowCreated = { snapshots.append($0) }
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 122_707,
+            ownerPID: 22_502,
+            role: kAXWindowRole as String,
+            subrole: kAXUnknownSubrole as String,
+            isModal: false
+        ))
+        retry.runAll()
+        reporter.flush()
+
+        #expect(snapshots.isEmpty)
+        #expect(service.diagnosticTrackingSnapshot.knownWindowIDs.isEmpty)
+        let attempts = durableDiagnosticEvents(in: directory).filter {
+            $0["event"] == "window_creation_detection_attempted"
+        }
+        #expect(attempts.map { $0["result"] } == Array(
+            repeating: "ax_classification_pending",
+            count: WindowDiscoveryService.windowCreationRetryDelays.count + 1
+        ))
+    }
+
     @Test("A listed standard window waits for its desktop assignment")
     func standardWindowCreationRetriesUntilDesktopIsReady() throws {
         let directory = try makeTempDirectory()
