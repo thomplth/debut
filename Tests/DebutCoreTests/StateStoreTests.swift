@@ -208,6 +208,18 @@ struct StateStoreTests {
         #expect(try StateStore(directory: dir).loadRetiredWindows().isEmpty)
     }
 
+    @Test("Main-display-only overlay placement defaults off for existing settings")
+    func mainDisplayOverlayLegacySettings() throws {
+        var settings = AppSettings()
+        #expect(!settings.overlayOnMainDisplayOnly)
+        settings.overlayOnMainDisplayOnly = true
+        let data = try JSONEncoder().encode(settings)
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "overlayOnMainDisplayOnly")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        #expect(try !JSONDecoder().decode(AppSettings.self, from: legacy).overlayOnMainDisplayOnly)
+    }
+
     @Test("Settings round-trip")
     func settingsRoundTrip() throws {
         let dir = try makeTempDirectory()
@@ -217,6 +229,7 @@ struct StateStoreTests {
         var settings = AppSettings()
         settings.launchAtLogin = true
         settings.stageCornerRadius = 30
+        settings.overlayOnMainDisplayOnly = true
         settings.windowSelectionStyle = .magnify
         settings.selectorOutset = 3
         settings.selectorCornerRadius = 18
@@ -231,6 +244,7 @@ struct StateStoreTests {
         let loaded = try store.loadSettings()
         #expect(loaded.launchAtLogin == true)
         #expect(loaded.stageCornerRadius == 30)
+        #expect(loaded.overlayOnMainDisplayOnly)
         #expect(loaded.windowSelectionStyle == .magnify)
         #expect(loaded.selectorOutset == 3)
         #expect(loaded.selectorCornerRadius == 18)
