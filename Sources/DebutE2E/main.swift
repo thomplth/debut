@@ -863,6 +863,28 @@ func focusedWindowElement(for processIdentifier: pid_t) -> AXUIElement? {
     return (element as! AXUIElement)
 }
 
+/// Read the live keyboard owner so cached application state cannot pass a failed switch.
+func liveKeyboardFocus() -> (ownerPID: pid_t, windowID: CGWindowID)? {
+    let system = AXUIElementCreateSystemWide()
+    AXUIElementSetMessagingTimeout(system, 0.05)
+    var applicationRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString,
+                                        &applicationRef) == .success,
+          let applicationRef, CFGetTypeID(applicationRef) == AXUIElementGetTypeID() else { return nil }
+    let application = applicationRef as! AXUIElement
+    AXUIElementSetMessagingTimeout(application, 0.05)
+    var ownerPID: pid_t = 0
+    var windowRef: CFTypeRef?
+    guard AXUIElementGetPid(application, &ownerPID) == .success,
+          AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString,
+                                         &windowRef) == .success,
+          let windowRef, CFGetTypeID(windowRef) == AXUIElementGetTypeID() else { return nil }
+    let window = windowRef as! AXUIElement
+    AXUIElementSetMessagingTimeout(window, 0.05)
+    guard let windowID = windowIdentifier(of: window) else { return nil }
+    return (ownerPID, windowID)
+}
+
 func windowSize(_ window: AXUIElement) -> CGSize? {
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &value) == .success,
@@ -945,7 +967,14 @@ func systemWindowOverviewActive() -> Bool {
 }
 
 func wait(_ seconds: Double) {
-    Thread.sleep(forTimeInterval: seconds)
+    let deadline = Date().addingTimeInterval(seconds)
+    // App lifecycle/activation caches receive main-run-loop notifications. Sleeping this
+    // thread left stale app instances after the duration matrix's repeated relaunches.
+    while Date() < deadline {
+        if !RunLoop.current.run(mode: .default, before: deadline) {
+            Thread.sleep(forTimeInterval: max(0, deadline.timeIntervalSinceNow))
+        }
+    }
 }
 
 @discardableResult
@@ -3326,6 +3355,116 @@ if let resizeFixtureWindow, let originalSize = windowSize(resizeFixtureWindow) {
 }
 
 NSRunningApplication(processIdentifier: launchFocusPID)?.forceTerminate()
+
+// --- Consecutive window moves at every duration offered by the Settings slider. ---
+header("Focused-window move shortcuts: all 41 switch durations")
+let moveSettingsBackup = try? Data(contentsOf: settingsFile)
+let moveWindows = AccessibilityWindowService()
+let moveSpaces = SpaceService()
+let moveFixture = moveWindows.listWindows().first {
+    $0.ownerBundleID == "com.apple.TextEdit" && moveSpaces.desktopIndex(forWindow: $0.windowID) != nil
+}
+
+if moveSpaces.desktopCount() >= 4, let fixture = moveFixture {
+    let originalDesktop = moveSpaces.desktopIndex(forWindow: fixture.windowID)
+    moveSpaces.moveWindow(windowID: fixture.windowID, toDesktop: 0)
+    let fixtureMoved = waitFor { moveSpaces.desktopIndex(forWindow: fixture.windowID) == 0 }
+    var measurements: [[String: Any]] = []
+    for milliseconds in stride(from: 0, through: 400, by: 10) {
+        _ = terminateDebutAndWait()
+        var settings = (try? settingsStore.loadSettings()) ?? AppSettings()
+        settings.features.workspaceIsolation = true
+        settings.features.numberShortcuts = true
+        settings.excludedBundleIDs.removeAll { $0 == fixture.ownerBundleID }
+        settings.quickSwitchExcludedBundleIDs.removeAll { $0 == fixture.ownerBundleID }
+        settings.spaceSwitchDuration = Double(milliseconds) / 1_000
+        try? settingsStore.saveSettings(settings)
+        clearDiagnosticFile()
+        let ready = waitForDebutReady(launchDebut())
+        let atFirst = quickSwitch(to: 0, using: moveSpaces)
+        let fronted = moveWindows.frontWindow(windowID: fixture.windowID, ownerPID: fixture.ownerPID)
+        _ = moveWindows.raiseWindow(windowID: fixture.windowID)
+        let focused = waitFor {
+            let focus = liveKeyboardFocus()
+            return focus?.ownerPID == fixture.ownerPID && focus?.windowID == fixture.windowID
+        }
+
+        func postMoveArrow(_ code: Int) {
+            postKeyDown(keyCode: CGKeyCode(code), flags: [.maskCommand, .maskAlternate])
+            postKeyUp(keyCode: CGKeyCode(code), flags: [.maskCommand, .maskAlternate])
+        }
+        func atEndpoint(_ index: Int) -> Bool {
+            let focus = liveKeyboardFocus()
+            return moveSpaces.currentDesktopIndex() == index
+                && moveSpaces.desktopIndex(forWindow: fixture.windowID) == index
+                && focus?.ownerPID == fixture.ownerPID && focus?.windowID == fixture.windowID
+                && Int(readState()["activeSpaceIndex"] ?? "") == index
+        }
+        func endpointDescription() -> String {
+            let focus = liveKeyboardFocus()
+            return "desktop=\(moveSpaces.currentDesktopIndex().map(String.init) ?? "none") "
+                + "windowDesktop=\(moveSpaces.desktopIndex(forWindow: fixture.windowID).map(String.init) ?? "none") "
+                + "keyboard=\(focus?.ownerPID.description ?? "none")/\(focus?.windowID.description ?? "none") "
+                + "expected=\(fixture.ownerPID)/\(fixture.windowID) model=\(readState()["activeSpaceIndex"] ?? "none") "
+                + "workspacePID=\(NSWorkspace.shared.frontmostApplication?.processIdentifier.description ?? "none")"
+        }
+        let forwardStart = ProcessInfo.processInfo.systemUptime
+        // No settling between presses: later commands must retain the original window even
+        // when Dock is still on its first hop. Mix both aliases in the same traversal.
+        for code in [kVK_RightArrow, kVK_DownArrow, kVK_RightArrow] {
+            postMoveArrow(code)
+            wait(0.04)
+        }
+        let forwardLanded = waitFor(timeout: 5) { atEndpoint(3) }
+        let forwardElapsed = ProcessInfo.processInfo.systemUptime - forwardStart
+        let forwardDescription = endpointDescription()
+        wait(0.15)
+        let stillFocused = atEndpoint(3)
+        let reverseStart = ProcessInfo.processInfo.systemUptime
+        for code in [kVK_LeftArrow, kVK_UpArrow, kVK_LeftArrow] {
+            postMoveArrow(code)
+            wait(0.04)
+        }
+        let reverseLanded = waitFor(timeout: 5) { atEndpoint(0) }
+        let reverseElapsed = ProcessInfo.processInfo.systemUptime - reverseStart
+        if !forwardLanded || !reverseLanded {
+            info("  Forward: \(forwardDescription); reverse: \(endpointDescription())")
+        }
+        // Leave margin for guest scheduling, but catch per-key delays or stalled confirmations.
+        let responsivenessBudget = 3 * settings.spaceSwitchDuration + 1.0
+        test("Command-Option arrows chain 1→4→1 with focus at \(milliseconds) ms") {
+            fixtureMoved && ready && atFirst && fronted && focused && forwardLanded && stillFocused
+                && reverseLanded && forwardElapsed < responsivenessBudget && reverseElapsed < responsivenessBudget
+        }
+        measurements.append(["configuredMilliseconds": milliseconds,
+                             "forwardMilliseconds": Int(forwardElapsed * 1_000),
+                             "reverseMilliseconds": Int(reverseElapsed * 1_000),
+                             "forwardFocused": forwardLanded && stillFocused,
+                             "reverseFocused": reverseLanded])
+        info("  \(milliseconds) ms: 1→4 \(Int(forwardElapsed * 1_000)) ms; 4→1 \(Int(reverseElapsed * 1_000)) ms")
+        if [0, 150, 400].contains(milliseconds) {
+            _ = takeScreenshot("window_move_chain_\(milliseconds)ms")
+        }
+        // A failed endpoint must not poison the next duration's starting fixture.
+        if !reverseLanded {
+            moveSpaces.moveWindow(windowID: fixture.windowID, toDesktop: 0)
+            _ = waitFor { moveSpaces.desktopIndex(forWindow: fixture.windowID) == 0 }
+        }
+    }
+    if let data = try? JSONSerialization.data(withJSONObject: measurements, options: [.prettyPrinted, .sortedKeys]) {
+        try? data.write(to: screenshotDir.appendingPathComponent("window-move-timings.json"))
+    }
+    if let originalDesktop {
+        moveSpaces.moveWindow(windowID: fixture.windowID, toDesktop: originalDesktop)
+        _ = waitFor { moveSpaces.desktopIndex(forWindow: fixture.windowID) == originalDesktop }
+        _ = quickSwitch(to: originalDesktop, using: moveSpaces)
+    }
+} else {
+    test("Window-move chaining fixture has four desktops and a tracked TextEdit window") { false }
+}
+_ = terminateDebutAndWait()
+if let moveSettingsBackup { try? moveSettingsBackup.write(to: settingsFile, options: .atomic) }
+else { try? FileManager.default.removeItem(at: settingsFile) }
 
 // --- Summary ---
 header("Results")
