@@ -309,6 +309,17 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             return event
         }
 
+        if type == .keyDown, features.workspaceIsolation, desktopNavigationAvailable,
+           flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]) == [.maskCommand, .maskAlternate],
+           [kVK_LeftArrow, kVK_UpArrow, kVK_RightArrow, kVK_DownArrow].contains(Int(keyCode)) {
+            guard !isFrontmostAppExcluded, !desktopNavigationBlocked() else { return event }
+            if quickSwitchKeysDown.insert(keyCode).inserted {
+                let offset = keyCode == Int64(kVK_LeftArrow) || keyCode == Int64(kVK_UpArrow) ? -1 : 1
+                deliver(.moveFocusedWindowToAdjacentSpace(offset), asynchronously: deliverAsynchronously)
+            }
+            return nil
+        }
+
         if type == .keyDown, features.controlArrows, desktopNavigationAvailable,
            flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]) == .maskControl,
            keyCode == Int64(kVK_LeftArrow) || keyCode == Int64(kVK_RightArrow) {

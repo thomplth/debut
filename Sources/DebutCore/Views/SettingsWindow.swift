@@ -514,6 +514,24 @@ public struct SettingsView: View {
                 )
             }
 
+            Text("Move focused window")
+                .font(.headline)
+                .padding(.top, 4)
+
+            HStack {
+                Text("Move to previous stage")
+                Spacer()
+                Text("⌥⌘← / ⌥⌘↑").foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("Move to next stage")
+                Spacer()
+                Text("⌥⌘→ / ⌥⌘↓").foregroundStyle(.secondary)
+            }
+            Text("Follow the window to its desktop and keep it focused. Requires workspace isolation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Text("Quick switch")
                 .font(.headline)
                 .padding(.top, 4)

@@ -98,7 +98,7 @@ sleep 2
 # switch a space or move a window between two. Debut builds its space list at launch, so the
 # desktops have to exist first.
 echo "Provisioning desktops so spaces have somewhere to be..."
-"$e2e_path" provision-desktops 3
+"$e2e_path" provision-desktops 4
 
 echo "Launching Debut..."
 open "$app_path"

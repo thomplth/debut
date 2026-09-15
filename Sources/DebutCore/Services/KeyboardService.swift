@@ -25,6 +25,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case switchToSpace(Int)     // Configured modifier + 1-9 (global immediate switch)
     case switchToSpaceKeepingCurrentApplication(Int)
     case switchAdjacentSpace(Int)
+    case moveFocusedWindowToAdjacentSpace(Int) // Command+Option arrows, following the window
 
     case moveWindowUp           // Up Arrow
     case moveWindowDown         // Down Arrow

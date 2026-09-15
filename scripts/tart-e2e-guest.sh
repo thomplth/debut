@@ -148,6 +148,9 @@ wait_for_fixture_apps() {
 echo "Installing the host build in the isolated guest..."
 sudo rm -rf "$APP_PATH"
 sudo ditto -x -k "$APP_ARCHIVE" /Applications
+# A freshly cloned guest has no LaunchServices record for this copied bundle. The input
+# driver's bundle-ID lookup must resolve the installation before its first launch.
+as_console /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_PATH"
 
 bundle_id="$(/usr/bin/defaults read "$APP_PATH/Contents/Info" CFBundleIdentifier)"
 # Debut keeps its state under the last component of its bundle ID; Tests/CI/AppIdentityTests.sh
@@ -222,7 +225,7 @@ wait_for_fixture_apps
 # suite cannot switch a space or move a window between two. Debut builds its space list at
 # launch, so the desktops have to exist first.
 echo "Provisioning desktops so spaces have somewhere to be..."
-as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 3
+as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 4
 
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
@@ -277,7 +280,7 @@ sudo killall tccd 2>/dev/null || true
 reset_capture_reminders
 
 # Restore the full suite fixture after the isolated first-run journeys.
-as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 3
+as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 4
 as_console rm -rf "$support_dir"
 as_console pkill -x TextEdit 2>/dev/null || true
 as_console open -na TextEdit "$FIXTURE_DIR/one.txt"

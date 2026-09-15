@@ -63,6 +63,8 @@ if [[ -f "$host_runner" ]]; then
 fi
 
 if [[ -f "$guest_runner" ]]; then
+    expect_contains "$guest_runner" 'as_console .*lsregister.*-f.*APP_PATH' \
+        "a fresh guest must register its installed app before bundle-ID launch"
     expect_contains "$guest_runner" 'kTCCServiceAccessibility' \
         "the disposable guest must provision Accessibility"
     expect_contains "$guest_runner" 'kTCCServicePostEvent' \
