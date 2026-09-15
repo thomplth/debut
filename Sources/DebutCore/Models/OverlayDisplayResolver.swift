@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// Picks the single display the overlay belongs on. Stages describe where the user's attention
-/// already is, so they follow the focused window rather than covering every screen.
+/// already is, so they follow the focused window unless pinned to the main display.
 public enum OverlayDisplayResolver {
     /// Returns the distance from the top of the full display to unobstructed content. The
     /// visible frame accounts for a persistently shown menu bar, while `menuBarHeight` reserves
@@ -46,10 +46,11 @@ public enum OverlayDisplayResolver {
     public static func resolve(
         focusedWindowFrame: CGRect?,
         displays: [DesktopScreenDescriptor],
-        mainDisplayID: CGDirectDisplayID?
+        mainDisplayID: CGDirectDisplayID?,
+        mainDisplayOnly: Bool = false
     ) -> CGDirectDisplayID? {
         let fallback = displays.first { $0.displayID == mainDisplayID } ?? displays.first
-        guard let focusedWindowFrame else { return fallback?.displayID }
+        guard !mainDisplayOnly, let focusedWindowFrame else { return fallback?.displayID }
 
         // A window mid-transition can report a zero size, and an empty rectangle intersects
         // nothing, so area would discard an origin that still answers the question.

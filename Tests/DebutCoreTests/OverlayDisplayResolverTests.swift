@@ -24,6 +24,34 @@ struct OverlayDisplayResolverTests {
         #expect(display == 2)
     }
 
+    @Test("Main-display-only placement ignores the focused window", arguments: [false, true])
+    func mainDisplayPreferenceOverridesFocus(_ mainDisplayOnly: Bool) {
+        let display = OverlayDisplayResolver.resolve(
+            focusedWindowFrame: CGRect(x: 2000, y: 100, width: 800, height: 600),
+            displays: [right, left],
+            mainDisplayID: 1,
+            mainDisplayOnly: mainDisplayOnly
+        )
+
+        #expect(display == (mainDisplayOnly ? 1 : 2))
+    }
+
+    @Test("Main-display-only placement safely handles missing displays")
+    func mainDisplayPreferenceFallsBack() {
+        #expect(OverlayDisplayResolver.resolve(
+            focusedWindowFrame: CGRect(x: 2000, y: 100, width: 800, height: 600),
+            displays: [left, right],
+            mainDisplayID: 99,
+            mainDisplayOnly: true
+        ) == 1)
+        #expect(OverlayDisplayResolver.resolve(
+            focusedWindowFrame: nil,
+            displays: [],
+            mainDisplayID: 1,
+            mainDisplayOnly: true
+        ) == nil)
+    }
+
     @Test("A window straddling two displays opens on the one showing most of it")
     func straddlingWindowPicksLargestOverlap() {
         // 700pt of width lands on the left display, 300pt on the right.

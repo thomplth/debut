@@ -136,6 +136,17 @@ public struct SettingsView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 4) {
+                settingsToggle(
+                    "Show overlay only on main display",
+                    isOn: $viewModel.settings.overlayOnMainDisplayOnly
+                )
+                Text("Always use the main display, even when the focused window is on another monitor.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Glass style")
                     Spacer()

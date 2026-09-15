@@ -138,6 +138,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var stageScale: Double
     /// Whether each card takes its own window's shape rather than the display's.
     public var adaptiveCardSizing: Bool
+    /// Keep both overlay modes on the system primary display regardless of window focus.
+    public var overlayOnMainDisplayOnly: Bool
 
     // Window selection
     public var windowSelectionStyle: WindowSelectionStyle
@@ -173,6 +175,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
         self.adaptiveCardSizing = true
+        self.overlayOnMainDisplayOnly = false
         self.windowSelectionStyle = .filled
         self.selectorOutset = Self.defaultSelectorOutset
         self.selectorCornerRadius = Self.defaultSelectorCornerRadius
@@ -218,6 +221,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
             Bool.self,
             forKey: .adaptiveCardSizing
         ) ?? true
+        overlayOnMainDisplayOnly = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .overlayOnMainDisplayOnly
+        ) ?? false
         windowSelectionStyle = try container.decodeIfPresent(
             WindowSelectionStyle.self,
             forKey: .windowSelectionStyle

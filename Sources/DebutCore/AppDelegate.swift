@@ -845,12 +845,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             self?.spaceController?.revealDesktop()
         }
 
-        let display = overlayDisplay(focusedWindowFrame: spaceController.focusedWindowFrame)
+        let display = overlayDisplay(
+            focusedWindowFrame: spaceController.focusedWindowFrame,
+            mainDisplayOnly: currentSettings.overlayOnMainDisplayOnly
+        )
         // The flat switcher has already selected the stack holding its own selection, and that
         // selection is what a commit resolves. Re-pointing it at the focused display would
         // silently commit a different window than the one under the selector.
-        if let displayID = display?.displayID, spaceController.overlayMode == .stages {
-            spaceController.selectSpaceStack(forDisplayID: displayID)
+        if spaceController.overlayMode == .stages,
+           let focusedDisplay = overlayDisplay(
+               focusedWindowFrame: spaceController.focusedWindowFrame,
+               mainDisplayOnly: false
+           ) {
+            // Placement may be pinned, but switching still starts in the focused workspace.
+            spaceController.selectSpaceStack(forDisplayID: focusedDisplay.displayID)
         }
         overlayWindow.targetScreenFrame = display?.frame
         let createdHostingView = if spaceController.overlayMode == .altTab {
@@ -923,7 +931,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     private func updateOverlay() {
         guard let spaceController, let overlayWindow else { return }
-        let display = overlayDisplay(focusedWindowFrame: spaceController.focusedWindowFrame)
+        let display = overlayDisplay(
+            focusedWindowFrame: spaceController.focusedWindowFrame,
+            mainDisplayOnly: currentSettings.overlayOnMainDisplayOnly
+        )
         // Stack cycling deliberately keeps the overlay on its current screen; the header
         // changes to identify the remote display whose stages are being inspected.
         if spaceController.spaceManager.connectedSpaceStacks.count <= 1 {
@@ -955,11 +966,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         return vm
     }
 
-    /// The screen the stages belong on: the one holding the focused window. Accessibility
+    /// The screen the stages belong on: the focused window’s display, or the system primary
+    /// display when the user pins the overlay there. Accessibility
     /// reports that window in Quartz coordinates, so the displays are matched in that space and
     /// only the winner is translated back into Cocoa's.
     private func overlayDisplay(
-        focusedWindowFrame: CGRect?
+        focusedWindowFrame: CGRect?,
+        mainDisplayOnly: Bool
     ) -> (displayID: CGDirectDisplayID, frame: CGRect)? {
         let displays = NSScreen.screens.map {
             DesktopScreenDescriptor(displayID: $0.displayID, frame: CGDisplayBounds($0.displayID))
@@ -967,7 +980,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         guard let displayID = OverlayDisplayResolver.resolve(
             focusedWindowFrame: focusedWindowFrame,
             displays: displays,
-            mainDisplayID: NSScreen.main?.displayID
+            // NSScreen.main follows the key window, so pinning must use the system primary.
+            mainDisplayID: mainDisplayOnly ? CGMainDisplayID() : NSScreen.main?.displayID,
+            mainDisplayOnly: mainDisplayOnly
         ), let screen = NSScreen.screens.first(where: { $0.displayID == displayID })
         else { return nil }
         return (displayID, screen.overlayFrame)
