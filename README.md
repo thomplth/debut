@@ -55,6 +55,12 @@ In the workspace overlay, drag a window preview onto another desktop's card, or
 use Up/Down while holding the activation modifier. Left/Right reorder windows
 inside the workspace. One app can have windows on several desktops.
 
+**Command-Option-left/up** moves the focused window to the previous stage;
+**Command-Option-right/down** moves it to the next. Your desktop follows the
+window and keeps it focused. Consecutive presses continue moving the same
+window while the desktop transition is running. The first and last stages stop
+movement at the boundary.
+
 <img src="docs/media/window-move.gif" alt="Moving a window between existing macOS desktops from the workspace overlay" width="760">
 
 Debut's spaces **are your real macOS desktops**, in the same order. Add or remove
@@ -94,6 +100,8 @@ Captured images stay in memory on your Mac and are never uploaded.
 | `⌃ 1` … `⌃ 9` | Switch directly to desktop 1–9 |
 | `⌃ ⌥ 1` … `⌃ ⌥ 9` | Switch desktop, preferring a window of the current app |
 | `⌃ ←` / `⌃ →` | Previous / next desktop, when enabled |
+| `⌥ ⌘ ←` / `⌥ ⌘ ↑` | Move focused window to previous stage and follow it |
+| `⌥ ⌘ →` / `⌥ ⌘ ↓` | Move focused window to next stage and follow it |
 
 Activation shortcuts and numbered-shortcut modifiers are editable in Settings.
 Control-arrow and the trackpad desktop gesture have separate feature switches.

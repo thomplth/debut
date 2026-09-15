@@ -441,9 +441,19 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// The window Debut last asked the window server to front, pending the focus report it causes.
     private var focusRequest: (windowID: CGWindowID, ownerPID: pid_t, at: Date)?
     private var pendingFront: (windowID: CGWindowID, ownerPID: pid_t)?
+    private struct FollowingWindowMove {
+        let id = UUID()
+        let windowID: CGWindowID
+        let ownerPID: pid_t
+        let stackID: String
+        var destinationID: UUID
+        var relocating = false
+    }
+    private var followingWindowMove: FollowingWindowMove?
     private enum FocusCommand: String {
         case commandTab = "command_tab"
         case commandBacktick = "command_backtick"
+        case moveFocusedWindow = "move_focused_window"
         case general
     }
     private struct PendingFocusDelivery {
@@ -656,6 +666,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
         applyDeferredSwitchActivations()
         applyPendingSpaceFocus()
+        continueFollowingWindowMove()
     }
 
     /// Resolves focus events held while a Debut-initiated switch was in flight.
@@ -720,6 +731,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// leaving, because the Dock consumes the forged swipe asynchronously. macOS then
     /// restored its own idea of focus as the Space settled and overwrote the choice.
     private func applyPendingSpaceFocus() {
+        // A later press may already be moving this window past the desktop just reached.
+        if followingWindowMove?.relocating == true { return }
         if applyPendingSystemAttentionFocus() { return }
         guard let pending = pendingSpaceFocus else { return }
         guard let stackID = spaceManager.spaceStackID(containingSpaceID: pending.spaceID),
@@ -728,6 +741,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
               let stack = switcher.spaceTopology().stack(id: stackID)
         else {
             pendingSpaceFocus = nil
+            followingWindowMove = nil
             return
         }
 
@@ -737,10 +751,12 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             // the signal that the user overtook the switch or Dock landed unexpectedly.
             if switcher.isSwitchInFlight(stackID: stackID) { return }
             pendingSpaceFocus = nil
+            followingWindowMove = nil
             return
         }
         pendingSpaceFocus = nil
         focusWindow(pending.windowID, inSpaceID: pending.spaceID, command: pending.command)
+        if followingWindowMove?.destinationID == pending.spaceID { followingWindowMove = nil }
         delegate?.spaceControllerDidMutateState(self)
     }
 
@@ -950,14 +966,14 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             spaceID: spaceID,
             sourceWindowID: sourceWindowID,
             command: command,
-            requiresVisibleWindow: command == .commandBacktick || sourceOwnerPID == ownerPID,
+            requiresVisibleWindow: command == .commandBacktick || command == .moveFocusedWindow || sourceOwnerPID == ownerPID,
             attempt: 1,
             revision: focusDeliveryRevision
         )
         diag.report("window_focus_delivery_requested", details: [
             "attempt": "1",
             "command": command.rawValue,
-            "requiresVisibleWindow": "\(command == .commandBacktick || sourceOwnerPID == ownerPID)",
+            "requiresVisibleWindow": "\(command == .commandBacktick || command == .moveFocusedWindow || sourceOwnerPID == ownerPID)",
             "sourceWindowID": sourceWindowID.map(String.init) ?? "none",
             "windowID": "\(windowID)",
         ])
@@ -1727,6 +1743,14 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
         diag.report("key_event", level: .transient, details: keyEventDetails)
 
+        switch event {
+        case .moveFocusedWindowToAdjacentSpace, .cmdRelease:
+            break
+        default:
+            followingWindowMove = nil
+            if pendingSpaceFocus?.command == .moveFocusedWindow { pendingSpaceFocus = nil }
+        }
+
         // Once system-owned confirmation UI takes over, the held keyboard session has no
         // visible selector to navigate. Only its release boundary remains meaningful: it
         // commits the transaction the user already staged without taking focus back.
@@ -1740,6 +1764,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             switch event {
             case .quitSelectedApp, .closeSelectedWindow, .nextDisplayStack,
                  .switchAdjacentSpace, .switchToSpace, .switchToSpaceKeepingCurrentApplication,
+                 .moveFocusedWindowToAdjacentSpace,
                  .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick, .cmdShiftBacktickRepeat,
                  .moveWindowLeft, .moveWindowRight, .jumpToSpace, .jumpToLastSpace:
                 return
@@ -1833,6 +1858,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             if let index = spaceManager.spaces.firstIndex(where: { $0.id == spaceManager.activeSpaceID }) {
                 quickSwitchToSpace(index: index + offset, keepingCurrentApplication: false)
             }
+        case .moveFocusedWindowToAdjacentSpace(let offset):
+            moveFocusedWindowToAdjacentSpace(offset: offset)
         case .switchToSpace(let position):
             quickSwitchToSpace(index: position - 1, keepingCurrentApplication: false)
         case .switchToSpaceKeepingCurrentApplication(let position):
@@ -1858,6 +1885,128 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     // MARK: - Quick switch
+
+    /// Keep the command's window and intended destination while Dock acknowledges its route.
+    /// macOS can temporarily focus another process at an intermediate desktop; asking for focus
+    /// again on each press would move that other window instead of continuing this traversal.
+    private func moveFocusedWindowToAdjacentSpace(offset: Int) {
+        guard abs(offset) == 1, !isStageStackCommitInFlight,
+              activeTutorialScope == nil, let switcher = spaceSwitcher,
+              switcher.canMoveWindows else { return }
+
+        if followingWindowMove == nil {
+            let focused = probeFocusedWindow()
+            var focusedWindowID = focused.windowID
+            // Some multi-window apps report their old desktop's AX window after a focus.
+            // A hidden window cannot own the keyboard here; prefer the visible window server
+            // order for the frontmost process rather than dropping the next move in a chain.
+            if let reportedID = focusedWindowID,
+               let reportedLocation = switcher.desktopLocation(forWindow: reportedID),
+               switcher.spaceTopology().stack(id: reportedLocation.stackID)?.currentDesktopIndex != reportedLocation.index,
+               let frontmostPID = windowService.frontmostApplicationPID() {
+                focusedWindowID = windowService.frontmostWindowID(ownerPID: frontmostPID)
+            }
+            guard !focused.isFullscreen, let windowID = focusedWindowID,
+                  let sourceID = spaceManager.spaceContainingWindow(windowID: windowID),
+                  let stackID = spaceManager.spaceStackID(containingSpaceID: sourceID),
+                  let sourceIndex = spaceManager.spaceIndex(id: sourceID),
+                  let stack = switcher.spaceTopology().stack(id: stackID),
+                  stack.currentDesktopIndex == sourceIndex,
+                  let location = switcher.desktopLocation(forWindow: windowID),
+                  location.stackID == stackID, location.index == sourceIndex,
+                  let window = spaceManager.allSpaces.first(where: { $0.id == sourceID })?
+                    .windows.first(where: { $0.windowID == windowID }),
+                  !excludedBundleIDs.contains(window.ownerBundleID), let ownerPID = window.ownerPID,
+                  spaceManager.spaceID(stackID: stackID, at: sourceIndex + offset) != nil
+            else { return }
+            followingWindowMove = .init(windowID: windowID, ownerPID: ownerPID,
+                                        stackID: stackID, destinationID: sourceID)
+            if isSpaceManagerVisible {
+                stageStackTransaction.discard()
+                isSpaceManagerVisible = false
+                (keyboardService as? EventTapKeyboardService)?.overlayVisible = false
+                dismissOverlayPresentation()
+            }
+        }
+        guard var request = followingWindowMove,
+              let index = spaceManager.spaceIndex(id: request.destinationID),
+              let destinationID = spaceManager.spaceID(stackID: request.stackID, at: index + offset)
+        else { return }
+        request.destinationID = destinationID
+        followingWindowMove = request
+        continueFollowingWindowMove()
+    }
+
+    /// Move and follow one adjacent desktop at a time. Moving the focused window past an
+    /// unconfirmed swipe lets macOS change desktops out of sequence. Presses update the final
+    /// destination immediately, but the next relocation waits for the preceding desktop event.
+    private func continueFollowingWindowMove() {
+        guard var request = followingWindowMove, !request.relocating else { return }
+        guard let switcher = spaceSwitcher,
+              let sourceID = spaceManager.spaceContainingWindow(windowID: request.windowID),
+              let sourceIndex = spaceManager.spaceIndex(id: sourceID),
+              let finalIndex = spaceManager.spaceIndex(id: request.destinationID),
+              let stack = switcher.spaceTopology().stack(id: request.stackID)
+        else {
+            followingWindowMove = nil
+            return
+        }
+        guard pendingSpaceFocus?.command != .moveFocusedWindow,
+              !switcher.isSwitchInFlight(stackID: request.stackID),
+              stack.currentDesktopIndex == sourceIndex else { return }
+        spaceManager.selectSpaceStack(id: request.stackID)
+        if sourceID == request.destinationID {
+            performSpaceSwitch(id: request.destinationID, raiseWindowID: request.windowID,
+                               command: .moveFocusedWindow)
+            followingWindowMove = nil
+            return
+        }
+        let index = sourceIndex + (finalIndex > sourceIndex ? 1 : -1)
+        guard let location = stack.location(at: index),
+              let destinationID = spaceManager.spaceID(stackID: request.stackID, at: index) else {
+            followingWindowMove = nil
+            return
+        }
+        request.relocating = true
+        followingWindowMove = request
+        // Superseded focus must not front the window on an intermediate desktop.
+        pendingSpaceFocus = nil
+        if pendingFocusDelivery?.windowID == request.windowID { pendingFocusDelivery = nil }
+        let windowID = request.windowID
+        let ownerPID = request.ownerPID
+        let requestID = request.id
+        switcher.moveWindow(windowID: windowID, to: location) { [weak self] moved in
+            let finish: @Sendable () -> Void = { [weak self] in
+                guard let self else { return }
+                guard moved,
+                      let confirmedSourceID = self.spaceManager.spaceContainingWindow(windowID: windowID),
+                      self.spaceManager.allSpaces.first(where: { $0.id == confirmedSourceID })?
+                        .windows.contains(where: { $0.windowID == windowID && $0.ownerPID == ownerPID }) == true,
+                      self.spaceManager.allSpaces.contains(where: { $0.id == destinationID }) else {
+                    if self.followingWindowMove?.id == requestID { self.followingWindowMove = nil }
+                    self.diag.report("window_move_failed", details: ["windowID": "\(windowID)"])
+                    return
+                }
+                // Reconciliation may already have credited the window server's move while
+                // this callback was waiting for the main queue. Accept that membership too.
+                self.spaceManager.moveWindow(windowID: windowID, fromSpaceID: confirmedSourceID,
+                                             toSpaceID: destinationID, at: 0)
+                self.diag.report("focused_window_moved", details: [
+                    "windowID": "\(windowID)", "toSpaceIndex": "\(index)",
+                ])
+                self.delegate?.spaceControllerDidMutateState(self)
+                // Another command can cancel following while the bridge confirms a move.
+                // Keep the confirmed assignment, but never resume its superseded desktop route.
+                guard var current = self.followingWindowMove, current.id == requestID else { return }
+                current.relocating = false
+                self.followingWindowMove = current
+                self.performSpaceSwitch(id: destinationID, raiseWindowID: windowID,
+                                        command: .moveFocusedWindow)
+            }
+            if Thread.isMainThread { finish() }
+            else { DispatchQueue.main.async(execute: finish) }
+        }
+    }
 
     /// Immediately switch to the space at the given index (configured modifier + 1-9).
     /// Works whether or not the overlay is open; if open, it is dismissed first.
