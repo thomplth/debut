@@ -15,13 +15,18 @@ final class DesktopSwipeService: @unchecked Sendable {
     private var tracking = false
     private var committed = false
     private let desktopNavigationBlocked: @Sendable () -> Bool
+    private let postingMode: @Sendable () -> DockSwipePostingMode?
     private let switchDesktop: (Int) -> Void
 
     init(
         desktopNavigationBlocked: @escaping @Sendable () -> Bool = { false },
+        postingMode: @escaping @Sendable () -> DockSwipePostingMode? = {
+            DockSwipeCompatibility.currentMode
+        },
         switchDesktop: @escaping (Int) -> Void
     ) {
         self.desktopNavigationBlocked = desktopNavigationBlocked
+        self.postingMode = postingMode
         self.switchDesktop = switchDesktop
     }
 
@@ -134,6 +139,13 @@ final class DesktopSwipeService: @unchecked Sendable {
             }
             tracking = false
             committed = false
+            if case .augmented = postingMode() {
+                if let cleanup = DockSwipeEvent.cleanupPhysicalEnded(event) { return cleanup }
+                event.setDoubleValueField(kCGEventGestureSwipeProgress, value: 0)
+                event.setDoubleValueField(kCGEventGestureSwipeVelocityX, value: 0)
+                event.setDoubleValueField(kCGEventGestureSwipeVelocityY, value: 0)
+                return event
+            }
         } else if phase == 8 { // Cancelled
             tracking = false
             committed = false

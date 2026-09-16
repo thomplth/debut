@@ -44,23 +44,57 @@ public extension Notification.Name {
     )
 }
 
-/// Cheap live check for a Dock overview.
-/// The Dock-owned layer-18 window spans the overview's lifetime and its owner/layer metadata is
-/// available without Screen Recording permission. Mission Control, App Exposé, and Show Desktop
-/// all stand down: each owns the native navigation gestures while it is visible.
+/// Cheap live check for an overview without reading permission-gated window names.
+///
+/// Through macOS 26 the Dock owns a layer-18 marker. macOS 27 moved Mission Control and App
+/// Exposé to a display-sized WindowManager layer-19 overlay, while Show Desktop uses a
+/// display-sized WindowManager layer-18 overlay. Requiring display size prevents ordinary
+/// WindowManager thumbnails and tiling affordances from blocking navigation.
 enum DockOverviewDetector {
     static func isActive() -> Bool {
         guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
             as? [[String: Any]]
         else { return false }
-        return isActive(in: windows)
+        return isActive(
+            in: windows,
+            operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+            displayBounds: activeDisplayBounds()
+        )
     }
 
-    static func isActive(in windows: [[String: Any]]) -> Bool {
-        windows.contains { window in
-            (window[kCGWindowLayer as String] as? NSNumber)?.int32Value == 18
-                && (window[kCGWindowOwnerName as String] as? String) == "Dock"
+    static func isActive(
+        in windows: [[String: Any]],
+        operatingSystemMajor: Int,
+        displayBounds: [CGRect]
+    ) -> Bool {
+        guard operatingSystemMajor >= 27 else {
+            return windows.contains { window in
+                (window[kCGWindowLayer as String] as? NSNumber)?.int32Value == 18
+                    && (window[kCGWindowOwnerName as String] as? String) == "Dock"
+            }
         }
+
+        return windows.contains { window in
+            guard (window[kCGWindowOwnerName as String] as? String) == "WindowManager",
+                  let layer = (window[kCGWindowLayer as String] as? NSNumber)?.int32Value,
+                  layer == 18 || layer == 19,
+                  let boundsDictionary = window[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(
+                    dictionaryRepresentation: boundsDictionary as CFDictionary
+                  )
+            else { return false }
+            return displayBounds.contains {
+                abs($0.width - bounds.width) <= 1 && abs($0.height - bounds.height) <= 1
+            }
+        }
+    }
+
+    private static func activeDisplayBounds() -> [CGRect] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &displays, &count) == .success else { return [] }
+        return displays.prefix(Int(count)).map(CGDisplayBounds)
     }
 }
 
@@ -94,7 +128,7 @@ final class DesktopNavigationEligibility: @unchecked Sendable {
         lock.withLock { self.stackID = stackID }
     }
 
-    /// Dock's layer-18 marker has no balanced close event, and the first synthetic horizontal
+    /// The overview marker has no balanced close event, and the first synthetic horizontal
     /// gesture after dismissal is ignored on macOS 26. Remember the opening signal instead:
     /// while the marker is present every match stays native, then exactly one match after it
     /// disappears is left to Dock to reset its carousel state before acceleration resumes.
