@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import Darwin
 import Foundation
 
 // Real macOS Spaces as the backing store for spaces.
@@ -239,16 +240,24 @@ private let kWindowEnumerationOptions: UInt32 = 0x7
 //     feed the Dock timed Changed samples, then End. Space Rabbit drives progress that way
 //     on the Mission Control axis; Debut applies it to the horizontal one so its switch
 //     setting can be a duration rather than an opaque speed.
+//   - iss — https://github.com/joshuarli/iss
+//     The reverse-engineered macOS 27 IOHID payload format and serialized field-4205 framing.
 let kCGSEventTypeField = CGEventField(rawValue: 55)!
 let kCGEventGestureHIDType = CGEventField(rawValue: 110)!
+let kCGEventGestureSwipeMask = CGEventField(rawValue: 115)!
 let kCGEventGestureScrollY = CGEventField(rawValue: 119)!
 let kCGEventGestureSwipeMotion = CGEventField(rawValue: 123)!
 let kCGEventGestureSwipeProgress = CGEventField(rawValue: 124)!
+let kCGEventGesturePositionX = CGEventField(rawValue: 125)!
+let kCGEventGesturePositionY = CGEventField(rawValue: 126)!
 let kCGEventGestureSwipeVelocityX = CGEventField(rawValue: 129)!
 let kCGEventGestureSwipeVelocityY = CGEventField(rawValue: 130)!
 let kCGEventGesturePhase = CGEventField(rawValue: 132)!
+let kCGEventGesturePhase2 = CGEventField(rawValue: 134)!
 let kCGEventScrollGestureFlagBits = CGEventField(rawValue: 135)!
+let kCGEventGestureFlavor = CGEventField(rawValue: 138)!
 let kCGEventGestureZoomDeltaX = CGEventField(rawValue: 139)!
+let kCGEventGestureTimestamp = CGEventField(rawValue: 169)!
 
 let kCGSEventGesture: Int64 = 29
 let kCGSEventDockControl: Int64 = 30
@@ -262,9 +271,97 @@ private let kInstantSwitchProgress: Double = 2.0
 /// Only used when the switch duration is zero. Far above the band in which the Dock draws a
 /// transition at all, which is exactly the point: the desktop cuts rather than slides.
 private let kInstantSwitchVelocity: Double = 400
+/// macOS 27 raised the terminal-velocity threshold on its validated gesture path.
+private let kAugmentedInstantSwitchVelocity: Double = 9_999
 /// Released at the end of a driven slide, where progress has already reached the target and
 /// the velocity only has to be enough to commit rather than rubber-band.
 private let kAnimatedReleaseVelocity: Double = 60
+
+/// macOS 27 validates a raw IOHID queue entry stored as binary CGEvent field 4205.
+private let kCGEventIOHIDPayloadField: UInt16 = 4_205
+private let kIOHIDEventTypeVelocity: UInt32 = 9
+private let kIOHIDEventTypeFluidTouchGesture: UInt32 = 23
+private let kIOHIDGestureFlavorDockPrimary: UInt16 = 3
+private let kIOHIDFluidTouchGestureDataSize: UInt32 = 40
+private let kIOHIDVelocityEventDataSize: UInt32 = 28
+private let kIOHIDProgressEpsilon = 1.0 / 65_536.0
+
+enum DockSwipePostingMode: Equatable {
+    case legacy
+    case augmented(invertSigns: Bool)
+}
+
+/// Selects the measured DockSwipe schema for the running macOS release.
+///
+/// macOS 27 requires a three-phase gesture whose fields are mirrored into a packed IOHID
+/// payload. Its horizontal sign follows Natural Scrolling on release builds. Early 26A beta
+/// seeds below 26A5416 used an always-inverted sign, but shipping 27.0 is 26A428: Apple's
+/// release build numbers are lower than its 5000-series seed numbers, so it must not be
+/// classified as an early beta merely because 428 is less than 5416.
+enum DockSwipeCompatibility {
+    static func mode(
+        operatingSystemMajor: Int,
+        build: String,
+        naturalScrolling: Bool
+    ) -> DockSwipePostingMode? {
+        if operatingSystemMajor < 27 { return .legacy }
+        guard operatingSystemMajor == 27 else { return nil }
+
+        let parsed = parse(build: build)
+        let isAlwaysInvertedSeed = parsed?.train == 26
+            && parsed?.letter == "A"
+            && (parsed?.number ?? 0) >= 5_000
+            && (parsed?.number ?? Int.max) < 5_416
+        return .augmented(invertSigns: isAlwaysInvertedSeed || naturalScrolling)
+    }
+
+    static var currentMode: DockSwipePostingMode? {
+        mode(
+            operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+            build: operatingSystemBuild(),
+            naturalScrolling: naturalScrollingEnabled()
+        )
+    }
+
+    static func supports(operatingSystemMajor: Int) -> Bool {
+        (26...27).contains(operatingSystemMajor)
+    }
+
+    private static func parse(build: String) -> (train: Int, letter: String, number: Int)? {
+        var remainder = build[...]
+        let trainText = remainder.prefix(while: \.isNumber)
+        remainder = remainder.dropFirst(trainText.count)
+        let letterText = remainder.prefix(while: \.isUppercase)
+        remainder = remainder.dropFirst(letterText.count)
+        let numberText = remainder.prefix(while: \.isNumber)
+        guard let train = Int(trainText), !letterText.isEmpty, let number = Int(numberText)
+        else { return nil }
+        return (train, String(letterText), number)
+    }
+
+    private static func operatingSystemBuild() -> String {
+        var size = 0
+        guard sysctlbyname("kern.osversion", nil, &size, nil, 0) == 0, size > 0
+        else { return "" }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("kern.osversion", &buffer, &size, nil, 0) == 0
+        else { return "" }
+        let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    private static func naturalScrollingEnabled() -> Bool {
+        CFPreferencesSynchronize(
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesCurrentHost
+        )
+        return CFPreferencesCopyAppValue(
+            "com.apple.swipescrolldirection" as CFString,
+            kCFPreferencesAnyApplication
+        ) as? Bool ?? true
+    }
+}
 
 // MARK: - Plan
 
@@ -466,7 +563,7 @@ struct SpaceSwitchCoordinator {
 
 // MARK: - Gesture events
 
-enum DockSwipePhase {
+enum DockSwipePhase: Equatable {
     case began
     case changed
     case ended
@@ -516,6 +613,135 @@ enum DockSwipeAnimation {
 
 enum DockSwipeEvent {
 
+    static func instantPhases(for mode: DockSwipePostingMode) -> [DockSwipePhase] {
+        switch mode {
+        case .legacy: [.began, .ended]
+        case .augmented: [.began, .changed, .ended]
+        }
+    }
+
+    private static func fixed1616(_ value: Double) -> Int32 {
+        guard value.isFinite else { return 0 }
+        let scaled = (value * 65_536).rounded(.towardZero)
+        let bounded = min(max(scaled, Double(Int32.min)), Double(Int32.max))
+        let fixed = Int32(bounded)
+        if fixed == 0, value != 0 { return value > 0 ? 1 : -1 }
+        return fixed
+    }
+
+    private static func appendLittleEndian<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+        withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+    }
+
+    /// Encodes the packed IOHID queue entry the macOS 27 Dock validates against the ordinary
+    /// CGEvent fields. The layout is the 28-byte queue header followed by one 40-byte fluid
+    /// touch record and, on Ended, a 28-byte velocity record.
+    private static func iohidPayload(for event: CGEvent) -> Data {
+        let phase = event.getIntegerValueField(kCGEventGesturePhase)
+        let velocityX = event.getDoubleValueField(kCGEventGestureSwipeVelocityX)
+        let velocityY = event.getDoubleValueField(kCGEventGestureSwipeVelocityY)
+        let includesVelocity = velocityX != 0 || velocityY != 0 || phase == kCGSGesturePhaseEnded
+        var payload = Data()
+
+        appendLittleEndian(event.timestamp == 0 ? mach_absolute_time() : event.timestamp, to: &payload)
+        appendLittleEndian(UInt64(0), to: &payload)
+        appendLittleEndian(UInt32(0), to: &payload)
+        appendLittleEndian(UInt32(0), to: &payload)
+        appendLittleEndian(UInt32(includesVelocity ? 2 : 1), to: &payload)
+
+        appendLittleEndian(kIOHIDFluidTouchGestureDataSize, to: &payload)
+        appendLittleEndian(kIOHIDEventTypeFluidTouchGesture, to: &payload)
+        appendLittleEndian(UInt32((phase & 0xFF) << 24), to: &payload)
+        appendLittleEndian(UInt8(0), to: &payload)
+        payload.append(contentsOf: [0, 0, 0])
+        appendLittleEndian(fixed1616(event.getDoubleValueField(kCGEventGesturePositionX)), to: &payload)
+        appendLittleEndian(fixed1616(event.getDoubleValueField(kCGEventGesturePositionY)), to: &payload)
+        appendLittleEndian(Int32(0), to: &payload)
+        appendLittleEndian(UInt32(truncatingIfNeeded:
+            event.getIntegerValueField(kCGEventGestureSwipeMask)), to: &payload)
+        appendLittleEndian(UInt16(truncatingIfNeeded:
+            event.getIntegerValueField(kCGEventGestureSwipeMotion)), to: &payload)
+        appendLittleEndian(kIOHIDGestureFlavorDockPrimary, to: &payload)
+        appendLittleEndian(fixed1616(event.getDoubleValueField(kCGEventGestureSwipeProgress)),
+                           to: &payload)
+
+        if includesVelocity {
+            appendLittleEndian(kIOHIDVelocityEventDataSize, to: &payload)
+            appendLittleEndian(kIOHIDEventTypeVelocity, to: &payload)
+            appendLittleEndian(UInt32(0), to: &payload)
+            appendLittleEndian(UInt8(1), to: &payload)
+            payload.append(contentsOf: [0, 0, 0])
+            appendLittleEndian(fixed1616(velocityX), to: &payload)
+            appendLittleEndian(fixed1616(velocityY), to: &payload)
+            appendLittleEndian(Int32(0), to: &payload)
+        }
+        return payload
+    }
+
+    private static func appendingPayload(_ payload: Data, to serialized: Data) -> Data? {
+        guard payload.count <= Int(UInt16.max) else { return nil }
+        var augmented = serialized
+        augmented.append(UInt8(payload.count >> 8))
+        augmented.append(UInt8(payload.count & 0xFF))
+        augmented.append(UInt8(kCGEventIOHIDPayloadField >> 8))
+        augmented.append(UInt8(kCGEventIOHIDPayloadField & 0xFF))
+        augmented.append(payload)
+        return augmented
+    }
+
+    /// Replaces the payload in a physical event without disturbing its other serialized fields.
+    /// Unknown record shapes abort the cleanup rather than risking a corrupt event.
+    private static func replacingPayload(_ payload: Data, in serialized: Data) -> Data? {
+        guard serialized.count >= 4 else { return nil }
+        var result = Data(serialized.prefix(4))
+        var offset = 4
+        var foundPayload = false
+
+        while offset < serialized.count {
+            guard offset + 4 <= serialized.count else { return nil }
+            let elementSize = (UInt16(serialized[offset]) << 8)
+                | UInt16(serialized[offset + 1])
+            let tagAndField = (UInt16(serialized[offset + 2]) << 8)
+                | UInt16(serialized[offset + 3])
+            let tag = tagAndField >> 14
+            let field = tagAndField & 0x3FFF
+            let valueSize: Int
+            switch (tag, elementSize) {
+            case (0, 1): valueSize = 8
+            case (0, let size) where size > 1: valueSize = Int(size)
+            case (1, 1), (3, 1): valueSize = 4
+            case (3, 2): valueSize = 8
+            default: return nil
+            }
+            let recordEnd = offset + 4 + valueSize
+            guard recordEnd <= serialized.count else { return nil }
+            if field == kCGEventIOHIDPayloadField {
+                foundPayload = true
+            } else {
+                result.append(serialized.subdata(in: offset..<recordEnd))
+            }
+            offset = recordEnd
+        }
+
+        guard foundPayload else { return nil }
+        return appendingPayload(payload, to: result)
+    }
+
+    /// Binary fields are not writable through CGEvent's field setters. Flatten the event,
+    /// append or replace field 4205, then inflate a new event carrying the matching payload.
+    private static func augment(_ event: CGEvent, replacingExistingPayload: Bool = false) -> CGEvent? {
+        guard let serialized = event.data as Data?, serialized.count >= 4,
+              serialized.prefix(4).elementsEqual([0, 0, 0, 2])
+        else { return nil }
+
+        let payload = iohidPayload(for: event)
+        let augmented = replacingExistingPayload
+            ? replacingPayload(payload, in: serialized)
+            : appendingPayload(payload, to: serialized)
+        guard let augmented else { return nil }
+        return CGEvent(withDataAllocator: kCFAllocatorDefault, data: augmented as CFData)
+    }
+
     /// Builds one dock-control event describing a horizontal Space swipe.
     ///
     /// Only the Ended phase carries velocity and progress; that is the phase where the Dock
@@ -559,6 +785,68 @@ enum DockSwipeEvent {
         return event
     }
 
+    /// Builds the schema selected for the running release. Legacy events retain their exact
+    /// pre-27 fields. macOS 27 events add the mirrored fields, use a non-zero Began progress,
+    /// then carry the matching raw IOHID payload in field 4205.
+    static func makeForPosting(
+        phase: DockSwipePhase,
+        direction: SpaceSwitchDirection,
+        velocity: Double,
+        progress: Double,
+        location: CGPoint? = nil,
+        mode: DockSwipePostingMode,
+        markSynthetic: Bool = true
+    ) -> CGEvent? {
+        guard case .augmented(let invertSigns) = mode else {
+            return make(
+                phase: phase,
+                direction: direction,
+                velocity: velocity,
+                progress: progress,
+                location: location
+            )
+        }
+
+        guard let event = CGEvent(source: nil) else { return nil }
+        if let location { event.location = location }
+        let sign = direction.sign * (invertSigns ? -1 : 1)
+        let signedProgress = sign * (phase == .began ? kIOHIDProgressEpsilon : progress)
+
+        event.setIntegerValueField(kCGSEventTypeField, value: kCGSEventDockControl)
+        event.setIntegerValueField(kCGEventGestureHIDType, value: kIOHIDEventTypeDockSwipe)
+        event.setIntegerValueField(kCGEventGesturePhase, value: phase.raw)
+        event.setIntegerValueField(kCGEventGesturePhase2, value: phase.raw)
+        event.setIntegerValueField(kCGEventGestureSwipeMotion, value: kGestureMotionHorizontal)
+        event.setDoubleValueField(kCGEventGestureSwipeProgress, value: signedProgress)
+        event.setDoubleValueField(kCGEventGestureFlavor,
+                                  value: Double(kIOHIDGestureFlavorDockPrimary))
+        event.setDoubleValueField(kCGEventGestureTimestamp, value: Double(mach_absolute_time()))
+        event.setDoubleValueField(kCGEventGesturePositionX, value: 0.1)
+        if phase == .ended {
+            event.setDoubleValueField(kCGEventGestureSwipeVelocityX, value: sign * velocity)
+        }
+
+        guard let augmented = augment(event) else { return nil }
+        if markSynthetic {
+            augmented.setIntegerValueField(.eventSourceUserData,
+                                           value: DesktopSwipeService.syntheticMarker)
+        }
+        return augmented
+    }
+
+    /// Rebuilds a physical macOS 27 terminal event with no movement in either representation.
+    /// Dock still needs the Ended phase to close the gesture it saw begin; swallowing it leaves
+    /// the next physical swipe attached to stale state.
+    static func cleanupPhysicalEnded(_ event: CGEvent) -> CGEvent? {
+        guard event.getIntegerValueField(kCGEventGesturePhase) == kCGSGesturePhaseEnded,
+              let cleanup = event.copy()
+        else { return nil }
+        cleanup.setDoubleValueField(kCGEventGestureSwipeProgress, value: 0)
+        cleanup.setDoubleValueField(kCGEventGestureSwipeVelocityX, value: 0)
+        cleanup.setDoubleValueField(kCGEventGestureSwipeVelocityY, value: 0)
+        return augment(cleanup, replacingExistingPayload: true)
+    }
+
     /// The envelope event the Dock expects alongside each dock-control event.
     static func makeEnvelope(location: CGPoint? = nil) -> CGEvent? {
         guard let event = CGEvent(source: nil) else { return nil }
@@ -574,17 +862,31 @@ enum DockSwipeEvent {
     static func postSwitch(
         direction: SpaceSwitchDirection,
         velocity: Double,
-        location: CGPoint? = nil
+        location: CGPoint? = nil,
+        mode: DockSwipePostingMode = .legacy
     ) -> Bool {
-        guard let began = make(
-            phase: .began, direction: direction, velocity: 0, location: location
-        ), let beganEnvelope = makeEnvelope(location: location),
-              let ended = make(
-                phase: .ended, direction: direction, velocity: velocity, location: location
-              ), let endedEnvelope = makeEnvelope(location: location)
-        else { return false }
+        let phases = instantPhases(for: mode).map { phase -> (DockSwipePhase, Double, Double) in
+            switch (mode, phase) {
+            case (.legacy, .ended): (phase, velocity, kInstantSwitchProgress)
+            case (.legacy, _): (phase, 0, kInstantSwitchProgress)
+            case (.augmented, .ended): (phase, kAugmentedInstantSwitchVelocity, 1)
+            case (.augmented, _): (phase, 0, 1)
+            }
+        }
+        let events = phases.compactMap { phase, phaseVelocity, progress -> (CGEvent, CGEvent)? in
+            guard let control = makeForPosting(
+                phase: phase,
+                direction: direction,
+                velocity: phaseVelocity,
+                progress: progress,
+                location: location,
+                mode: mode
+            ), let envelope = makeEnvelope(location: location) else { return nil }
+            return (control, envelope)
+        }
+        guard events.count == phases.count else { return false }
 
-        for (control, envelope) in [(began, beganEnvelope), (ended, endedEnvelope)] {
+        for (control, envelope) in events {
             control.post(tap: .cgSessionEventTap)
             envelope.post(tap: .cgSessionEventTap)
         }
@@ -601,13 +903,18 @@ enum DockSwipeEvent {
     static func postDrivenSwitch(direction: SpaceSwitchDirection,
                                  samples: [DockSwipeSample],
                                  location: CGPoint? = nil,
+                                 mode: DockSwipePostingMode = .legacy,
                                  isCancelled: () -> Bool = { false }) -> Bool {
-        guard let began = make(
-            phase: .began, direction: direction, velocity: 0, location: location
+        let releaseVelocity = mode == .legacy
+            ? kAnimatedReleaseVelocity : kAugmentedInstantSwitchVelocity
+        guard let began = makeForPosting(
+            phase: .began, direction: direction, velocity: 0, progress: 1,
+            location: location, mode: mode
         ), let beganEnvelope = makeEnvelope(location: location),
-              let ended = make(phase: .ended, direction: direction,
-                               velocity: kAnimatedReleaseVelocity, progress: 1,
-                               location: location),
+              let ended = makeForPosting(
+                phase: .ended, direction: direction, velocity: releaseVelocity, progress: 1,
+                location: location, mode: mode
+              ),
               let endedEnvelope = makeEnvelope(location: location)
         else { return false }
 
@@ -618,8 +925,10 @@ enum DockSwipeEvent {
         for sample in samples.dropLast() {
             guard !isCancelled() else { break }
             wait(untilElapsed: sample.delay, since: start)
-            guard let changed = make(phase: .changed, direction: direction,
-                                     progress: sample.progress, location: location),
+            guard let changed = makeForPosting(
+                    phase: .changed, direction: direction, velocity: 0,
+                    progress: sample.progress, location: location, mode: mode
+                  ),
                   let envelope = makeEnvelope(location: location)
             else { continue }
             changed.post(tap: .cgSessionEventTap)
@@ -796,12 +1105,12 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         return cid == 0 ? nil : cid
     }
 
-    /// macOS 27 rejects bare synthetic dock swipes and requires an augmented
-    /// Began+Changed+Ended sequence carrying a packed IOHID payload. That path is not
-    /// implemented here because it cannot be exercised on this machine, and shipping a
-    /// gesture path no test or probe has ever run is worse than declining to switch.
+    /// Future releases stay disabled until their private DockSwipe schema is measured.
+    /// macOS 27 is supported through its validated, packed IOHID event path.
     public var canSwitchSpaces: Bool {
-        ProcessInfo.processInfo.operatingSystemVersion.majorVersion < 27
+        DockSwipeCompatibility.supports(
+            operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        )
     }
 
     // MARK: Reading
@@ -1119,7 +1428,8 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     private func post(_ hop: SpaceSwitchHop, in topology: SpaceTopology) -> Bool {
         guard let stack = topology.stack(id: hop.stackID),
               stack.currentDesktopID == hop.fromDesktopID,
-              stack.desktopIDs.contains(hop.toDesktopID)
+              stack.desktopIDs.contains(hop.toDesktopID),
+              let postingMode = DockSwipeCompatibility.currentMode
         else { return false }
         let eventLocation: CGPoint? = stack.displayID.map { displayID in
             let bounds = CGDisplayBounds(displayID)
@@ -1131,7 +1441,8 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             return DockSwipeEvent.postSwitch(
                 direction: hop.direction,
                 velocity: hop.instantVelocity,
-                location: eventLocation
+                location: eventLocation,
+                mode: postingMode
             )
         }
 
@@ -1139,7 +1450,8 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             let posted = DockSwipeEvent.postDrivenSwitch(
                 direction: hop.direction,
                 samples: samples,
-                location: eventLocation
+                location: eventLocation,
+                mode: postingMode
             )
             if !posted {
                 switchCoordinatorLock.withLock {

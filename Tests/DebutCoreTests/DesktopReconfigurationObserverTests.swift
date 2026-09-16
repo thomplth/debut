@@ -26,8 +26,41 @@ struct DesktopReconfigurationObserverTests {
             ["kCGWindowLayer": 18, "kCGWindowOwnerName": "Dock"],
         ]
 
-        #expect(!DockOverviewDetector.isActive(in: ordinary))
-        #expect(DockOverviewDetector.isActive(in: missionControl))
+        #expect(!DockOverviewDetector.isActive(
+            in: ordinary, operatingSystemMajor: 26, displayBounds: []
+        ))
+        #expect(DockOverviewDetector.isActive(
+            in: missionControl, operatingSystemMajor: 26, displayBounds: []
+        ))
+    }
+
+    @Test("macOS 27 WindowManager overlays identify every overview without matching thumbnails")
+    func detectsWindowManagerOverviewWindows() {
+        let display = CGRect(x: 0, y: 0, width: 1_440, height: 900)
+        let ordinary: [[String: Any]] = [
+            ["kCGWindowLayer": 19, "kCGWindowOwnerName": "WindowManager",
+             "kCGWindowBounds": CGRect(x: 20, y: 20, width: 700, height: 500).dictionaryRepresentation],
+            ["kCGWindowLayer": 18, "kCGWindowOwnerName": "Dock",
+             "kCGWindowBounds": display.dictionaryRepresentation],
+        ]
+        let missionControl = ordinary + [[
+            "kCGWindowLayer": 19, "kCGWindowOwnerName": "WindowManager",
+            "kCGWindowBounds": display.dictionaryRepresentation,
+        ]]
+        let showDesktop = ordinary + [[
+            "kCGWindowLayer": 18, "kCGWindowOwnerName": "WindowManager",
+            "kCGWindowBounds": display.dictionaryRepresentation,
+        ]]
+
+        #expect(!DockOverviewDetector.isActive(
+            in: ordinary, operatingSystemMajor: 27, displayBounds: [display]
+        ))
+        #expect(DockOverviewDetector.isActive(
+            in: missionControl, operatingSystemMajor: 27, displayBounds: [display]
+        ))
+        #expect(DockOverviewDetector.isActive(
+            in: showDesktop, operatingSystemMajor: 27, displayBounds: [display]
+        ))
     }
 
     @Test("Overview recovery yields once after the Dock overlay disappears")
