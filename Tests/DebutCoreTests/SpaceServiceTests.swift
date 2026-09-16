@@ -295,6 +295,133 @@ struct DockSwipeEventTests {
         #expect(right.getIntegerValueField(kCGEventScrollGestureFlagBits) == 1)
         #expect(left.getIntegerValueField(kCGEventScrollGestureFlagBits) == 0)
     }
+
+    @Test("macOS 27 uses an augmented gesture while older and future releases stay gated")
+    func postingModeByOperatingSystem() {
+        #expect(DockSwipeCompatibility.mode(
+            operatingSystemMajor: 26,
+            build: "25G76",
+            naturalScrolling: true
+        ) == .legacy)
+        #expect(DockSwipeCompatibility.mode(
+            operatingSystemMajor: 27,
+            build: "26A428",
+            naturalScrolling: true
+        ) == .augmented(invertSigns: true))
+        #expect(DockSwipeCompatibility.mode(
+            operatingSystemMajor: 28,
+            build: "27A1",
+            naturalScrolling: true
+        ) == nil)
+    }
+
+    @Test("macOS 27 release signs follow Natural scrolling without misclassifying release builds as beta seeds")
+    func augmentedSignCompatibility() {
+        #expect(DockSwipeCompatibility.mode(
+            operatingSystemMajor: 27,
+            build: "26A428",
+            naturalScrolling: false
+        ) == .augmented(invertSigns: false))
+        #expect(DockSwipeCompatibility.mode(
+            operatingSystemMajor: 27,
+            build: "26A5388g",
+            naturalScrolling: false
+        ) == .augmented(invertSigns: true))
+        #expect(DockSwipeCompatibility.mode(
+            operatingSystemMajor: 27,
+            build: "26A5416b",
+            naturalScrolling: false
+        ) == .augmented(invertSigns: false))
+    }
+
+    @Test("macOS 27 posts the required Changed phase while legacy releases keep their pair")
+    func instantPostingPhases() {
+        #expect(DockSwipeEvent.instantPhases(for: .legacy) == [.began, .ended])
+        #expect(DockSwipeEvent.instantPhases(
+            for: .augmented(invertSigns: true)
+        ) == [.began, .changed, .ended])
+    }
+
+    @Test("macOS 27 events mirror fields into a packed IOHID payload")
+    func augmentedPayload() throws {
+        let event = try #require(DockSwipeEvent.makeForPosting(
+            phase: .ended,
+            direction: .right,
+            velocity: 9_999,
+            progress: 1,
+            mode: .augmented(invertSigns: true)
+        ))
+
+        #expect(event.getIntegerValueField(kCGEventGesturePhase) == kCGSGesturePhaseEnded)
+        #expect(event.getIntegerValueField(kCGEventGesturePhase2) == kCGSGesturePhaseEnded)
+        #expect(event.getDoubleValueField(kCGEventGestureFlavor) == 3)
+        #expect(abs(event.getDoubleValueField(kCGEventGesturePositionX) - 0.1) < 0.000_001)
+        #expect(event.getDoubleValueField(kCGEventGestureSwipeProgress) == -1)
+        #expect(event.getDoubleValueField(kCGEventGestureSwipeVelocityX) == -9_999)
+
+        let serialized = try #require(event.data as Data?)
+        let payload = try #require(Self.binaryField(4_205, in: serialized))
+        #expect(payload.count == 96)
+        #expect(Self.littleEndianUInt32(payload, at: 24) == 2)
+        #expect(Self.littleEndianUInt32(payload, at: 28) == 40)
+        #expect(Self.littleEndianUInt32(payload, at: 32) == 23)
+        #expect(Self.littleEndianInt32(payload, at: 64) == -65_536)
+        #expect(Self.littleEndianUInt32(payload, at: 68) == 28)
+        #expect(Self.littleEndianUInt32(payload, at: 72) == 9)
+        #expect(Self.littleEndianInt32(payload, at: 84) == -655_294_464)
+    }
+
+    @Test("macOS 27 Began preserves a non-zero signed 16.16 progress epsilon")
+    func augmentedBeganEpsilon() throws {
+        let event = try #require(DockSwipeEvent.makeForPosting(
+            phase: .began,
+            direction: .left,
+            velocity: 0,
+            progress: 1,
+            mode: .augmented(invertSigns: true)
+        ))
+
+        #expect(event.getDoubleValueField(kCGEventGestureSwipeProgress) == 1.0 / 65_536.0)
+        let serialized = try #require(event.data as Data?)
+        let payload = try #require(Self.binaryField(4_205, in: serialized))
+        #expect(payload.count == 68)
+        #expect(Self.littleEndianUInt32(payload, at: 24) == 1)
+        #expect(Self.littleEndianInt32(payload, at: 64) == 1)
+    }
+
+    private static func binaryField(_ field: UInt16, in bytes: Data) -> Data? {
+        guard bytes.count >= 4 else { return nil }
+        var offset = 4
+        while offset + 4 <= bytes.count {
+            let elementSize = (UInt16(bytes[offset]) << 8) | UInt16(bytes[offset + 1])
+            let tagAndField = (UInt16(bytes[offset + 2]) << 8) | UInt16(bytes[offset + 3])
+            let tag = tagAndField >> 14
+            let currentField = tagAndField & 0x3FFF
+            let valueSize: Int
+            switch (tag, elementSize) {
+            case (0, 1): valueSize = 8
+            case (0, let size) where size > 1: valueSize = Int(size)
+            case (1, 1), (3, 1): valueSize = 4
+            case (3, 2): valueSize = 8
+            default: return nil
+            }
+            let end = offset + 4 + valueSize
+            guard end <= bytes.count else { return nil }
+            if currentField == field { return bytes.subdata(in: (offset + 4)..<end) }
+            offset = end
+        }
+        return nil
+    }
+
+    private static func littleEndianUInt32(_ data: Data, at offset: Int) -> UInt32 {
+        data[offset..<(offset + 4)].enumerated().reduce(0) { result, byte in
+            result | (UInt32(byte.element) << UInt32(byte.offset * 8))
+        }
+    }
+
+    private static func littleEndianInt32(_ data: Data, at offset: Int) -> Int32 {
+        Int32(bitPattern: littleEndianUInt32(data, at: offset))
+    }
 }
 
 @Suite("SpaceService desktop mapping")
