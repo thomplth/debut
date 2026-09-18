@@ -13,23 +13,23 @@ public enum DebutGlyph {
 
     private static let spaces = [
         Space(
-            frame: CGRect(x: 0.1875, y: 0.03125, width: 0.625, height: 0.21875),
+            frame: CGRect(x: 0.1875, y: 0.15625, width: 0.625, height: 0.15625),
             radius: 0.0625,
             alpha: 0.45
         ),
         Space(
-            frame: CGRect(x: 0.0625, y: 0.375, width: 0.875, height: 0.25),
-            radius: 0.09375,
+            frame: CGRect(x: 0.0625, y: 0.40625, width: 0.875, height: 0.1875),
+            radius: 0.078125,
             alpha: 1
         ),
         Space(
-            frame: CGRect(x: 0.1875, y: 0.75, width: 0.625, height: 0.21875),
+            frame: CGRect(x: 0.1875, y: 0.6875, width: 0.625, height: 0.15625),
             radius: 0.0625,
             alpha: 0.45
         )
     ]
 
-    public static let menuBarSize: CGFloat = 16
+    public static let menuBarSize: CGFloat = 20
 
     /// Drawn at the requested point size rather than scaled from a raster, so the same
     /// mark stays crisp in the menu bar and in the Settings header.

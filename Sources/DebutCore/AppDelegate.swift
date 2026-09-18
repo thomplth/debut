@@ -993,6 +993,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
+            button.imageScaling = .scaleProportionallyDown
             button.image = DebutGlyph.image(size: DebutGlyph.menuBarSize)
         }
 
