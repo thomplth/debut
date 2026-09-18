@@ -13,17 +13,17 @@ public enum DebutGlyph {
 
     private static let spaces = [
         Space(
-            frame: CGRect(x: 0.1875, y: 0.15625, width: 0.625, height: 0.15625),
+            frame: CGRect(x: 0.1875, y: 0.03125, width: 0.625, height: 0.21875),
             radius: 0.0625,
             alpha: 0.45
         ),
         Space(
-            frame: CGRect(x: 0.0625, y: 0.40625, width: 0.875, height: 0.1875),
-            radius: 0.078125,
+            frame: CGRect(x: 0.0625, y: 0.375, width: 0.875, height: 0.25),
+            radius: 0.09375,
             alpha: 1
         ),
         Space(
-            frame: CGRect(x: 0.1875, y: 0.6875, width: 0.625, height: 0.15625),
+            frame: CGRect(x: 0.1875, y: 0.75, width: 0.625, height: 0.21875),
             radius: 0.0625,
             alpha: 0.45
         )
