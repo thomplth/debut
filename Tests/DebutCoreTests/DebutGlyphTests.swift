@@ -62,13 +62,13 @@ struct DebutGlyphTests {
         #expect(alpha(DebutGlyph.image(size: 64), x: 0.5, y: 0.36) < 0.05)
     }
 
-    @Test("The menu bar mark fills the available height without growing wider")
+    @Test("The menu bar mark scales up uniformly inside its fixed-width status item")
     func menuBarFit() {
         let mark = DebutGlyph.image(size: 64)
 
-        #expect(DebutGlyph.menuBarSize == 16)
-        #expect(alpha(mark, x: 0.5, y: 0.05) > 0.25)
-        #expect(alpha(mark, x: 0.5, y: 0.95) > 0.25)
+        #expect(DebutGlyph.menuBarSize == 20)
+        #expect(alpha(mark, x: 0.5, y: 0.1) < 0.05)
+        #expect(alpha(mark, x: 0.5, y: 0.9) < 0.05)
         #expect(alpha(mark, x: 0.02, y: 0.5) < 0.05)
         #expect(alpha(mark, x: 0.98, y: 0.5) < 0.05)
     }
