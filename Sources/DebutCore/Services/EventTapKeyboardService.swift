@@ -382,8 +382,9 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             }
 
             // Same-app cycling is Debut's replacement for macOS's Cmd-` handling. Excluded
-            // apps have no tracked windows, so leave that shortcut untouched for macOS.
-            if globalAction.isSameAppCycle && isFrontmostAppExcluded {
+            // apps have no tracked windows, so leave that shortcut untouched for macOS until
+            // Debut's overlay is visible and owns the keyboard session.
+            if globalAction.isSameAppCycle && isFrontmostAppExcluded && !overlayVisible {
                 return event
             }
 
