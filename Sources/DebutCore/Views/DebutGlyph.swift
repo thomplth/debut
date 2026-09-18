@@ -1,5 +1,9 @@
 import AppKit
 
+private final class DebutMenuBarIconView: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// Debut's mark: the active space as a full-width bar between two shorter, dimmer
 /// neighbours — the overlay's stage stack reduced to what survives at 16pt.
 public enum DebutGlyph {
@@ -30,6 +34,29 @@ public enum DebutGlyph {
     ]
 
     public static let menuBarSize: CGFloat = 20
+
+    /// Hosts the mark in its own square drawing surface. `NSStatusBarButton` otherwise fits a
+    /// larger image into its narrower content inset, scaling the width and height differently.
+    @MainActor
+    public static func installMenuBarIcon(in button: NSStatusBarButton) {
+        button.image = nil
+        button.setAccessibilityLabel("Debut")
+
+        let icon = DebutMenuBarIconView(image: image(size: menuBarSize))
+        icon.identifier = NSUserInterfaceItemIdentifier("DebutMenuBarIcon")
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.contentTintColor = .labelColor
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.setAccessibilityElement(false)
+        button.addSubview(icon)
+
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: menuBarSize),
+            icon.heightAnchor.constraint(equalToConstant: menuBarSize),
+            icon.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: button.centerYAnchor)
+        ])
+    }
 
     /// Drawn at the requested point size rather than scaled from a raster, so the same
     /// mark stays crisp in the menu bar and in the Settings header.
