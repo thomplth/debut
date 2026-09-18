@@ -73,6 +73,25 @@ struct DebutGlyphTests {
         #expect(alpha(mark, x: 0.98, y: 0.5) < 0.05)
     }
 
+    @Test("The status item hosts the mark in a square view without growing")
+    @MainActor
+    func statusButtonFit() throws {
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        defer { NSStatusBar.system.removeStatusItem(statusItem) }
+
+        let button = try #require(statusItem.button)
+        DebutGlyph.installMenuBarIcon(in: button)
+        button.layoutSubtreeIfNeeded()
+        let icon = try #require(button.subviews.first {
+            $0.identifier?.rawValue == "DebutMenuBarIcon"
+        })
+
+        #expect(statusItem.length == NSStatusItem.squareLength)
+        #expect(button.image == nil)
+        #expect(icon.frame.size == NSSize(width: 20, height: 20))
+        #expect(icon.hitTest(NSPoint(x: 10, y: 10)) == nil)
+    }
+
     @Test("A larger request scales the mark instead of padding it")
     func scalesWithRequestedSize() {
         let small = DebutGlyph.image(size: 16)
