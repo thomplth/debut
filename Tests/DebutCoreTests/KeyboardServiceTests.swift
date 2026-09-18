@@ -928,6 +928,42 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents.isEmpty)
     }
 
+    @Test("Cmd-backtick stays in the overlay for excluded apps")
+    func commandBacktickControlsOverlayForExcludedApp() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+        service.updateFrontmostApp(bundleIdentifier: "com.example.Excluded")
+        service.excludedBundleIDs = ["com.example.Excluded"]
+
+        let tabDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_Tab),
+            keyDown: true
+        )!
+        tabDown.flags = .maskCommand
+        #expect(service.handleCGEvent(type: .keyDown, event: tabDown) == nil)
+        service.overlayVisible = true
+
+        let backtickDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Grave),
+            keyDown: true
+        )!
+        backtickDown.flags = .maskCommand
+        let backtickUp = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_ANSI_Grave),
+            keyDown: false
+        )!
+        backtickUp.flags = .maskCommand
+
+        #expect(service.handleCGEvent(type: .keyDown, event: backtickDown) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: backtickUp) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .previousWindow])
+    }
+
     @Test("Cmd-shift-backtick passes through for excluded apps")
     func commandShiftBacktickPassesThroughForExcludedApp() {
         let service = EventTapKeyboardService()
