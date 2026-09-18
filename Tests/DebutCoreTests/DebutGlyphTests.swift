@@ -62,6 +62,17 @@ struct DebutGlyphTests {
         #expect(alpha(DebutGlyph.image(size: 64), x: 0.5, y: 0.36) < 0.05)
     }
 
+    @Test("The menu bar mark fills the available height without growing wider")
+    func menuBarFit() {
+        let mark = DebutGlyph.image(size: 64)
+
+        #expect(DebutGlyph.menuBarSize == 16)
+        #expect(alpha(mark, x: 0.5, y: 0.05) > 0.25)
+        #expect(alpha(mark, x: 0.5, y: 0.95) > 0.25)
+        #expect(alpha(mark, x: 0.02, y: 0.5) < 0.05)
+        #expect(alpha(mark, x: 0.98, y: 0.5) < 0.05)
+    }
+
     @Test("A larger request scales the mark instead of padding it")
     func scalesWithRequestedSize() {
         let small = DebutGlyph.image(size: 16)
