@@ -1658,6 +1658,130 @@ struct WindowDiscoveryServiceTests {
         #expect(processExitMonitor.monitoredPIDs == [newPID])
     }
 
+    // Dia's updater activates its replacement process before that process publishes any
+    // windows. The first activation scan therefore returns empty. Creation observation must
+    // already be armed at the application level, or the eventual windows remain invisible
+    // until some unrelated activation triggers a full scan.
+    @Test("A relaunched app arms creation observation before its windows exist")
+    func relaunchedAppArmsCreationObservationBeforeWindowsExist() {
+        let newPID: pid_t = 20
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: newPID, isHidden: false),
+        ]
+        let processExitMonitor = MockProcessExitMonitor()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: processExitMonitor
+        )
+        var observedPIDs: [pid_t] = []
+        service.windowCreationObserverRegistrationOverride = { pid in
+            observedPIDs.append(pid)
+            return .success
+        }
+
+        service.handleAppActivation(
+            AppInfo(
+                bundleID: "company.thebrowser.dia",
+                name: "Dia",
+                pid: newPID,
+                isHidden: false
+            )
+        )
+
+        #expect(observedPIDs == [newPID])
+        #expect(processExitMonitor.monitoredPIDs == [newPID])
+    }
+
+    @Test("Creation observation retries a freshly launched app's transient AX refusal")
+    func creationObservationRetriesTransientAXRefusal() {
+        let retry = ImmediateRetryScheduler()
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 20, isHidden: false),
+        ]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var attempts = 0
+        service.windowCreationObserverRegistrationOverride = { _ in
+            attempts += 1
+            return attempts == 1 ? .cannotComplete : .success
+        }
+        service.windowCreationObserverRetryScheduler = {
+            retry.schedule(after: $0, work: $1)
+        }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 20, isHidden: false)
+        )
+
+        #expect(attempts == 2)
+        #expect(retry.delays == [0.25])
+    }
+
+    @Test("Launch and activation share one creation-observer retry chain")
+    func launchAndActivationShareCreationObserverRetryChain() {
+        let retry = DeferredWindowCreationRetryScheduler()
+        let app = AppInfo(
+            bundleID: "company.thebrowser.dia",
+            name: "Dia",
+            pid: 20,
+            isHidden: false
+        )
+        let windowService = MockWindowService()
+        windowService.apps = [app]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            launchDiscoveryDelay: 0,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var attempts = 0
+        service.windowCreationObserverRegistrationOverride = { _ in
+            attempts += 1
+            return .cannotComplete
+        }
+        service.windowCreationObserverRetryScheduler = {
+            retry.schedule(delay: $0, work: $1)
+        }
+
+        service.handleAppLaunch(app)
+        service.handleAppActivation(app)
+
+        #expect(attempts == 1)
+        #expect(retry.delays == [0.25])
+    }
+
+    @Test("Process exit cancels a pending creation-observer retry")
+    func processExitCancelsCreationObserverRetry() {
+        let retry = DeferredWindowCreationRetryScheduler()
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var attempts = 0
+        service.windowCreationObserverRegistrationOverride = { _ in
+            attempts += 1
+            return .cannotComplete
+        }
+        service.windowCreationObserverRetryScheduler = {
+            retry.schedule(delay: $0, work: $1)
+        }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 20, isHidden: false)
+        )
+        service.handleProcessExit(pid: 20)
+        retry.runAll()
+
+        #expect(attempts == 1)
+    }
+
     @Test("A window ID reused by a different process is re-armed rather than skipped as already tracked")
     func reusedWindowIDForNewProcessIsRearmed() {
         let service = WindowDiscoveryService(

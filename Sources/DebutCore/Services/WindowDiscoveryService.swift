@@ -41,6 +41,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     static let focusProbeTimeout: TimeInterval = 0.05
     static let windowCreationRetryDelays: [TimeInterval] = [0.05, 0.1, 0.25, 0.5]
+    private static let windowCreationObserverRetryDelays: [TimeInterval] = [0.25, 0.5, 1, 2]
     private static let focusProbeQueue = DispatchQueue(
         label: "com.thomplth.Debut.focusProbe",
         qos: .userInitiated
@@ -162,9 +163,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Replaces the AX focus-observer registration in tests. Production leaves this nil.
     var focusObserverRegistrationOverride: ((pid_t) -> AXError)?
 
+    /// Replaces app-level window-creation registration in tests. Production leaves this nil.
+    var windowCreationObserverRegistrationOverride: ((pid_t) -> AXError)?
+
     /// Replaces retry scheduling in tests so a refused registration can be re-driven
     /// without waiting on wall time. Production leaves this nil.
     var focusObserverRetryScheduler: ((TimeInterval, @escaping () -> Void) -> Void)?
+
+    /// Replaces retry scheduling for app-level window-creation observation in tests.
+    /// Production leaves this nil.
+    var windowCreationObserverRetryScheduler: ((TimeInterval, @escaping () -> Void) -> Void)?
 
     /// Replaces the bounded creation-readiness delay in tests. Production leaves this nil.
     var windowCreationRetryScheduler: ((TimeInterval, @escaping () -> Void) -> Void)?
@@ -201,6 +209,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     // Per-app AXObservers for window lifecycle (destroyed, title changed)
     private var perAppObservers: [pid_t: AXObserver] = [:]
+    private var windowCreationObservedPIDs: Set<pid_t> = []
+    private var pendingWindowCreationObserverAttempts: [pid_t: Int] = [:]
 
     /// The AX element behind every armed window, keyed by window ID.
     ///
@@ -523,6 +533,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         // Install focus observer on the current frontmost app
         if let front, let info = appInfo(for: front) {
+            installWindowCreationObserver(for: info.pid, bundleID: info.bundleID)
             installFocusObserver(for: info.pid, bundleID: info.bundleID)
         }
     }
@@ -547,6 +558,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         pendingWindowCreations.removeAll()
         creationNotificationsSeen.removeAll()
         creationDetectionFailures.removeAll()
+        windowCreationObservedPIDs.removeAll()
+        pendingWindowCreationObserverAttempts.removeAll()
     }
 
     // MARK: - Per-window lifecycle tracking
@@ -632,28 +645,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             kAXWindowResizedNotification as CFString,
             selfPtr
         )
-        let windowCreated = AXObserverAddNotification(
-            observer,
-            lifecycleTarget,
-            kAXWindowCreatedNotification as CFString,
-            selfPtr
-        )
-        reportOptionalLifecycleRegistration(
-            windowCreated,
-            notification: kAXWindowCreatedNotification,
-            pid: pid
-        )
-        let sheetCreated = AXObserverAddNotification(
-            observer,
-            lifecycleTarget,
-            kAXSheetCreatedNotification as CFString,
-            selfPtr
-        )
-        reportOptionalLifecycleRegistration(
-            sheetCreated,
-            notification: kAXSheetCreatedNotification,
-            pid: pid
-        )
+        _ = registerWindowCreationNotifications(for: pid)
         return .armed
     }
 
@@ -718,6 +710,97 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         return observer
     }
 
+    /// A replacement process can activate before it publishes any windows. Observing creation
+    /// cannot depend on first finding a window, because the creation event is precisely what
+    /// must make that first window discoverable. Fresh AX servers temporarily refuse the
+    /// registration, so use the same bounded backoff shape as focused-window observation.
+    private func installWindowCreationObserver(for pid: pid_t, bundleID: String) {
+        guard pid > 0,
+              bundleID != "com.thomplth.Debut",
+              !excludedBundleIDs.contains(bundleID),
+              !windowCreationObservedPIDs.contains(pid),
+              pendingWindowCreationObserverAttempts[pid] == nil
+        else { return }
+
+        registerProcessExitMonitoring(for: pid)
+        pendingWindowCreationObserverAttempts[pid] = 0
+        attemptWindowCreationObserverInstall(for: pid)
+    }
+
+    private func attemptWindowCreationObserverInstall(for pid: pid_t) {
+        guard let attempt = pendingWindowCreationObserverAttempts[pid],
+              !windowCreationObservedPIDs.contains(pid)
+        else { return }
+
+        let result = windowCreationObserverRegistrationOverride?(pid)
+            ?? registerWindowCreationNotifications(for: pid)
+        guard result != .success, result != .notificationAlreadyRegistered else {
+            windowCreationObservedPIDs.insert(pid)
+            pendingWindowCreationObserverAttempts.removeValue(forKey: pid)
+            if attempt > 0 {
+                diag.report("window_creation_observer_registered", details: [
+                    "ownerPID": "\(pid)",
+                    "attempts": "\(attempt + 1)",
+                ])
+            }
+            return
+        }
+
+        guard attempt < Self.windowCreationObserverRetryDelays.count else {
+            diag.report("window_creation_observer_registration_failed", details: [
+                "ownerPID": "\(pid)",
+                "error": "\(result.rawValue)",
+                "attempts": "\(attempt + 1)",
+            ])
+            pendingWindowCreationObserverAttempts.removeValue(forKey: pid)
+            return
+        }
+
+        let delay = Self.windowCreationObserverRetryDelays[attempt]
+        pendingWindowCreationObserverAttempts[pid] = attempt + 1
+        let retry: @Sendable () -> Void = { [weak self] in
+            self?.attemptWindowCreationObserverInstall(for: pid)
+        }
+        if let windowCreationObserverRetryScheduler {
+            windowCreationObserverRetryScheduler(delay, retry)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: retry)
+        }
+    }
+
+    private func registerWindowCreationNotifications(for pid: pid_t) -> AXError {
+        guard let observer = getOrCreateObserver(for: pid) else { return .cannotComplete }
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+        let lifecycleTarget = Self.lifecycleNotificationTarget(for: pid)
+        let windowCreated = AXObserverAddNotification(
+            observer,
+            lifecycleTarget,
+            kAXWindowCreatedNotification as CFString,
+            selfPtr
+        )
+        reportOptionalLifecycleRegistration(
+            windowCreated,
+            notification: kAXWindowCreatedNotification,
+            pid: pid
+        )
+        let sheetCreated = AXObserverAddNotification(
+            observer,
+            lifecycleTarget,
+            kAXSheetCreatedNotification as CFString,
+            selfPtr
+        )
+        reportOptionalLifecycleRegistration(
+            sheetCreated,
+            notification: kAXSheetCreatedNotification,
+            pid: pid
+        )
+        if windowCreated == .success || windowCreated == .notificationAlreadyRegistered {
+            windowCreationObservedPIDs.insert(pid)
+            pendingWindowCreationObserverAttempts.removeValue(forKey: pid)
+        }
+        return windowCreated
+    }
+
     private func removeAppObserver(for pid: pid_t) {
         // Arming records are keyed by window, not by observer, so they must be
         // cleared even when no observer was ever created for this app.
@@ -735,6 +818,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             trackedWindowElements.removeValue(forKey: windowID)
         }
 
+        windowCreationObservedPIDs.remove(pid)
+        pendingWindowCreationObserverAttempts.removeValue(forKey: pid)
+
         guard let observer = perAppObservers.removeValue(forKey: pid) else { return }
         CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
     }
@@ -745,6 +831,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
         if let observedPID, !runningPIDs.contains(observedPID) {
             removeFocusObserver()
+        }
+        for pid in Array(pendingWindowCreationObserverAttempts.keys) where !runningPIDs.contains(pid) {
+            pendingWindowCreationObserverAttempts.removeValue(forKey: pid)
         }
         let stoppedPIDs = perAppObservers.keys.filter { !runningPIDs.contains($0) }
         for pid in stoppedPIDs {
@@ -1396,6 +1485,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     func handleAppLaunch(_ app: AppInfo) {
+        installWindowCreationObserver(for: app.pid, bundleID: app.bundleID)
         AppIconCache.shared.warm(
             bundleIDs: [app.bundleID],
             sizes: AppIconCache.overlayIconSizes,
@@ -1531,6 +1621,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             )
             return
         }
+        installWindowCreationObserver(for: app.pid, bundleID: app.bundleID)
         let focusGeneration = focusChangeProbeGeneration
         focusProbeScheduler(pid) { [weak self] sampledFocusedWindowID in
             self?.finishAppActivation(
@@ -1662,7 +1753,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 "creationFailureReason": failure?.reason ?? "none",
                 "creationNotificationSeen": "\(creationNotificationsSeen.contains(identity))",
                 "focusObserverPresent": "\(observedPID == window.ownerPID)",
-                "lifecycleObserverPresent": "\(perAppObservers[window.ownerPID] != nil)",
+                "lifecycleObserverPresent": "\(windowCreationObservedPIDs.contains(window.ownerPID))",
                 "ownerPID": "\(window.ownerPID)",
                 "trigger": trigger,
                 "windowID": "\(window.windowID)",
