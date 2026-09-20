@@ -873,9 +873,11 @@ public struct StageConstants {
     public static func fittedStageScale(
         requested: CGFloat,
         contentAspects: [[CGFloat?]],
-        containerSize: CGSize
+        containerSize: CGSize,
+        rowSpacing: CGFloat? = nil
     ) -> CGFloat {
-        let metrics = StageMetrics.shaped(forDisplay: containerSize)
+        let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize)
+        let metrics = rowSpacing.map(shapedMetrics.withRowSpacing) ?? shapedMetrics
         let floor = minimumFittedStageScale
         let ceiling = CGFloat(AppSettings.maximumStageScale)
         let step = CGFloat(AppSettings.stageScaleStep)
@@ -916,12 +918,16 @@ public struct StageConstants {
     public static func drawnMetrics(
         stageScale: CGFloat,
         contentAspects: [[CGFloat?]],
-        containerSize: CGSize
+        containerSize: CGSize,
+        rowSpacing: CGFloat? = nil
     ) -> StageMetrics {
-        StageMetrics.shaped(forDisplay: containerSize).scaled(by: fittedStageScale(
+        let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize)
+        let metrics = rowSpacing.map(shapedMetrics.withRowSpacing) ?? shapedMetrics
+        return metrics.scaled(by: fittedStageScale(
             requested: stageScale,
             contentAspects: contentAspects,
-            containerSize: containerSize
+            containerSize: containerSize,
+            rowSpacing: rowSpacing
         ))
     }
 
