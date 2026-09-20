@@ -208,16 +208,16 @@ struct StateStoreTests {
         #expect(try StateStore(directory: dir).loadRetiredWindows().isEmpty)
     }
 
-    @Test("Main-display-only overlay placement defaults off for existing settings")
+    @Test("Main-display-only overlay placement defaults on for existing settings")
     func mainDisplayOverlayLegacySettings() throws {
         var settings = AppSettings()
-        #expect(!settings.overlayOnMainDisplayOnly)
-        settings.overlayOnMainDisplayOnly = true
+        #expect(settings.overlayOnMainDisplayOnly)
+        settings.overlayOnMainDisplayOnly = false
         let data = try JSONEncoder().encode(settings)
         var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         object.removeValue(forKey: "overlayOnMainDisplayOnly")
         let legacy = try JSONSerialization.data(withJSONObject: object)
-        #expect(try !JSONDecoder().decode(AppSettings.self, from: legacy).overlayOnMainDisplayOnly)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: legacy).overlayOnMainDisplayOnly)
     }
 
     @Test("Desktop switch indicator defaults on for existing settings")
@@ -307,7 +307,7 @@ struct StateStoreTests {
         #expect(decoded.quickSwitchExcludedBundleIDs.isEmpty)
     }
 
-    @Test("Older settings default overlay presentation delay to 75ms")
+    @Test("Older settings default overlay presentation delay to 100ms")
     func legacySettingsDefaultOverlayPresentationDelay() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
@@ -318,7 +318,7 @@ struct StateStoreTests {
 
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
-        #expect(decoded.overlayPresentationDelay == 0.075)
+        #expect(decoded.overlayPresentationDelay == 0.1)
     }
 
     // Settings written before this key existed also include the `spaceSwitchVelocity` it
@@ -378,7 +378,7 @@ struct StateStoreTests {
         #expect(decoded.stageScale == min(2.5, max(1, scale)))
     }
 
-    @Test("Settings written before the stage scale existed use the 100 percent default")
+    @Test("Settings written before the stage scale existed use the 150 percent default")
     func legacySettingsDefaultStageScale() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
@@ -390,7 +390,7 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.stageScale == AppSettings.defaultStageScale)
-        #expect(AppSettings.defaultStageScale == 1.0)
+        #expect(AppSettings.defaultStageScale == 1.5)
     }
 
     @Test("Settings written before selector customization use the macOS filled defaults")

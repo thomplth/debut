@@ -9,10 +9,13 @@ struct SettingsViewModelTests {
     func defaults() {
         let vm = SettingsViewModel()
         #expect(vm.settings.launchAtLogin == true)
+        #expect(vm.settings.features.controlArrows)
+        #expect(vm.settings.features.trackpadSwipes)
         #expect(vm.settings.glassStyle == .clear)
-        #expect(vm.settings.stageCornerRadius == 40)
+        #expect(vm.settings.stageCornerRadius == 30)
         #expect(vm.settings.inactiveStageScale == 0.7)
-        #expect(vm.settings.stageScale == 1.0)
+        #expect(vm.settings.stageScale == 1.5)
+        #expect(vm.settings.overlayOnMainDisplayOnly)
         #expect(vm.settings.windowSelectionStyle == .filled)
         #expect(vm.settings.selectorOutset == 6)
         #expect(vm.settings.selectorCornerRadius == 12)
@@ -20,8 +23,14 @@ struct SettingsViewModelTests {
         #expect(vm.settings.magnifyShadowStrength == 1)
         #expect(vm.settings.showsDesktopSwitchIndicator)
         // Must stay on the hold-delay slider's 25ms step grid, or the first drag moves it.
-        #expect(vm.settings.overlayPresentationDelay == 0.075)
+        #expect(vm.settings.overlayPresentationDelay == 0.1)
+        #expect(vm.settings.spaceSwitchDuration == 0)
+        #expect(vm.settings.excludedBundleIDs.isEmpty)
         #expect(vm.settings.quickSwitchExcludedBundleIDs.isEmpty)
+        #expect(vm.settings.quickSwitchSameApplicationModifiers == ShortcutModifiers(
+            control: true,
+            option: true
+        ))
     }
 
     @Test("Update settings")
