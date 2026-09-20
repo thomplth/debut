@@ -140,6 +140,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var adaptiveCardSizing: Bool
     /// Keep both overlay modes on the system primary display regardless of window focus.
     public var overlayOnMainDisplayOnly: Bool
+    /// Show the confirmed desktop number briefly after macOS finishes moving between Spaces.
+    public var showsDesktopSwitchIndicator: Bool
 
     // Window selection
     public var windowSelectionStyle: WindowSelectionStyle
@@ -176,6 +178,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.stageScale = Self.defaultStageScale
         self.adaptiveCardSizing = true
         self.overlayOnMainDisplayOnly = false
+        self.showsDesktopSwitchIndicator = true
         self.windowSelectionStyle = .filled
         self.selectorOutset = Self.defaultSelectorOutset
         self.selectorCornerRadius = Self.defaultSelectorCornerRadius
@@ -225,6 +228,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
             Bool.self,
             forKey: .overlayOnMainDisplayOnly
         ) ?? false
+        showsDesktopSwitchIndicator = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .showsDesktopSwitchIndicator
+        ) ?? true
         windowSelectionStyle = try container.decodeIfPresent(
             WindowSelectionStyle.self,
             forKey: .windowSelectionStyle
