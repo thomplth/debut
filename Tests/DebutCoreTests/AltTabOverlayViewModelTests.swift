@@ -146,6 +146,28 @@ struct AltTabOverlayViewModelTests {
         #expect(layout.rowSizes == [3, 2])
     }
 
+    /// Each card already contributes its own six-point inset above and below its content. An
+    /// additional row gap doubles that separation, so the flat plate should stack card frames
+    /// directly and let their existing edge insets provide the whitespace between rows.
+    @Test("Wrapped rows use only the cards' edge insets for spacing")
+    func wrappedRowsUseCardEdgeInsets() {
+        let space = UUID()
+        let model = AltTabOverlayViewModel(
+            entries: (1...5).map { entry(space, CGWindowID($0), "W\($0)") },
+            selectedIndex: 0
+        )
+        let container = CGSize(width: 900, height: 600)
+        let layout = model.layout(containerSize: container)
+
+        #expect(layout.rowCount > 1)
+        #expect(layout.metrics.rowSpacing == 0)
+        #expect(
+            layout.cardOffsetFromCenter(at: layout.rowStartIndex(1)).height
+                - layout.cardOffsetFromCenter(at: 0).height
+                == layout.metrics.cardHeight
+        )
+    }
+
     /// A global list is far longer than any one space's, so it is the first thing in the app that
     /// routinely overflows the display. It must give scale back rather than draw off-screen.
     @Test("A list too large for the display gives scale back until it fits")

@@ -48,7 +48,10 @@ public struct AltTabOverlayViewModel: Sendable {
         StageConstants.drawnMetrics(
             stageScale: CGFloat(appearance.stageScale),
             contentAspects: [windows.map(\.contentAspect)],
-            containerSize: containerSize
+            containerSize: containerSize,
+            // Each card already supplies an inset on both sides of a row boundary. The flat
+            // switcher needs no third gap between those insets.
+            rowSpacing: 0
         )
     }
 

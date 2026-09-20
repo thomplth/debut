@@ -131,6 +131,28 @@ public struct StageMetrics: Equatable, Sendable {
         )
     }
 
+    /// Change only the space inserted between card frames. A card's own padding remains intact,
+    /// so zero still leaves one inset from each adjoining card between their visible content.
+    func withRowSpacing(_ spacing: CGFloat) -> StageMetrics {
+        StageMetrics(
+            thumbnailWidth: thumbnailWidth,
+            thumbnailHeight: thumbnailHeight,
+            cardPadding: cardPadding,
+            titleWidthAllowance: titleWidthAllowance,
+            titleSpacing: titleSpacing,
+            titleHeight: titleHeight,
+            badgeSize: badgeSize,
+            previewPlaceholderIconSize: previewPlaceholderIconSize,
+            windowSpacing: windowSpacing,
+            rowSpacing: spacing,
+            padding: padding,
+            topPadding: topPadding,
+            bottomPadding: bottomPadding,
+            minStageWidth: minStageWidth,
+            scale: scale
+        )
+    }
+
     public var cardWidth: CGFloat {
         thumbnailWidth + titleWidthAllowance + cardPadding * 2
     }
