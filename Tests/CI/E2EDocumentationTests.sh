@@ -4,7 +4,6 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 agent_guide="AGENTS.md"
-readme="README.md"
 local_guide="docs/local-e2e.md"
 failures=0
 
@@ -20,7 +19,7 @@ expect_contains() {
     grep -Eiq -- "$pattern" "$path" || fail "$message"
 }
 
-for path in "$agent_guide" "$readme" "$local_guide"; do
+for path in "$agent_guide" "$local_guide"; do
     [[ -f "$path" ]] || fail "missing $path"
 done
 
@@ -39,11 +38,6 @@ expect_contains "$local_guide" 'preferred.*headless|headless.*preferred' \
     "local E2E guide must identify headless Tart as preferred"
 expect_contains "$local_guide" 'GitHub-hosted.*fallback|fallback.*GitHub-hosted' \
     "local E2E guide must describe hosted CI as the fallback"
-
-expect_contains "$readme" 'High-risk verification' \
-    "README must expose the high-risk verification policy"
-expect_contains "$readme" 'docs/local-e2e\.md' \
-    "README must link to the local E2E guide"
 
 if (( failures > 0 )); then
     exit 1

@@ -107,11 +107,14 @@ echo "Preparing the display before Debut starts..."
 as_console env HOME="$console_home" "$DEMO_SOURCE" --prepare-display --display "$DISPLAY_MODE"
 # Keep demonstration traffic out of anonymous performance summaries.
 as_console mkdir -p "$console_home/Library/Application Support/Debut"
-as_console tee "$console_home/Library/Application Support/Debut/settings.json" >/dev/null <<'JSON'
-{"launchAtLogin":false,"excludedBundleIDs":[],"shareAnonymousTelemetry":false,"glassStyle":"Clear","stageCornerRadius":40,"inactiveStageScale":0.7}
+demo_stage_scale=1.4
+[[ "${*:6}" == *onboarding* ]] && demo_stage_scale=1.0
+as_console tee "$console_home/Library/Application Support/Debut/settings.json" >/dev/null <<JSON
+{"launchAtLogin":false,"excludedBundleIDs":[],"shareAnonymousTelemetry":false,"glassStyle":"Clear","stageCornerRadius":40,"inactiveStageScale":0.7,"stageScale":$demo_stage_scale}
 JSON
 
 echo "Provisioning three real desktops through Mission Control..."
+as_console env HOME="$console_home" "$PROVISION_SOURCE" reset-desktops
 as_console env HOME="$console_home" "$PROVISION_SOURCE" provision-desktops 3
 as_console env HOME="$console_home" "$PROVISION_SOURCE" switch-to-desktop 0
 as_console pkill -f "Debut.app" 2>/dev/null || true

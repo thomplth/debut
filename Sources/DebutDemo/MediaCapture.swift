@@ -17,10 +17,9 @@ final class DemoMovieRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
     init(url: URL, width: Int, height: Int) throws {
         writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoCodecKey: AVVideoCodecType.proRes422,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
-            AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 8_000_000],
         ])
         input.expectsMediaDataInRealTime = true
         super.init()
@@ -146,5 +145,38 @@ func startDemoMovie(at url: URL) throws -> DemoMovieRecorder {
         let recorder = try DemoMovieRecorder(url: url, width: display.width * 2, height: display.height * 2)
         try await recorder.start(display: display)
         return recorder
+    }
+}
+
+/// Capture the real overlay alone. A display screenshot would bake the desktop into the cover.
+func captureOverlayCover(to url: URL) throws {
+    try awaitCapture {
+        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+        guard let window = content.windows.first(where: {
+            $0.owningApplication?.bundleIdentifier == "com.thomplth.Debut"
+                && $0.windowLayer == Int(NSWindow.Level.statusBar.rawValue)
+                && $0.frame.width > 600
+        }) else { throw CaptureFailure.noFrames }
+        let configuration = SCStreamConfiguration()
+        configuration.width = Int(window.frame.width * 2)
+        configuration.height = Int(window.frame.height * 2)
+        configuration.showsCursor = false
+        configuration.shouldBeOpaque = false
+        configuration.ignoreShadowsSingleWindow = true
+        let image = try await SCScreenshotManager.captureImage(
+            contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration)
+        // An independent window supplies accurate alpha bounds, but macOS flattens its glass
+        // against gray. Capture the same rectangle as displayed over the demo's white panel
+        // for the actual colors, then use the isolated alpha to trim away the desktop margins.
+        let display = try await demoDisplay()
+        configuration.sourceRect = window.frame
+        let rendered = try await SCScreenshotManager.captureImage(
+            contentFilter: SCContentFilter(display: display, excludingWindows: []),
+            configuration: configuration)
+        let cropped = try overlayCoverImage(image, renderedImage: rendered)
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
+        else { throw CaptureFailure.failed }
+        CGImageDestinationAddImage(destination, cropped, nil)
+        guard CGImageDestinationFinalize(destination) else { throw CaptureFailure.failed }
     }
 }
