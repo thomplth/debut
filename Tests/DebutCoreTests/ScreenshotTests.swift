@@ -951,8 +951,11 @@ struct ScreenshotTests {
         #expect(abs(sourceBounds.midX - sourceSurface.midX) < 0.5)
     }
 
-    @Test("Display stack indicator sits at the top of the overlay")
-    func displayStackIndicator() throws {
+    @Test(
+        "Display stack indicator sits at the top of the overlay with configured glass",
+        arguments: GlassStyle.allCases
+    )
+    func displayStackIndicator(glassStyle: GlassStyle) throws {
         var manager = makeSampleViewModel(
             spaceCount: 3,
             windowsPerSpace: [3, 2, 1],
@@ -968,10 +971,13 @@ struct ScreenshotTests {
                 frame: .zero, desktopIDs: [20], currentDesktopID: 20
             ),
         ]))
+        var appearance = AppSettings()
+        appearance.glassStyle = glassStyle
         let vm = StageOverlayViewModel(
             spaceManager: manager,
             activeSpaceIndex: 1,
-            selectedWindowIndex: 1
+            selectedWindowIndex: 1,
+            appearance: appearance
         )
 
         guard let image = renderSwiftUI(
@@ -980,13 +986,19 @@ struct ScreenshotTests {
         ) else {
             throw ScreenshotError.renderFailed
         }
-        try saveImage(image, name: "07_display_stack_indicator")
+        try saveImage(
+            image,
+            name: "07_display_stack_indicator_\(glassStyle.rawValue.lowercased())"
+        )
 
         #expect(vm.displayStackCount == 2)
     }
 
-    @Test("Desktop switch indicator is a compact top-center capsule")
-    func desktopSwitchIndicator() throws {
+    @Test(
+        "Desktop switch indicator is a compact top-center capsule with configured glass",
+        arguments: GlassStyle.allCases
+    )
+    func desktopSwitchIndicator(glassStyle: GlassStyle) throws {
         let view = DesktopSwitchIndicatorView(
             presentation: DesktopSwitchIndicatorPresentation(
                 stackID: "display-a",
@@ -994,14 +1006,18 @@ struct ScreenshotTests {
                 displayName: "Studio Display",
                 desktopPosition: 1,
                 desktopCount: 4
-            )
+            ),
+            glassStyle: glassStyle
         )
         let image = try #require(renderSwiftUI(
             view,
             size: NSSize(width: 240, height: 72),
             background: 0.32
         ))
-        try saveImage(image, name: "07_desktop_switch_indicator")
+        try saveImage(
+            image,
+            name: "07_desktop_switch_indicator_\(glassStyle.rawValue.lowercased())"
+        )
     }
 
     @Test("Launch settings sections render independently", arguments: SettingsSection.allCases)

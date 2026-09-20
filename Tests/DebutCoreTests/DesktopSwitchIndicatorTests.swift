@@ -52,6 +52,55 @@ struct DesktopSwitchIndicatorTests {
         #expect(frame.maxY == 650)
     }
 
+    @Test("Indicator shifts up when the menu bar is auto-hidden")
+    func placementWithAutoHiddenMenuBar() {
+        let screenFrame = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let visibleMenuBarInset = OverlayDisplayResolver.topContentInset(
+            frame: screenFrame,
+            visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1054),
+            safeAreaTopInset: 0
+        )
+        let hiddenMenuBarInset = OverlayDisplayResolver.topContentInset(
+            frame: screenFrame,
+            visibleFrame: screenFrame,
+            safeAreaTopInset: 0
+        )
+        let size = CGSize(width: 180, height: 38)
+        let belowVisibleMenuBar = DesktopSwitchIndicatorWindow.frame(
+            screenFrame: screenFrame,
+            topContentInset: visibleMenuBarInset,
+            indicatorSize: size
+        )
+        let belowHiddenMenuBar = DesktopSwitchIndicatorWindow.frame(
+            screenFrame: screenFrame,
+            topContentInset: hiddenMenuBarInset,
+            indicatorSize: size
+        )
+
+        #expect(belowHiddenMenuBar.maxY - belowVisibleMenuBar.maxY == 26)
+        #expect(belowHiddenMenuBar.maxY == screenFrame.maxY - DesktopSwitchIndicatorWindow.topPadding)
+    }
+
+    @Test("Indicator retains the configured overlay glass style")
+    func glassStyle() {
+        let presentation = DesktopSwitchIndicatorPresentation(
+            stackID: "display-a",
+            displayID: 42,
+            displayName: "Studio Display",
+            desktopPosition: 2,
+            desktopCount: 4
+        )
+
+        #expect(DesktopSwitchIndicatorView(
+            presentation: presentation,
+            glassStyle: .clear
+        ).glassStyle == .clear)
+        #expect(DesktopSwitchIndicatorView(
+            presentation: presentation,
+            glassStyle: .regular
+        ).glassStyle == .regular)
+    }
+
     @Test("Presentation policy honors the setting and an open overlay")
     func presentationPolicy() {
         let change = DesktopSwitchIndicatorPresentation(

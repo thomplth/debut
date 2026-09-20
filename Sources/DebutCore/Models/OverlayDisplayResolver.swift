@@ -3,17 +3,16 @@ import CoreGraphics
 /// Picks the single display the overlay belongs on. Stages describe where the user's attention
 /// already is, so they follow the focused window unless pinned to the main display.
 public enum OverlayDisplayResolver {
-    /// Returns the distance from the top of the full display to unobstructed content. The
-    /// visible frame accounts for a persistently shown menu bar, while `menuBarHeight` reserves
-    /// its position when it auto-hides. The safe-area inset accounts for hardware such as a
-    /// camera housing. Any one can be larger depending on the display.
+    /// Returns the distance from the top of the full display to unobstructed content. The live
+    /// visible frame accounts for a shown menu bar and reaches the display top when an auto-hidden
+    /// menu bar is tucked away. The safe-area inset still protects hardware such as a camera
+    /// housing in either state.
     public static func topContentInset(
         frame: CGRect,
         visibleFrame: CGRect,
-        safeAreaTopInset: CGFloat,
-        menuBarHeight: CGFloat
+        safeAreaTopInset: CGFloat
     ) -> CGFloat {
-        max(0, frame.maxY - visibleFrame.maxY, safeAreaTopInset, menuBarHeight)
+        max(0, frame.maxY - visibleFrame.maxY, safeAreaTopInset)
     }
 
     /// The rectangle the overlay window covers on a display, in Cocoa coordinates. The overlay

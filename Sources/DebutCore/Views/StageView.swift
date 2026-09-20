@@ -1342,7 +1342,9 @@ public struct StageOverlayView: View {
                     .font(.callout)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule())
+                    .modifier(OverlayGlassCapsuleModifier(
+                        glassStyle: viewModel.appearance.glassStyle
+                    ))
                     .frame(width: geo.size.width)
                     .padding(.top, 18)
                     .allowsHitTesting(false)
@@ -1999,9 +2001,11 @@ struct LiquidGlassModifier: ViewModifier {
     let appearance: AppSettings
 
     func body(content: Content) -> some View {
-        let glass: Glass = appearance.glassStyle == .clear ? .clear : .regular
         content
-            .glassEffect(glass, in: .rect(cornerRadius: cornerRadius))
+            .glassEffect(
+                appearance.glassStyle.overlayGlass,
+                in: .rect(cornerRadius: cornerRadius)
+            )
     }
 }
 

@@ -22,8 +22,7 @@ extension NSScreen {
         OverlayDisplayResolver.topContentInset(
             frame: frame,
             visibleFrame: visibleFrame,
-            safeAreaTopInset: safeAreaInsets.top,
-            menuBarHeight: NSStatusBar.system.thickness
+            safeAreaTopInset: safeAreaInsets.top
         )
     }
 
