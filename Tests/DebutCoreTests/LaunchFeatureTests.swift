@@ -5,7 +5,7 @@ import Carbon.HIToolbox
 
 @Suite("Launch feature controls")
 struct LaunchFeatureTests {
-    @Test("Existing preferences retain current behavior without enabling new interception")
+    @Test("Existing preferences without feature choices gain the current defaults")
     func migration() throws {
         let data = try JSONEncoder().encode(AppSettings())
         var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -14,8 +14,8 @@ struct LaunchFeatureTests {
         #expect(restored.features.windowPreviews)
         #expect(restored.features.workspaceIsolation)
         #expect(restored.features.numberShortcuts)
-        #expect(!restored.features.controlArrows)
-        #expect(!restored.features.trackpadSwipes)
+        #expect(restored.features.controlArrows)
+        #expect(restored.features.trackpadSwipes)
     }
 
     @Test("Choices survive settings round trip independently")

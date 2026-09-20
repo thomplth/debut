@@ -81,7 +81,7 @@ public struct ShortcutModifiers: Codable, Sendable, Equatable, Hashable {
 
 public struct AppSettings: Codable, Sendable, Equatable {
     /// Sits on the hold-delay slider's 25ms step grid, so the first drag does not shift it.
-    public static let defaultOverlayPresentationDelay: TimeInterval = 0.075
+    public static let defaultOverlayPresentationDelay: TimeInterval = 0.1
     public static let defaultPreviewCacheTTL: TimeInterval = 60
     /// Paces held cycling independently of the user's key-repeat rate.
     public static let defaultHeldCycleMinimumInterval: TimeInterval = 0.06
@@ -93,7 +93,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// and the old slider's whole 100–1000 range sat above that, so every value on it
     /// looked identical and instant. Debut now drives the swipe's progress itself on a
     /// timer, which is what makes a number in milliseconds honest.
-    public static let defaultSpaceSwitchDuration: TimeInterval = 0.15
+    public static let defaultSpaceSwitchDuration: TimeInterval = 0
     /// Zero is a real setting, not a degenerate one: it posts the original high-velocity
     /// flick and the Dock cuts straight to the target desktop with no transition.
     public static let minimumSpaceSwitchDuration: TimeInterval = 0
@@ -109,9 +109,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var shareAnonymousTelemetry: Bool
 
     // Appearance
-    /// Keep the original overlay dimensions as the default; users can enlarge the complete,
-    /// proportionally scaled presentation with the appearance setting when they need it.
-    public static let defaultStageScale: Double = 1.0
+    /// Enlarge the complete presentation proportionally while retaining the original size as
+    /// the lower end of the user-selectable range.
+    public static let defaultStageScale: Double = 1.5
     /// The user-selectable range. Automatic viewport fitting has its own lower floor.
     public static let minimumStageScale: Double = 1.0
     public static let maximumStageScale: Double = 2.5
@@ -173,11 +173,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.shareAnonymousTelemetry = true
 
         self.glassStyle = .clear
-        self.stageCornerRadius = 40
+        self.stageCornerRadius = 30
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
         self.adaptiveCardSizing = true
-        self.overlayOnMainDisplayOnly = false
+        self.overlayOnMainDisplayOnly = true
         self.showsDesktopSwitchIndicator = true
         self.windowSelectionStyle = .filled
         self.selectorOutset = Self.defaultSelectorOutset
@@ -227,7 +227,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         overlayOnMainDisplayOnly = try container.decodeIfPresent(
             Bool.self,
             forKey: .overlayOnMainDisplayOnly
-        ) ?? false
+        ) ?? true
         showsDesktopSwitchIndicator = try container.decodeIfPresent(
             Bool.self,
             forKey: .showsDesktopSwitchIndicator
