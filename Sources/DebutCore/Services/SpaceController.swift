@@ -275,6 +275,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// says the switch stopped; intermediate candidates then fail the showing-desktop check,
     /// while an early final candidate is applied once.
     private var deferredSwitchActivations: [String: CGWindowID] = [:]
+    private var desktopSwitchIndicatorTracker = DesktopSwitchIndicatorTracker()
     private var stageStackTransaction = StageStackTransaction()
     private var isStageStackCommitInFlight = false
     private var pendingOverlayActions: [pid_t: PendingOverlayAction] = [:]
@@ -565,6 +566,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
         let topology = spaceSwitcher.spaceTopology()
+        if !topology.stacks.isEmpty {
+            desktopSwitchIndicatorTracker.seed(with: topology)
+        }
+        reconcileSpaces(with: topology)
+    }
+
+    private func reconcileSpaces(with topology: SpaceTopology) {
         guard !topology.stacks.isEmpty else {
             diag.report("spaces_reconcile_refused", details: ["reason": "noDesktopsReported"])
             return
@@ -648,13 +656,25 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// wrong for the rest of the session — windows on a desktop past the end of the space array
     /// have nowhere to go. The notification fires once the Space change has settled, so this is
     /// the earliest honest point to re-ask.
-    public func desktopDidChange() {
+    @discardableResult
+    public func desktopDidChange() -> [DesktopSwitchIndicatorPresentation] {
         // Let the switcher confirm the completed hop before reconciling the model. A far
         // target may start its next adjacent hop here, which also tells deferred focus that
         // an intermediate desktop is expected rather than a user overtaking the switch.
         spaceSwitcher?.spaceDidChange()
+        let topology = spaceSwitcher?.spaceTopology()
+        let indicatorPresentations: [DesktopSwitchIndicatorPresentation] = if let topology,
+            !topology.stacks.isEmpty {
+            desktopSwitchIndicatorTracker.recordConfirmedChanges(in: topology)
+        } else {
+            []
+        }
         let previousActiveSpaceID = spaceManager.activeSpaceID
-        reconcileSpacesWithDesktops()
+        if let topology {
+            reconcileSpaces(with: topology)
+        } else {
+            reconcileSpacesWithDesktops()
+        }
         if spaceManager.activeSpaceID != previousActiveSpaceID {
             previousSpaceID = previousActiveSpaceID
             diag.report("active_space_synced", details: [
@@ -667,6 +687,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         applyDeferredSwitchActivations()
         applyPendingSpaceFocus()
         continueFollowingWindowMove()
+        return indicatorPresentations
     }
 
     /// Resolves focus events held while a Debut-initiated switch was in flight.

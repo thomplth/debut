@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SpaceControllerDelegate {
     private var spaceController: SpaceController?
     private var overlayWindow: OverlayWindow?
+    private var desktopSwitchIndicatorWindows: [String: DesktopSwitchIndicatorWindow] = [:]
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var onboardingTargetWindow: NSWindow?
@@ -535,14 +536,42 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     /// only needs the active space adopted.
     @objc private func activeSpaceDidChange(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.spaceController?.desktopDidChange()
+            guard let self, let controller = self.spaceController else { return }
+            let changes = controller.desktopDidChange()
+            let presentations = DesktopSwitchIndicatorPolicy.presentations(
+                for: changes,
+                isEnabled: self.currentSettings.showsDesktopSwitchIndicator,
+                overlayVisible: controller.isSpaceManagerVisible
+            )
+            for presentation in presentations {
+                self.showDesktopSwitchIndicator(presentation)
+            }
             self.refreshDesktopNavigationAvailability()
             self.refreshOnboardingEnvironment()
             // Moving a window between desktops activates no app, so without this the move is
             // only noticed the next time the user clicks the window.
             self.windowDiscovery?.refreshDesktopAssignments()
         }
+    }
+
+    private func showDesktopSwitchIndicator(
+        _ presentation: DesktopSwitchIndicatorPresentation
+    ) {
+        let screen = presentation.displayID.flatMap { displayID in
+            NSScreen.screens.first(where: { $0.displayID == displayID })
+        } ?? NSScreen.screens.first(where: { $0.displayID == CGMainDisplayID() })
+            ?? NSScreen.main
+        guard let screen else { return }
+        let window = desktopSwitchIndicatorWindows[presentation.stackID]
+            ?? DesktopSwitchIndicatorWindow()
+        desktopSwitchIndicatorWindows[presentation.stackID] = window
+        window.present(presentation, on: screen)
+        diag.report("desktop_switch_indicator_shown", level: .transient, details: [
+            "desktopCount": "\(presentation.desktopCount)",
+            "desktopPosition": "\(presentation.desktopPosition)",
+            "displayName": presentation.displayName,
+            "stackID": presentation.stackID,
+        ])
     }
 
     /// Mission Control changed the desktop list, or is about to make it mutable.
@@ -731,6 +760,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         overlayPresentation: OverlayPresentationContext? = nil
     ) {
         guard let spaceController, let overlayWindow else { return }
+        desktopSwitchIndicatorWindows.values.forEach { $0.hideImmediately() }
         if let hiddenIdlePerformanceID {
             _ = PerformanceRecorder.shared.end(hiddenIdlePerformanceID)
             self.hiddenIdlePerformanceID = nil
@@ -1432,6 +1462,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         self.launchAtLogin.apply(enabled: newSettings.launchAtLogin)
         self.activationPolicy.apply(showsDockIcon: newSettings.showsDockIcon)
         self.currentSettings = newSettings
+        if !newSettings.showsDesktopSwitchIndicator {
+            desktopSwitchIndicatorWindows.values.forEach { $0.hideImmediately() }
+        }
         try? self.stateStore?.saveSettings(newSettings)
         self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
         self.keyboardService?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
