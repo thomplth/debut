@@ -565,7 +565,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let window = desktopSwitchIndicatorWindows[presentation.stackID]
             ?? DesktopSwitchIndicatorWindow()
         desktopSwitchIndicatorWindows[presentation.stackID] = window
-        window.present(presentation, on: screen)
+        window.present(
+            presentation,
+            on: screen,
+            glassStyle: currentSettings.glassStyle
+        )
         diag.report("desktop_switch_indicator_shown", level: .transient, details: [
             "desktopCount": "\(presentation.desktopCount)",
             "desktopPosition": "\(presentation.desktopPosition)",

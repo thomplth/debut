@@ -166,7 +166,11 @@ struct OverlayWindowTests {
             selectedWindowIndex: 0
         ))
 
-        #expect(screen.overlayTopContentInset > 0)
+        #expect(screen.overlayTopContentInset == max(
+            0,
+            screen.frame.maxY - screen.visibleFrame.maxY,
+            screen.safeAreaInsets.top
+        ))
         #expect(window.frame.maxY == screen.frame.maxY - screen.overlayTopContentInset)
         #expect(window.frame.minY == screen.frame.minY)
         #expect(window.frame.width == screen.frame.width)

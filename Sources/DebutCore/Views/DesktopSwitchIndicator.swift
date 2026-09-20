@@ -85,9 +85,14 @@ public enum DesktopSwitchIndicatorPolicy {
 
 public struct DesktopSwitchIndicatorView: View {
     public let presentation: DesktopSwitchIndicatorPresentation
+    public let glassStyle: GlassStyle
 
-    public init(presentation: DesktopSwitchIndicatorPresentation) {
+    public init(
+        presentation: DesktopSwitchIndicatorPresentation,
+        glassStyle: GlassStyle
+    ) {
         self.presentation = presentation
+        self.glassStyle = glassStyle
     }
 
     public var body: some View {
@@ -96,7 +101,7 @@ public struct DesktopSwitchIndicatorView: View {
             .monospacedDigit()
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
-            .background(.regularMaterial, in: Capsule())
+            .modifier(OverlayGlassCapsuleModifier(glassStyle: glassStyle))
             .accessibilityLabel(presentation.accessibilityLabel)
     }
 }
@@ -152,11 +157,15 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
     public func present(
         _ presentation: DesktopSwitchIndicatorPresentation,
         on screen: NSScreen,
+        glassStyle: GlassStyle,
         visibleDuration: TimeInterval = visibleDuration
     ) {
         let generation = beginPresentation()
         let hostingView = NSHostingView(
-            rootView: DesktopSwitchIndicatorView(presentation: presentation)
+            rootView: DesktopSwitchIndicatorView(
+                presentation: presentation,
+                glassStyle: glassStyle
+            )
         )
         let fittingSize = hostingView.fittingSize
         let size = CGSize(
