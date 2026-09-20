@@ -18,6 +18,7 @@ struct SettingsViewModelTests {
         #expect(vm.settings.selectorCornerRadius == 12)
         #expect(vm.settings.magnifyScale == 1.06)
         #expect(vm.settings.magnifyShadowStrength == 1)
+        #expect(vm.settings.showsDesktopSwitchIndicator)
         // Must stay on the hold-delay slider's 25ms step grid, or the first drag moves it.
         #expect(vm.settings.overlayPresentationDelay == 0.075)
         #expect(vm.settings.quickSwitchExcludedBundleIDs.isEmpty)

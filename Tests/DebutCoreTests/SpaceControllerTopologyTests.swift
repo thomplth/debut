@@ -730,6 +730,49 @@ struct SpaceControllerSpaceTests {
         #expect(spaces.spaceDidChangeCount == 1)
     }
 
+    @Test("A confirmed Debut switch emits the desktop indicator after the movement")
+    func confirmedDebutSwitchEmitsDesktopIndicator() throws {
+        let spaces = MockSpaceSwitcher(desktops: 4, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+        let target = controller.spaceManager.spaces[2].id
+
+        controller.switchToSpace(id: target, focusesWindow: false)
+        let presentations = controller.desktopDidChange()
+
+        #expect(presentations.count == 1)
+        let presentation = try #require(presentations.first)
+        #expect(presentation.stackID == SpaceTopology.sharedStackID)
+        #expect(presentation.displayID == nil)
+        #expect(presentation.desktopPosition == 3)
+        #expect(presentation.desktopCount == 4)
+        #expect(presentation.title == "Desktop 3 of 4")
+    }
+
+    @Test("An external desktop gesture uses the same confirmed-change pipeline")
+    func externalDesktopGestureEmitsDesktopIndicator() throws {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+
+        spaces.current = 1
+        let presentations = controller.desktopDidChange()
+
+        #expect(presentations.count == 1)
+        let presentation = try #require(presentations.first)
+        #expect(presentation.desktopPosition == 2)
+        #expect(presentation.desktopCount == 3)
+    }
+
+    @Test("A desktop notification without movement emits no indicator")
+    func unchangedDesktopEmitsNoIndicator() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 1)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+
+        #expect(controller.desktopDidChange().isEmpty)
+    }
+
     @Test("Focus survives an intermediate confirmed hop")
     func focusSurvivesIntermediateHop() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)

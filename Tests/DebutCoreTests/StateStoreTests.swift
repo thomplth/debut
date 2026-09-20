@@ -220,6 +220,19 @@ struct StateStoreTests {
         #expect(try !JSONDecoder().decode(AppSettings.self, from: legacy).overlayOnMainDisplayOnly)
     }
 
+    @Test("Desktop switch indicator defaults on for existing settings")
+    func desktopSwitchIndicatorLegacySettings() throws {
+        var settings = AppSettings()
+        settings.showsDesktopSwitchIndicator = false
+        let data = try JSONEncoder().encode(settings)
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "showsDesktopSwitchIndicator")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+
+        #expect(try JSONDecoder().decode(AppSettings.self, from: legacy)
+            .showsDesktopSwitchIndicator)
+    }
+
     @Test("Settings round-trip")
     func settingsRoundTrip() throws {
         let dir = try makeTempDirectory()
@@ -230,6 +243,7 @@ struct StateStoreTests {
         settings.launchAtLogin = true
         settings.stageCornerRadius = 30
         settings.overlayOnMainDisplayOnly = true
+        settings.showsDesktopSwitchIndicator = false
         settings.windowSelectionStyle = .magnify
         settings.selectorOutset = 3
         settings.selectorCornerRadius = 18
@@ -245,6 +259,7 @@ struct StateStoreTests {
         #expect(loaded.launchAtLogin == true)
         #expect(loaded.stageCornerRadius == 30)
         #expect(loaded.overlayOnMainDisplayOnly)
+        #expect(!loaded.showsDesktopSwitchIndicator)
         #expect(loaded.windowSelectionStyle == .magnify)
         #expect(loaded.selectorOutset == 3)
         #expect(loaded.selectorCornerRadius == 18)

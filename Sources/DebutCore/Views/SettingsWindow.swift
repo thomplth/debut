@@ -123,6 +123,16 @@ public struct SettingsView: View {
             FeatureControlsView(features: $viewModel.settings.features)
             Divider()
             SwitchDurationControl(duration: $viewModel.settings.spaceSwitchDuration)
+            VStack(alignment: .leading, spacing: 4) {
+                settingsToggle(
+                    "Show desktop switch indicator",
+                    isOn: $viewModel.settings.showsDesktopSwitchIndicator
+                )
+                Text("Briefly shows the desktop number after a switch finishes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

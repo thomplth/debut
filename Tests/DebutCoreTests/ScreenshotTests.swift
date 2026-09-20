@@ -985,6 +985,25 @@ struct ScreenshotTests {
         #expect(vm.displayStackCount == 2)
     }
 
+    @Test("Desktop switch indicator is a compact top-center capsule")
+    func desktopSwitchIndicator() throws {
+        let view = DesktopSwitchIndicatorView(
+            presentation: DesktopSwitchIndicatorPresentation(
+                stackID: "display-a",
+                displayID: 1,
+                displayName: "Studio Display",
+                desktopPosition: 1,
+                desktopCount: 4
+            )
+        )
+        let image = try #require(renderSwiftUI(
+            view,
+            size: NSSize(width: 240, height: 72),
+            background: 0.32
+        ))
+        try saveImage(image, name: "07_desktop_switch_indicator")
+    }
+
     @Test("Launch settings sections render independently", arguments: SettingsSection.allCases)
     func settingsSections(_ section: SettingsSection) throws {
         let view = SettingsView(viewModel: SettingsViewModel(), selectedSection: section)
