@@ -1,147 +1,167 @@
-# System Behaviors
+# System behaviors
 
-How Debut relates spaces, windows, and apps: assignment rules, isolation,
-persistence, and reconciliation. The architecture constraints explaining *why*
-these rules exist are in AGENTS.md.
+Debut provides window switching and desktop navigation on top of macOS. A
+**stage** is the product's representation of a real desktop; `Space`,
+`SpaceManager`, and `SpaceController` are the existing implementation names.
+See [architecture](../docs/architecture.md) for the component map and
+[the switcher specification](space-manager.md) for interaction details.
 
-## Window-centric model
+## Desktop authority
 
-Debut tracks individual windows, not apps. A space holds `SpaceWindow` entries,
-so one app can own windows in several spaces at once.
+macOS is the source of truth for desktop count, order, current desktop, and window
+membership. Users create, delete, and reorder desktops in Mission Control.
+Debut can navigate existing desktops and request window moves, but does not own a
+second workspace layout independent of macOS.
 
-A window is identified at runtime by its `CGWindowID` and persisted by
-(`ownerBundleID`, `windowTitle`); CGWindowIDs are ephemeral and are never written
-to disk. The window list comes from the AX API cross-referenced with
-`CGWindowList`.
+Every connected display stack contains one stage per normal desktop in macOS's
+order, including empty desktops. With separate Spaces disabled, there is one
+shared stack. Reconciliation retains a desktop's persistent UUID as a join key
+so a Mission Control reorder carries its stage's state along with it. The UUID
+does not prescribe desktop order. Legacy records without that identity adopt
+the reported desktops by position; if UUIDs are unavailable, reconciliation
+falls back to the reported count.
 
-Only real windows are tracked — non-modal `AXStandardWindow` and `AXDialog`
-elements. Modal dialogs, floating windows, `AXUnknown` popups, shadows, toolbars,
-and other auxiliary surfaces are excluded.
+Active-Space notifications synchronize visible desktops and window placements.
+Desktop-reconfiguration notifications also refresh the list, since reordering or
+removing an inactive desktop need not change the active Space. Opening the
+overlay rechecks topology. Display reconnection and shared/separate-Space mode
+changes reconcile against the newly reported topology. Disconnected stacks may
+retain state for recovery but are not offered as connected stage stacks.
 
-Each PID gets one AXObserver, shared across that app's window notifications.
-Windows are removed on `kAXUIElementDestroyedNotification` and titles refresh on
-`kAXTitleChangedNotification`.
+The old same-desktop workspace model is retired. There is no desktop-covering
+surface, position-based hiding, app minimization scheme, or per-window raise loop
+to simulate a desktop switch. macOS reveals the destination desktop as a whole.
 
-## App switcher isolation
+## Switching scope and focus
 
-Tapping the activation shortcut switches to the most recently used window inside
-the active space only, showing no UI. Holding presents the overlay.
+Command-Tab and Command-backtick, when workspace isolation is enabled, cycle
+windows in the current stage. Explicit stage navigation, numbered shortcuts,
+Option-Tab, Control-arrow, and the desktop swipe feature can cross desktops.
+Isolation scopes the window cycle; it does not prohibit intentional navigation.
 
-Debut also handles Cmd+\` (the default binding for `nextAppWindow`), cycling the
-current app's windows *within the active space* rather than deferring to the
-system.
+Debut selects windows rather than applications. One app can therefore have
+separate selectable windows in several stages. The stage overlay groups by
+desktop; the all-windows overlay uses a flat global recency order.
 
-The guarantee: no keyboard-driven switching crosses a space boundary.
+A requested desktop switch uses the DockSwipe path in `SpaceService`. A
+multi-desktop route is a sequence of adjacent hops, with the configured duration
+per hop. The default is Instant. Where available, Debut seeds the destination's
+front-process memory before switching; the actual window focus waits until
+macOS confirms the destination through the active-Space notification. Landing
+elsewhere invalidates the pending focus request.
 
-## Window-to-space assignment
+Window activation uses window-server fronting plus a key-window event, with AX
+and AppKit support/fallbacks. An accepted request is not proof that focus arrived:
+the controller verifies delivery and reports failures. Focus reports answering
+Debut's own request are credited to the requested window for a bounded interval
+because an app can report a different one of its windows.
 
-Every tracked window belongs to exactly one space. There is no sharing or
-duplication.
+An external activation is an observation, not a request to restore a saved
+layout. If macOS says a tracked window now belongs to a different desktop, Debut
+updates its assignment. It does not switch the user back to the stale stored
+desktop. Native navigation remains valid and is reflected in Debut.
 
-**A newly created window** (Cmd+N, `code .`) joins the active space even when the
-same app already has windows elsewhere, detected through
-`kAXFocusedWindowChangedNotification`.
+The optional desktop indicator appears after a confirmed desktop change, showing
+the desktop number and count on the affected display. It also reflects native
+switches, is suppressed while the switcher is visible, and does not announce an
+unconfirmed switch request.
 
-**An existing window activated from another space** (Dock, Spotlight) makes Debut
-switch to the space that already owns it. The window itself does not move.
+## Discovery and membership
 
-**Excluded apps** are invisible to the space manager. The list is configured in
-Settings from a running-app picker, persisted, and applied immediately. It must
-filter at every layer — discovery, launch, activation, reconciliation, and the
-AXObserver.
+The inventory comes from Core Graphics plus per-desktop SkyLight queries. AX
+provides metadata and notifications for windows reached through those sources;
+`kAXWindows` is not a complete inventory of windows on other desktops.
 
-**Quick-switch exclusions** let configured apps keep their own number shortcuts
-while frontmost. The frontmost bundle ID is cached from activation notifications,
-so quick switching performs no workspace or AX lookup.
+Eligible windows belong to regular applications. Discovery combines window-server
+layer, size, parent, and desktop evidence with available AX role/subrole/modal
+classification. Standard windows and non-modal dialogs can be tracked; modal
+dialogs, child surfaces, floating tools, and other auxiliary UI are excluded or
+handled as system-attention UI. Missing AX access alone does not reject a window
+that has suitable window-server evidence. A transient contradictory classification
+makes an existing assignment dormant rather than erasing it.
 
-## Space switching
+Each live tracked window has one assignment. Positive desktop membership always
+wins over a saved assignment, including for newly discovered windows. New windows
+are not unconditionally sent to stage 1 or to the desktop currently showing.
 
-Debut owns a full-screen desktop surface window at `.normal` level, sitting in
-z-order between active and inactive space windows.
+Windows on every desktop have no single location. Existing assignments stay
+where they are until there is a positive location; a previously unknown shared
+window may be admitted to the current stage. A window on no normal desktop,
+including a newly encountered fullscreen-only surface, is different: it is not
+admitted just because a desktop happens to be showing. `placedWindowIDs()`
+distinguishes these cases.
 
-A switch orders that surface to the front, then raises the active space's windows
-above it through AX. Inactive windows keep their positions and are simply
-occluded — no minimize animation, no position manipulation. Focus moves to the
-selected window, and the new space becomes the reference for later switching.
+App exclusions apply to discovery, launch, focus/activation, reconciliation, and
+tracking. Quick-switch exclusions are separate: they let a frontmost app keep
+numbered and Control-arrow shortcuts without removing its windows from Debut.
 
-The surface cannot become key or main, ignores mouse-down, and is not movable.
-When a file URL drag enters it, Debut yields the surface and other applications
-so Finder's real desktop becomes the drop destination while the drag is still active.
+## Lifecycle and ordering
 
-## MRU ordering
+Lifecycle observers are shared per PID and register notifications at the app
+element, so windows on inactive desktops can still be tracked without a currently
+enumerable AX window element. Focus observation follows only the frontmost app.
+Launching apps can refuse AX registration temporarily; bounded retries stop on
+success, process exit, or superseding activation. Startup, app launch, window
+creation, and focus discovery all establish lifecycle tracking.
 
-Windows within a space are ordered by recency, index 0 being most recently
-focused.
+Window destruction removes its assignment and records a tombstone scoped to the
+window ID, PID, and bundle ID. Tombstones survive Debut restarts only while the
+owning process is still valid. They prevent a dismissed but still-listed backing
+surface from becoming a ghost card. A trusted creation event resolving to that
+same process and window ID can begin a new lifetime and clear the tombstone;
+mere presence in a scan cannot.
 
-Ordering is maintained event-driven, never by polling.
-`kAXFocusedWindowChangedNotification` tracks focus changes inside an app and
-`NSWorkspace.didActivateApplicationNotification` tracks cross-app activation. One
-observer is active at a time and moves to the frontmost app on activation.
+Process-exit monitoring is event-driven, with workspace termination notifications
+as backup. An app exit makes its live windows dormant through one idempotent
+cleanup path. Title and resize notifications update metadata and previews.
 
-## Persistence
+Absence from AX or from one window-server list alone does not prove destruction.
+If both CG and SkyLight inventories no longer know an assignment, reconciliation
+makes it dormant (`vanished`). Explicit AX contradictions can also make it
+dormant. Neither case permanently deletes its saved recovery information.
 
-State survives app restarts and reboots.
+Stage window order is most-recently-used first, except for deliberate overlay
+reordering. Activation moves a window to the head and records `lastActivatedAt`;
+the all-windows list sorts those timestamps, retaining discovery order for ties
+or windows never activated. Same-app cycling freezes its walk order but writes
+each step to MRU immediately. Dormant assignments are absent from both switchers.
 
-Persisted: the space list and its order, window-to-space assignments (by bundle
-ID and title), settings, and the active space ID. Spaces have no name to persist.
+## Persistence and restore
 
-Writes are debounced through `DebouncedSaver` on space mutation and flushed
-synchronously on terminate.
+State lives under `~/Library/Application Support/Debut`. `state.json` stores
+display stacks, selected stack, stage identities and desktop UUID joins, per-stack
+active stages, live window records, recency, and dormant assignments. Settings,
+AX contradiction records, and retired-window tombstones have separate JSON files.
+`DebouncedSaver` coalesces mutations and flushes on termination.
 
-### Restore
+The serialized window records **do include** runtime CGWindowIDs and PIDs. Those
+values are not durable identity and must be validated against the live process,
+bundle, and window snapshot on restore. A recycled ID cannot claim another app's
+assignment. Recovery uses valid process-scoped identity, exact bundle/title
+matches, and then complete one-to-one bundle matching for changed titles where
+the evidence supports it. Titles alone are not stable keys.
 
-On launch Debut loads `state.json` and reconciles persisted windows against live
-ones by (bundleID, windowTitle). When an exact title match fails it falls back to
-bundleID alone, because titles are not stable keys — terminal prompts, browser
-tabs, and Slack channels all change between sessions. Ephemeral CGWindowIDs,
-PIDs, and titles are refreshed to current values.
+Startup reconciles the real desktop topology before window membership, preserves
+empty desktop stages, restores eligible assignments, and adopts the desktops
+macOS is currently showing without navigating the user. Positive current desktop
+locations override restored placements; loading state does not move windows back
+to a saved layout.
 
-Live windows absent from the snapshot join the first space, and excluded apps are
-filtered out during reconciliation. Empty spaces are pruned except those holding
-dormant assignments, and at least one space always remains.
+Dormant assignments preserve position and recency across Debut restarts and app
+quits, including updater relaunches. There is no time expiry. Explicit destruction,
+app exclusion, reset, or loss of the owning desktop can purge them. Disconnected
+display state is retained while it has live or dormant assignments. Troubleshooting's
+reset rebuilds window assignments from current desktops and preserves settings.
 
-Debut then activates the space owning the currently focused window, falling back
-to the first space.
+## Window movement
 
-### Dormancy
+Overlay moves and within-stage reordering use `StageStackTransaction`: the UI
+previews changes, and commit applies them to the model and requests the required
+desktop relocations. Escape discards the preview. The bridge's capability gate
+refuses unsupported cross-desktop moves. Delivery failures are diagnosed, and
+subsequent reconciliation corrects optimistic state from macOS membership.
 
-When an app exits, its windows leave the live space view but their space and
-position persist as dormant assignments. A later launch reclaims them by exact
-bundle and title match, then by complete one-to-one bundle matching for apps with
-dynamic titles.
-
-Dormant assignments have no time-based expiry and survive deliberate quits and
-updater relaunches alike, because macOS does not reliably distinguish those
-termination reasons. They are purged only by explicit window destruction,
-exclusion or reset, or space deletion.
-
-Absence from an AX or `CGWindowList` snapshot never removes an assignment —
-hidden and ordered-out windows drop out of those snapshots routinely. Only a
-lifecycle event does.
-
-## Fullscreen apps
-
-The overlay is shown inside a fullscreen app's Space, and every shortcut behaves
-as it does on the desktop. The overlay is a nonactivating panel joining all
-Spaces at `.statusBar` level, so the stages reach the Space the user is actually
-looking at. The panel is what makes that reachable at all with a Dock icon: a
-regular application's ordinary window is refused entry to another app's
-fullscreen Space while that application is not active.
-
-The desktop surface must not join all Spaces, or it would follow into the
-fullscreen Space and cover the app. Inactive spaces are therefore not occluded
-inside a fullscreen Space — the fullscreen app already covers them.
-
-## Edge cases
-
-- First launch creates a single space containing every running window.
-- A window closed with Cmd+W or the red button leaves its space immediately.
-- A title change from `cd`, a tab switch, or a save updates in place.
-- A window created outside Debut's awareness joins the active space on focus and
-  gains lifecycle tracking at that point. All three discovery paths — startup
-  reconciliation, app launch, and focus change — must register tracking, or the
-  window becomes a ghost.
-- Hidden apps keep their ordered-out assignments until their windows return.
-
-Space deletion and its overflow rules are specified in
-[space-manager.md](space-manager.md).
+Immediate focused-window movement keeps the requested window throughout an
+in-flight route, follows it to the adjacent desktop, and focuses it after
+confirmation. It does not move whichever unrelated window macOS briefly focuses
+on an intermediate desktop. Neither movement path creates or prunes stages.
