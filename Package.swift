@@ -81,6 +81,11 @@ let package = Package(
             path: "Sources/DebutBenchmarks"
         ),
         .testTarget(
+            name: "DebutDemoTests",
+            dependencies: ["DebutDemo"],
+            path: "Tests/DebutDemoTests"
+        ),
+        .testTarget(
             name: "UpdaterTests",
             dependencies: [.product(name: "Sparkle", package: "Sparkle")],
             path: "Tests/UpdaterTests"

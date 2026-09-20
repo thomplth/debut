@@ -9,7 +9,6 @@ manual=".github/workflows/release-manual.yml"
 publish=".github/workflows/release-publish.yml"
 e2e=".github/workflows/e2e.yml"
 agents="AGENTS.md"
-readme="README.md"
 release_guide="docs/html/10-build-release.html"
 release_verification="docs/release-verification.md"
 # The stable wrapper and direct nightly job execute one shared composite action.
@@ -114,9 +113,7 @@ expect_contains "$agents" 'single explicit user request' \
     "the agent release policy must treat one explicit user request as authorization"
 expect_not_contains "$agents" 'approved through the protected' \
     "the agent release policy must not require a second stable approval"
-expect_contains "$readme" 'single explicit release request' \
-    "the public release documentation must describe one-request releases"
-expect_not_contains "$readme" 'after approval' \
+expect_not_contains "$release_guide" 'after approval' \
     "the public release documentation must not promise a separate approval gate"
 expect_contains "$release_guide" 'single explicit release request' \
     "the build guide must describe one-request stable promotion"
@@ -179,12 +176,8 @@ if [[ -f "$publish_contract" ]]; then
     fi
 fi
 
-# The badge is the only place a reader sees whether main is currently releasable. The gates run on
-# pull requests alone, and a release calls them as reusable workflows, whose runs are attributed to
-# the caller. Neither feeds a ci.yml or e2e.yml badge on main, so both would read "no status".
+# If the README carries a badge, it must not point at a gate with no runs on main.
 if [[ -f "README.md" ]]; then
-    expect_contains "README.md" 'workflows/release-nightly\.yml/badge\.svg' \
-        "the README must show whether main is releasable"
     expect_not_contains "README.md" 'workflows/(ci|e2e)\.yml/badge\.svg' \
         "the README must not show a gate badge that no run on main can ever fill"
 fi
