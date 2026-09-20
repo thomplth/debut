@@ -110,6 +110,8 @@ func describeWindows(_ label: String) {
 
 // MARK: - Input
 
+var keyDisplay: DemoKeyDisplay?
+
 enum Key {
     static let tab: CGKeyCode = 48
     static let escape: CGKeyCode = 53
@@ -120,17 +122,20 @@ enum Key {
 }
 
 func postFlags(_ flags: CGEventFlags) {
+    MainActor.assumeIsolated { keyDisplay?.update(flags: flags) }
     guard let event = CGEvent(source: nil) else { return }
     event.type = .flagsChanged
     event.flags = flags
     event.post(tap: .cgSessionEventTap)
 }
 
-func postTap(_ keyCode: CGKeyCode, flags: CGEventFlags = []) {
+func postTap(_ keyCode: CGKeyCode, flags: CGEventFlags = [], duration: Double = 0.08) {
     for down in [true, false] {
+        MainActor.assumeIsolated { keyDisplay?.update(flags: flags, key: keyCode, down: down) }
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: down) else { continue }
         event.flags = flags
         event.post(tap: .cgSessionEventTap)
+        if down { wait(duration) }
     }
 }
 
@@ -272,17 +277,22 @@ func recordSpaceSwitch() {
 }
 
 func recordWindowCycle() {
-    clip("window-cycle", seconds: 9) {
+    clip("command-tab", seconds: 10) {
+        MainActor.assumeIsolated { keyDisplay = DemoKeyDisplay() }
+        wait(1)
         holding(.maskCommand) {
-            postTap(Key.tab, flags: .maskCommand)
+            postTap(Key.tab, flags: .maskCommand, duration: 0.4)
             wait(1.5)
-            postTap(Key.tab, flags: .maskCommand)
-            wait(1.3)
-            postTap(Key.tab, flags: .maskCommand)
-            wait(1.5)
+            MainActor.assumeIsolated { keyDisplay?.caption = "Keep holding Command · press Tab again" }
+            postTap(Key.tab, flags: .maskCommand, duration: 0.35)
+            wait(2.2)
+            MainActor.assumeIsolated { keyDisplay?.caption = "Release Command to focus the window" }
+            wait(0.7)
         }
+        MainActor.assumeIsolated { keyDisplay?.caption = "Selected window focused" }
         wait(2.0)
     }
+    MainActor.assumeIsolated { keyDisplay?.panel.orderOut(nil); keyDisplay = nil }
 }
 
 func recordAllWindows() {
@@ -327,11 +337,36 @@ func recordWindowMove() {
 }
 
 func captureStills() {
-    holding([.maskCommand, .maskAlternate]) {
-        postTap(Key.tab, flags: [.maskCommand, .maskAlternate])
+    holding(.maskCommand) {
+        postTap(Key.tab, flags: .maskCommand)
         wait(1.5)
-        still("overlay")
-        postTap(Key.escape, flags: [.maskCommand, .maskAlternate])
+        postTap(Key.digits[1], flags: .maskCommand)
+        wait(1)
+        // Start the movie over the light Notes window so the glass labels remain legible.
+        postTap(Key.tab, flags: .maskCommand)
+        wait(0.3)
+        postTap(Key.tab, flags: .maskCommand)
+        wait(0.3)
+        // Neutral backing for the glass, kept out of the isolated-window PNG itself.
+        let backdrop = MainActor.assumeIsolated { () -> NSPanel in
+            let panel = NSPanel(contentRect: NSScreen.main!.frame,
+                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel.backgroundColor = .white
+            panel.isOpaque = true
+            panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue - 1)
+            panel.hidesOnDeactivate = false
+            panel.ignoresMouseEvents = true
+            panel.orderFrontRegardless()
+            panel.displayIfNeeded()
+            return panel
+        }
+        wait(1)
+        do {
+            try captureOverlayCover(to: outputDirectory.appendingPathComponent("overlay.png"))
+            log("still overlay.png (isolated overlay)")
+        } catch { log("overlay cover FAILED: \(error)"); exit(1) }
+        MainActor.assumeIsolated { backdrop.orderOut(nil) }
+        // Commit this desktop so the following demo opens the same workspace.
         wait(0.5)
     }
 }

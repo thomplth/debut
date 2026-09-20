@@ -14,7 +14,7 @@ SSH_KEY="$SHARE_DIR/id_ed25519"
 KNOWN_HOSTS="$SHARE_DIR/known_hosts"
 MEDIA_DIR="$PROJECT_DIR/docs/media"
 DISPLAY_MODE="${DEBUT_DEMO_DISPLAY:-1440x900}"
-GIF_WIDTH="${DEBUT_DEMO_GIF_WIDTH:-760}"
+GIF_WIDTH="${DEBUT_DEMO_GIF_WIDTH:-1440}"
 STILL_WIDTH="${DEBUT_DEMO_STILL_WIDTH:-820}"
 
 usage() {
@@ -23,13 +23,14 @@ Usage: scripts/demo-capture.sh [--clips a,b,c] [--keep-raw]
 
 Records the README media in the Tart guest and converts it into docs/media.
 Requires the VM from scripts/tart-e2e.sh prepare, plus ffmpeg on the host.
+The default clip is command-tab; use --clips to select other demo sequences.
 
 Overrides: DEBUT_TART_VM, DEBUT_TART_SHARE, DEBUT_DEMO_DISPLAY, DEBUT_DEMO_GIF_WIDTH,
            DEBUT_DEMO_STILL_WIDTH
 EOF
 }
 
-CLIPS=""
+CLIPS="command-tab"
 KEEP_RAW=0
 while (( $# > 0 )); do
     case "$1" in
@@ -98,26 +99,42 @@ tart exec "$VM_NAME" /bin/bash -c '
 ' _ "$(<"$SSH_KEY.pub")"
 
 echo "Capturing inside $VM_NAME..."
-guest_ip="$(tart ip "$VM_NAME")"
-printf -v remote_command '/bin/bash %q %q %q %q %q %q' \
-    "/Volumes/My Shared Files/$GUEST_ARTIFACT" "$APP_ARTIFACT" "$DRIVER_ARTIFACT" \
-    "$DOCS_ARTIFACT" "$DISPLAY_MODE" "$PROVISION_ARTIFACT"
-[[ -n "$CLIPS" ]] && printf -v remote_command '%s --clips %q' "$remote_command" "$CLIPS"
-ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-    -o UserKnownHostsFile="$KNOWN_HOSTS" "admin@$guest_ip" "$remote_command"
+guest_arguments=( "/Volumes/My Shared Files/$GUEST_ARTIFACT" "$APP_ARTIFACT" "$DRIVER_ARTIFACT"
+    "$DOCS_ARTIFACT" "$DISPLAY_MODE" "$PROVISION_ARTIFACT" )
+[[ -n "$CLIPS" ]] && guest_arguments+=( --clips "$CLIPS" )
+printf -v quoted_arguments ' %q' "${guest_arguments[@]}"
+remote_command="/bin/bash$quoted_arguments"
+if guest_ip="$(tart ip "$VM_NAME" --wait 15 2>/dev/null)"; then
+    ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        -o UserKnownHostsFile="$KNOWN_HOSTS" "admin@$guest_ip" "$remote_command"
+else
+    # vsock works without DHCP. Enter through the guest's loopback SSH server so capture
+    # retains the same TCC responsibility as normal SSH, independent of the guest agent.
+    tart exec "$VM_NAME" /bin/bash -c '
+        set -e
+        umask 077
+        key="$HOME/.ssh/id_ed25519_debut_demo"
+        [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N "" -C "debut-demo-loopback" -f "$key"
+        grep -qxF "$(<"$key.pub")" "$HOME/.ssh/authorized_keys" || cat "$key.pub" >> "$HOME/.ssh/authorized_keys"
+        exec ssh -i "$key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new admin@127.0.0.1 "$1"
+    ' _ "$remote_command"
+fi
 
 RAW_DIR="$SHARE_DIR/media"
 [[ -d "$RAW_DIR" ]] || { echo "The guest produced no media at $RAW_DIR." >&2; exit 1; }
 
 echo "Converting..."
 mkdir -p "$MEDIA_DIR"
-# The guest captures at the full 2880x1800 backing scale, which is a 4.7 MB PNG for something
-# the README displays at 820 points. JPEG at twice the display width is 277 KB and, on a
-# screenshot this photographic, indistinguishable — the stages are translucent glass over a
-# wallpaper, not flat UI that would ring.
+# The cover is a tightly framed capture of the actual overlay window on a plain light canvas.
+# Keep its text lossless in PNG; onboarding stills retain their existing JPEG format.
 for still in "$RAW_DIR"/*.png; do
     [[ -e "$still" ]] || continue
     name="$(basename "${still%.png}")"
+    if [[ "$name" == overlay ]]; then
+        cp "$still" "$MEDIA_DIR/overlay.png"
+        echo "  overlay.png $(du -h "$MEDIA_DIR/overlay.png" | cut -f1)"
+        continue
+    fi
     crop=""
     case "$name" in
         onboarding-workspace) crop="crop=1000:630:940:740," ;;
@@ -128,18 +145,16 @@ for still in "$RAW_DIR"/*.png; do
     echo "  $name.jpg $(du -h "$MEDIA_DIR/$name.jpg" | cut -f1)"
 done
 
-# One shared palette per clip: the stages are translucent over a photographic wallpaper, and
-# a per-frame palette makes that gradient crawl. `stats_mode=diff` spends that palette on the
-# moving stages rather than the static desktop behind them, and ordered dithering keeps the
-# still regions byte-identical between frames — error diffusion sprays them with noise that no
-# GIF encoder can delta away, which is what made the first cut of these 14 MB.
+# One palette and ordered dithering keep unchanged regions identical. Drop duplicate frames
+# while retaining their timestamps, then encode only changed rectangles with transparency.
+# This retains readable UI at 1440px without paying for a full frame on every tick.
 for clip in "$RAW_DIR"/*.mov; do
     [[ -e "$clip" ]] || continue
     name="$(basename "${clip%.mov}")"
     [[ "$name" == onboarding-* ]] && continue
     ffmpeg -loglevel error -y -i "$clip" \
-        -vf "fps=15,scale=$GIF_WIDTH:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
-        -loop 0 "$MEDIA_DIR/$name.gif"
+        -vf "fps=15,scale=$GIF_WIDTH:-1:flags=lanczos,mpdecimate,split[a][b];[a]palettegen=max_colors=256:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
+        -fps_mode vfr -gifflags +transdiff+offsetting -loop 0 -final_delay 180 "$MEDIA_DIR/$name.gif"
     echo "  $name.gif $(du -h "$MEDIA_DIR/$name.gif" | cut -f1)"
 done
 
