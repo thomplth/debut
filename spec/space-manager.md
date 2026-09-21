@@ -110,7 +110,8 @@ a desktop move. Keyboard Up/Down moves use the same preview transaction and anim
 the selected card directly into the adjacent stage's MRU slot; this guided flight is
 keyboard-only and does not replace the pointer drag preview or its drop handoff.
 The source card stays invisibly retained for the flight so its ordinary removal transition
-cannot leave an afterimage, and the proxy hands off at the measured destination-card center.
+cannot leave an afterimage. The proxy follows reconstructed stable coordinates while the stages
+move, then accepts only a small measured correction after layout has settled before handoff.
 Keyboard Left/Right reorders within the selected stage. These edits affect the
 displayed preview until the user commits by releasing the modifier or choosing a
 window. Escape discards them without moving real windows.

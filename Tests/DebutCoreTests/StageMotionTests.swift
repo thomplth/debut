@@ -223,8 +223,15 @@ struct StageMotionTests {
         #expect(destinationItems.map(\.layoutIndex) == [0])
     }
 
-    @Test("A guided keyboard flight lands on the measured destination card")
-    func guidedKeyboardFlightUsesMeasuredDestination() {
+    @Test("A guided keyboard flight does not steer toward geometry sampled during layout")
+    func guidedKeyboardFlightUsesStableEstimatedPath() {
+        #expect(StageMotion.guidedKeyboardFlightDestination(
+            estimated: CGPoint(x: 400, y: 500)
+        ) == CGPoint(x: 400, y: 500))
+    }
+
+    @Test("A guided keyboard flight corrects to measured geometry only at handoff")
+    func guidedKeyboardFlightCorrectsAtHandoff() {
         let move = KeyboardWindowMoveAnimation(
             sequence: 1,
             windowID: 42,
@@ -233,32 +240,21 @@ struct StageMotionTests {
             toSpaceIndex: 1,
             toWindowIndex: 1
         )
-        let frames = [
-            WindowIdentityFrameID(spaceIndex: 1, windowIndex: 1, windowID: 99): CGRect(
-                x: 10, y: 20, width: 100, height: 80
-            ),
-            WindowIdentityFrameID(spaceIndex: 1, windowIndex: 1, windowID: 42): CGRect(
-                x: 210, y: 320, width: 120, height: 90
-            )
-        ]
+        let measuredDestination = WindowIdentityFrameID(
+            spaceIndex: 1,
+            windowIndex: 1,
+            windowID: 42
+        )
 
-        #expect(StageMotion.guidedKeyboardFlightDestination(
-            move: move,
-            windowFrames: frames
-        ) == CGPoint(x: 270, y: 365))
-        #expect(StageMotion.guidedKeyboardFlightDestination(
+        #expect(StageMotion.guidedKeyboardFlightHandoffDestination(
+            currentPosition: CGPoint(x: 265, y: 360),
             move: move,
             windowFrames: [
-                WindowIdentityFrameID(
-                    spaceIndex: 1,
-                    windowIndex: 1,
-                    windowID: 99
-                ): CGRect(
-                    x: 10, y: 20, width: 100, height: 80
-                )
+                measuredDestination: CGRect(x: 210, y: 320, width: 120, height: 90)
             ]
-        ) == nil)
-        #expect(StageMotion.guidedKeyboardFlightDestination(
+        ) == CGPoint(x: 270, y: 365))
+        #expect(StageMotion.guidedKeyboardFlightHandoffDestination(
+            currentPosition: CGPoint(x: 265, y: 360),
             move: move,
             windowFrames: [
                 WindowIdentityFrameID(
@@ -266,6 +262,13 @@ struct StageMotionTests {
                     windowIndex: 0,
                     windowID: 42
                 ): CGRect(x: 20, y: 30, width: 100, height: 80)
+            ]
+        ) == nil)
+        #expect(StageMotion.guidedKeyboardFlightHandoffDestination(
+            currentPosition: CGPoint(x: 700, y: 700),
+            move: move,
+            windowFrames: [
+                measuredDestination: CGRect(x: 210, y: 320, width: 120, height: 90)
             ]
         ) == nil)
     }

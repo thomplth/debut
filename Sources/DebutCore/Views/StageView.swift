@@ -171,10 +171,15 @@ enum StageMotion {
         return items
     }
 
-    /// The hidden destination card is the geometry authority for the handoff. Including its
-    /// window ID prevents a stale frame from the card that previously occupied the same slot
-    /// from becoming the flight endpoint.
-    static func guidedKeyboardFlightDestination(
+    /// Geometry preferences update while their ancestor stage is still moving. The reconstructed
+    /// destination is stable from the first frame, so live geometry must never steer the flight.
+    static func guidedKeyboardFlightDestination(estimated: CGPoint) -> CGPoint { estimated }
+
+    /// Once the shared spring completes, measured geometry may remove a small reconstruction
+    /// error. Rejecting large corrections prevents a transient or mismatched preference from
+    /// sending the proxy to a different coordinate system during handoff.
+    static func guidedKeyboardFlightHandoffDestination(
+        currentPosition: CGPoint,
         move: KeyboardWindowMoveAnimation,
         windowFrames: [WindowIdentityFrameID: CGRect]
     ) -> CGPoint? {
@@ -184,7 +189,13 @@ enum StageMotion {
             windowID: move.windowID
         )
         guard let frame = windowFrames[destinationID] else { return nil }
-        return CGPoint(x: frame.midX, y: frame.midY)
+        let destination = CGPoint(x: frame.midX, y: frame.midY)
+        let correction = hypot(
+            destination.x - currentPosition.x,
+            destination.y - currentPosition.y
+        )
+        guard correction > 0.5, correction <= 24 else { return nil }
+        return destination
     }
 
     /// A window leaving the stage is the app going away, not a layout tweak, so it settles
@@ -1542,7 +1553,6 @@ public struct StageOverlayView: View {
             }
             .onPreferenceChange(WindowIdentityFramePreferenceKey.self) { frames in
                 windowIdentityFrames = frames
-                startKeyboardWindowFlightIfReady(windowFrames: frames)
             }
             .onContinuousHover(coordinateSpace: .local) { phase in
                 switch phase {
@@ -1651,7 +1661,18 @@ public struct StageOverlayView: View {
             inactiveScale: inactiveScale,
             containerSize: containerSize,
             metrics: sourceMetrics
+        ), let estimatedDestination = StageConstants.windowCardCenter(
+            spaceIndex: move.toSpaceIndex,
+            windowIndex: move.toWindowIndex,
+            contentAspects: afterAspects,
+            activeSpaceIndex: move.toSpaceIndex,
+            inactiveScale: inactiveScale,
+            containerSize: containerSize,
+            metrics: destinationMetrics
         ) else { return }
+        let destination = StageMotion.guidedKeyboardFlightDestination(
+            estimated: estimatedDestination
+        )
 
         var transaction = Transaction()
         transaction.disablesAnimations = true
@@ -1662,47 +1683,56 @@ public struct StageOverlayView: View {
                 window: window,
                 position: source,
                 metrics: sourceMetrics,
-                destinationMetrics: destinationMetrics,
-                isAnimating: false
+                destinationMetrics: destinationMetrics
             )
         }
 
-        startKeyboardWindowFlightIfReady(windowFrames: windowIdentityFrames)
+        startKeyboardWindowFlight(sequence: move.sequence, destination: destination)
     }
 
-    private func startKeyboardWindowFlightIfReady(
-        windowFrames: [WindowIdentityFrameID: CGRect]
-    ) {
-        guard var flight = keyboardWindowFlight,
-              !flight.isAnimating,
-              let destination = StageMotion.guidedKeyboardFlightDestination(
-                  move: flight.move,
-                  windowFrames: windowFrames
-              )
-        else { return }
-
-        flight.isAnimating = true
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            keyboardWindowFlight = flight
-        }
-
+    private func startKeyboardWindowFlight(sequence: Int, destination: CGPoint) {
         DispatchQueue.main.async {
-            guard keyboardWindowFlight?.sequence == flight.sequence else { return }
+            guard let flight = keyboardWindowFlight,
+                  flight.sequence == sequence
+            else { return }
             withAnimation(
                 StageMotion.guidedKeyboardMoveTransition(reduceMotion: false).animation
             ) {
                 keyboardWindowFlight?.position = destination
                 keyboardWindowFlight?.metrics = flight.destinationMetrics
             } completion: {
-                guard keyboardWindowFlight?.sequence == flight.sequence else { return }
-                var completionTransaction = Transaction()
-                completionTransaction.disablesAnimations = true
-                withTransaction(completionTransaction) {
-                    keyboardWindowFlight = nil
-                }
+                finishKeyboardWindowFlight(sequence: sequence)
             }
+        }
+    }
+
+    private func finishKeyboardWindowFlight(sequence: Int) {
+        guard let flight = keyboardWindowFlight,
+              flight.sequence == sequence
+        else { return }
+
+        guard let destination = StageMotion.guidedKeyboardFlightHandoffDestination(
+            currentPosition: flight.position,
+            move: flight.move,
+            windowFrames: windowIdentityFrames
+        ) else {
+            clearKeyboardWindowFlight(sequence: sequence)
+            return
+        }
+
+        withAnimation(.easeOut(duration: 0.08)) {
+            keyboardWindowFlight?.position = destination
+        } completion: {
+            clearKeyboardWindowFlight(sequence: sequence)
+        }
+    }
+
+    private func clearKeyboardWindowFlight(sequence: Int) {
+        guard keyboardWindowFlight?.sequence == sequence else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            keyboardWindowFlight = nil
         }
     }
 
