@@ -610,6 +610,7 @@ struct SpaceControllerTests {
             toSpaceIndex: 0,
             toWindowIndex: 0
         ))
+        #expect(controller.keyboardWindowMoveAnimation == nil)
         keyboardSvc.simulateEvent(.cmdRelease)
 
         #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [202, 101])
@@ -789,6 +790,14 @@ struct SpaceControllerTests {
         #expect(controller.selectedSpaceIndex == 1)
         #expect(controller.spaceManager.spaces[1].windows.isEmpty)
         #expect(controller.overlaySpaceManager.spaces[1].windows.map(\.windowID) == [101])
+        #expect(controller.keyboardWindowMoveAnimation == KeyboardWindowMoveAnimation(
+            sequence: 1,
+            windowID: 101,
+            fromSpaceIndex: 0,
+            fromWindowIndex: 0,
+            toSpaceIndex: 1,
+            toWindowIndex: 0
+        ))
     }
 
     @Test("Configured overlay presentation delay controls the hold threshold")
