@@ -9,6 +9,8 @@ SHARE_DIR="${DEBUT_TART_SHARE:-$HOME/Library/Caches/Debut/TartE2E}"
 VM_LOG="$SHARE_DIR/tart-vm.log"
 SSH_KEY="$SHARE_DIR/id_ed25519"
 KNOWN_HOSTS="$SHARE_DIR/known_hosts"
+RUN_LOCK="$SHARE_DIR/tart-e2e.lock"
+RUN_LOCK_HELD=false
 APP_ARTIFACT=""
 E2E_ARTIFACT=""
 GUEST_ARTIFACT=""
@@ -20,7 +22,7 @@ Usage: scripts/tart-e2e.sh <prepare|run|stop|status>
   prepare  Clone and configure the free Tahoe VM (one-time, about 27 GB download)
   run      Run every check in the headless guest
   stop     Stop the warm guest VM
-  status   Show the VM configuration and current IP address
+  status   Show the VM configuration and guest-agent readiness
 
 Overrides: DEBUT_TART_VM, DEBUT_TART_SHARE
 EOF
@@ -36,6 +38,13 @@ require_tart() {
 
 vm_exists() {
     tart get "$VM_NAME" >/dev/null 2>&1
+}
+
+release_run_lock() {
+    if [[ "$RUN_LOCK_HELD" == true ]]; then
+        rm -f "$RUN_LOCK"
+        RUN_LOCK_HELD=false
+    fi
 }
 
 prepare_vm() {
@@ -113,7 +122,7 @@ start_vm() {
     exit 1
 }
 
-prepare_ssh() {
+prepare_loopback_ssh() {
     local public_key
     if [[ ! -f "$SSH_KEY" ]]; then
         ssh-keygen -q -t ed25519 -N "" -C "debut-tart-e2e" -f "$SSH_KEY"
@@ -135,6 +144,13 @@ run_e2e() {
         echo "Tart VM $VM_NAME does not exist. Run scripts/tart-e2e.sh prepare first." >&2
         exit 1
     fi
+    mkdir -p "$SHARE_DIR"
+    if ! /usr/bin/shlock -f "$RUN_LOCK" -p "$$"; then
+        echo "Another Tart E2E run already owns $SHARE_DIR (PID $(<"$RUN_LOCK"))." >&2
+        exit 1
+    fi
+    RUN_LOCK_HELD=true
+    trap release_run_lock EXIT
 
     space_build
     # First-use permission and desktop setup must start with a fresh compositor.
@@ -145,7 +161,7 @@ run_e2e() {
         tart stop "$VM_NAME"
     fi
     start_vm
-    prepare_ssh
+    prepare_loopback_ssh
 
     echo "Running the full E2E suite inside $VM_NAME..."
     printf -v remote_command '/bin/bash %q %q %q' \
@@ -182,7 +198,7 @@ show_status() {
     fi
     tart get "$VM_NAME"
     if guest_is_ready; then
-        echo "IP: $(tart ip "$VM_NAME")"
+        echo "Guest agent: ready"
     else
         echo "State: stopped"
     fi

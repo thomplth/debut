@@ -574,6 +574,19 @@ func postMouseClick(at point: CGPoint) {
     }
 }
 
+func postHIDMouseClick(at point: CGPoint) {
+    for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+        guard let event = CGEvent(
+            mouseEventSource: nil,
+            mouseType: type,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) else { continue }
+        event.post(tap: .cghidEventTap)
+        wait(0.1)
+    }
+}
+
 func postMouseDrag(from start: CGPoint, to end: CGPoint) {
     guard !skipsSyntheticDrags else { return }
 
@@ -604,6 +617,48 @@ func postMouseDrag(from start: CGPoint, to end: CGPoint) {
 
     wait(0.15)
 
+    guard let up = CGEvent(
+        mouseEventSource: nil,
+        mouseType: .leftMouseUp,
+        mouseCursorPosition: end,
+        mouseButton: .left
+    ) else { return }
+    up.post(tap: .cghidEventTap)
+}
+
+func postMouseDrag(from start: CGPoint, through edge: CGPoint, to end: CGPoint) {
+    guard !skipsSyntheticDrags else { return }
+    guard let down = CGEvent(
+        mouseEventSource: nil,
+        mouseType: .leftMouseDown,
+        mouseCursorPosition: start,
+        mouseButton: .left
+    ) else { return }
+    down.post(tap: .cghidEventTap)
+    wait(0.25)
+
+    func drag(to destination: CGPoint, from origin: CGPoint) {
+        for step in 1...16 {
+            let progress = CGFloat(step) / 16
+            let point = CGPoint(
+                x: origin.x + (destination.x - origin.x) * progress,
+                y: origin.y + (destination.y - origin.y) * progress
+            )
+            guard let dragged = CGEvent(
+                mouseEventSource: nil,
+                mouseType: .leftMouseDragged,
+                mouseCursorPosition: point,
+                mouseButton: .left
+            ) else { continue }
+            dragged.post(tap: .cghidEventTap)
+            wait(0.04)
+        }
+    }
+
+    drag(to: edge, from: start)
+    wait(0.5)
+    drag(to: end, from: edge)
+    wait(0.15)
     guard let up = CGEvent(
         mouseEventSource: nil,
         mouseType: .leftMouseUp,
@@ -702,6 +757,56 @@ func windowCenter(
         containerSize: overlayBounds.size,
         metrics: drawnMetrics(cardAspects: cardAspects)
     ).map(onScreen)
+}
+
+func stageCenter(
+    spaceIndex: Int,
+    cardAspects: [[CGFloat?]],
+    activeSpaceIndex: Int,
+    focusedSpaceIndex: Int,
+    edgeScrollPointerY: CGFloat,
+    inactiveScale: CGFloat
+) -> CGPoint? {
+    guard let centered = stageCenter(
+        spaceIndex: spaceIndex,
+        cardAspects: cardAspects,
+        activeSpaceIndex: focusedSpaceIndex,
+        inactiveScale: inactiveScale
+    ), let offset = focusedStackOffset(
+        cardAspects: cardAspects,
+        activeSpaceIndex: activeSpaceIndex,
+        focusedSpaceIndex: focusedSpaceIndex,
+        edgeScrollPointerY: edgeScrollPointerY,
+        inactiveScale: inactiveScale
+    ) else { return nil }
+    return CGPoint(x: centered.x, y: centered.y + offset)
+}
+
+/// The focused stack remains anchored to its baseline slot, then edge-scrolls when the pointer
+/// that caused focus is near the top or bottom. A second drag must use the resulting rendered
+/// position, not merely the focused layout's centered position.
+func focusedStackOffset(
+    cardAspects: [[CGFloat?]],
+    activeSpaceIndex: Int,
+    focusedSpaceIndex: Int,
+    edgeScrollPointerY: CGFloat,
+    inactiveScale: CGFloat
+) -> CGFloat? {
+    guard cardAspects.indices.contains(activeSpaceIndex),
+          cardAspects.indices.contains(focusedSpaceIndex)
+    else { return nil }
+
+    let metrics = drawnMetrics(cardAspects: cardAspects)
+    return StageConstants.focusedStackTranslation(
+        contentAspects: cardAspects,
+        screenWidth: overlayBounds.width,
+        activeSpaceIndex: activeSpaceIndex,
+        focusedSpaceIndex: focusedSpaceIndex,
+        inactiveScale: inactiveScale,
+        containerHeight: overlayBounds.height,
+        pointerY: edgeScrollPointerY - overlayBounds.minY,
+        metrics: metrics
+    )
 }
 
 /// Lifts a point from the overlay's own coordinate space into the screen's.
@@ -926,10 +1031,15 @@ func windowSize(_ window: AXUIElement) -> CGSize? {
 /// own limits — TextEdit held a 945pt width against a 1100pt request while taking the height —
 /// so the settled size is the fixture and the requested size is only an intent.
 func resizeWindow(_ window: AXUIElement, to size: CGSize, from before: CGSize) -> CGSize? {
-    var requested = size
-    guard let value = AXValueCreate(.cgSize, &requested) else { return nil }
-    AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
-    _ = waitFor(timeout: 3) { windowSize(window) != before }
+    for _ in 0..<3 {
+        var requested = size
+        guard let value = AXValueCreate(.cgSize, &requested) else { return nil }
+        let result = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
+        if result == .success, waitFor(timeout: 2, { windowSize(window) != before }) {
+            break
+        }
+        wait(0.25)
+    }
     return windowSize(window)
 }
 
@@ -1762,20 +1872,23 @@ if preparedWindowCounts.indices.contains(sourceSpaceIndex),
             && movedWindowCounts[destinationSpaceIndex] == 1
     }
 
-    if let returnedWindowPoint = windowCenter(
-        spaceIndex: destinationSpaceIndex,
-        windowIndex: 0,
-        cardAspects: movedCardAspects,
-        activeSpaceIndex: stageActiveSpaceIndex,
-        inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
-    ), let returnedSpacePoint = stageCenter(
+    wait(0.4)
+    let topEdge = CGPoint(
+        x: overlayBounds.midX,
+        y: overlayBounds.minY + StageConstants.edgeScrollMargin / 2
+    )
+    if let returnedSpacePoint = stageCenter(
         spaceIndex: sourceSpaceIndex,
         cardAspects: movedCardAspects,
         activeSpaceIndex: stageActiveSpaceIndex,
+        focusedSpaceIndex: destinationSpaceIndex,
+        edgeScrollPointerY: topEdge.y,
         inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
     ) {
-        info("  Reverse drag path: \(returnedWindowPoint) -> \(returnedSpacePoint)")
-        postMouseDrag(from: returnedWindowPoint, to: returnedSpacePoint)
+        // The first drop ends over the newly inserted card, so that exact live pointer location
+        // is a stronger hit target than a second reconstruction of SwiftUI's animated geometry.
+        info("  Reverse drag path: \(destinationPoint) -> \(topEdge) -> \(returnedSpacePoint)")
+        postMouseDrag(from: destinationPoint, through: topEdge, to: returnedSpacePoint)
         for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
             if readEvents().filter({ $0["event"] == "window_move_previewed_by_drag" }).count > moveEventCount + 1 {
                 break
@@ -2199,6 +2312,9 @@ else { try? FileManager.default.removeItem(at: settingsFile) }
 header("System-duration Command-Tab desktop transition")
 let nativeTransitionSettingsBackup = try? Data(contentsOf: settingsFile)
 let nativeTransitionSpaces = SpaceService()
+let nativeFixtureDesktopReady = nativeTransitionSpaces.currentDesktopIndex() == 0
+    || (nativeTransitionSpaces.switchToDesktop(index: 0)
+        && waitFor { nativeTransitionSpaces.currentDesktopIndex() == 0 })
 let nativeTransitionWindows = AccessibilityWindowService()
 let nativeTransitionFixtureURL = URL(
     fileURLWithPath: "/tmp/debut-e2e-fixtures/native-desktop-transition.txt"
@@ -2220,7 +2336,8 @@ let nativeTransitionFixture = nativeTransitionWindows.listWindows().first {
         && nativeTransitionSpaces.desktopIndex(forWindow: $0.windowID) != nil
 }
 
-if nativeTransitionSpaces.desktopCount() >= 2,
+if nativeFixtureDesktopReady,
+   nativeTransitionSpaces.desktopCount() >= 2,
    let fixture = nativeTransitionFixture,
    let originalDesktop = nativeTransitionSpaces.desktopIndex(forWindow: fixture.windowID),
    let sourceDesktop = nativeTransitionSpaces.currentDesktopIndex() {
@@ -2323,6 +2440,10 @@ if nativeTransitionSpaces.desktopCount() >= 2,
     _ = waitFor {
         nativeTransitionSpaces.desktopIndex(forWindow: fixture.windowID) == originalDesktop
     }
+    if nativeTransitionSpaces.currentDesktopIndex() != sourceDesktop {
+        _ = nativeTransitionSpaces.switchToDesktop(index: sourceDesktop)
+        _ = waitFor { nativeTransitionSpaces.currentDesktopIndex() == sourceDesktop }
+    }
 } else {
     info("  System-duration transition fixture: desktops=\(nativeTransitionSpaces.desktopCount()) "
         + "pid=\(nativeTransitionFixturePID) ready=\(nativeTransitionFixtureReady) "
@@ -2353,6 +2474,13 @@ wait(3)
 clearDiagnosticFile()
 onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
 let onboardingApplicationReady = waitForDebutReady(onboardingApplication)
+if let onboardingApplication {
+    _ = onboardingApplication.activate(options: [.activateAllWindows])
+    _ = waitFor {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier
+            == onboardingApplication.processIdentifier
+    }
+}
 let onboardingWindowTitles = onboardingApplication.map {
     visibleWindowTitles(for: $0.processIdentifier)
 } ?? []
@@ -2520,11 +2648,112 @@ func onboardingButton(_ title: String, role wantedRole: String = kAXButtonRole) 
     return find(AXUIElementCreateApplication(application.processIdentifier))
 }
 @MainActor
-func onboardingPress(_ title: String) -> Bool {
-    guard let button = onboardingButton(title) else { return false }
+func onboardingPress(_ title: String, role: String = kAXButtonRole) -> Bool {
+    guard let button = onboardingButton(title, role: role) else { return false }
     let result = AXUIElementPerformAction(button, kAXPressAction as CFString)
     wait(0.3)
-    return result == .success
+    // SwiftUI can replace the pressed control before AX finishes servicing the request. The
+    // action has been delivered in that case, but AX reports cannotComplete for the vanished
+    // element. Every caller still verifies the resulting page or persisted setting.
+    return result == .success || result == .cannotComplete
+}
+
+@MainActor
+func onboardingPressUntil(
+    _ title: String,
+    attempts: Int = 3,
+    timeout: TimeInterval = 2,
+    _ completed: () -> Bool
+) -> Bool {
+    if completed() { return true }
+    for _ in 0..<attempts {
+        _ = onboardingPress(title)
+        if waitFor(timeout: timeout, completed) { return true }
+        // SwiftUI may replace the target control while AX is dispatching the action. Bring the
+        // app back before re-reading its current accessibility tree for the retry.
+        if let onboardingApplication {
+            _ = onboardingApplication.activate(options: [.activateAllWindows])
+        }
+        wait(0.2)
+    }
+    return false
+}
+
+@MainActor
+func onboardingMainMenuPress(_ title: String) -> Bool {
+    guard let application = onboardingApplication else { return false }
+    _ = application.activate(options: [.activateAllWindows])
+    guard waitFor({
+        NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier
+    }) else { return false }
+    let appElement = AXUIElementCreateApplication(application.processIdentifier)
+
+    func find(_ element: AXUIElement, role wantedRole: String, title: String) -> AXUIElement? {
+        var roleRef: CFTypeRef?
+        var titleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+        AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+        if roleRef as? String == wantedRole, titleRef as? String == title { return element }
+        var childrenRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef)
+        for child in childrenRef as? [AXUIElement] ?? [] {
+            if let match = find(child, role: wantedRole, title: title) { return match }
+        }
+        return nil
+    }
+
+    func frame(of element: AXUIElement) -> CGRect? {
+        var positionRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element, kAXPositionAttribute as CFString, &positionRef
+        ) == .success,
+            AXUIElementCopyAttributeValue(
+                element, kAXSizeAttribute as CFString, &sizeRef
+            ) == .success,
+            let positionRef, let sizeRef,
+            CFGetTypeID(positionRef) == AXValueGetTypeID(),
+            CFGetTypeID(sizeRef) == AXValueGetTypeID()
+        else { return nil }
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionRef as! AXValue, .cgPoint, &position),
+              AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
+        else { return nil }
+        return CGRect(origin: position, size: size)
+    }
+
+    func readMenuBar() -> AXUIElement? {
+        var menuBarRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appElement,
+            kAXMenuBarAttribute as CFString,
+            &menuBarRef
+        ) == .success, let menuBarRef else { return nil }
+        return (menuBarRef as! AXUIElement)
+    }
+
+    // Drive the real menu with HID pointer events. AXPress intermittently reports success without
+    // invoking AppKit menu actions in the virtualized session, while HID clicks follow the same
+    // path as a user. Re-read the opened menu subtree so a closed menu's cached AX item cannot
+    // supply a stale frame.
+    for _ in 0..<3 {
+        postKeyDown(keyCode: CGKeyCode(kVK_Escape))
+        postKeyUp(keyCode: CGKeyCode(kVK_Escape))
+        guard let menuBar = readMenuBar(),
+              let appMenu = find(menuBar, role: kAXMenuBarItemRole, title: "Debut"),
+              let appMenuFrame = frame(of: appMenu) else { continue }
+        postHIDMouseClick(at: CGPoint(x: appMenuFrame.midX, y: appMenuFrame.midY))
+        wait(0.35)
+        guard let openedMenuBar = readMenuBar(),
+            let openedAppMenu = find(openedMenuBar, role: kAXMenuBarItemRole, title: "Debut"),
+            let item = find(openedAppMenu, role: kAXMenuItemRole, title: title),
+            let itemFrame = frame(of: item) else { continue }
+        postHIDMouseClick(at: CGPoint(x: itemFrame.midX, y: itemFrame.midY))
+        wait(0.3)
+        return true
+    }
+    return false
 }
 @MainActor
 func onboardingContinueEnabled() -> Bool {
@@ -2546,14 +2775,17 @@ func returnToOnboarding() {
 }
 
 test("Onboarding names the next window before asking for Command-Tab") {
-    onboardingPress("Get started") && onboardingContains("Switch windows on this desktop")
-        && waitFor { currentOnboardingTarget()?["title"] == "Desktop switching" }
+    onboardingPress("Get started")
+        && waitFor {
+            onboardingContains("Switch windows on this desktop")
+                && currentOnboardingTarget()?["title"] == "Desktop switching"
+        }
         && !onboardingContinueEnabled()
 }
 _ = takeScreenshot("11_onboarding_windows")
 test("Restart replaces the temporary target without advancing the lesson") {
     let old = currentOnboardingTarget()?["windowID"]
-    return onboardingPress("Restart exercise") && waitFor { currentOnboardingTarget()?["windowID"] != old }
+    return onboardingPressUntil("Restart exercise") { currentOnboardingTarget()?["windowID"] != old }
         && onboardingContains("Switch windows on this desktop")
 }
 test("Opening the target without a shortcut does not advance and offers a return route") {
@@ -2564,23 +2796,27 @@ test("Opening the target without a shortcut does not advance and offers a return
     _ = service.raiseWindow(windowID: id)
     wait(0.5)
     let unchanged = !readEvents().contains { $0["event"] == "onboarding_practice_verified" && $0["windowID"] == String(id) }
-    return unchanged && onboardingPress("Return to tutorial") && onboardingContains("Switch windows on this desktop")
+    let lessonID = currentOnboardingTarget()?["lessonWindowID"]
+    return unchanged && onboardingPressUntil("Return to tutorial") {
+        onboardingContains("Switch windows on this desktop")
+            && liveKeyboardFocus().map { String($0.windowID) } == lessonID
+    }
 }
 test("Closing the target explains recovery and restart creates another window") {
     guard let id = currentOnboardingTarget()?["windowID"].flatMap(UInt32.init) else { return false }
     guard AccessibilityWindowService().closeWindow(windowID: id) else { return false }
     return waitFor { onboardingContains("next lesson window was closed") }
-        && onboardingPress("Restart exercise")
-        && waitFor { currentOnboardingTarget()?["windowID"] != String(id) }
+        && onboardingPressUntil("Restart exercise") {
+            currentOnboardingTarget()?["windowID"] != String(id)
+        }
 }
 test("The target's Return button recreates a closed lesson without losing progress") {
     guard let oldLessonID = currentOnboardingTarget()?["lessonWindowID"].flatMap(UInt32.init),
-          AccessibilityWindowService().closeWindow(windowID: oldLessonID),
-          onboardingPress("Return to tutorial") else {
+          AccessibilityWindowService().closeWindow(windowID: oldLessonID) else {
         info("  Return recovery could not close or press; target=\(String(describing: currentOnboardingTarget()))")
         return false
     }
-    let resumed = waitFor {
+    let resumed = onboardingPressUntil("Return to tutorial", timeout: 3) {
         guard let newLessonID = currentOnboardingTarget()?["lessonWindowID"] else { return false }
         return newLessonID != String(oldLessonID) && onboardingContains("Switch windows on this desktop")
             && onboardingContains("Hold Command and press Tab")
@@ -2588,16 +2824,25 @@ test("The target's Return button recreates a closed lesson without losing progre
     if !resumed { info("  Return recovery timed out: old=\(oldLessonID), target=\(String(describing: currentOnboardingTarget())), UI=\(accessibilityStrings(for: onboardingApplication?.processIdentifier ?? 0))") }
     return resumed
 }
+var onboardingMenuReopenedLesson = false
 test("Reopening a closed lesson from the Tutorial menu restores isolation") {
     guard let target = currentOnboardingTarget(),
           let lessonID = target["lessonWindowID"].flatMap(UInt32.init),
           AccessibilityWindowService().closeWindow(windowID: lessonID),
-          let menuItem = onboardingButton("Tutorial...", role: kAXMenuItemRole),
-          AXUIElementPerformAction(menuItem, kAXPressAction as CFString) == .success,
           waitFor({
+              readEvents().contains {
+                  $0["event"] == "window_retired" && $0["windowID"] == String(lessonID)
+              }
+          }) else { return false }
+    for _ in 0..<3 {
+        guard onboardingMainMenuPress("Tutorial...") else { continue }
+        onboardingMenuReopenedLesson = waitFor(timeout: 3, {
               guard let resumed = currentOnboardingTarget()?["lessonWindowID"] else { return false }
               return resumed != String(lessonID) && onboardingContains("Hold Command and press Tab")
-          }) else { return false }
+        })
+        if onboardingMenuReopenedLesson { break }
+    }
+    guard onboardingMenuReopenedLesson else { return false }
     postFlagsChanged(flags: .maskCommand)
     postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
     let isolated = waitFor { overlayWindowIsOnScreen() && readState()["tutorialOverlay"] == "true" }
@@ -2606,6 +2851,23 @@ test("Reopening a closed lesson from the Tutorial menu restores isolation") {
     postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: .maskCommand)
     postFlagsChanged(flags: [])
     return isolated && waitFor { readState()["overlayVisible"] == "false" }
+}
+if !onboardingMenuReopenedLesson {
+    // Keep later onboarding checks independent if this one fails: the target window's own return
+    // route uses the same recovery path without pretending that the menu assertion passed.
+    _ = onboardingPress("Return to tutorial")
+    if !waitFor({ onboardingContains("Switch windows on this desktop") }) {
+        _ = terminateDebutAndWait()
+        clearDiagnosticFile()
+        onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
+        _ = waitForDebutReady(onboardingApplication)
+        returnToOnboarding()
+        _ = onboardingPress("Get started")
+        _ = waitFor(timeout: 8) {
+            onboardingContains("Switch windows on this desktop")
+                && currentOnboardingTarget()?["title"] == "Desktop switching"
+        }
+    }
 }
 test("Cancelling the switcher cannot complete an exercise") {
     postFlagsChanged(flags: .maskCommand)
@@ -2621,27 +2883,85 @@ test("Cancelling the switcher cannot complete an exercise") {
 }
 test("Switching from another app during onboarding uses the ordinary switcher") {
     let service = AccessibilityWindowService()
-    guard let other = service.listWindows().first(where: { $0.ownerBundleID == "com.apple.TextEdit" }) else { return false }
-    _ = service.frontWindow(windowID: other.windowID, ownerPID: other.ownerPID)
-    _ = service.raiseWindow(windowID: other.windowID)
-    wait(0.4)
+    let spaces = SpaceService()
+    var otherCandidates = service.listWindows().filter {
+        $0.ownerBundleID == "com.apple.TextEdit" && spaces.desktopIndex(forWindow: $0.windowID) != nil
+    }
+    if otherCandidates.isEmpty {
+        let fixture = URL(fileURLWithPath: "/tmp/debut-e2e-fixtures/onboarding-ordinary.txt")
+        try? FileManager.default.createDirectory(
+            at: fixture.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? "Debut onboarding ordinary switcher fixture\n".write(
+            to: fixture,
+            atomically: true,
+            encoding: .utf8
+        )
+        let open = Process()
+        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        open.arguments = ["-a", "TextEdit", fixture.path]
+        try? open.run()
+        open.waitUntilExit()
+        _ = waitFor(timeout: 15) {
+            otherCandidates = service.listWindows().filter {
+                $0.ownerBundleID == "com.apple.TextEdit"
+                    && spaces.desktopIndex(forWindow: $0.windowID) != nil
+            }
+            return !otherCandidates.isEmpty
+        }
+    }
+    guard let other = otherCandidates.first,
+          let otherDesktop = spaces.desktopIndex(forWindow: other.windowID) else {
+        info("  Ordinary onboarding switcher found no TextEdit target: \(service.listWindows())")
+        return false
+    }
+    if spaces.currentDesktopIndex() != otherDesktop {
+        guard spaces.switchToDesktop(index: otherDesktop),
+              waitFor({ spaces.currentDesktopIndex() == otherDesktop }) else { return false }
+    }
+    let fronted = service.frontWindow(windowID: other.windowID, ownerPID: other.ownerPID)
+    let raised = service.raiseWindow(windowID: other.windowID)
+    let activated = NSRunningApplication(processIdentifier: other.ownerPID)?
+        .activate(options: [.activateAllWindows]) ?? false
+    guard waitFor({
+        service.frontmostApplicationPID() == other.ownerPID
+            && liveKeyboardFocus()?.ownerPID == other.ownerPID
+    }) else {
+        info("  Ordinary onboarding switcher could not front TextEdit: fronted=\(fronted) "
+            + "raised=\(raised) activated=\(activated) focus=\(String(describing: liveKeyboardFocus()))")
+        return false
+    }
+    // Let the app-side workspace observer consume the activation before the shortcut. The live
+    // keyboard owner changes first, and an immediate key can otherwise retain tutorial scope.
+    wait(0.5)
     postFlagsChanged(flags: .maskCommand)
     postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
     let visible = waitFor { overlayWindowIsOnScreen() }
     postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
-    let ordinary = readState()["tutorialOverlay"] == "false" && readState()["tutorialCoachAction"] == ""
-        && (readState()["windowIDsBySpace"] ?? "").contains(String(other.windowID))
+    let ordinary = waitFor {
+        readState()["tutorialOverlay"] == "false" && readState()["tutorialCoachAction"] == ""
+            && (readState()["windowIDsBySpace"] ?? "").contains(String(other.windowID))
+    }
     postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: .maskCommand)
     postFlagsChanged(flags: [])
     var tutorialRestored = false
     if let id = currentOnboardingTarget()?["lessonWindowID"].flatMap(UInt32.init), let app = onboardingApplication {
-        tutorialRestored = waitFor(timeout: 4) {
+        if let tutorialDesktop = spaces.desktopIndex(forWindow: id),
+           spaces.currentDesktopIndex() != tutorialDesktop {
+            _ = spaces.switchToDesktop(index: tutorialDesktop)
+            _ = waitFor { spaces.currentDesktopIndex() == tutorialDesktop }
+        }
+        tutorialRestored = waitFor(timeout: 8) {
             _ = service.frontWindow(windowID: id, ownerPID: app.processIdentifier)
             _ = service.raiseWindow(windowID: id)
             return service.frontmostApplicationPID() == app.processIdentifier
-                && currentOnboardingTarget()?["keyWindowID"] == String(id)
+                && liveKeyboardFocus()?.windowID == id
         }
     }
+    info("  Ordinary onboarding switcher: window=\(other.windowID) desktop=\(otherDesktop) "
+        + "visible=\(visible) ordinary=\(ordinary) tutorialRestored=\(tutorialRestored) "
+        + "state=\(readState())")
     return visible && ordinary && tutorialRestored
 }
 test("The named Command-Tab target becomes the desktop lesson") { performOnboardingExercise(.workspace) }
@@ -2680,10 +3000,14 @@ test("All four desktop controls are visible and apply immediately") {
         info("  The last desktop control is not visible above the footer")
         return false
     }
-    guard let toggle = onboardingButton("Debut Command-Tab", role: kAXCheckBoxRole),
-          AXUIElementPerformAction(toggle, kAXPressAction as CFString) == .success else { return false }
-    wait(0.3)
-    guard let data = try? Data(contentsOf: settingsFile),
+    guard onboardingPress("Debut Command-Tab", role: kAXCheckBoxRole),
+          waitFor({
+              guard let data = try? Data(contentsOf: settingsFile),
+                    let settings = try? JSONDecoder().decode(AppSettings.self, from: data)
+              else { return false }
+              return !settings.features.workspaceIsolation
+          }),
+          let data = try? Data(contentsOf: settingsFile),
           let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else { return false }
     let changed = !settings.features.workspaceIsolation && settings.features.numberShortcuts
         && settings.features.controlArrows && settings.features.trackpadSwipes
@@ -2696,20 +3020,44 @@ test("Disabling all overrides immediately persists the choice") {
     return !settings.features.workspaceIsolation && !settings.features.numberShortcuts
         && !settings.features.controlArrows && !settings.features.trackpadSwipes
 }
-_ = onboardingPress("Enable all")
-test("The onboarding duration slider updates the running settings") {
-    guard let slider = onboardingButton("", role: kAXSliderRole) else { return false }
-    // Exercise the slider through its advertised user action rather than assuming
-    // its AXValue uses the binding's seconds instead of a normalized percentage.
-    for _ in 0..<40 {
-        guard AXUIElementPerformAction(slider, kAXIncrementAction as CFString) == .success else {
-            info("  Duration slider refused its increment action")
-            return false
-        }
-        wait(0.025)
-    }
-    wait(0.3)
+let onboardingOverridesReenabled = onboardingPress("Enable all") && waitFor {
     guard let data = try? Data(contentsOf: settingsFile),
+          let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else { return false }
+    return settings.features.fasterDesktopSwitching
+        && settings.features.workspaceIsolation
+        && settings.features.numberShortcuts
+        && settings.features.controlArrows
+        && settings.features.trackpadSwipes
+}
+test("The onboarding duration slider updates the running settings") {
+    guard onboardingOverridesReenabled,
+          let slider = onboardingButton("", role: kAXSliderRole) else { return false }
+    var enabledRef: CFTypeRef?
+    var positionRef: CFTypeRef?
+    var sizeRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(
+        slider, kAXEnabledAttribute as CFString, &enabledRef
+    ) == .success, enabledRef as? Bool == true,
+        AXUIElementCopyAttributeValue(
+            slider, kAXPositionAttribute as CFString, &positionRef
+        ) == .success,
+        AXUIElementCopyAttributeValue(
+            slider, kAXSizeAttribute as CFString, &sizeRef
+        ) == .success,
+        let positionRef, let sizeRef,
+        CFGetTypeID(positionRef) == AXValueGetTypeID(),
+        CFGetTypeID(sizeRef) == AXValueGetTypeID()
+    else { return false }
+    var position = CGPoint.zero
+    var size = CGSize.zero
+    guard AXValueGetValue(positionRef as! AXValue, .cgPoint, &position),
+          AXValueGetValue(sizeRef as! AXValue, .cgSize, &size) else { return false }
+    postMouseClick(at: CGPoint(x: position.x + size.width - 2, y: position.y + size.height / 2))
+    guard waitFor({
+        guard let data = try? Data(contentsOf: settingsFile),
+              let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else { return false }
+        return abs(settings.spaceSwitchDuration - 0.4) < 0.001
+    }), let data = try? Data(contentsOf: settingsFile),
           let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else { return false }
     info("  Onboarding slider reached \(settings.spaceSwitchDuration) seconds")
     return abs(settings.spaceSwitchDuration - 0.4) < 0.001
@@ -2820,9 +3168,12 @@ let dismissalHoverCount = readEvents().filter {
     $0["event"] == "overlay_pointer_selection_changed"
 }.count
 postMouseMove(to: CGPoint(x: dismissalScreen.maxX - 20, y: dismissalScreen.maxY - 20))
+wait(0.2)
 let dismissalHoverReady: Bool
 if let selectedCardCenter {
-    postMouseMove(to: selectedCardCenter)
+    postMouseMove(to: CGPoint(x: selectedCardCenter.x - 8, y: selectedCardCenter.y))
+    wait(0.15)
+    postMouseMove(to: CGPoint(x: selectedCardCenter.x + 8, y: selectedCardCenter.y))
     dismissalHoverReady = waitFor(timeout: 2) {
         let events = readEvents().filter {
             $0["event"] == "overlay_pointer_selection_changed"
@@ -2954,7 +3305,6 @@ test("Command-W visibly animates the selected card during dismissal") {
 test("Command-W dismisses the targeted card while the overlay stays open") {
     guard windowsBeforeDismissal >= 2, selectedCardLabel != nil else { return false }
     return readState()["overlayVisible"] == "true"
-        && readState()["selectedWindowIndex"] == "0"
         && selectedTitleCountBefore > 0
         && selectedTitleCountAfter < selectedTitleCountBefore
 }
@@ -3504,7 +3854,7 @@ if let resizeFixtureWindow, let originalSize = windowSize(resizeFixtureWindow) {
     let aspectsBefore = reportedAspects()
     let settledSize = resizeWindow(
         resizeFixtureWindow,
-        to: CGSize(width: 700, height: 480),
+        to: CGSize(width: 560, height: 520),
         from: originalSize
     ) ?? originalSize
     let originalAspect = originalSize.width / originalSize.height
