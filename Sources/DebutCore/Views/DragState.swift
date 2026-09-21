@@ -47,7 +47,6 @@ struct KeyboardWindowFlightState {
     var position: CGPoint
     var metrics: StageMetrics
     let destinationMetrics: StageMetrics
-    var isAnimating: Bool
 }
 
 struct WindowLayoutKey: Equatable {
