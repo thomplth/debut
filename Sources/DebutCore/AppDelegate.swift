@@ -988,7 +988,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             activeSpaceIndex: spaceController.selectedSpaceIndex, selectedWindowIndex: spaceController.selectedWindowIndex,
             windowPreviews: spaceController.windowPreviews, windowSizes: spaceController.windowSizes,
             appearance: currentSettings, wallpaperLuminance: nil, forceDisplayStackIndicator: forceDisplayStackIndicator,
-            keyboardWindowMoveAnimation: spaceController.keyboardWindowMoveAnimation)
+            keyboardWindowMoveAnimation: spaceController.keyboardWindowMoveAnimation,
+            overlayKeyboardInteractionSequence: spaceController.overlayKeyboardInteractionSequence)
         vm.tutorialScope = spaceController.activeTutorialScope
         vm.tutorialCoachmark = spaceController.tutorialCoachmark
         return vm
@@ -997,7 +998,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private func altTabViewModel(spaceController: SpaceController) -> AltTabOverlayViewModel {
         var vm = AltTabOverlayViewModel(entries: spaceController.altTabEntries,
             selectedIndex: spaceController.altTabSelectionIndex, windowPreviews: spaceController.windowPreviews,
-            windowSizes: spaceController.windowSizes, appearance: currentSettings)
+            windowSizes: spaceController.windowSizes, appearance: currentSettings,
+            overlayKeyboardInteractionSequence: spaceController.overlayKeyboardInteractionSequence)
         vm.tutorialScope = spaceController.activeTutorialScope
         vm.tutorialCoachmark = spaceController.tutorialCoachmark
         return vm

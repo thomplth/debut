@@ -1172,6 +1172,7 @@ public struct StageOverlayView: View {
     @State private var settlingWindowDrop: WindowDropSettlingState?
     @State private var keyboardWindowFlight: KeyboardWindowFlightState?
     @State private var lastHandledKeyboardMoveSequence: Int
+    @State private var lastHandledKeyboardInteractionSequence: Int
     @State private var retainedWindowDragFocusSpaceIndex: Int?
     @State private var pointerSelection: PointerSelection?
     @State private var reportedPointerRegion: String?
@@ -1235,6 +1236,9 @@ public struct StageOverlayView: View {
         _windowDrag = State(initialValue: initialWindowDrag)
         _lastHandledKeyboardMoveSequence = State(
             initialValue: viewModel.keyboardWindowMoveAnimation?.sequence ?? 0
+        )
+        _lastHandledKeyboardInteractionSequence = State(
+            initialValue: viewModel.overlayKeyboardInteractionSequence
         )
         _pointerMovementGate = State(
             initialValue: PointerMovementGate(initialLocation: NSEvent.mouseLocation)
@@ -1624,6 +1628,14 @@ public struct StageOverlayView: View {
             .onChange(of: viewModel.activeSpaceIndex) { _, _ in
                 hoveredSpaceIndex = nil
                 hoverPointerY = nil
+            }
+            .onChange(of: viewModel.overlayKeyboardInteractionSequence) { _, sequence in
+                guard sequence > lastHandledKeyboardInteractionSequence else { return }
+                lastHandledKeyboardInteractionSequence = sequence
+                pointerSelection = nil
+                hoveredSpaceIndex = nil
+                hoverPointerY = nil
+                pointerMovementGate.reset(at: NSEvent.mouseLocation)
             }
             .onChange(of: viewModel.keyboardWindowMoveAnimation?.sequence) { _, _ in
                 guard let move = viewModel.keyboardWindowMoveAnimation,

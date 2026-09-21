@@ -67,9 +67,12 @@ navigation shortcut can reopen the overlay before the modifier is released.
 Session bindings are interpreted relative to the held activation modifier.
 
 Hover highlights a provisional pointer target. A subsequent navigation or action,
-including modifier release, uses that target. Leaving the preview before acting
-restores the keyboard target; Escape discards the hover. Clicking a window
-commits it immediately. Clicking the desktop outside the stage
+including modifier release, uses that target. Navigation first advances from the
+hovered target, then returns selection ownership to the keyboard. Hover cannot
+take ownership again until the pointer physically moves; a layout change beneath
+a stationary pointer, including a keyboard move to another stage, does not change
+selection. Leaving the preview before acting restores the keyboard target; Escape
+discards the hover. Clicking a window commits it immediately. Clicking the desktop outside the stage
 cards dismisses the overlay, discards pending moves, and exposes Finder's real
 desktop through the app's desktop-reveal action.
 

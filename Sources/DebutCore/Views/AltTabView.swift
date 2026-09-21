@@ -14,6 +14,7 @@ public struct AltTabOverlayView: View {
 
     @State private var pointerSelectionIndex: Int?
     @State private var pointerMovementGate: PointerMovementGate
+    @State private var lastHandledKeyboardInteractionSequence: Int
 
     public init(
         viewModel: AltTabOverlayViewModel,
@@ -26,6 +27,9 @@ public struct AltTabOverlayView: View {
         _pointerSelectionIndex = State(initialValue: nil)
         _pointerMovementGate = State(
             initialValue: PointerMovementGate(initialLocation: NSEvent.mouseLocation)
+        )
+        _lastHandledKeyboardInteractionSequence = State(
+            initialValue: viewModel.overlayKeyboardInteractionSequence
         )
     }
 
@@ -99,6 +103,12 @@ public struct AltTabOverlayView: View {
                 )
             }
             .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .onChange(of: viewModel.overlayKeyboardInteractionSequence) { _, sequence in
+            guard sequence > lastHandledKeyboardInteractionSequence else { return }
+            lastHandledKeyboardInteractionSequence = sequence
+            pointerSelectionIndex = nil
+            pointerMovementGate.reset(at: NSEvent.mouseLocation)
         }
     }
 }
