@@ -21,6 +21,12 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case nextAppWindow
     case previousAppWindow
 
+    // Global focused-window movement between spaces
+    case moveFocusedWindowToPreviousSpace
+    case moveFocusedWindowToPreviousSpaceAlternate
+    case moveFocusedWindowToNextSpace
+    case moveFocusedWindowToNextSpaceAlternate
+
     // Space Manager session
     case nextWindow
     case previousWindow
@@ -59,6 +65,11 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .quickSwitchSpace9: "Quick switch to space 9"
         case .nextAppWindow: "Next window in current app"
         case .previousAppWindow: "Previous window in current app"
+        case .moveFocusedWindowToPreviousSpace: "Move to previous stage"
+        case .moveFocusedWindowToPreviousSpaceAlternate:
+            "Move to previous stage (alternate)"
+        case .moveFocusedWindowToNextSpace: "Move to next stage"
+        case .moveFocusedWindowToNextSpaceAlternate: "Move to next stage (alternate)"
         case .nextWindow: "Next window"
         case .previousWindow: "Previous window"
         case .previousWindowAlternate: "Previous window (alternate)"
@@ -104,6 +115,12 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .quickSwitchSpace9: .switchToSpace(9)
         case .nextAppWindow: .cmdBacktick
         case .previousAppWindow: .cmdShiftBacktick
+        case .moveFocusedWindowToPreviousSpace,
+             .moveFocusedWindowToPreviousSpaceAlternate:
+            .moveFocusedWindowToAdjacentSpace(-1)
+        case .moveFocusedWindowToNextSpace,
+             .moveFocusedWindowToNextSpaceAlternate:
+            .moveFocusedWindowToAdjacentSpace(1)
         case .nextWindow: .nextWindow
         case .previousWindow: .previousWindow
         case .previousWindowAlternate: .previousWindow
@@ -153,7 +170,11 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
              .quickSwitchSpace1, .quickSwitchSpace2, .quickSwitchSpace3,
              .quickSwitchSpace4, .quickSwitchSpace5, .quickSwitchSpace6,
              .quickSwitchSpace7, .quickSwitchSpace8, .quickSwitchSpace9,
-             .nextAppWindow, .previousAppWindow:
+             .nextAppWindow, .previousAppWindow,
+             .moveFocusedWindowToPreviousSpace,
+             .moveFocusedWindowToPreviousSpaceAlternate,
+             .moveFocusedWindowToNextSpace,
+             .moveFocusedWindowToNextSpaceAlternate:
             .global
         default:
             .session
@@ -195,6 +216,23 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         self == .nextAppWindow || self == .previousAppWindow
     }
 
+    public var movesFocusedWindowBetweenSpaces: Bool {
+        focusedWindowMoveOffset != nil
+    }
+
+    public var focusedWindowMoveOffset: Int? {
+        switch self {
+        case .moveFocusedWindowToPreviousSpace,
+             .moveFocusedWindowToPreviousSpaceAlternate:
+            -1
+        case .moveFocusedWindowToNextSpace,
+             .moveFocusedWindowToNextSpaceAlternate:
+            1
+        default:
+            nil
+        }
+    }
+
     /// Actions that step a selection one place along a list. Only these are paced while held:
     /// swallowing repeats of something like "delete space" would drop keystrokes the user meant.
     public var isCycling: Bool {
@@ -228,12 +266,20 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         .nextAppWindow, .previousAppWindow,
     ]
 
+    public static let focusedWindowMoveActions: [KeyAction] = [
+        .moveFocusedWindowToPreviousSpace,
+        .moveFocusedWindowToPreviousSpaceAlternate,
+        .moveFocusedWindowToNextSpace,
+        .moveFocusedWindowToNextSpaceAlternate,
+    ]
+
     public static let altTabActions: [KeyAction] = [
         .activateAltTabNext, .activateAltTabPrevious,
     ]
 
     public static let globalActions =
         activationActions + altTabActions + quickSwitchActions + sameAppActions
+            + focusedWindowMoveActions
     public static let sessionActions = allCases.filter { $0.shortcutScope == .session }
 
     public static func jumpAction(forSpaceIndex index: Int) -> KeyAction? {
@@ -405,6 +451,26 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
                 keyCode: kVK_ANSI_Grave,
                 command: true,
                 shift: true
+            ),
+            .moveFocusedWindowToPreviousSpace: KeyCombo(
+                keyCode: kVK_LeftArrow,
+                command: true,
+                option: true
+            ),
+            .moveFocusedWindowToPreviousSpaceAlternate: KeyCombo(
+                keyCode: kVK_UpArrow,
+                command: true,
+                option: true
+            ),
+            .moveFocusedWindowToNextSpace: KeyCombo(
+                keyCode: kVK_RightArrow,
+                command: true,
+                option: true
+            ),
+            .moveFocusedWindowToNextSpaceAlternate: KeyCombo(
+                keyCode: kVK_DownArrow,
+                command: true,
+                option: true
             ),
             .nextWindow: KeyCombo(keyCode: kVK_Tab),
             .previousWindow: KeyCombo(keyCode: kVK_Tab, shift: true),

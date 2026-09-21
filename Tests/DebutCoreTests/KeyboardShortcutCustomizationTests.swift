@@ -41,6 +41,38 @@ struct KeyboardShortcutCustomizationTests {
         #expect(KeyAction.allCases.allSatisfy { bindings.combo(for: $0) != nil })
     }
 
+    @Test("Focused-window move shortcuts preserve all four arrow defaults")
+    func focusedWindowMoveDefaults() {
+        let bindings = KeyBindings()
+
+        #expect(KeyAction.focusedWindowMoveActions == [
+            .moveFocusedWindowToPreviousSpace,
+            .moveFocusedWindowToPreviousSpaceAlternate,
+            .moveFocusedWindowToNextSpace,
+            .moveFocusedWindowToNextSpaceAlternate,
+        ])
+        #expect(bindings.combo(for: .moveFocusedWindowToPreviousSpace) == KeyCombo(
+            keyCode: kVK_LeftArrow,
+            command: true,
+            option: true
+        ))
+        #expect(bindings.combo(for: .moveFocusedWindowToPreviousSpaceAlternate) == KeyCombo(
+            keyCode: kVK_UpArrow,
+            command: true,
+            option: true
+        ))
+        #expect(bindings.combo(for: .moveFocusedWindowToNextSpace) == KeyCombo(
+            keyCode: kVK_RightArrow,
+            command: true,
+            option: true
+        ))
+        #expect(bindings.combo(for: .moveFocusedWindowToNextSpaceAlternate) == KeyCombo(
+            keyCode: kVK_DownArrow,
+            command: true,
+            option: true
+        ))
+    }
+
     @Test("Older saved bindings gain defaults for newly configurable shortcuts")
     func legacyBindingsGainNewDefaults() throws {
         var legacy = KeyBindings()
@@ -112,6 +144,37 @@ struct KeyboardShortcutCustomizationTests {
         let releaseControl = keyEvent(keyCode: kVK_Control, flags: [])
         #expect(service.handleCGEvent(type: .flagsChanged, event: releaseControl) == nil)
         #expect(delegate.receivedEvents == [.cmdTabHold, .cmdRelease])
+    }
+
+    @Test("Custom focused-window move shortcuts replace the arrow defaults")
+    func customFocusedWindowMove() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        var bindings = KeyBindings()
+        bindings.bindings[.moveFocusedWindowToPreviousSpace] = KeyCombo(
+            keyCode: kVK_ANSI_B,
+            control: true,
+            shift: true
+        )
+        service.keyBindings = bindings
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let oldDefault = keyEvent(
+            keyCode: kVK_LeftArrow,
+            flags: [.maskCommand, .maskAlternate]
+        )
+        #expect(service.handleCGEvent(type: .keyDown, event: oldDefault) === oldDefault)
+
+        let custom = keyEvent(
+            keyCode: kVK_ANSI_B,
+            flags: [.maskControl, .maskShift]
+        )
+        #expect(service.handleCGEvent(type: .keyDown, event: custom) == nil)
+        #expect(delegate.receivedEvents == [.moveFocusedWindowToAdjacentSpace(-1)])
+
+        let release = keyEvent(keyCode: kVK_ANSI_B, flags: [])
+        #expect(service.handleCGEvent(type: .keyUp, event: release) == nil)
     }
 
     @Test("Session shortcuts are relative to the configured activation modifier")
