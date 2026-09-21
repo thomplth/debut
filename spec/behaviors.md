@@ -50,8 +50,9 @@ available, Debut seeds the destination's front-process memory before switching;
 the actual window focus waits until macOS confirms the destination through the
 active-Space notification. Landing elsewhere invalidates the pending focus
 request. With the parent feature disabled, selecting a window on another desktop
-fronts that window directly and leaves the desktop movement and transition to
-macOS.
+selects that exact window before fronting its process, leaving the desktop
+movement and transition to macOS. The parent gates numbered, Control-arrow, and
+trackpad overrides at runtime without changing their saved choices.
 
 Window activation uses window-server fronting plus a key-window event, with AX
 and AppKit support/fallbacks. An accepted request is not proof that focus arrived:

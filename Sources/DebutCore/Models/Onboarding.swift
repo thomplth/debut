@@ -219,10 +219,8 @@ public final class OnboardingViewModel {
     }
 
     public func setFeatures(_ features: FeatureSettings) {
-        var normalized = features
-        normalized.normalizeDesktopOverrides()
-        self.features = normalized
-        onFeaturesChanged(normalized)
+        self.features = features
+        onFeaturesChanged(features)
     }
     public func setAllOverrides(_ enabled: Bool) {
         var updated = features

@@ -35,16 +35,30 @@ struct LaunchFeatureTests {
         #expect(restored.features.fasterDesktopSwitching)
     }
 
-    @Test("Disabling faster desktop switching turns off every desktop override")
-    func disablingFasterDesktopSwitchingDisablesOverrides() {
+    @Test("Disabling faster desktop switching preserves every desktop override")
+    func disablingFasterDesktopSwitchingPreservesOverrides() {
         var features = FeatureSettings()
+        features.numberShortcuts = false
+        features.controlArrows = true
+        features.trackpadSwipes = false
 
         features.setFasterDesktopSwitching(false)
 
         #expect(!features.fasterDesktopSwitching)
         #expect(!features.numberShortcuts)
-        #expect(!features.controlArrows)
+        #expect(features.controlArrows)
         #expect(!features.trackpadSwipes)
+        #expect(!features.effectiveNumberShortcuts)
+        #expect(!features.effectiveControlArrows)
+        #expect(!features.effectiveTrackpadSwipes)
+
+        features.setFasterDesktopSwitching(true)
+        #expect(!features.numberShortcuts)
+        #expect(features.controlArrows)
+        #expect(!features.trackpadSwipes)
+        #expect(!features.effectiveNumberShortcuts)
+        #expect(features.effectiveControlArrows)
+        #expect(!features.effectiveTrackpadSwipes)
     }
 
     @Test("Choices survive settings round trip independently")
@@ -52,8 +66,18 @@ struct LaunchFeatureTests {
         var settings = AppSettings()
         settings.features.windowPreviews = false
         settings.features.workspaceIsolation = false
+        settings.features.numberShortcuts = false
+        settings.features.controlArrows = true
+        settings.features.trackpadSwipes = false
         settings.features.setFasterDesktopSwitching(false)
-        #expect(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings)) == settings)
+        let restored = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONEncoder().encode(settings)
+        )
+        #expect(restored == settings)
+        #expect(!restored.features.numberShortcuts)
+        #expect(restored.features.controlArrows)
+        #expect(!restored.features.trackpadSwipes)
     }
 
     @Test("Disabled shortcuts pass through; Control arrows consume their matching key up")
@@ -83,6 +107,49 @@ struct LaunchFeatureTests {
         service.features.controlArrows = true
         service.desktopNavigationAvailable = false
         #expect(service.handleCGEvent(type: .keyDown, event: event(kVK_RightArrow, true, .maskControl)) != nil)
+    }
+
+    @Test("The faster-desktop master gates preserved keyboard overrides", arguments: [true, false])
+    func fasterDesktopMasterGatesKeyboardOverrides(masterEnabled: Bool) {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        _ = service.start(delegate: delegate)
+        defer { service.stop() }
+
+        var features = FeatureSettings()
+        features.numberShortcuts = true
+        features.controlArrows = true
+        features.setFasterDesktopSwitching(masterEnabled)
+        service.features = features
+
+        func event(_ code: Int, _ flags: CGEventFlags) -> CGEvent {
+            let event = CGEvent(
+                keyboardEventSource: nil,
+                virtualKey: CGKeyCode(code),
+                keyDown: true
+            )!
+            event.flags = flags
+            return event
+        }
+
+        let numberResult = service.handleCGEvent(
+            type: .keyDown,
+            event: event(kVK_ANSI_2, .maskControl)
+        )
+        let arrowResult = service.handleCGEvent(
+            type: .keyDown,
+            event: event(kVK_RightArrow, .maskControl)
+        )
+
+        if masterEnabled {
+            #expect(numberResult == nil)
+            #expect(arrowResult == nil)
+            #expect(delegate.receivedEvents == [.switchToSpace(2), .switchAdjacentSpace(1)])
+        } else {
+            #expect(numberResult != nil)
+            #expect(arrowResult != nil)
+            #expect(delegate.receivedEvents.isEmpty)
+        }
     }
 
     @Test("Control-arrow remains native throughout an overview and resumes on the next press")

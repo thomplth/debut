@@ -105,6 +105,16 @@ func readState() -> [String: String] {
     return state
 }
 
+func selectedStageWindowID(in state: [String: String]? = nil) -> String? {
+    let state = state ?? readState()
+    let rows = (state["windowIDsBySpace"] ?? "")
+        .split(separator: ";", omittingEmptySubsequences: false)
+    guard let row = Int(state["selectedSpaceIndex"] ?? ""), rows.indices.contains(row),
+          let column = Int(state["selectedWindowIndex"] ?? "") else { return nil }
+    let windows = rows[row].split(separator: ",")
+    return windows.indices.contains(column) ? String(windows[column]) : nil
+}
+
 func readEvents() -> [[String: String]] {
     guard let data = try? Data(contentsOf: diagnosticFile),
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -2153,6 +2163,112 @@ _ = terminateDebutAndWait()
 if let featureSettingsBackup { try? featureSettingsBackup.write(to: settingsFile, options: .atomic) }
 else { try? FileManager.default.removeItem(at: settingsFile) }
 
+// --- Native Command-Tab transition with the faster-desktop master disabled. ---
+header("Native Command-Tab desktop transition")
+let nativeTransitionSettingsBackup = try? Data(contentsOf: settingsFile)
+let nativeTransitionSpaces = SpaceService()
+let nativeTransitionWindows = AccessibilityWindowService()
+let nativeTransitionFixture = nativeTransitionWindows.listWindows().first {
+    $0.ownerBundleID == "com.apple.TextEdit"
+        && nativeTransitionSpaces.desktopIndex(forWindow: $0.windowID) != nil
+}
+
+if nativeTransitionSpaces.desktopCount() >= 2,
+   let fixture = nativeTransitionFixture,
+   let originalDesktop = nativeTransitionSpaces.desktopIndex(forWindow: fixture.windowID),
+   let sourceDesktop = nativeTransitionSpaces.currentDesktopIndex() {
+    let targetDesktop = sourceDesktop == 0 ? 1 : 0
+    nativeTransitionSpaces.moveWindow(windowID: fixture.windowID, toDesktop: targetDesktop)
+    let fixturePlaced = waitFor {
+        nativeTransitionSpaces.desktopIndex(forWindow: fixture.windowID) == targetDesktop
+    }
+
+    var nativeSettings = (try? settingsStore.loadSettings()) ?? AppSettings()
+    nativeSettings.features.workspaceIsolation = true
+    nativeSettings.features.numberShortcuts = true
+    nativeSettings.features.controlArrows = false
+    nativeSettings.features.trackpadSwipes = true
+    nativeSettings.features.setFasterDesktopSwitching(false)
+    try? settingsStore.saveSettings(nativeSettings)
+    clearDiagnosticFile()
+    let nativeApplicationReady = waitForDebutReady(launchDebut())
+    let fixtureTracked = waitFor(timeout: 8) {
+        (readState()["windowIDsBySpace"] ?? "").split { $0 == ";" || $0 == "," }
+            .contains(Substring(String(fixture.windowID)))
+    }
+
+    let restoredSettings = try? settingsStore.loadSettings()
+    test("The disabled master preserves each child desktop preference") {
+        restoredSettings?.features.fasterDesktopSwitching == false
+            && restoredSettings?.features.numberShortcuts == true
+            && restoredSettings?.features.controlArrows == false
+            && restoredSettings?.features.trackpadSwipes == true
+    }
+
+    postFlagsChanged(flags: .maskCommand)
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+    postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+    let overlayOpened = waitFor(timeout: 8) { readState()["overlayVisible"] == "true" }
+
+    if overlayOpened {
+        for _ in 0..<nativeTransitionSpaces.desktopCount() {
+            if readState()["selectedSpaceIndex"] == String(targetDesktop) { break }
+            let before = readState()["selectedSpaceIndex"]
+            let chord: CGEventFlags = [.maskCommand, .maskAlternate]
+            postFlagsChanged(flags: chord)
+            postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: chord)
+            postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: chord)
+            _ = waitFor { readState()["selectedSpaceIndex"] != before }
+            postFlagsChanged(flags: .maskCommand)
+        }
+        for _ in 0..<60 {
+            if selectedStageWindowID() == String(fixture.windowID) { break }
+            let before = selectedStageWindowID()
+            postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+            postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+            guard waitFor(timeout: 2, { selectedStageWindowID() != before }) else { break }
+        }
+    }
+    let selectedFixture = selectedStageWindowID() == String(fixture.windowID)
+    postFlagsChanged(flags: [])
+    let nativeTransitionLanded = waitFor(timeout: 8) {
+        nativeTransitionSpaces.currentDesktopIndex() == targetDesktop
+    }
+    let nativeFocusLanded = waitFor(timeout: 5) {
+        let focus = liveKeyboardFocus()
+        return focus?.ownerPID == fixture.ownerPID && focus?.windowID == fixture.windowID
+    }
+    let nativeRequestReported = readEvents().contains {
+        $0["event"] == "native_space_transition_requested"
+            && $0["windowID"] == String(fixture.windowID)
+    }
+    test("Command-Tab uses the native macOS transition when faster movement is off") {
+        fixturePlaced && nativeApplicationReady && fixtureTracked && overlayOpened
+            && selectedFixture && nativeRequestReported && nativeTransitionLanded
+            && nativeFocusLanded
+    }
+
+    _ = terminateDebutAndWait()
+    nativeTransitionSpaces.moveWindow(windowID: fixture.windowID, toDesktop: originalDesktop)
+    _ = waitFor {
+        nativeTransitionSpaces.desktopIndex(forWindow: fixture.windowID) == originalDesktop
+    }
+} else {
+    skipTest(
+        "The disabled master preserves each child desktop preference",
+        reason: "The host needs two desktops and a TextEdit fixture"
+    )
+    skipTest(
+        "Command-Tab uses the native macOS transition when faster movement is off",
+        reason: "The host needs two desktops and a TextEdit fixture"
+    )
+}
+if let nativeTransitionSettingsBackup {
+    try? nativeTransitionSettingsBackup.write(to: settingsFile, options: .atomic)
+} else {
+    try? FileManager.default.removeItem(at: settingsFile)
+}
+
 // --- 13. First-launch onboarding (forced, without changing user defaults) ---
 header("13. First-launch onboarding")
 
@@ -2194,12 +2310,7 @@ func currentOnboardingTarget() -> [String: String]? {
 }
 @MainActor
 func selectedOnboardingWindowID() -> String? {
-    let state = readState()
-    let rows = (state["windowIDsBySpace"] ?? "").split(separator: ";", omittingEmptySubsequences: false)
-    guard let row = Int(state["selectedSpaceIndex"] ?? ""), rows.indices.contains(row),
-          let column = Int(state["selectedWindowIndex"] ?? "") else { return nil }
-    let windows = rows[row].split(separator: ",")
-    return windows.indices.contains(column) ? String(windows[column]) : nil
+    selectedStageWindowID()
 }
 @MainActor
 func performOnboardingExercise(_ practice: OnboardingPractice) -> Bool {

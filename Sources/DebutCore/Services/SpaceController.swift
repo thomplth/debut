@@ -1278,6 +1278,30 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         )
     }
 
+    /// The native Space transition follows the app's key window, so this path selects the exact
+    /// requested window before it fronts the process. Ordinary focus keeps its existing ordering.
+    private func activateOwnerForNativeDesktopTransition(
+        _ window: SpaceWindow,
+        windowID: CGWindowID
+    ) -> OwnerActivation {
+        if let ownerPID = window.ownerPID {
+            if windowService.frontWindowForNativeDesktopTransition(
+                windowID: windowID,
+                ownerPID: ownerPID
+            ) {
+                return OwnerActivation(outcome: .windowServer, windowServerTrace: nil)
+            }
+            if windowService.activateApp(pid: ownerPID) {
+                return OwnerActivation(outcome: .appKitProcess, windowServerTrace: nil)
+            }
+        }
+        return OwnerActivation(
+            outcome: windowService.activateApp(bundleID: window.ownerBundleID)
+                ? .appKitBundle : .refused,
+            windowServerTrace: nil
+        )
+    }
+
     /// Adopts the desktop currently showing as the active space.
     ///
     /// The user can switch desktop without Debut — Mission Control, Control+Arrow, or
@@ -1422,7 +1446,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             .windows.first(where: { $0.windowID == windowID })
         else { return false }
 
-        let activation = activateOwner(of: window, raising: windowID)
+        let activation = activateOwnerForNativeDesktopTransition(window, windowID: windowID)
         guard activation.outcome != .refused else { return false }
         if let ownerPID = window.ownerPID {
             focusRequest = (windowID: windowID, ownerPID: ownerPID, at: clock())
@@ -3066,7 +3090,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         guard fasterDesktopSwitchingEnabled else {
-            let fronted = windowService.frontWindow(windowID: windowID, ownerPID: ownerPID)
+            let fronted = windowService.frontWindowForNativeDesktopTransition(
+                windowID: windowID,
+                ownerPID: ownerPID
+            )
             let accepted = fronted || windowService.activateApp(pid: ownerPID)
             pendingSystemAttentionFocus = accepted
                 ? PendingSystemAttentionFocus(

@@ -53,12 +53,13 @@ wallpaper. Accessibility is required for global input and window control.
 
 Faster desktop transitions is the parent for numbered shortcuts, Control-arrow,
 trackpad interception, and Debut's synthetic transition when selecting a window
-on another desktop. Turning it off clears and disables the three child overrides,
-disables the duration control, and lets macOS perform cross-desktop window
-activation with its original transition. The duration applies only while the
-parent is enabled. A trackpad desktop gesture commits one adjacent hop. Other
-gestures and unclaimed shortcuts keep their native behavior. Enabled numbered
-and Control-arrow shortcuts apply regardless of which app is frontmost.
+on another desktop. Turning it off disables the three child controls without
+changing their saved choices, disables the duration control, and lets macOS
+perform cross-desktop window activation with its original transition. Turning
+the parent back on restores the saved child choices. The duration applies only
+while the parent is enabled. A trackpad desktop gesture commits one adjacent hop.
+Other gestures and unclaimed shortcuts keep their native behavior. Enabled
+numbered and Control-arrow shortcuts apply regardless of which app is frontmost.
 Mission Control, App Exposé, and Show Desktop retain their native navigation;
 unsupported synthetic switching is passed through rather than swallowed.
 

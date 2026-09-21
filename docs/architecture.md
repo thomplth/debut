@@ -69,8 +69,10 @@ wait for confirmation and continue through adjacent hops. The macOS 27 recipe
 includes the augmented IOHID payload. Capability and system-overview gates
 preserve native input when Debut cannot safely own the navigation. When the
 parent feature is disabled, cross-desktop window selection fronts the requested
-window directly so macOS owns the desktop transition. This is not a global
-change to macOS's animation preferences.
+window through the native-transition path: it selects the exact window before
+fronting its process so macOS follows that window to its desktop. This is not a
+global change to macOS's animation preferences. The parent gates the numbered,
+Control-arrow, and trackpad integrations without erasing their saved settings.
 
 Stage commits, numbered navigation, cross-desktop Option-Tab selection, enabled
 Control-arrow/trackpad input, and move-and-follow commands use this common
