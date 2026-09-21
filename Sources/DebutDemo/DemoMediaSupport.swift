@@ -30,10 +30,10 @@ func croppedOverlay(_ image: CGImage, padding: Int = 32) throws -> CGImage {
 }
 
 /// Keep the original alpha and leave 64 logical pixels beyond every visible shadow pixel.
-func overlayCoverImage(_ image: CGImage, renderedOnWhite: CGImage? = nil) throws -> CGImage {
+func overlayCoverImage(_ image: CGImage, renderedImage: CGImage? = nil, backdropWhite: UInt8 = 255) throws -> CGImage {
     let source: CGImage
-    if let renderedOnWhite {
-        guard image.width == renderedOnWhite.width, image.height == renderedOnWhite.height else {
+    if let renderedImage {
+        guard image.width == renderedImage.width, image.height == renderedImage.height else {
             throw CaptureFailure.failed
         }
         func canvas() throws -> CGContext {
@@ -46,15 +46,15 @@ func overlayCoverImage(_ image: CGImage, renderedOnWhite: CGImage? = nil) throws
         let alpha = try canvas(), color = try canvas()
         let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
         alpha.draw(image, in: bounds)
-        color.draw(renderedOnWhite, in: bounds)
+        color.draw(renderedImage, in: bounds)
         guard let a = alpha.data?.assumingMemoryBound(to: UInt8.self),
               let c = color.data?.assumingMemoryBound(to: UInt8.self) else { throw CaptureFailure.failed }
         for offset in stride(from: 0, to: image.width * image.height * 4, by: 4) {
             let opacity = Int(a[offset + 3])
-            // Remove the known white backing in premultiplied space. This keeps black
-            // shadows black and antialiased edges free of a white fringe on dark pages.
+            // Remove the known backing in premultiplied space, preserving translucent
+            // glass and keeping antialiased edges free of a light or dark fringe.
             for channel in 0..<3 {
-                c[offset + channel] = UInt8(clamping: min(opacity, Int(c[offset + channel]) - (255 - opacity)))
+                c[offset + channel] = UInt8(clamping: min(opacity, Int(c[offset + channel]) - ((255 - opacity) * Int(backdropWhite) + 127) / 255))
             }
             c[offset + 3] = UInt8(opacity)
         }

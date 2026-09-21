@@ -35,14 +35,14 @@ as_console() {
 }
 
 grant() {
-    local service="$1" client="$2" client_type="$3" signed_path="$4"
+    local service="$1" client="$2" client_type="$3" signed_path="$4" indirect="${5:-UNUSED}"
     local requirement csreq_hex timestamp
     requirement="$(codesign -d -r- "$signed_path" 2>&1 | awk -F ' => ' '/designated/{print $2}')"
     csreq_hex="$(printf '%s' "$requirement" | csreq -r- -b /dev/stdout | xxd -p | tr -d '\n')"
     timestamp="$(date +%s)"
     for db in "$SYSTEM_TCC_DB" "$USER_TCC_DB"; do
         sudo sqlite3 "$db" "INSERT OR REPLACE INTO access VALUES(\
-'$service','${client//\'/\'\'}',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);" 2>/dev/null || true
+'$service','${client//\'/\'\'}',$client_type,2,4,1,X'$csreq_hex',NULL,0,'$indirect',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);" 2>/dev/null || true
     done
 }
 
@@ -62,6 +62,10 @@ grant kTCCServicePostEvent "$PROVISION_SOURCE" 1 "$PROVISION_SOURCE"
 # A reused E2E image may deliberately contain denied grants from permission tests.
 for service in kTCCServiceAccessibility kTCCServiceScreenCapture kTCCServicePostEvent; do
     grant "$service" /usr/libexec/sshd-keygen-wrapper 1 /usr/libexec/sshd-keygen-wrapper
+done
+# The cover switches the disposable guest's native appearance via System Events.
+for client in "$DEMO_SOURCE" /usr/libexec/sshd-keygen-wrapper /usr/bin/osascript; do
+    grant kTCCServiceAppleEvents "$client" 1 "$client" com.apple.systemevents
 done
 sudo killall tccd 2>/dev/null || true
 # Clear periodic capture reminders in the disposable guest, as the E2E fixture does.
@@ -203,7 +207,7 @@ grant kTCCServiceListenEvent io.github.keycastr 0 /Applications/KeyCastr.app
 grant kTCCServiceAccessibility io.github.keycastr 0 /Applications/KeyCastr.app
 as_console env HOME="$console_home" defaults write io.github.keycastr alwaysShowPrefs -bool false
 as_console env HOME="$console_home" defaults write io.github.keycastr selectedVisualizer -string Default
-as_console env HOME="$console_home" defaults write io.github.keycastr default.fontSize -float 32
+as_console env HOME="$console_home" defaults write io.github.keycastr default.fontSize -float 64
 as_console env HOME="$console_home" defaults write io.github.keycastr default.commandKeysOnly -bool false
 as_console env HOME="$console_home" defaults write io.github.keycastr default.allModifiedKeys -bool false
 as_console env HOME="$console_home" defaults write io.github.keycastr default.fadeDelay -float 1.2
