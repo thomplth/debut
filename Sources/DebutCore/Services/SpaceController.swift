@@ -238,6 +238,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let location: DesktopLocation
     }
 
+    private struct PendingExternalDesktopActivation {
+        let windowID: CGWindowID
+        let location: DesktopLocation
+        let sourceDesktopID: CGSSpaceID
+        let observedAt: Date
+    }
+
     public var spaceManager: SpaceManager
     public let windowService: any WindowService
     public let keyboardService: any KeyboardService
@@ -273,6 +280,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// says the switch stopped; intermediate candidates then fail the showing-desktop check,
     /// while an early final candidate is applied once.
     private var deferredSwitchActivations: [String: CGWindowID] = [:]
+    /// Native cross-desktop activation can report focus before the desktop-change notification.
+    /// Keep that evidence separate from Debut-owned routes: it is consumed by the next confirmed
+    /// desktop change only when the reported desktop is the one that actually arrived.
+    private var pendingExternalDesktopActivations: [String: PendingExternalDesktopActivation] = [:]
     private var desktopSwitchIndicatorTracker = DesktopSwitchIndicatorTracker()
     private var stageStackTransaction = StageStackTransaction()
     private var isStageStackCommitInFlight = false
@@ -715,6 +726,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             delegate?.spaceControllerDidMutateState(self)
             delegate?.spaceControllerDidSwitchSpace(self)
         }
+        applyPendingExternalDesktopActivations(in: topology)
         applyDeferredSwitchActivations()
         applyPendingSpaceFocus()
         continueFollowingWindowMove()
@@ -763,6 +775,58 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 continue
             }
             recordWindowActivation(windowID: windowID)
+        }
+    }
+
+    /// Resolves focus that arrived just before a native desktop switch completed. A callback for
+    /// a desktop that is not showing is normally stale, but same-app cross-desktop launches do
+    /// not emit a new application activation and can deliver this ordering legitimately. The
+    /// next desktop notification decides: only a fresh candidate on the desktop that arrived is
+    /// credited, and every other candidate is discarded rather than surviving to a later visit.
+    private func applyPendingExternalDesktopActivations(in topology: SpaceTopology?) {
+        guard !pendingExternalDesktopActivations.isEmpty else { return }
+        guard let switcher = spaceSwitcher else {
+            pendingExternalDesktopActivations.removeAll()
+            return
+        }
+        let topology = topology ?? switcher.spaceTopology()
+        for stackID in Array(pendingExternalDesktopActivations.keys) {
+            guard let pending = pendingExternalDesktopActivations.removeValue(forKey: stackID)
+            else { continue }
+            guard clock().timeIntervalSince(pending.observedAt) < Self.focusRequestFailsafe else {
+                diag.report("window_activation_ignored", level: .transient, details: [
+                    "reason": "desktop_change_candidate_expired",
+                    "stackID": stackID,
+                    "windowID": "\(pending.windowID)",
+                ])
+                continue
+            }
+            guard let currentDesktopID = topology.stack(id: stackID)?.currentDesktopID else {
+                continue
+            }
+            if currentDesktopID == pending.sourceDesktopID {
+                pendingExternalDesktopActivations[stackID] = pending
+                continue
+            }
+            guard currentDesktopID == pending.location.desktopID,
+                  switcher.desktopLocation(forWindow: pending.windowID) == pending.location
+            else {
+                diag.report("window_activation_ignored", level: .transient, details: [
+                    "reason": "desktop_change_landed_elsewhere",
+                    "stackID": stackID,
+                    "windowID": "\(pending.windowID)",
+                ])
+                continue
+            }
+            if pendingFocusSupersedes(windowID: pending.windowID, onStack: stackID) {
+                diag.report("window_activation_ignored", level: .transient, details: [
+                    "reason": "explicit_focus_pending",
+                    "stackID": stackID,
+                    "windowID": "\(pending.windowID)",
+                ])
+                continue
+            }
+            recordWindowActivation(windowID: pending.windowID)
         }
     }
 
@@ -1534,6 +1598,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // A positively located candidate is retained because it may be the final desktop's
         // real focus arriving just before the completion notification.
         if let stackID, spaceSwitcher?.isSwitchInFlight(stackID: stackID) == true {
+            pendingExternalDesktopActivations.removeValue(forKey: stackID)
             if desktopLocation != nil {
                 deferredSwitchActivations[stackID] = windowID
             }
@@ -1551,12 +1616,22 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
            let showingDesktopID = spaceSwitcher?.spaceTopology()
                .stack(id: desktopLocation.stackID)?.currentDesktopID,
            showingDesktopID != desktopLocation.desktopID {
-            diag.report("window_activation_ignored", level: .transient, details: [
-                "reason": "desktop_not_showing",
+            pendingExternalDesktopActivations[desktopLocation.stackID] =
+                PendingExternalDesktopActivation(
+                    windowID: windowID,
+                    location: desktopLocation,
+                    sourceDesktopID: showingDesktopID,
+                    observedAt: clock()
+                )
+            diag.report("window_activation_deferred", level: .transient, details: [
+                "reason": "desktop_change_pending",
                 "stackID": desktopLocation.stackID,
                 "windowID": "\(windowID)",
             ])
             return
+        }
+        if let desktopLocation {
+            pendingExternalDesktopActivations.removeValue(forKey: desktopLocation.stackID)
         }
 
         if pendingFocusDelivery?.windowID == reportedWindowID,
