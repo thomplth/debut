@@ -306,11 +306,22 @@ public actor DiskTelemetryQueue: TelemetryQueue {
         guard let data = try? Data(contentsOf: file) else {
             return Envelope(payloads: [], quota: TelemetryQuota())
         }
-        if let envelope = try? JSONDecoder().decode(Envelope.self, from: data) { return envelope }
-        if let legacy = try? JSONDecoder().decode([TelemetryPayload].self, from: data) {
+        let normalized = Self.normalizingLegacyOperationNames(in: data)
+        if let envelope = try? JSONDecoder().decode(Envelope.self, from: normalized) { return envelope }
+        if let legacy = try? JSONDecoder().decode([TelemetryPayload].self, from: normalized) {
             return Envelope(payloads: legacy, quota: TelemetryQuota())
         }
         throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Invalid telemetry queue"))
+    }
+
+    /// The user-facing terminology moved from stages back to macOS Spaces after early builds
+    /// had already persisted telemetry. Normalize exact JSON strings before decoding so one old
+    /// anomaly cannot poison the queue, and so summary/quota dictionary keys stay canonical too.
+    private static func normalizingLegacyOperationNames(in data: Data) -> Data {
+        guard var json = String(data: data, encoding: .utf8) else { return data }
+        json = json.replacingOccurrences(of: "\"stage_switch\"", with: "\"space_switch\"")
+        json = json.replacingOccurrences(of: "\"stage_raise\"", with: "\"space_raise\"")
+        return Data(json.utf8)
     }
 
     private func write(_ envelope: Envelope) throws {
