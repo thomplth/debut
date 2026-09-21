@@ -28,6 +28,13 @@ struct WindowDropSettlingState {
     let destination: CGPoint
 }
 
+struct KeyboardWindowFlightState {
+    let sequence: Int
+    let window: StageWindowData
+    var position: CGPoint
+    var metrics: StageMetrics
+}
+
 struct WindowLayoutKey: Equatable {
     let spaceWindowIDs: [[CGWindowID]]
 }

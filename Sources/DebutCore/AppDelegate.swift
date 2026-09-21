@@ -984,7 +984,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         var vm = StageOverlayViewModel(spaceManager: spaceController.overlaySpaceManager,
             activeSpaceIndex: spaceController.selectedSpaceIndex, selectedWindowIndex: spaceController.selectedWindowIndex,
             windowPreviews: spaceController.windowPreviews, windowSizes: spaceController.windowSizes,
-            appearance: currentSettings, wallpaperLuminance: nil, forceDisplayStackIndicator: forceDisplayStackIndicator)
+            appearance: currentSettings, wallpaperLuminance: nil, forceDisplayStackIndicator: forceDisplayStackIndicator,
+            keyboardWindowMoveAnimation: spaceController.keyboardWindowMoveAnimation)
         vm.tutorialScope = spaceController.activeTutorialScope
         vm.tutorialCoachmark = spaceController.tutorialCoachmark
         return vm
