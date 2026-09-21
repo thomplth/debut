@@ -183,23 +183,38 @@ private final class SpaceMutationDelegate: SpaceControllerDelegate {
     }
 }
 
+private final class SpaceTopologyTestClock: @unchecked Sendable {
+    private(set) var now = Date(timeIntervalSinceReferenceDate: 100)
+
+    func advance(by interval: TimeInterval) {
+        now = now.addingTimeInterval(interval)
+    }
+}
+
 @Suite("SpaceController on real Spaces")
 struct SpaceControllerSpaceTests {
 
-    private func makeController(spaces: MockSpaceSwitcher)
+    private func makeController(
+        spaces: MockSpaceSwitcher,
+        clock: @escaping @Sendable () -> Date = Date.init
+    )
         -> (SpaceController, MockWindowService) {
-        let (controller, windowService, _) = makeKeyedController(spaces: spaces)
+        let (controller, windowService, _) = makeKeyedController(spaces: spaces, clock: clock)
         return (controller, windowService)
     }
 
-    private func makeKeyedController(spaces: MockSpaceSwitcher)
+    private func makeKeyedController(
+        spaces: MockSpaceSwitcher,
+        clock: @escaping @Sendable () -> Date = Date.init
+    )
         -> (SpaceController, MockWindowService, MockKeyboardService) {
         let windowService = MockWindowService()
         let keyboardService = MockKeyboardService()
         let controller = SpaceController(
             windowService: windowService,
             keyboardService: keyboardService,
-            focusedWindowSnapshotProvider: { .unfocused }
+            focusedWindowSnapshotProvider: { .unfocused },
+            clock: clock
         )
         controller.spaceSwitcher = spaces
         return (controller, windowService, keyboardService)
@@ -1008,6 +1023,120 @@ struct SpaceControllerSpaceTests {
         #expect(intermediate.lastActivatedAt == oldDate)
         #expect(final.lastActivatedAt.map { $0 > oldDate } == true)
         #expect(controller.spaceManager.globalWindowOrder().first?.window.windowID == 30)
+    }
+
+    /// Opening an existing window from another window of the same app can make AppKit report
+    /// focus before the native desktop transition has finished. There is no app-activation
+    /// notification in that case because the process was already frontmost. The early focus is
+    /// the only evidence naming the destination window, so hold it until the desktop notification
+    /// confirms that macOS actually landed there.
+    @Test("A same-app cross-desktop launch credits focus reported before the desktop changes")
+    func sameAppCrossDesktopLaunchCreditsEarlyFocus() throws {
+        let spaces = MockSpaceSwitcher(desktops: 4, current: 3)
+        let (controller, _) = makeController(spaces: spaces)
+        for _ in 1..<4 { controller.spaceManager.createSpace(position: .below) }
+        let oldDate = Date(timeIntervalSinceReferenceDate: 10)
+        let targetSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 22,
+                ownerBundleID: "com.other",
+                ownerName: "Other",
+                windowTitle: "Current head",
+                lastActivatedAt: oldDate.addingTimeInterval(1)
+            ),
+            toSpaceID: targetSpaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 21,
+                ownerBundleID: "notion.id",
+                ownerName: "Notion",
+                windowTitle: "Destination",
+                lastActivatedAt: oldDate
+            ),
+            toSpaceID: targetSpaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 41,
+                ownerBundleID: "notion.id",
+                ownerName: "Notion",
+                windowTitle: "Launcher"
+            ),
+            toSpaceID: controller.spaceManager.spaces[3].id
+        )
+        spaces.windowDesktops = [21: 1, 22: 1, 41: 3]
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[3].id)
+
+        controller.recordWindowActivation(windowID: 21)
+        #expect(controller.spaceManager.allSpaces[1].windows.map(\.windowID) == [22, 21])
+
+        // A duplicate notification, or one for another display stack, must not consume the
+        // candidate before this stack actually leaves its source desktop.
+        controller.desktopDidChange()
+        spaces.current = 1
+        controller.desktopDidChange()
+
+        let destination = try #require(
+            controller.spaceManager.allSpaces[1].windows.first { $0.windowID == 21 }
+        )
+        #expect(controller.spaceManager.allSpaces[1].windows.map(\.windowID) == [21, 22])
+        #expect(destination.lastActivatedAt.map { $0 > oldDate } == true)
+    }
+
+    @Test("An early cross-desktop focus is discarded when the next desktop lands elsewhere")
+    func earlyCrossDesktopFocusDoesNotSurviveAnotherLanding() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 2)
+        let (controller, _) = makeController(spaces: spaces)
+        for _ in 1..<3 { controller.spaceManager.createSpace(position: .below) }
+        let targetSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 11, ownerBundleID: "com.other", ownerName: "Other",
+                        windowTitle: "Current head"),
+            toSpaceID: targetSpaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 12, ownerBundleID: "notion.id", ownerName: "Notion",
+                        windowTitle: "Destination"),
+            toSpaceID: targetSpaceID
+        )
+        spaces.windowDesktops = [11: 0, 12: 0]
+
+        controller.recordWindowActivation(windowID: 12)
+        spaces.current = 1
+        controller.desktopDidChange()
+        spaces.current = 0
+        controller.desktopDidChange()
+
+        #expect(controller.spaceManager.allSpaces[0].windows.map(\.windowID) == [11, 12])
+    }
+
+    @Test("An early cross-desktop focus expires before a delayed desktop change")
+    func earlyCrossDesktopFocusExpires() {
+        let clock = SpaceTopologyTestClock()
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
+        let (controller, _) = makeController(spaces: spaces, clock: { clock.now })
+        controller.spaceManager.createSpace(position: .below)
+        let targetSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 11, ownerBundleID: "com.other", ownerName: "Other",
+                        windowTitle: "Current head"),
+            toSpaceID: targetSpaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 12, ownerBundleID: "notion.id", ownerName: "Notion",
+                        windowTitle: "Destination"),
+            toSpaceID: targetSpaceID
+        )
+        spaces.windowDesktops = [11: 0, 12: 0]
+
+        controller.recordWindowActivation(windowID: 12)
+        clock.advance(by: 2)
+        spaces.current = 0
+        controller.desktopDidChange()
+
+        #expect(controller.spaceManager.allSpaces[0].windows.map(\.windowID) == [11, 12])
     }
 
     /// The final desktop notification can arrive before its restored focus callback. The last
