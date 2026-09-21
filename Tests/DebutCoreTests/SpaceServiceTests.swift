@@ -70,19 +70,46 @@ struct SpaceSwitchCoordinatorTests {
         )
     }
 
+    private func hop(
+        from: Int,
+        to: Int,
+        animation: SpaceSwitchAnimation = .configured
+    ) -> SpaceSwitchHop {
+        SpaceSwitchHop(
+            stackID: SpaceTopology.sharedStackID,
+            fromDesktopID: desktopIDs[from],
+            toDesktopID: desktopIDs[to],
+            direction: to > from ? .right : .left,
+            animation: animation
+        )
+    }
+
     @Test("A far target starts exactly one adjacent hop")
     func farTargetStartsOneHop() {
         var coordinator = SpaceSwitchCoordinator()
 
         let request = coordinator.request(to: location(3), in: topology(current: 0))
 
-        #expect(request == .post(SpaceSwitchHop(
-            stackID: SpaceTopology.sharedStackID,
-            fromDesktopID: 10,
-            toDesktopID: 11,
-            direction: .right
-        )))
-        #expect(request.hop?.instantVelocity == 400)
+        #expect(request == .post([hop(from: 0, to: 1)]))
+        #expect(request.hops.first?.instantVelocity == 400)
+        #expect(coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
+
+    @Test("An instant far target posts every adjacent hop as one batch")
+    func instantFarTargetStartsEveryHop() {
+        var coordinator = SpaceSwitchCoordinator()
+
+        let request = coordinator.request(
+            to: location(3),
+            in: topology(current: 0),
+            scheduling: .batchedInstant
+        )
+
+        #expect(request == .post([
+            hop(from: 0, to: 1),
+            hop(from: 1, to: 2),
+            hop(from: 2, to: 3),
+        ]))
         #expect(coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
     }
 
@@ -107,6 +134,34 @@ struct SpaceSwitchCoordinatorTests {
         #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
     }
 
+    @Test("A batched route accepts intermediate confirmations and retargets from its endpoint")
+    func batchedRouteRetargetsAfterEndpoint() {
+        var coordinator = SpaceSwitchCoordinator()
+        _ = coordinator.request(
+            to: location(3),
+            in: topology(current: 0),
+            scheduling: .batchedInstant
+        )
+
+        let retarget = coordinator.request(
+            to: location(1),
+            in: topology(current: 0),
+            scheduling: .batchedInstant
+        )
+
+        #expect(retarget == .coalesced)
+        #expect(coordinator.desktopDidChange(to: topology(current: 1)).isEmpty)
+        #expect(coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+        #expect(coordinator.desktopDidChange(to: topology(current: 2)).isEmpty)
+        #expect(coordinator.desktopDidChange(to: topology(current: 3)) == [
+            hop(from: 3, to: 2),
+            hop(from: 2, to: 1),
+        ])
+        #expect(coordinator.desktopDidChange(to: topology(current: 2)).isEmpty)
+        #expect(coordinator.desktopDidChange(to: topology(current: 1)).isEmpty)
+        #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
+
     @Test("System animation is retained across every hop to a far desktop")
     func systemAnimationIsRetainedAcrossHops() throws {
         var coordinator = SpaceSwitchCoordinator()
@@ -115,7 +170,7 @@ struct SpaceSwitchCoordinatorTests {
             to: location(3),
             in: topology(current: 0),
             animation: .system
-        ).hop)
+        ).hops.first)
         let second = try #require(coordinator.desktopDidChange(
             to: topology(current: 1)
         ).first)
@@ -175,10 +230,14 @@ struct SpaceSwitchCoordinatorTests {
     @Test("A posting failure clears the matching in-flight hop")
     func postingFailureClears() throws {
         var coordinator = SpaceSwitchCoordinator()
-        let request = coordinator.request(to: location(2), in: topology(current: 0))
-        let hop = try #require(request.hop)
+        let request = coordinator.request(
+            to: location(2),
+            in: topology(current: 0),
+            scheduling: .batchedInstant
+        )
+        let hops = try #require(request.hops.isEmpty ? nil : request.hops)
 
-        coordinator.postingFailed(hop)
+        coordinator.postingFailed(hops)
 
         #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
         #expect(coordinator.desktopDidChange(to: topology(current: 1)).isEmpty)
@@ -199,6 +258,22 @@ struct SpaceSwitchCoordinatorTests {
 
 @Suite("SpaceService switch speed")
 struct SpaceServiceSpeedTests {
+
+    @Test("Only a configured zero-duration route batches its hops")
+    func schedulingFollowsResolvedDuration() {
+        #expect(
+            SpaceSwitchAnimation.configured.scheduling(configuredDuration: 0)
+                == .batchedInstant
+        )
+        #expect(
+            SpaceSwitchAnimation.configured.scheduling(configuredDuration: 0.01)
+                == .confirmedAdjacent
+        )
+        #expect(
+            SpaceSwitchAnimation.system.scheduling(configuredDuration: 0)
+                == .confirmedAdjacent
+        )
+    }
 
     @Test("System animation ignores the configured faster-switch duration")
     func systemAnimationIgnoresConfiguredDuration() {
