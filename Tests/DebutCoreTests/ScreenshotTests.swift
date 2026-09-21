@@ -1027,6 +1027,18 @@ struct ScreenshotTests {
         try saveImage(image, name: "settings_\(section.rawValue)")
     }
 
+    @Test("Disabled faster desktop transitions gray dependent controls")
+    func disabledFasterDesktopTransitions() throws {
+        var settings = AppSettings()
+        settings.features.setFasterDesktopSwitching(false)
+        let view = SettingsView(
+            viewModel: SettingsViewModel(settings: settings),
+            selectedSection: .features
+        )
+        let image = try #require(renderSwiftUI(view, size: NSSize(width: 820, height: 620)))
+        try saveImage(image, name: "settings_faster_desktop_transitions_disabled")
+    }
+
     @Test("Tutorial coachmarks fit beside only the practice windows", arguments: ["windows", "desktops", "move", "release", "previews", "dark"])
     func tutorialCoachmarks(_ state: String) throws {
         let practice: OnboardingPractice = state == "previews" ? .allWindows : state == "desktops" ? .desktop : state == "move" || state == "release" ? .moveWindow : .workspace

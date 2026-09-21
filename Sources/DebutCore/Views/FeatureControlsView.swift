@@ -17,18 +17,33 @@ struct FeatureControlsView: View {
                     detail: "Cycle windows on this desktop. Off restores native Command–Tab and Command–`.",
                     value: $features.workspaceIsolation, id: "workspace-isolation")
             VStack(alignment: .leading, spacing: 10) {
-                Label("Move between desktops faster", systemImage: "bolt")
-                    .font(.headline)
-                Text("Choose which interactions Debut handles.")
+                HStack {
+                    Label("Move between desktops faster", systemImage: "bolt")
+                        .font(.headline)
+                    Spacer(minLength: 16)
+                    Toggle(
+                        "Move between desktops faster",
+                        isOn: Binding(
+                            get: { features.fasterDesktopSwitching },
+                            set: { features.setFasterDesktopSwitching($0) }
+                        )
+                    )
+                    .labelsHidden()
+                    .accessibilityIdentifier("feature-faster-desktop-switching")
+                }
+                Text("Off uses the original macOS desktop transition.")
                     .font(.subheadline).foregroundStyle(.secondary)
-                featureToggle("Numbered shortcuts · Control + 1–9 by default", value: $features.numberShortcuts)
-                    .accessibilityIdentifier("feature-number-shortcuts")
-                featureToggle("Control + ← / →", value: $features.controlArrows)
-                    .accessibilityIdentifier("feature-control-arrows")
-                featureToggle("Trackpad desktop swipe", value: $features.trackpadSwipes)
-                    .accessibilityIdentifier("feature-trackpad-swipes")
-                Text("Uses your macOS three- or four-finger desktop gesture. Other gestures keep their normal behavior.")
-                    .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    featureToggle("Numbered shortcuts · Control + 1–9 by default", value: $features.numberShortcuts)
+                        .accessibilityIdentifier("feature-number-shortcuts")
+                    featureToggle("Control + ← / →", value: $features.controlArrows)
+                        .accessibilityIdentifier("feature-control-arrows")
+                    featureToggle("Trackpad desktop swipe", value: $features.trackpadSwipes)
+                        .accessibilityIdentifier("feature-trackpad-swipes")
+                    Text("Uses your macOS three- or four-finger desktop gesture. Other gestures keep their normal behavior.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .disabled(!features.fasterDesktopSwitching)
             }
             .toggleStyle(.switch)
         }

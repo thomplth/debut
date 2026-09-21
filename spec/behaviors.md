@@ -43,12 +43,15 @@ Debut selects windows rather than applications. One app can therefore have
 separate selectable windows in several stages. The stage overlay groups by
 desktop; the all-windows overlay uses a flat global recency order.
 
-A requested desktop switch uses the DockSwipe path in `SpaceService`. A
-multi-desktop route is a sequence of adjacent hops, with the configured duration
-per hop. The default is Instant. Where available, Debut seeds the destination's
-front-process memory before switching; the actual window focus waits until
-macOS confirms the destination through the active-Space notification. Landing
-elsewhere invalidates the pending focus request.
+With faster desktop transitions enabled, a requested desktop switch uses the
+DockSwipe path in `SpaceService`. A multi-desktop route is a sequence of adjacent
+hops, with the configured duration per hop. The default is Instant. Where
+available, Debut seeds the destination's front-process memory before switching;
+the actual window focus waits until macOS confirms the destination through the
+active-Space notification. Landing elsewhere invalidates the pending focus
+request. With the parent feature disabled, selecting a window on another desktop
+fronts that window directly and leaves the desktop movement and transition to
+macOS.
 
 Window activation uses window-server fronting plus a key-window event, with AX
 and AppKit support/fallbacks. An accepted request is not proof that focus arrived:

@@ -219,12 +219,15 @@ public final class OnboardingViewModel {
     }
 
     public func setFeatures(_ features: FeatureSettings) {
-        self.features = features
-        onFeaturesChanged(features)
+        var normalized = features
+        normalized.normalizeDesktopOverrides()
+        self.features = normalized
+        onFeaturesChanged(normalized)
     }
     public func setAllOverrides(_ enabled: Bool) {
         var updated = features
         updated.workspaceIsolation = enabled
+        updated.setFasterDesktopSwitching(enabled)
         updated.numberShortcuts = enabled
         updated.controlArrows = enabled
         updated.trackpadSwipes = enabled

@@ -173,6 +173,7 @@ public struct OnboardingView: View {
                 Text("Changes apply immediately. Turning these off restores macOS controls, including its app switcher.")
                     .font(.caption).foregroundStyle(.secondary).padding(.bottom, 14)
                 SwitchDurationControl(duration: Binding(get: { viewModel.duration }, set: { viewModel.setDuration($0) }))
+                    .disabled(!viewModel.features.fasterDesktopSwitching)
                 Divider().padding(.vertical, 12)
                 Grid(horizontalSpacing: 24, verticalSpacing: 8) {
                     GridRow {
@@ -184,6 +185,7 @@ public struct OnboardingView: View {
                         featureToggle("Trackpad swipe", detail: "Swipe left or right with 3 or 4 fingers", key: \.trackpadSwipes, id: "trackpad-swipes")
                     }
                 }
+                .disabled(!viewModel.features.fasterDesktopSwitching)
 
             }.padding(16).background(.background, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(.separator.opacity(0.5)))

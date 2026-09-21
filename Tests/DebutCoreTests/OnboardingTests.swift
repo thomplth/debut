@@ -150,6 +150,7 @@ struct OnboardingTests {
         #expect(durations == [0.25])
         model.setAllOverrides(false)
         #expect(changes.last?.workspaceIsolation == false)
+        #expect(changes.last?.fasterDesktopSwitching == false)
         #expect(changes.last?.numberShortcuts == false)
         #expect(changes.last?.controlArrows == false)
         #expect(changes.last?.trackpadSwipes == false)

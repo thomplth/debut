@@ -62,12 +62,15 @@ reference and driven-progress pattern. Debut adapts the timed progress to the
 horizontal desktop axis. The macOS 27 serialized IOHID payload work is credited
 to [iss](https://github.com/joshuarli/iss).
 
-`DockSwipeAnimation` posts a high-velocity instant switch at duration zero, or a
-Began/Changed/Ended sequence over the requested duration. Each gesture crosses
-one desktop; longer routes wait for confirmation and continue through adjacent
-hops. The macOS 27 recipe includes the augmented IOHID payload. Capability and
-system-overview gates preserve native input when Debut cannot safely own the
-navigation. This is not a global change to macOS's animation preferences.
+When faster desktop transitions are enabled, `DockSwipeAnimation` posts a
+high-velocity instant switch at duration zero, or a Began/Changed/Ended sequence
+over the requested duration. Each gesture crosses one desktop; longer routes
+wait for confirmation and continue through adjacent hops. The macOS 27 recipe
+includes the augmented IOHID payload. Capability and system-overview gates
+preserve native input when Debut cannot safely own the navigation. When the
+parent feature is disabled, cross-desktop window selection fronts the requested
+window directly so macOS owns the desktop transition. This is not a global
+change to macOS's animation preferences.
 
 Stage commits, numbered navigation, cross-desktop Option-Tab selection, enabled
 Control-arrow/trackpad input, and move-and-follow commands use this common

@@ -124,6 +124,7 @@ public struct SettingsView: View {
             FeatureControlsView(features: $viewModel.settings.features)
             Divider()
             SwitchDurationControl(duration: $viewModel.settings.spaceSwitchDuration)
+                .disabled(!viewModel.settings.features.fasterDesktopSwitching)
             VStack(alignment: .leading, spacing: 4) {
                 settingsToggle(
                     "Show desktop switch indicator",
