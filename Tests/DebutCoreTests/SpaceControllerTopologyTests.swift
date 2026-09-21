@@ -20,6 +20,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     enum Operation: Equatable {
         case setFrontProcess(pid: pid_t, desktop: CGSSpaceID)
         case switchToDesktop(Int)
+        case switchToDesktopWithSystemAnimation(Int)
     }
     private(set) var operations: [Operation] = []
     private(set) var spaceDidChangeCount = 0
@@ -95,6 +96,13 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
         operations.append(.switchToDesktop(index))
         guard (0..<desktops).contains(index) else { return false }
         if switchChangesDesktop { current = index }
+        return true
+    }
+
+    func switchToDesktopWithSystemAnimation(_ location: DesktopLocation) -> Bool {
+        operations.append(.switchToDesktopWithSystemAnimation(location.index))
+        guard (0..<desktops).contains(location.index) else { return false }
+        if switchChangesDesktop { current = location.index }
         return true
     }
 
@@ -369,9 +377,9 @@ struct SpaceControllerSpaceTests {
         #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
     }
 
-    @Test("Confirmation attention uses the native transition when faster switching is off")
+    @Test("Confirmation attention uses the system animation when faster switching is off")
     @MainActor
-    func confirmationAttentionUsesNativeTransition() {
+    func confirmationAttentionUsesSystemAnimation() {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         spaces.switchChangesDesktop = false
         let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
@@ -395,20 +403,17 @@ struct SpaceControllerSpaceTests {
         keyboardService.simulateEvent(.closeSelectedWindow)
         controller.recordOverlayActionAttention(windowID: 909, ownerPID: 22)
 
-        #expect(spaces.operations.isEmpty)
-        #expect(windowService.nativeDesktopTransitionRequests == [
-            FrontWindowRequest(windowID: 909, ownerPID: 22),
+        #expect(spaces.operations == [
+            .switchToDesktopWithSystemAnimation(1),
         ])
-        #expect(windowService.frontedWindows == [
-            FrontWindowRequest(windowID: 909, ownerPID: 22),
-        ])
+        #expect(windowService.frontedWindows.isEmpty)
         #expect(windowService.raisedWindowID == nil)
+        #expect(windowService.activatedPID == nil)
 
         spaces.current = 1
         controller.desktopDidChange()
 
         #expect(windowService.frontedWindows == [
-            FrontWindowRequest(windowID: 909, ownerPID: 22),
             FrontWindowRequest(windowID: 909, ownerPID: 22),
         ])
         #expect(windowService.raisedWindowID == 909)
@@ -1159,8 +1164,8 @@ struct SpaceControllerSpaceTests {
         ])
     }
 
-    @Test("Disabling faster desktop switching lets window focus use the native transition")
-    func disabledFasterDesktopSwitchingUsesNativeWindowFocus() {
+    @Test("Disabling faster desktop switching uses the system desktop animation")
+    func disabledFasterDesktopSwitchingUsesSystemDesktopAnimation() {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
         spaces.switchChangesDesktop = false
         let (controller, windowService) = makeController(spaces: spaces)
@@ -1182,21 +1187,18 @@ struct SpaceControllerSpaceTests {
 
         controller.switchToSpace(id: targetSpaceID, raiseWindowID: 22)
 
-        #expect(spaces.operations.isEmpty)
-        #expect(windowService.nativeDesktopTransitionRequests == [
-            FrontWindowRequest(windowID: 22, ownerPID: 4242),
+        #expect(spaces.operations == [
+            .switchToDesktopWithSystemAnimation(0),
         ])
-        #expect(windowService.frontedWindows == [
-            FrontWindowRequest(windowID: 22, ownerPID: 4242),
-        ])
+        #expect(windowService.frontedWindows.isEmpty)
         #expect(windowService.raisedWindowID == nil)
+        #expect(windowService.activatedPID == nil)
         #expect(controller.spaceManager.activeSpaceID != targetSpaceID)
 
         spaces.current = 0
         controller.desktopDidChange()
 
         #expect(windowService.frontedWindows == [
-            FrontWindowRequest(windowID: 22, ownerPID: 4242),
             FrontWindowRequest(windowID: 22, ownerPID: 4242),
         ])
         #expect(windowService.raisedWindowID == 22)
@@ -1246,21 +1248,22 @@ struct SpaceControllerSpaceTests {
                 .setFrontProcess(pid: 22, desktop: 101),
                 .switchToDesktop(1),
             ])
-            #expect(windowService.nativeDesktopTransitionRequests.isEmpty)
             #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
         } else {
-            #expect(spaces.operations.isEmpty)
-            #expect(windowService.nativeDesktopTransitionRequests == [
-                FrontWindowRequest(windowID: 202, ownerPID: 22),
+            #expect(spaces.operations == [
+                .switchToDesktopWithSystemAnimation(1),
             ])
+            #expect(windowService.frontedWindows.isEmpty)
+            #expect(windowService.raisedWindowID == nil)
+            #expect(windowService.activatedPID == nil)
             #expect(controller.spaceManager.activeSpaceID == sourceSpaceID)
         }
-        #expect(windowService.raisedWindowID == nil)
 
         spaces.current = 1
         controller.desktopDidChange()
 
         #expect(windowService.raisedWindowID == 202)
+        #expect(windowService.frontedWindows.count == 1)
         #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
     }
 

@@ -1293,30 +1293,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         )
     }
 
-    /// The native Space transition follows the app's key window, so this path selects the exact
-    /// requested window before it fronts the process. Ordinary focus keeps its existing ordering.
-    private func activateOwnerForNativeDesktopTransition(
-        _ window: SpaceWindow,
-        windowID: CGWindowID
-    ) -> OwnerActivation {
-        if let ownerPID = window.ownerPID {
-            if windowService.frontWindowForNativeDesktopTransition(
-                windowID: windowID,
-                ownerPID: ownerPID
-            ) {
-                return OwnerActivation(outcome: .windowServer, windowServerTrace: nil)
-            }
-            if windowService.activateApp(pid: ownerPID) {
-                return OwnerActivation(outcome: .appKitProcess, windowServerTrace: nil)
-            }
-        }
-        return OwnerActivation(
-            outcome: windowService.activateApp(bundleID: window.ownerBundleID)
-                ? .appKitBundle : .refused,
-            windowServerTrace: nil
-        )
-    }
-
     /// Adopts the desktop currently showing as the active space.
     ///
     /// The user can switch desktop without Debut — Mission Control, Control+Arrow, or
@@ -1403,21 +1379,25 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 .spaceRaise,
                 workload: .init(windows: targetSpace?.windows.count ?? 0)
             )
-            if fasterDesktopSwitchingEnabled,
-               let index = spaceManager.spaceIndex(id: targetID),
+            if let index = spaceManager.spaceIndex(id: targetID),
                let stackID = spaceManager.spaceStackID(containingSpaceID: targetID),
                let location = spaceSwitcher?.spaceTopology().stack(id: stackID)?.location(at: index),
                let switcher = spaceSwitcher {
-                if let focusWindowID {
-                    seedFrontProcess(forWindow: focusWindowID, inSpaceID: targetID,
-                                     desktopID: location.desktopID, switcher: switcher)
+                if fasterDesktopSwitchingEnabled {
+                    if let focusWindowID {
+                        seedFrontProcess(forWindow: focusWindowID, inSpaceID: targetID,
+                                         desktopID: location.desktopID, switcher: switcher)
+                    }
+                    desktopIsSettling = switcher.switchToDesktop(location)
+                } else {
+                    desktopIsSettling = switcher.switchToDesktopWithSystemAnimation(location)
+                    if desktopIsSettling {
+                        diag.report("system_desktop_switch_requested", details: [
+                            "space": spaceLabel(forID: targetID),
+                            "windowID": focusWindowID.map(String.init) ?? "none",
+                        ])
+                    }
                 }
-                desktopIsSettling = switcher.switchToDesktop(location)
-            } else if !fasterDesktopSwitchingEnabled, let focusWindowID {
-                desktopIsSettling = requestNativeDesktopTransition(
-                    forWindow: focusWindowID,
-                    inSpaceID: targetID
-                )
             }
             _ = PerformanceRecorder.shared.end(raiseID)
 
@@ -1448,30 +1428,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         delegate?.spaceControllerDidMutateState(self)
         delegate?.spaceControllerDidSwitchSpace(self)
-    }
-
-    /// Fronting a window on another desktop asks macOS to perform its normal Space transition.
-    /// The first request starts that transition; the confirmed active-Space notification makes
-    /// the final focus and MRU update, just as it does after Debut's synthetic route.
-    private func requestNativeDesktopTransition(
-        forWindow windowID: CGWindowID,
-        inSpaceID spaceID: UUID
-    ) -> Bool {
-        guard let window = spaceManager.allSpaces.first(where: { $0.id == spaceID })?
-            .windows.first(where: { $0.windowID == windowID })
-        else { return false }
-
-        let activation = activateOwnerForNativeDesktopTransition(window, windowID: windowID)
-        guard activation.outcome != .refused else { return false }
-        if let ownerPID = window.ownerPID {
-            focusRequest = (windowID: windowID, ownerPID: ownerPID, at: clock())
-        }
-        diag.report("native_space_transition_requested", details: [
-            "space": spaceLabel(forID: spaceID),
-            "via": activation.outcome.rawValue,
-            "windowID": "\(windowID)",
-        ])
-        return true
     }
 
     /// Tells the destination desktop which app to show forward, before it is revealed.
@@ -3109,19 +3065,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         guard fasterDesktopSwitchingEnabled else {
-            let fronted = windowService.frontWindowForNativeDesktopTransition(
-                windowID: windowID,
-                ownerPID: ownerPID
-            )
-            let accepted = fronted || windowService.activateApp(pid: ownerPID)
-            pendingSystemAttentionFocus = accepted
+            let started = switcher.switchToDesktopWithSystemAnimation(location)
+            pendingSystemAttentionFocus = started
                 ? PendingSystemAttentionFocus(
                     windowID: windowID,
                     ownerPID: ownerPID,
                     location: location
                 )
                 : nil
-            if !accepted {
+            if !started {
                 focusSystemAttention(windowID: windowID, ownerPID: ownerPID)
             }
             return

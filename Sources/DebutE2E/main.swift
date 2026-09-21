@@ -533,6 +533,24 @@ func postFlagsChanged(flags: CGEventFlags) {
     event.post(tap: .cgSessionEventTap)
 }
 
+func launchNewTextEditInstance(opening urls: [URL]) -> pid_t {
+    guard let editor = NSWorkspace.shared.urlForApplication(
+        withBundleIdentifier: "com.apple.TextEdit"
+    ) else { return -1 }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
+    configuration.createsNewApplicationInstance = true
+    let ready = DispatchSemaphore(value: 0)
+    let result = LockedBox<pid_t>()
+    NSWorkspace.shared.open(urls, withApplicationAt: editor, configuration: configuration) {
+        app, _ in
+        result.store(app?.processIdentifier ?? -1)
+        ready.signal()
+    }
+    _ = ready.wait(timeout: .now() + 20)
+    return result.load() ?? -1
+}
+
 func postMouseMove(to point: CGPoint) {
     guard let event = CGEvent(
         mouseEventSource: nil,
@@ -2163,13 +2181,28 @@ _ = terminateDebutAndWait()
 if let featureSettingsBackup { try? featureSettingsBackup.write(to: settingsFile, options: .atomic) }
 else { try? FileManager.default.removeItem(at: settingsFile) }
 
-// --- Native Command-Tab transition with the faster-desktop master disabled. ---
-header("Native Command-Tab desktop transition")
+// --- System-duration Command-Tab transition with the faster-desktop master disabled. ---
+header("System-duration Command-Tab desktop transition")
 let nativeTransitionSettingsBackup = try? Data(contentsOf: settingsFile)
 let nativeTransitionSpaces = SpaceService()
 let nativeTransitionWindows = AccessibilityWindowService()
+let nativeTransitionFixtureURL = URL(
+    fileURLWithPath: "/tmp/debut-e2e-fixtures/native-desktop-transition.txt"
+)
+try? "Debut native desktop transition fixture\n".write(
+    to: nativeTransitionFixtureURL,
+    atomically: true,
+    encoding: .utf8
+)
+let nativeTransitionFixturePID = launchNewTextEditInstance(opening: [nativeTransitionFixtureURL])
+let nativeTransitionFixtureReady = nativeTransitionFixturePID > 0 && waitFor(timeout: 15) {
+    nativeTransitionWindows.listWindows().contains {
+        $0.ownerPID == nativeTransitionFixturePID
+            && nativeTransitionSpaces.desktopIndex(forWindow: $0.windowID) != nil
+    }
+}
 let nativeTransitionFixture = nativeTransitionWindows.listWindows().first {
-    $0.ownerBundleID == "com.apple.TextEdit"
+    $0.ownerPID == nativeTransitionFixturePID
         && nativeTransitionSpaces.desktopIndex(forWindow: $0.windowID) != nil
 }
 
@@ -2182,6 +2215,18 @@ if nativeTransitionSpaces.desktopCount() >= 2,
     let fixturePlaced = waitFor {
         nativeTransitionSpaces.desktopIndex(forWindow: fixture.windowID) == targetDesktop
     }
+    let nativeTransitionSource = nativeTransitionWindows.listWindows().first {
+        $0.ownerPID != fixture.ownerPID
+            && nativeTransitionSpaces.desktopIndex(forWindow: $0.windowID) == sourceDesktop
+    }
+    let nativeTransitionSourceReady = nativeTransitionSource.map { source in
+        nativeTransitionWindows.frontWindow(
+            windowID: source.windowID,
+            ownerPID: source.ownerPID
+        ) && waitFor {
+            nativeTransitionWindows.frontmostApplicationPID() == source.ownerPID
+        }
+    } ?? false
 
     var nativeSettings = (try? settingsStore.loadSettings()) ?? AppSettings()
     nativeSettings.features.workspaceIsolation = true
@@ -2239,11 +2284,22 @@ if nativeTransitionSpaces.desktopCount() >= 2,
         return focus?.ownerPID == fixture.ownerPID && focus?.windowID == fixture.windowID
     }
     let nativeRequestReported = readEvents().contains {
-        $0["event"] == "native_space_transition_requested"
+        $0["event"] == "system_desktop_switch_requested"
             && $0["windowID"] == String(fixture.windowID)
     }
-    test("Command-Tab uses the native macOS transition when faster movement is off") {
-        fixturePlaced && nativeApplicationReady && fixtureTracked && overlayOpened
+    let finalNativeFocus = liveKeyboardFocus()
+    info("  System-duration transition: fixtureReady=\(nativeTransitionFixtureReady) "
+        + "placed=\(fixturePlaced) sourceReady=\(nativeTransitionSourceReady) "
+        + "appReady=\(nativeApplicationReady) "
+        + "tracked=\(fixtureTracked) overlay=\(overlayOpened) "
+        + "selected=\(selectedFixture) requested=\(nativeRequestReported) "
+        + "landed=\(nativeTransitionLanded) focused=\(nativeFocusLanded) "
+        + "desktop=\(nativeTransitionSpaces.currentDesktopIndex().map(String.init) ?? "none") "
+        + "expected=\(fixture.ownerPID)/\(fixture.windowID) "
+        + "actual=\(finalNativeFocus.map { "\($0.ownerPID)/\($0.windowID)" } ?? "none")")
+    test("Command-Tab uses the system-style desktop transition when faster movement is off") {
+        nativeTransitionFixtureReady && fixturePlaced && nativeTransitionSourceReady
+            && nativeApplicationReady && fixtureTracked && overlayOpened
             && selectedFixture && nativeRequestReported && nativeTransitionLanded
             && nativeFocusLanded
     }
@@ -2254,15 +2310,15 @@ if nativeTransitionSpaces.desktopCount() >= 2,
         nativeTransitionSpaces.desktopIndex(forWindow: fixture.windowID) == originalDesktop
     }
 } else {
-    skipTest(
-        "The disabled master preserves each child desktop preference",
-        reason: "The host needs two desktops and a TextEdit fixture"
-    )
-    skipTest(
-        "Command-Tab uses the native macOS transition when faster movement is off",
-        reason: "The host needs two desktops and a TextEdit fixture"
-    )
+    info("  System-duration transition fixture: desktops=\(nativeTransitionSpaces.desktopCount()) "
+        + "pid=\(nativeTransitionFixturePID) ready=\(nativeTransitionFixtureReady) "
+        + "current=\(nativeTransitionSpaces.currentDesktopIndex().map(String.init) ?? "none")")
+    test("The disabled master preserves each child desktop preference") { false }
+    test("Command-Tab uses the system-style desktop transition when faster movement is off") {
+        false
+    }
 }
+NSRunningApplication(processIdentifier: nativeTransitionFixturePID)?.terminate()
 if let nativeTransitionSettingsBackup {
     try? nativeTransitionSettingsBackup.write(to: settingsFile, options: .atomic)
 } else {

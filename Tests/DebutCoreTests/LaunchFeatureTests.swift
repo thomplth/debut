@@ -122,11 +122,11 @@ struct LaunchFeatureTests {
         features.setFasterDesktopSwitching(masterEnabled)
         service.features = features
 
-        func event(_ code: Int, _ flags: CGEventFlags) -> CGEvent {
+        func event(_ code: Int, down: Bool, _ flags: CGEventFlags) -> CGEvent {
             let event = CGEvent(
                 keyboardEventSource: nil,
                 virtualKey: CGKeyCode(code),
-                keyDown: true
+                keyDown: down
             )!
             event.flags = flags
             return event
@@ -134,20 +134,32 @@ struct LaunchFeatureTests {
 
         let numberResult = service.handleCGEvent(
             type: .keyDown,
-            event: event(kVK_ANSI_2, .maskControl)
+            event: event(kVK_ANSI_2, down: true, .maskControl)
         )
         let arrowResult = service.handleCGEvent(
             type: .keyDown,
-            event: event(kVK_RightArrow, .maskControl)
+            event: event(kVK_RightArrow, down: true, .maskControl)
+        )
+        let numberUpResult = service.handleCGEvent(
+            type: .keyUp,
+            event: event(kVK_ANSI_2, down: false, [])
+        )
+        let arrowUpResult = service.handleCGEvent(
+            type: .keyUp,
+            event: event(kVK_RightArrow, down: false, [])
         )
 
         if masterEnabled {
             #expect(numberResult == nil)
             #expect(arrowResult == nil)
+            #expect(numberUpResult == nil)
+            #expect(arrowUpResult == nil)
             #expect(delegate.receivedEvents == [.switchToSpace(2), .switchAdjacentSpace(1)])
         } else {
             #expect(numberResult != nil)
             #expect(arrowResult != nil)
+            #expect(numberUpResult != nil)
+            #expect(arrowUpResult != nil)
             #expect(delegate.receivedEvents.isEmpty)
         }
     }
