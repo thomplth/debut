@@ -73,7 +73,7 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | Excluded Apps | Running-app picker for applications omitted from window management. |
 | App | Login launch and Dock visibility. The menu-bar item remains available with the Dock icon off. |
 | Privacy | Sharing switch and preview of the exact allowlisted session-summary payload. |
-| Keyboard Shortcuts | Activation/session bindings, numbered modifier sets, hold delay, repeat pace, shortcut exclusions, and reference for fixed move chords. |
+| Keyboard Shortcuts | Activation/session bindings, numbered modifier sets, hold delay, repeat pace, shortcut exclusions, a confirmed restore-defaults action, and reference for fixed move chords. |
 | Advanced | Main-display overlay placement, glass, stage/card geometry, adaptive sizing, selector appearance, and preview refresh/cache policy. |
 | Troubleshooting | Export local diagnostics or reset window assignments against the real desktop list while preserving settings. |
 | About | Version and update check. |

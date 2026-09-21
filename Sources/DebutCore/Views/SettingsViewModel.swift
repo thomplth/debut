@@ -37,6 +37,15 @@ public struct SettingsViewModel: Sendable {
         onCheckForUpdates?()
     }
 
+    public mutating func restoreDefaultShortcuts() {
+        settings.keyBindings.restoreDefaults()
+        settings.quickSwitchModifiers = .control
+        settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(
+            control: true,
+            option: true
+        )
+    }
+
     public let telemetryExcludedData = "Never shared: window titles, app names or bundle IDs, PIDs, window IDs, paths, screenshots, raw diagnostics, free-form errors, or persistent identifiers."
 
     public func telemetryPayloadPreview() throws -> String {

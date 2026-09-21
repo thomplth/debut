@@ -42,6 +42,28 @@ struct SettingsViewModelTests {
         #expect(vm.settings.isQuickSwitchExcluded(bundleID: "com.tinyspeck.slackmacgap"))
     }
 
+    @Test("Restore default shortcuts resets only shortcut preferences")
+    func restoreDefaultShortcuts() {
+        var vm = SettingsViewModel()
+        vm.settings.keyBindings.bindings[.nextWindow] = KeyCombo(
+            keyCode: 42,
+            option: true
+        )
+        vm.settings.quickSwitchModifiers = ShortcutModifiers(command: true)
+        vm.settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(shift: true)
+        vm.settings.stageScale = 1.25
+
+        vm.restoreDefaultShortcuts()
+
+        #expect(vm.settings.keyBindings == KeyBindings())
+        #expect(vm.settings.quickSwitchModifiers == .control)
+        #expect(vm.settings.quickSwitchSameApplicationModifiers == ShortcutModifiers(
+            control: true,
+            option: true
+        ))
+        #expect(vm.settings.stageScale == 1.25)
+    }
+
     @Test("Sections list")
     func sections() {
         let vm = SettingsViewModel()
