@@ -56,6 +56,18 @@ if [[ "${bundle_id##*.}" != "$support_name" ]]; then
     fail "bundle ID '$bundle_id' and support directory '$support_name' disagree; the guest derives one from the other"
 fi
 
+# TelemetryDeck routing identifiers are public bundle configuration, not credentials. Keeping
+# the expected values here prevents a release from silently falling back to the unavailable
+# transport because either Info.plist value was cleared or mistyped.
+telemetry_namespace="$(/usr/bin/awk '/<key>TelemetryDeckNamespace<\/key>/ { getline; gsub(/.*<string>|<\/string>.*/, ""); print }' Resources/Info.plist)"
+telemetry_app_id="$(/usr/bin/awk '/<key>TelemetryDeckAppID<\/key>/ { getline; gsub(/.*<string>|<\/string>.*/, ""); print }' Resources/Info.plist)"
+if [[ "$telemetry_namespace" != "com.thomplth" ]]; then
+    fail "TelemetryDeck namespace must be com.thomplth, got '$telemetry_namespace'"
+fi
+if [[ "$telemetry_app_id" != "C7FA86E4-55ED-46DD-B0EC-E547FD37BA2C" ]]; then
+    fail "TelemetryDeck app ID is not the configured Debut app, got '$telemetry_app_id'"
+fi
+
 if (( failures > 0 )); then
     exit 1
 fi
