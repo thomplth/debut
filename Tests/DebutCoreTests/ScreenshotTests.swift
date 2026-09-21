@@ -1086,7 +1086,7 @@ struct ScreenshotTests {
         settings.features.setFasterDesktopSwitching(false)
         let view = SettingsView(
             viewModel: SettingsViewModel(settings: settings),
-            selectedSection: .features
+            selectedSection: .desktops
         )
         let image = try #require(renderSwiftUI(view, size: NSSize(width: 820, height: 620)))
         try saveImage(image, name: "settings_faster_desktop_transitions_disabled")

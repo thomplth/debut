@@ -68,18 +68,21 @@ which display stack the window switcher navigates.
 
 ## Settings pages
 
-Settings opens on **Features**. Each sidebar page scrolls independently, and
+Settings opens on **General**. Each sidebar page scrolls independently, and
 changes save immediately and update shared onboarding controls and menu checkmarks.
 
 | Page | Contents |
 | --- | --- |
-| Features | Preview and workspace switches, a faster-desktop parent with three navigation overrides, duration, and desktop indicator. |
-| Excluded Apps | Running-app picker for applications omitted from window management. |
-| App | Login launch and Dock visibility. The menu-bar item remains available with the Dock icon off. |
-| Keyboard Shortcuts | Activation/session bindings, numbered modifier sets, hold delay, repeat pace, a confirmed restore-defaults action, and reference for fixed move chords. |
-| Advanced | Main-display overlay placement, glass, stage/card geometry, adaptive sizing, selector appearance, and preview refresh/cache policy. |
-| Troubleshooting | Export local diagnostics or reset window assignments against the real desktop list while preserving settings. |
-| About | Version and update check. |
+| General | Login launch, Dock visibility, Reduce Motion guidance, and a running-app picker for applications ignored by window management. The menu-bar item remains available with the Dock icon off. |
+| Desktops | Faster switching and its number-key, Control-arrow, and trackpad methods, followed by transition duration and the desktop-change indicator. |
+| Switcher | Command-Tab desktop isolation, window previews, display placement, glass and card layout, preview freshness, and selected-window treatment. |
+| Shortcuts | Activation/session bindings, numbered modifier sets, hold delay, repeat pace, a confirmed restore-defaults action, and reference for fixed move chords. |
+| Support | Version and update checks, diagnostic export, and a confirmed window-cache reset that preserves settings. |
+
+Every configurable value has one destination: app-level choices and ignored apps
+are in General; desktop navigation and feedback are in Desktops; overlay behavior,
+content, layout, and selection are in Switcher; and all key assignments and
+held-key timing are in Shortcuts. Support contains actions rather than preferences.
 
 The menu-bar item provides feature toggles, Settings, Tutorial, update checks,
 and Quit. System Reduce Motion changes overlay animation; it is not a separate

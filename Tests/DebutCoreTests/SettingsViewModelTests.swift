@@ -68,14 +68,20 @@ struct SettingsViewModelTests {
     func sections() {
         let vm = SettingsViewModel()
         #expect(vm.sections == [
-            .features,
-            .excludedApps,
-            .app,
-            .keyboardShortcuts,
-            .advanced,
-            .troubleshooting,
-            .about,
+            .general,
+            .desktops,
+            .switcher,
+            .shortcuts,
+            .support,
         ])
+    }
+
+    @Test("Every configurable option appears in exactly one section")
+    func sectionOptionsAreCompleteAndUnique() {
+        let groupedOptions = SettingsSection.allCases.flatMap(\.options)
+
+        #expect(groupedOptions.count == SettingsOption.allCases.count)
+        #expect(Set(groupedOptions) == Set(SettingsOption.allCases))
     }
 
     @Test("Settings no longer persist the removed sharing preference")
