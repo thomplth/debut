@@ -111,6 +111,7 @@ public struct StageOverlayViewModel: Sendable {
     /// review the display indicator without changing normal display-stack behavior.
     public var forceDisplayStackIndicator: Bool
     public var keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation?
+    public var overlayKeyboardInteractionSequence: Int
 
     public var displayStackName: String {
         spaceManager.selectedSpaceStack?.displayName ?? "Display"
@@ -135,7 +136,7 @@ public struct StageOverlayViewModel: Sendable {
 
     public var displayStackShortcutSpacing: CGFloat { 3.5 }
 
-    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], windowSizes: [CGWindowID: CGSize] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, forceDisplayStackIndicator: Bool = false, keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation? = nil) {
+    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], windowSizes: [CGWindowID: CGSize] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, forceDisplayStackIndicator: Bool = false, keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation? = nil, overlayKeyboardInteractionSequence: Int = 0) {
         self.spaceManager = spaceManager
         self.activeSpaceIndex = activeSpaceIndex
         self.selectedWindowIndex = selectedWindowIndex
@@ -145,6 +146,7 @@ public struct StageOverlayViewModel: Sendable {
         self.wallpaperLuminance = wallpaperLuminance
         self.forceDisplayStackIndicator = forceDisplayStackIndicator
         self.keyboardWindowMoveAnimation = keyboardWindowMoveAnimation
+        self.overlayKeyboardInteractionSequence = overlayKeyboardInteractionSequence
     }
 
     public var stages: [StageData] {

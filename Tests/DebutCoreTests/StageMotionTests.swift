@@ -1332,6 +1332,22 @@ struct StageMotionTests {
         #expect(remainedEnabled)
     }
 
+    @Test("Keyboard ownership rearms pointer selection until the pointer moves again")
+    func keyboardOwnershipRearmsPointerMovementGate() {
+        var gate = PointerMovementGate(initialLocation: CGPoint(x: 400, y: 300))
+
+        let acceptedInitialMovement = gate.observe(at: CGPoint(x: 401, y: 300))
+
+        gate.reset(at: CGPoint(x: 401, y: 300))
+
+        let rejectedStationaryPointer = gate.observe(at: CGPoint(x: 401, y: 300))
+        let acceptedNewMovement = gate.observe(at: CGPoint(x: 402, y: 300))
+
+        #expect(acceptedInitialMovement)
+        #expect(!rejectedStationaryPointer)
+        #expect(acceptedNewMovement)
+    }
+
     // The stage's shadow moved onto the glass plate, which sits inside the stage's `.scaleEffect`
     // rather than outside it as the old modifier did (KHA-641). The plate's numbers therefore have
     // to come out pre-divided, or an inactive stage draws a shadow shrunk by its own depth scale.

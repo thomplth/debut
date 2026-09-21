@@ -1456,9 +1456,12 @@ struct SpaceControllerTests {
         keyboardService.simulateEvent(.cmdTabHold)
         #expect(controller.selectedWindowIndex == 1)
         controller.updateOverlayPointerSelection(spaceIndex: 0, windowIndex: 0)
+        let sequenceBeforeClose = controller.overlayKeyboardInteractionSequence
         keyboardService.simulateEvent(.closeSelectedWindow)
 
         #expect(windowService.closedWindowIDs == [101])
+        #expect(controller.overlayKeyboardInteractionSequence == sequenceBeforeClose,
+                "An action uses hover without turning it into a navigation handoff")
     }
 
     @Test("Leaving a hovered preview restores the keyboard target for overlay commands")
@@ -1519,6 +1522,54 @@ struct SpaceControllerTests {
 
         #expect(controller.overlaySpaceManager.activeSpace.windows.map(\.windowID) == [202, 101, 303])
         #expect(controller.selectedWindowIndex == 1, "The arrow starts from the promoted hover target")
+    }
+
+    @Test("Tab advances from the hovered preview and hands selection ownership to the keyboard")
+    func tabAdvancesFromPointerHover() {
+        let (controller, _, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        for windowID in [CGWindowID(101), 202, 303, 404] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.example.\(windowID)",
+                    ownerName: "Window \(windowID)",
+                    windowTitle: "Window \(windowID)"
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        controller.updateOverlayPointerSelection(spaceIndex: 0, windowIndex: 3)
+        let sequenceBeforeTab = controller.overlayKeyboardInteractionSequence
+
+        keyboardService.simulateEvent(.nextWindow)
+
+        #expect(controller.selectedWindowIndex == 0, "Tab wraps from the hovered fourth window")
+        #expect(controller.overlayKeyboardInteractionSequence == sequenceBeforeTab + 1)
+    }
+
+    @Test("Keyboard navigation takes ownership even when no window is hovered")
+    func keyboardNavigationTakesPointerOwnershipWithoutHover() {
+        let (controller, _, keyboardService) = makeController()
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.example.one",
+                ownerName: "One",
+                windowTitle: "One"
+            ),
+            toSpaceID: spaceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        let sequenceBeforeNavigation = controller.overlayKeyboardInteractionSequence
+
+        keyboardService.simulateEvent(.nextWindow)
+
+        #expect(controller.overlayKeyboardInteractionSequence == sequenceBeforeNavigation + 1)
     }
 
     @Test("Held backward Tab stops at the first window and a fresh press wraps")

@@ -10,13 +10,15 @@ public struct AltTabOverlayViewModel: Sendable {
     public let windows: [StageWindowData]
     public var selectedIndex: Int
     public var appearance: AppSettings
+    public var overlayKeyboardInteractionSequence: Int
 
     public init(
         entries: [GlobalWindowEntry],
         selectedIndex: Int,
         windowPreviews: [CGWindowID: CGImage] = [:],
         windowSizes: [CGWindowID: CGSize] = [:],
-        appearance: AppSettings = AppSettings()
+        appearance: AppSettings = AppSettings(),
+        overlayKeyboardInteractionSequence: Int = 0
     ) {
         self.windows = entries.map {
             StageWindowData.card(
@@ -28,6 +30,7 @@ public struct AltTabOverlayViewModel: Sendable {
         }
         self.selectedIndex = selectedIndex
         self.appearance = appearance
+        self.overlayKeyboardInteractionSequence = overlayKeyboardInteractionSequence
     }
 
     public var selectedWindow: StageWindowData? { windows[safe: selectedIndex] }
