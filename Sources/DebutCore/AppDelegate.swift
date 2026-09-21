@@ -291,7 +291,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             }
         )
         desktopSwipeService = swipeService
-        if !swipeService.setEnabled(currentSettings.features.trackpadSwipes) {
+        if !swipeService.setEnabled(currentSettings.features.effectiveTrackpadSwipes) {
             diag.report("desktop_swipe_tap_failed")
         }
         keyboardService.features = currentSettings.features
@@ -1468,8 +1468,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func applySettings(_ incomingSettings: AppSettings) {
-        var newSettings = incomingSettings
-        newSettings.features.normalizeDesktopOverrides()
+        let newSettings = incomingSettings
         let telemetryChanged = self.currentSettings.shareAnonymousTelemetry != newSettings.shareAnonymousTelemetry
         self.launchAtLogin.apply(enabled: newSettings.launchAtLogin)
         self.activationPolicy.apply(showsDockIcon: newSettings.showsDockIcon)
@@ -1509,7 +1508,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 if sending { try? await exporter.flush() }
             }
         }
-        if desktopSwipeService?.setEnabled(newSettings.features.trackpadSwipes) == false {
+        if desktopSwipeService?.setEnabled(newSettings.features.effectiveTrackpadSwipes) == false {
             diag.report("desktop_swipe_tap_failed")
         }
         keyboardService?.features = newSettings.features

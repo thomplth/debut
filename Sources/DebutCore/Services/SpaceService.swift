@@ -132,6 +132,32 @@ public enum FrontProcessManagement {
         windowID: CGWindowID,
         ownerPID: pid_t
     ) -> FrontWindowDeliveryTrace {
+        frontWithTrace(
+            windowID: windowID,
+            ownerPID: ownerPID,
+            selectsWindowBeforeFronting: false
+        )
+    }
+
+    /// Native application activation chooses a Space from the app's key window. Select the
+    /// requested window before moving the process globally to the front, then repeat the key
+    /// request afterwards so the chosen window also owns the keyboard when the transition lands.
+    public static func frontForNativeDesktopTransition(
+        windowID: CGWindowID,
+        ownerPID: pid_t
+    ) -> Bool {
+        frontWithTrace(
+            windowID: windowID,
+            ownerPID: ownerPID,
+            selectsWindowBeforeFronting: true
+        ).accepted
+    }
+
+    private static func frontWithTrace(
+        windowID: CGWindowID,
+        ownerPID: pid_t,
+        selectsWindowBeforeFronting: Bool
+    ) -> FrontWindowDeliveryTrace {
         let readiness = readiness
         guard let slpsSetFrontProcessWithOptions, let getProcessForPID else {
             return FrontWindowDeliveryTrace(
@@ -156,6 +182,9 @@ public enum FrontProcessManagement {
                 processSerialNumberSymbolResolved: readiness.processSerialNumberResolved,
                 keyWindowEventSymbolResolved: readiness.eventRecordPostResolved
             )
+        }
+        if selectsWindowBeforeFronting {
+            _ = makeKeyWindow(windowID: windowID, of: &psn)
         }
         let frontStatus = slpsSetFrontProcessWithOptions(&psn, windowID, kSLPSUserGenerated)
         guard frontStatus == .success else {

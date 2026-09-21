@@ -1027,9 +1027,12 @@ struct ScreenshotTests {
         try saveImage(image, name: "settings_\(section.rawValue)")
     }
 
-    @Test("Disabled faster desktop transitions gray dependent controls")
+    @Test("Disabled faster desktop transitions gray dependent controls without changing choices")
     func disabledFasterDesktopTransitions() throws {
         var settings = AppSettings()
+        settings.features.numberShortcuts = true
+        settings.features.controlArrows = false
+        settings.features.trackpadSwipes = true
         settings.features.setFasterDesktopSwitching(false)
         let view = SettingsView(
             viewModel: SettingsViewModel(settings: settings),
