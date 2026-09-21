@@ -26,6 +26,7 @@ public struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
     @State private var selectedSection: SettingsSection = .features
     @State private var showingResetConfirmation = false
+    @State private var showingRestoreDefaultsConfirmation = false
     private let shortcutRecordingService: (any ShortcutRecordingService)?
     @State private var showingTelemetryPayload = false
     @State private var telemetryPayload = ""
@@ -688,19 +689,22 @@ public struct SettingsView: View {
                 configurable: false
             )
 
-            Button("Restore Defaults") {
-                viewModel.settings.keyBindings.restoreDefaults()
-                viewModel.settings.quickSwitchModifiers = .control
-                viewModel.settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(
-                    control: true,
-                    option: true
-                )
+            Button("Restore Defaults…", role: .destructive) {
+                showingRestoreDefaultsConfirmation = true
             }
             .padding(.top, 8)
         }
         .onChange(of: viewModel.settings.quickSwitchModifiers) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.quickSwitchSameApplicationModifiers) { _, _ in
             saveSettings()
+        }
+        .alert("Restore Default Shortcuts?", isPresented: $showingRestoreDefaultsConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Restore Defaults", role: .destructive) {
+                viewModel.restoreDefaultShortcuts()
+            }
+        } message: {
+            Text("This resets all keyboard shortcuts and shortcut modifiers to their defaults. Other settings are preserved.")
         }
     }
 
