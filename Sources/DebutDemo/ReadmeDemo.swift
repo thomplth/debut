@@ -338,6 +338,9 @@ func recordReadme() {
     }
     if requestedClips.isEmpty || requestedClips.contains("command-tab") {
         scene.restore()
+        // Start each interaction with fresh light glass; reused surfaces can retain a dark backing.
+        setDemoAppearance(dark: false)
+        setDemoInstant(false)
         scene.startKeys()
         clip("command-tab", seconds: 7) {
             postFlags(.maskCommand)
@@ -353,6 +356,8 @@ func recordReadme() {
     }
     if requestedClips.isEmpty || requestedClips.contains("organize-windows") {
         scene.restore()
+        setDemoAppearance(dark: false)
+        setDemoInstant(false)
         scene.startKeys()
         scene.focus(scene.groups[1][1])
         scene.focus(scene.groups[1][0])
@@ -368,6 +373,8 @@ func recordReadme() {
     }
     if requestedClips.isEmpty || requestedClips.contains("option-tab") {
         scene.restore()
+        setDemoAppearance(dark: false)
+        setDemoInstant(false)
         scene.startKeys()
         scene.focus(scene.groups[0][1])
         scene.focus(scene.groups[1][0])
