@@ -4,6 +4,102 @@ import Testing
 
 @Suite("Anonymous telemetry")
 struct TelemetryTests {
+    @Test("Hourly accumulator exports exact P95 values for user-facing interactions and resets")
+    func hourlyP95Accumulator() async throws {
+        let transport = RecordingTelemetryClient()
+        let exporter = TelemetryExporter(
+            client: transport,
+            queue: InMemoryTelemetryQueue(),
+            enabled: true,
+            dailyEventLimit: 24
+        )
+        for duration in [10.0, 20, 30, 40, 50, 60, 70, 80, 90, 100] {
+            await exporter.record(observation(
+                operation: .overlayEndToEndVisible,
+                duration: duration,
+                windows: 12
+            ))
+        }
+        await exporter.record(observation(
+            operation: .windowDiscovery,
+            duration: 9_999,
+            windows: 12
+        ))
+
+        try await exporter.flushHourly(appVersion: "1.2.3", operatingSystemMajor: 26)
+        try await exporter.flushHourly(appVersion: "1.2.3", operatingSystemMajor: 26)
+
+        let batches = await transport.batches
+        #expect(batches.count == 1)
+        #expect(batches[0].count == 1)
+        #expect(batches[0][0].event == .hourlyP95)
+        #expect(batches[0][0].operation == .overlayEndToEndVisible)
+        #expect(batches[0][0].latencyMilliseconds == 100)
+        #expect(batches[0][0].sampleCount == 10)
+        #expect(batches[0][0].appVersion == "1.2.3")
+        #expect(batches[0][0].operatingSystemMajor == 26)
+        #expect(batches[0][0].workload == .typical)
+    }
+
+    @Test("TelemetryDeck adapter batches numeric latency metrics in one request")
+    func numericTelemetryDeckBatch() throws {
+        let client = TelemetryDeckClient(namespace: "debut", appID: "app-id")
+        let request = try client.request(for: [
+            payload(.overlayEndToEndVisible, milliseconds: 123.456, samples: 18, workload: .busy),
+            payload(.spaceSwitch, milliseconds: 88.25, samples: 4),
+        ])
+
+        #expect(request.url?.absoluteString == "https://nom.telemetrydeck.com/v2/namespace/debut/")
+        #expect(request.value(forHTTPHeaderField: "User-Agent") == "Debut-Telemetry/1")
+        let data = try #require(request.httpBody)
+        let events = try #require(try JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        #expect(events.count == 2)
+        #expect(events[0]["type"] as? String == "Debut.Performance.hourly_p95")
+        #expect(events[0]["floatValue"] as? Double == 123.456)
+        let dimensions = try #require(events[0]["payload"] as? [String: Any])
+        #expect(dimensions["Debut.operation"] as? String == "overlay_end_to_end_visible")
+        #expect(dimensions["Debut.sampleCount"] as? Int == 18)
+        #expect(dimensions["Debut.latencyBucket"] == nil)
+        #expect(events[0]["clientUser"] as? String == "")
+        #expect(events[0]["sessionID"] == nil)
+    }
+
+    @Test("Failed hourly delivery stays queued and retries as one batch")
+    func failedBatchRetries() async throws {
+        let transport = FailingOnceTelemetryClient()
+        let exporter = TelemetryExporter(
+            client: transport,
+            queue: InMemoryTelemetryQueue(),
+            enabled: true,
+            dailyEventLimit: 24
+        )
+        await exporter.record(observation(operation: .previewFirst, duration: 42, windows: 25))
+
+        await #expect(throws: (any Error).self) {
+            try await exporter.flushHourly(appVersion: "1.0", operatingSystemMajor: 26)
+        }
+        #expect(await exporter.status().queued == 1)
+
+        try await exporter.flush()
+        #expect(await exporter.status().queued == 0)
+        #expect(await transport.successfulBatches.count == 1)
+        #expect(await transport.successfulBatches[0].count == 1)
+    }
+
+    @Test("Empty hours do not perform network requests")
+    func emptyHoursDoNotSend() async throws {
+        let transport = RecordingTelemetryClient()
+        let exporter = TelemetryExporter(
+            client: transport,
+            queue: InMemoryTelemetryQueue(),
+            enabled: true
+        )
+
+        try await exporter.flushHourly(appVersion: "1.0", operatingSystemMajor: 26)
+
+        #expect(await transport.batches.isEmpty)
+    }
+
     @Test("Fresh and legacy settings default to no sharing while explicit choices remain codable")
     func settingsMigration() throws {
         var settings = AppSettings()
@@ -21,7 +117,9 @@ struct TelemetryTests {
         )
         #expect(decodedOptIn.shareAnonymousTelemetry)
 
-        let current = try JSONSerialization.jsonObject(with: JSONEncoder().encode(AppSettings())) as! [String: Any]
+        let current = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(AppSettings())
+        ) as! [String: Any]
         var legacy = current
         legacy.removeValue(forKey: "shareAnonymousTelemetry")
         let legacyData = try JSONSerialization.data(withJSONObject: legacy)
@@ -29,61 +127,51 @@ struct TelemetryTests {
         #expect(!decodedLegacy.shareAnonymousTelemetry)
     }
 
-    @Test("Payload contains only approved aggregate dimensions")
+    @Test("Numeric payload contains only approved aggregate dimensions")
     func payloadAllowlist() throws {
-        let payload = TelemetryPayload.sessionSummary(
-            appVersion: "1.2.3",
-            operatingSystemMajor: 26,
-            workload: .busy,
-            operationCounts: [.overlayPreparation: 8],
-            latencyBuckets: [.overlayPreparation: .milliseconds50To100],
-            anomalyCount: 1
-        )
-        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(payload)) as! [String: Any]
+        let encoded = try JSONEncoder().encode(payload(
+            .overlayEndToEndVisible,
+            milliseconds: 82.75,
+            samples: 8,
+            workload: .busy
+        ))
+        let object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
 
-        #expect(Set(object.keys) == ["schemaVersion", "event", "appVersion", "operatingSystemMajor", "workload", "operationCounts", "latencyBuckets", "anomalyCount"])
+        #expect(Set(object.keys) == [
+            "schemaVersion", "event", "appVersion", "operatingSystemMajor", "workload",
+            "operation", "latencyMilliseconds", "sampleCount",
+        ])
         let text = String(data: try JSONSerialization.data(withJSONObject: object), encoding: .utf8)!
-        for prohibited in ["windowTitle", "bundleID", "windowID", "pid", "path", "screenshot", "error", "diagnostic"] {
+        for prohibited in [
+            "windowTitle", "bundleID", "windowID", "pid", "path", "screenshot", "error", "diagnostic",
+        ] {
             #expect(!text.localizedCaseInsensitiveContains(prohibited))
         }
     }
 
-    @Test("Overlay anomaly exposes only a bucketed temperature")
-    func overlayTemperatureAllowlist() throws {
-        let payload = TelemetryPayload.anomaly(
-            operation: .overlayEndToEndVisible,
-            latency: .over500Milliseconds,
-            workload: .typical,
-            temperature: .processFirst
-        )
-        let object = try JSONSerialization.jsonObject(
-            with: JSONEncoder().encode(payload)
-        ) as! [String: Any]
-
-        #expect(object["temperature"] as? String == "process_first")
-        #expect(Set(object.keys) == [
-            "schemaVersion", "event", "operation", "latency", "workload", "temperature",
-        ])
-    }
-
-    @Test("Disabling stops delivery immediately and deletes queued events")
+    @Test("Disabling stops collection and deletes queued events")
     func optOutClearsQueue() async throws {
-        let transport = RecordingTelemetryClient()
-        let queue = InMemoryTelemetryQueue()
-        let exporter = TelemetryExporter(client: transport, queue: queue, enabled: true, dailyEventLimit: 10)
-        try await exporter.enqueue(.anomaly(operation: .spaceSwitch, latency: .milliseconds100To250, workload: .typical))
+        let transport = FailingOnceTelemetryClient()
+        let exporter = TelemetryExporter(
+            client: transport,
+            queue: InMemoryTelemetryQueue(),
+            enabled: true
+        )
+        await exporter.record(observation(operation: .spaceSwitch, duration: 120))
+        await #expect(throws: (any Error).self) {
+            try await exporter.flushHourly(appVersion: "1.0", operatingSystemMajor: 26)
+        }
         #expect(await exporter.status().queued == 1)
 
         await exporter.setEnabled(false)
-        #expect(await exporter.status().queued == 0)
-        try await exporter.flush()
-        #expect(await transport.payloads.isEmpty)
+        await exporter.record(observation(operation: .spaceSwitch, duration: 140))
+        try await exporter.flushHourly(appVersion: "1.0", operatingSystemMajor: 26)
 
-        try await exporter.enqueue(.anomaly(operation: .spaceSwitch, latency: .milliseconds100To250, workload: .typical))
         #expect(await exporter.status().queued == 0)
+        #expect(await transport.successfulBatches.isEmpty)
     }
 
-    @Test("Daily cap drops excess payloads without network activity")
+    @Test("Daily cap drops excess hourly metrics")
     func dailyCap() async throws {
         let transport = RecordingTelemetryClient()
         let exporter = TelemetryExporter(
@@ -92,11 +180,10 @@ struct TelemetryTests {
             enabled: true,
             dailyEventLimit: 1
         )
-        let payload = TelemetryPayload.anomaly(operation: .previewCapture, latency: .milliseconds250To500, workload: .stress)
-        try await exporter.enqueue(payload)
-        try await exporter.flush()
-        try await exporter.enqueue(payload)
-        try await exporter.flush()
+        await exporter.record(observation(operation: .previewFirst, duration: 10))
+        await exporter.record(observation(operation: .spaceSwitch, duration: 20))
+
+        try await exporter.flushHourly(appVersion: "1.0", operatingSystemMajor: 26)
 
         #expect(await transport.payloads.count == 1)
         let status = await exporter.status()
@@ -104,66 +191,29 @@ struct TelemetryTests {
         #expect(status.dropped == 1)
     }
 
-    @Test("One noisy operation cannot consume the anomaly budget")
-    func perOperationCap() async throws {
-        let queue = InMemoryTelemetryQueue()
-        let exporter = TelemetryExporter(
-            client: RecordingTelemetryClient(),
-            queue: queue,
-            enabled: true,
-            dailyEventLimit: 6,
-            dailyPerOperationLimit: 2
-        )
-        let wallpaper = TelemetryPayload.anomaly(
-            operation: .wallpaperCapture,
-            latency: .over500Milliseconds,
-            workload: .typical
-        )
-        for _ in 0..<5 { try await exporter.enqueue(wallpaper) }
-        try await exporter.enqueue(.anomaly(
-            operation: .overlayEndToEndVisible,
-            latency: .over500Milliseconds,
-            workload: .typical
-        ))
-
-        let payloads = await queue.payloads()
-        #expect(payloads.filter { $0.operation == .wallpaperCapture }.count == 2)
-        #expect(payloads.filter { $0.operation == .overlayEndToEndVisible }.count == 1)
-        #expect(await exporter.status().dropped == 3)
-    }
-
-    @Test("Per-operation cap survives delivery and exporter restart")
-    func durablePerOperationCap() async throws {
+    @Test("Daily installation cap survives exporter restart")
+    func durableDailyCap() async throws {
         let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("DebutTelemetryOperations-\(UUID()).json")
+            .appendingPathComponent("DebutTelemetry-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
-        let wallpaper = TelemetryPayload.anomaly(
-            operation: .wallpaperCapture,
-            latency: .over500Milliseconds,
-            workload: .typical
-        )
         let first = TelemetryExporter(
             client: RecordingTelemetryClient(),
             queue: DiskTelemetryQueue(file: file),
             enabled: true,
-            dailyEventLimit: 10,
-            dailyPerOperationLimit: 2
+            dailyEventLimit: 1
         )
-        try await first.enqueue(wallpaper)
-        try await first.flush()
-        try await first.enqueue(wallpaper)
-        try await first.flush()
+        await first.record(observation(operation: .previewFirst, duration: 10))
+        try await first.flushHourly(appVersion: "1.0", operatingSystemMajor: 26)
 
         let secondClient = RecordingTelemetryClient()
         let second = TelemetryExporter(
             client: secondClient,
             queue: DiskTelemetryQueue(file: file),
             enabled: true,
-            dailyEventLimit: 10,
-            dailyPerOperationLimit: 2
+            dailyEventLimit: 1
         )
-        try await second.enqueue(wallpaper)
-        try await second.flush()
+        await second.record(observation(operation: .spaceSwitch, duration: 20))
+        try await second.flushHourly(appVersion: "1.0", operatingSystemMajor: 26)
 
         #expect(await secondClient.payloads.isEmpty)
         #expect(await second.status().dropped == 1)
@@ -180,130 +230,85 @@ struct TelemetryTests {
         #expect(quota.acceptedByOperation.isEmpty)
     }
 
-    @Test("Legacy stage operation names migrate throughout the disk queue")
-    func legacyOperationNamesMigrate() async throws {
+    @Test("Legacy bucketed queues decode and are pruned before numeric delivery")
+    func legacyQueuesArePruned() async throws {
         let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("DebutTelemetryLegacyOperations-\(UUID()).json")
+            .appendingPathComponent("DebutTelemetryLegacy-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let data = Data(#"""
         {
-          "payloads": [
-            {
-              "schemaVersion": 1,
-              "event": "anomaly",
-              "workload": "typical",
-              "operation": "stage_switch",
-              "latency": "gte_500ms"
-            },
-            {
-              "schemaVersion": 1,
-              "event": "session_summary",
-              "workload": "typical",
-              "operationCounts": { "stage_raise": 2 },
-              "latencyBuckets": { "stage_switch": "10_25ms" },
-              "anomalyCount": 0
-            }
-          ],
-          "quota": {
-            "day": "2026-08-27",
-            "sent": 0,
-            "dropped": 0,
-            "acceptedByOperation": { "stage_switch": 1 }
-          }
+          "payloads": [{
+            "schemaVersion": 1,
+            "event": "anomaly",
+            "workload": "typical",
+            "operation": "stage_switch",
+            "latency": "gte_500ms"
+          }],
+          "quota": {"day": "2026-08-27", "sent": 0, "dropped": 0}
         }
         """#.utf8)
         try data.write(to: file)
-
         let queue = DiskTelemetryQueue(file: file)
-        let payloads = try await queue.payloads()
-        let quota = try await queue.quota()
+        let decoded = try await queue.payloads()
+        #expect(decoded.count == 1)
+        #expect(decoded[0].operation == .spaceSwitch)
 
-        #expect(payloads[0].operation == .spaceSwitch)
-        #expect(payloads[1].operationCounts?["space_raise"] == 2)
-        #expect(payloads[1].latencyBuckets?["space_switch"] == .milliseconds10To25)
-        #expect(quota.acceptedByOperation == ["space_switch": 1])
+        let exporter = TelemetryExporter(client: RecordingTelemetryClient(), queue: queue, enabled: true)
+        try await exporter.pruneLegacyPayloads()
+
+        #expect(try await queue.payloads().isEmpty)
     }
 
-    @Test("TelemetryDeck adapter uses v2 EU ingestion with an empty user and flat allowlisted primitives")
-    func telemetryDeckRequest() throws {
-        let client = TelemetryDeckClient(namespace: "debut", appID: "app-id")
-        let payload = TelemetryPayload.sessionSummary(
-            appVersion: "1.0", operatingSystemMajor: 26, workload: .typical,
-            operationCounts: [.overlayPreparation: 2],
-            latencyBuckets: [.overlayPreparation: .milliseconds25To50], anomalyCount: 0
-        )
-        let request = try client.request(for: payload)
-        #expect(request.url?.absoluteString == "https://nom.telemetrydeck.com/v2/namespace/debut/")
-        #expect(request.value(forHTTPHeaderField: "User-Agent") == "Debut-Telemetry/1")
-        let requestBody = try #require(request.httpBody)
-        let body = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [[String: Any]])
-        #expect(body.first?["clientUser"] as? String == "")
-        #expect(body.first?["sessionID"] == nil)
-        let dimensions = try #require(body.first?["payload"] as? [String: Any])
-        #expect(dimensions["Debut.operation.overlay_preparation.count"] as? Int == 2)
-        #expect(dimensions.values.allSatisfy { !($0 is [String: Any]) && !($0 is [Any]) })
-    }
-
-    @Test("Daily installation cap survives exporter restart")
-    func durableDailyCap() async throws {
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("DebutTelemetry-\(UUID()).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-        let firstClient = RecordingTelemetryClient()
-        let payload = TelemetryPayload.anomaly(operation: .spaceSwitch, latency: .milliseconds100To250, workload: .typical)
-        let first = TelemetryExporter(client: firstClient, queue: DiskTelemetryQueue(file: file), enabled: true, dailyEventLimit: 1)
-        try await first.enqueue(payload)
-        try await first.flush()
-
-        let secondClient = RecordingTelemetryClient()
-        let second = TelemetryExporter(client: secondClient, queue: DiskTelemetryQueue(file: file), enabled: true, dailyEventLimit: 1)
-        try await second.enqueue(payload)
-        try await second.flush()
-
-        #expect(await secondClient.payloads.isEmpty)
-        #expect(await second.status().dropped == 1)
-    }
-
-    @Test("Idle intervals never count as latency anomalies")
-    func idleIntervalsAreNotAnomalies() {
-        let idle = PerformanceObservation(
+    private func observation(
+        operation: PerformanceOperation,
+        duration: Double,
+        windows: Int = 1
+    ) -> PerformanceObservation {
+        PerformanceObservation(
             correlationID: UUID(),
-            operation: .hiddenIdle,
-            durationMilliseconds: 190_000,
-            workload: .init()
+            operation: operation,
+            durationMilliseconds: duration,
+            workload: .init(windows: windows)
         )
-        let delayedDelivery = PerformanceObservation(
-            correlationID: UUID(),
-            operation: .mainQueueDelivery,
-            durationMilliseconds: 575,
-            workload: .init()
-        )
-
-        #expect(!PerformanceAnomalyPolicy.shouldReport(idle))
-        #expect(PerformanceAnomalyPolicy.shouldReport(delayedDelivery))
     }
 
-    @Test("Exporter removes legacy idle anomalies while retaining real anomalies")
-    func pruneLegacyIdleAnomalies() async throws {
-        let queue = InMemoryTelemetryQueue()
-        await queue.replace(with: [
-            .anomaly(operation: .hiddenIdle, latency: .over500Milliseconds, workload: .typical),
-            .anomaly(operation: .wallpaperCapture, latency: .over500Milliseconds, workload: .typical),
-        ])
-        let exporter = TelemetryExporter(
-            client: RecordingTelemetryClient(),
-            queue: queue,
-            enabled: true
+    private func payload(
+        _ operation: PerformanceOperation,
+        milliseconds: Double,
+        samples: Int,
+        workload: TelemetryWorkload = .typical
+    ) -> TelemetryPayload {
+        .hourlyP95(
+            operation: operation,
+            milliseconds: milliseconds,
+            sampleCount: samples,
+            appVersion: "1.2.3",
+            operatingSystemMajor: 26,
+            workload: workload
         )
-
-        try await exporter.pruneInvalidAnomalies()
-
-        let payloads = await queue.payloads()
-        #expect(payloads.count == 1)
-        #expect(payloads.first?.operation == .wallpaperCapture)
     }
 }
 
 private actor RecordingTelemetryClient: TelemetryClient {
     private(set) var payloads: [TelemetryPayload] = []
-    func send(_ payload: TelemetryPayload) async throws { payloads.append(payload) }
+    private(set) var batches: [[TelemetryPayload]] = []
+
+    func send(_ payloads: [TelemetryPayload]) async throws {
+        batches.append(payloads)
+        self.payloads.append(contentsOf: payloads)
+    }
+}
+
+private actor FailingOnceTelemetryClient: TelemetryClient {
+    enum Failure: Error { case expected }
+    private var shouldFail = true
+    private(set) var successfulBatches: [[TelemetryPayload]] = []
+
+    func send(_ payloads: [TelemetryPayload]) async throws {
+        if shouldFail {
+            shouldFail = false
+            throw Failure.expected
+        }
+        successfulBatches.append(payloads)
+    }
 }

@@ -25,10 +25,10 @@ and retention facts are maintained in the [privacy notice](privacy.md) and
 ### Singling out
 
 Risk is low but not asserted to be zero. A rare combination of app version,
-macOS major version, workload class, operation, latency bucket, and receipt time
+macOS major version, workload class, interaction, exact hourly P95 latency, aggregate sample count, and receipt time
 might distinguish one event in a small dataset. It does not identify the person
 or installation and Debut provides no value that can reliably follow that source
-over time. Coarse buckets, aggregate counts, low daily volume, and the absence of
+over time. Hourly aggregation, low daily volume, and the absence of
 free text limit this risk.
 
 ### Linkability
@@ -63,7 +63,7 @@ Repeat this assessment before release if any of the following changes:
 - an account, user, installation, session, trace, advertising, or device identifier is added;
 - the direct client is replaced by an SDK that adds automatic fields;
 - IP addresses or other request metadata are stored, logged, or exposed to the maintainer;
-- exact timestamps, exact durations, finer buckets, precise hardware, locale, free text, paths, titles, or user content are added;
+- individual timestamps or durations, precise hardware, locale, free text, paths, titles, or user content are added;
 - event volume increases materially or user-level journeys, funnels, or cohorts are introduced;
 - a new recipient, endpoint, hosting region, purpose, or data-sharing arrangement is introduced;
 - TelemetryDeck changes its anonymization, subprocessor, network-metadata, or retention practices; or
