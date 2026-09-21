@@ -65,7 +65,6 @@ public final class OnboardingViewModel {
     public private(set) var windowCount = 0
     public private(set) var workspacePracticed = false
     public private(set) var allWindowsPracticed = false
-    public private(set) var shareAnonymousTelemetry: Bool
     private var didComplete = false
     private let permissionClient: any OnboardingPermissionClient
     private let onFeaturesChanged: @MainActor (FeatureSettings) -> Void
@@ -73,7 +72,6 @@ public final class OnboardingViewModel {
     private let onPermissionStateChanged: @MainActor (OnboardingPermissionState) -> Void
     private let onProgressChanged: @MainActor (OnboardingCheckpoint) -> Void
     private let onCompleted: @MainActor () -> Void
-    private let onTelemetryChanged: @MainActor (Bool) -> Void
     public var onEnvironmentRefresh: @MainActor () -> Void = {}
     public var onOpenMissionControl: @MainActor () -> Void = {}
 
@@ -83,8 +81,6 @@ public final class OnboardingViewModel {
         onFeaturesChanged: @escaping @MainActor (FeatureSettings) -> Void = { _ in },
         duration: TimeInterval = 0,
         onDurationChanged: @escaping @MainActor (TimeInterval) -> Void = { _ in },
-        shareAnonymousTelemetry: Bool = false,
-        onTelemetryChanged: @escaping @MainActor (Bool) -> Void = { _ in },
         onPermissionStateChanged: @escaping @MainActor (OnboardingPermissionState) -> Void = { _ in },
         checkpoint: OnboardingCheckpoint? = nil,
         onProgressChanged: @escaping @MainActor (OnboardingCheckpoint) -> Void = { _ in },
@@ -96,8 +92,6 @@ public final class OnboardingViewModel {
         self.duration = duration
         self.onFeaturesChanged = onFeaturesChanged
         self.onDurationChanged = onDurationChanged
-        self.shareAnonymousTelemetry = shareAnonymousTelemetry
-        self.onTelemetryChanged = onTelemetryChanged
         self.onPermissionStateChanged = onPermissionStateChanged
         self.onCompleted = onCompleted
         self.onProgressChanged = onProgressChanged
@@ -239,10 +233,6 @@ public final class OnboardingViewModel {
         var updated = features
         updated.windowPreviews = false
         setFeatures(updated)
-    }
-    public func setShareAnonymousTelemetry(_ enabled: Bool) {
-        shareAnonymousTelemetry = enabled
-        onTelemetryChanged(enabled)
     }
     public func requestAccessibility() {
         permissionClient.requestAccessibility()

@@ -50,7 +50,7 @@ The full-screen overlay panel is switcher UI, not the retired desktop surface.
 | [OverlayWindow](../Sources/DebutCore/Views/OverlayWindow.swift), [StageView](../Sources/DebutCore/Views/StageView.swift), [AltTabView](../Sources/DebutCore/Views/AltTabView.swift) | Nonactivating presentation, glass stages, adaptive cards, pointer interaction, and the flat window list. |
 | [DesktopSwitchIndicator](../Sources/DebutCore/Views/DesktopSwitchIndicator.swift) | Brief feedback for a confirmed desktop change, independently of the switcher panel. |
 | [StateStore](../Sources/DebutCore/Services/StateStore.swift), [DebouncedSaver](../Sources/DebutCore/Services/DebouncedSaver.swift) | Local persistence, decoding/migration, atomic writes, and mutation-driven saves. |
-| [DiagnosticReporter](../Sources/DebutCore/Services/DiagnosticReporter.swift), [PerformanceObservability](../Sources/DebutCore/Services/PerformanceObservability.swift), [Telemetry](../Sources/DebutCore/Services/Telemetry.swift) | Local state/evidence and separately allowlisted, optional remote aggregates. |
+| [DiagnosticReporter](../Sources/DebutCore/Services/DiagnosticReporter.swift), [PerformanceObservability](../Sources/DebutCore/Services/PerformanceObservability.swift) | Local diagnostic state, performance evidence, and signposts. |
 
 ## Desktop switching and window movement
 

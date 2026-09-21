@@ -27,7 +27,6 @@ struct SettingsViewModelTests {
         #expect(vm.settings.overlayPresentationDelay == 0.1)
         #expect(vm.settings.spaceSwitchDuration == 0)
         #expect(vm.settings.excludedBundleIDs.isEmpty)
-        #expect(!vm.settings.shareAnonymousTelemetry)
         #expect(vm.settings.quickSwitchSameApplicationModifiers == ShortcutModifiers(
             control: true,
             option: true
@@ -72,7 +71,6 @@ struct SettingsViewModelTests {
             .features,
             .excludedApps,
             .app,
-            .privacy,
             .keyboardShortcuts,
             .advanced,
             .troubleshooting,
@@ -80,26 +78,28 @@ struct SettingsViewModelTests {
         ])
     }
 
-    @Test("Privacy payload preview is exact JSON and documents excluded data")
-    func privacyPayloadPreview() throws {
-        let vm = SettingsViewModel()
-        let preview = try vm.telemetryPayloadPreview()
-        let data = try #require(preview.data(using: .utf8))
-        let payloads = try #require(try JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        #expect(payloads.allSatisfy { $0["schemaVersion"] as? Int == 2 })
-        #expect(payloads.allSatisfy { $0["latencyBuckets"] == nil })
-        #expect(vm.telemetryExcludedData.contains("window titles"))
-        #expect(!preview.contains("bundleID"))
+    @Test("Settings no longer persist the removed sharing preference")
+    func settingsExcludeRemovedSharingPreference() throws {
+        let data = try JSONEncoder().encode(AppSettings())
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["shareAnonymousTelemetry"] == nil)
     }
 
-    @Test("Privacy payload presentation carries the generated JSON on first display")
-    func privacyPayloadPresentation() throws {
-        let vm = SettingsViewModel()
-        let presentation = try vm.telemetryPayloadPresentation()
+    @Test("Settings written by sharing-enabled builds remain decodable")
+    func legacySharingPreferenceIsIgnored() throws {
+        let current = AppSettings()
+        let encoded = try JSONEncoder().encode(current)
+        var object = try #require(try JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["shareAnonymousTelemetry"] = true
+        let legacy = try JSONSerialization.data(withJSONObject: object)
 
-        #expect(!presentation.json.isEmpty)
-        #expect(presentation.json == (try vm.telemetryPayloadPreview()))
-        #expect(!presentation.json.contains("latencyBucket"))
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacy)
+
+        #expect(decoded == current)
+        let normalized = try #require(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any]
+        )
+        #expect(normalized["shareAnonymousTelemetry"] == nil)
     }
 
     @Test("Troubleshooting actions are forwarded to the app")
