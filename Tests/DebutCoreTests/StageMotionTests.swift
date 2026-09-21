@@ -146,6 +146,37 @@ struct StageMotionTests {
         )
     }
 
+    @Test("A guided keyboard move shares the focus spring")
+    func guidedKeyboardMoveUsesOneClock() {
+        #expect(
+            StageMotion.guidedKeyboardMoveTransition(reduceMotion: false)
+                == .spring(duration: 0.26, bounce: 0)
+        )
+        #expect(
+            StageMotion.guidedKeyboardMoveTransition(reduceMotion: true)
+                == .fade(duration: 0.12)
+        )
+    }
+
+    @Test("A guided keyboard move reconstructs the source layout from the destination layout")
+    func guidedKeyboardMoveReconstructsSourceLayout() {
+        let move = KeyboardWindowMoveAnimation(
+            sequence: 1,
+            windowID: 42,
+            fromSpaceIndex: 0,
+            fromWindowIndex: 1,
+            toSpaceIndex: 1,
+            toWindowIndex: 0
+        )
+
+        let before = StageMotion.contentAspectsBeforeKeyboardMove(
+            after: [[1.2], [1.6, 0.8, 1.0]],
+            move: move
+        )
+
+        #expect(before == [[1.2, 1.6], [0.8, 1.0]])
+    }
+
     @Test("The window layout key sees a reorder that leaves the count alone")
     func windowLayoutKeyTracksOrderWithinASpace() {
         func stage(_ ids: [CGWindowID]) -> StageData {

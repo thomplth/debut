@@ -106,9 +106,12 @@ stops window captures and clears the cache.
 ## Moving windows
 
 Drag a card within a stage to change its order, or onto another stage to prepare
-a desktop move. Keyboard Up/Down and Left/Right use the same preview transaction.
-These edits affect the displayed preview until the user commits by releasing the
-modifier or choosing a window. Escape discards them without moving real windows.
+a desktop move. Keyboard Up/Down moves use the same preview transaction and animate
+the selected card directly into the adjacent stage's MRU slot; this guided flight is
+keyboard-only and does not replace the pointer drag preview or its drop handoff.
+Keyboard Left/Right reorders within the selected stage. These edits affect the
+displayed preview until the user commits by releasing the modifier or choosing a
+window. Escape discards them without moving real windows.
 
 On commit, Debut sends desktop relocations through the bridged window-server
 operation. Dragging a card is an overlay interaction; Debut does not synthesize a

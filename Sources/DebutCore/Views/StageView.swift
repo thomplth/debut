@@ -117,6 +117,31 @@ enum StageMotion {
         return windowReorderTransition(reduceMotion: reduceMotion)
     }
 
+    /// A keyboard cross-stage move is one continuous gesture: the proxy, both grids, and stage
+    /// focus all settle together. Pointer drops keep their independent drag transition.
+    static func guidedKeyboardMoveTransition(reduceMotion: Bool) -> StageFocusTransition {
+        focusTransition(reduceMotion: reduceMotion)
+    }
+
+    /// The view model already contains the committed preview order. Reversing just that move
+    /// recovers the geometry the proxy leaves from without retaining a second copy of the model.
+    static func contentAspectsBeforeKeyboardMove(
+        after: [[CGFloat?]],
+        move: KeyboardWindowMoveAnimation
+    ) -> [[CGFloat?]] {
+        guard move.fromSpaceIndex != move.toSpaceIndex,
+              after.indices.contains(move.fromSpaceIndex),
+              after.indices.contains(move.toSpaceIndex),
+              after[move.toSpaceIndex].indices.contains(move.toWindowIndex)
+        else { return after }
+
+        var before = after
+        let moved = before[move.toSpaceIndex].remove(at: move.toWindowIndex)
+        let sourceSlot = min(max(0, move.fromWindowIndex), before[move.fromSpaceIndex].count)
+        before[move.fromSpaceIndex].insert(moved, at: sourceSlot)
+        return before
+    }
+
     /// A window leaving the stage is the app going away, not a layout tweak, so it settles
     /// without bounce: overshoot would read as the card trying to come back.
     static func windowRemovalTransition(reduceMotion: Bool) -> StageFocusTransition {
@@ -1073,6 +1098,8 @@ public struct StageOverlayView: View {
 
     @State private var windowDrag: WindowDragState?
     @State private var settlingWindowDrop: WindowDropSettlingState?
+    @State private var keyboardWindowFlight: KeyboardWindowFlightState?
+    @State private var lastHandledKeyboardMoveSequence: Int
     @State private var retainedWindowDragFocusSpaceIndex: Int?
     @State private var pointerSelection: PointerSelection?
     @State private var reportedPointerRegion: String?
@@ -1133,6 +1160,9 @@ public struct StageOverlayView: View {
         self.onPointerSelectionChanged = onPointerSelectionChanged
         self.onDesktopSelected = onDesktopSelected
         _windowDrag = State(initialValue: initialWindowDrag)
+        _lastHandledKeyboardMoveSequence = State(
+            initialValue: viewModel.keyboardWindowMoveAnimation?.sequence ?? 0
+        )
         _pointerMovementGate = State(
             initialValue: PointerMovementGate(initialLocation: NSEvent.mouseLocation)
         )
@@ -1149,6 +1179,12 @@ public struct StageOverlayView: View {
     @ViewBuilder private var standardBody: some View {
         let stages = viewModel.stages
         let windowLayoutKey = StageMotion.windowLayoutKey(for: stages)
+        let pendingKeyboardMove = viewModel.keyboardWindowMoveAnimation.flatMap {
+            $0.sequence > lastHandledKeyboardMoveSequence ? $0 : nil
+        }
+        let guidedKeyboardWindowID = keyboardWindowFlight?.window.windowID
+            ?? pendingKeyboardMove?.windowID
+        let hasGuidedKeyboardMove = guidedKeyboardWindowID != nil
         let hasCommittedSettlingDrop = settlingWindowDrop.map {
             StageMotion.isWindowDropApplied($0.request, to: windowLayoutKey)
         } ?? false
@@ -1199,6 +1235,9 @@ public struct StageOverlayView: View {
                 hasActiveDrag: layoutWindowDrag != nil,
                 isAwaitingCommittedLayout: settlingWindowDrop != nil
             )
+            let keyboardLayoutTransition = hasGuidedKeyboardMove
+                ? StageMotion.guidedKeyboardMoveTransition(reduceMotion: reduceMotion)
+                : keyboardWindowReorderTransition
             let dragTargetIndex = layoutWindowDrag?.dropTarget?.spaceIndex
             let focusedSpaceIndex = StageMotion.focusedSpaceIndex(
                 active: viewModel.activeSpaceIndex,
@@ -1267,6 +1306,8 @@ public struct StageOverlayView: View {
                             windowDrag: $windowDrag,
                             layoutWindowDrag: layoutWindowDrag,
                             settlingWindowID: settlingWindowDrop?.request.windowID,
+                            guidedKeyboardWindowID: guidedKeyboardWindowID,
+                            usesGuidedKeyboardMoveMotion: hasGuidedKeyboardMove,
                             stageFrames: $stageFrames,
                             windowFrames: $windowFrames,
                             spaceIndex: index,
@@ -1394,6 +1435,18 @@ public struct StageOverlayView: View {
                     .opacity(StageMotion.cursorPreviewOpacity)
                     .position(drag.location)
                     .allowsHitTesting(false)
+                } else if let flight = keyboardWindowFlight {
+                    WindowPreviewView(
+                        window: flight.window,
+                        isWindowSelected: true,
+                        isDragging: false,
+                        metrics: flight.metrics.adapted(
+                            toContentAspect: flight.window.contentAspect
+                        ),
+                        appearance: viewModel.appearance
+                    )
+                    .position(flight.position)
+                    .allowsHitTesting(false)
                 }
             }
             .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeSpaceIndex)
@@ -1402,7 +1455,7 @@ public struct StageOverlayView: View {
             .animation(focusTransition.animation, value: focusedSpaceIndex)
             .animation(focusTransition.animation, value: pointerSelection)
             .animation(activeWindowReorderTransition?.animation, value: layoutWindowDrag?.dropTarget)
-            .animation(keyboardWindowReorderTransition?.animation, value: windowLayoutKey)
+            .animation(keyboardLayoutTransition?.animation, value: windowLayoutKey)
             .coordinateSpace(name: "overlay")
             .simultaneousGesture(
                 SpatialTapGesture(coordinateSpace: .named("overlay"))
@@ -1487,11 +1540,93 @@ public struct StageOverlayView: View {
                 hoveredSpaceIndex = nil
                 hoverPointerY = nil
             }
+            .onChange(of: viewModel.keyboardWindowMoveAnimation?.sequence) { _, _ in
+                guard let move = viewModel.keyboardWindowMoveAnimation,
+                      move.sequence > lastHandledKeyboardMoveSequence
+                else { return }
+                beginKeyboardWindowFlight(
+                    move,
+                    stages: stages,
+                    afterAspects: restingAspects,
+                    containerSize: geo.size,
+                    destinationMetrics: metrics
+                )
+            }
             .onChange(of: windowLayoutKey) { _, committedLayout in
                 finishWindowDropHandoff(ifAppliedTo: committedLayout)
             }
             .onAppear {
                 finishWindowDropHandoff(ifAppliedTo: windowLayoutKey)
+            }
+        }
+    }
+
+    private func beginKeyboardWindowFlight(
+        _ move: KeyboardWindowMoveAnimation,
+        stages: [StageData],
+        afterAspects: [[CGFloat?]],
+        containerSize: CGSize,
+        destinationMetrics: StageMetrics
+    ) {
+        lastHandledKeyboardMoveSequence = move.sequence
+        guard !reduceMotion,
+              let window = stages[safe: move.toSpaceIndex]?.windows[safe: move.toWindowIndex],
+              window.windowID == move.windowID
+        else { return }
+
+        let beforeAspects = StageMotion.contentAspectsBeforeKeyboardMove(
+            after: afterAspects,
+            move: move
+        )
+        let sourceMetrics = StageConstants.drawnMetrics(
+            stageScale: CGFloat(viewModel.appearance.stageScale),
+            contentAspects: beforeAspects,
+            containerSize: containerSize
+        )
+        let inactiveScale = CGFloat(viewModel.appearance.inactiveStageScale)
+        guard let source = StageConstants.windowCardCenter(
+            spaceIndex: move.fromSpaceIndex,
+            windowIndex: move.fromWindowIndex,
+            contentAspects: beforeAspects,
+            activeSpaceIndex: move.fromSpaceIndex,
+            inactiveScale: inactiveScale,
+            containerSize: containerSize,
+            metrics: sourceMetrics
+        ), let destination = StageConstants.windowCardCenter(
+            spaceIndex: move.toSpaceIndex,
+            windowIndex: move.toWindowIndex,
+            contentAspects: afterAspects,
+            activeSpaceIndex: move.toSpaceIndex,
+            inactiveScale: inactiveScale,
+            containerSize: containerSize,
+            metrics: destinationMetrics
+        ) else { return }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            keyboardWindowFlight = KeyboardWindowFlightState(
+                sequence: move.sequence,
+                window: window,
+                position: source,
+                metrics: sourceMetrics
+            )
+        }
+
+        DispatchQueue.main.async {
+            guard keyboardWindowFlight?.sequence == move.sequence else { return }
+            withAnimation(
+                StageMotion.guidedKeyboardMoveTransition(reduceMotion: false).animation
+            ) {
+                keyboardWindowFlight?.position = destination
+                keyboardWindowFlight?.metrics = destinationMetrics
+            } completion: {
+                guard keyboardWindowFlight?.sequence == move.sequence else { return }
+                var completionTransaction = Transaction()
+                completionTransaction.disablesAnimations = true
+                withTransaction(completionTransaction) {
+                    keyboardWindowFlight = nil
+                }
             }
         }
     }
@@ -1608,6 +1743,8 @@ struct StageSwiftUIView: View {
     @Binding var windowDrag: WindowDragState?
     let layoutWindowDrag: WindowDragState?
     let settlingWindowID: CGWindowID?
+    let guidedKeyboardWindowID: CGWindowID?
+    let usesGuidedKeyboardMoveMotion: Bool
     @Binding var stageFrames: [Int: CGRect]
     @Binding var windowFrames: [WindowFrameID: CGRect]
     let spaceIndex: Int
@@ -1617,7 +1754,9 @@ struct StageSwiftUIView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var removalTransition: StageFocusTransition {
-        StageMotion.windowRemovalTransition(reduceMotion: reduceMotion)
+        usesGuidedKeyboardMoveMotion
+            ? StageMotion.guidedKeyboardMoveTransition(reduceMotion: reduceMotion)
+            : StageMotion.windowRemovalTransition(reduceMotion: reduceMotion)
     }
 
     var body: some View {
@@ -1641,6 +1780,7 @@ struct StageSwiftUIView: View {
                         let isDragging = layoutWindowDrag?.sourceSpaceIndex == spaceIndex
                             && layoutWindowDrag?.sourceWindowIndex == index
                         let isSettling = settlingWindowID == window.windowID
+                            || guidedKeyboardWindowID == window.windowID
                         let anchorOffset = layout.cardOffsetFromCenter(
                             at: StageMotion.windowAnchorIndex(
                                 spaceIndex: spaceIndex,
