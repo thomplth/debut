@@ -286,6 +286,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public var selectedWindowIndex: Int = 0
     public private(set) var keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation?
     private var keyboardWindowMoveSequence = 0
+    /// Changes when a keyboard command reaches a visible overlay. Views use this generation to
+    /// drop their pointer-only highlight and require fresh physical movement before hover can
+    /// take selection ownership again.
+    public private(set) var overlayKeyboardInteractionSequence = 0
+    private var overlayViewUpdateSequence = 0
 
     /// Which switcher the one overlay session is presenting. The event tap tracks a single
     /// session, so the two can never be open at once.
@@ -1844,8 +1849,14 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // Hover is tentative until the next overlay command. Promote it once here, before
         // dispatch, so every existing and future command reads the same selected indices. Escape
         // is deliberately excluded: abandoning the overlay must also abandon the hover.
+        let keyboardTookOverlayOwnership = isSpaceManagerVisible
+            && Self.takesOverlaySelectionOwnership(event)
+        let overlayViewUpdateSequenceBeforeEvent = overlayViewUpdateSequence
         if isSpaceManagerVisible, event != .escape {
             promoteProvisionalPointerTarget()
+            if keyboardTookOverlayOwnership {
+                overlayKeyboardInteractionSequence += 1
+            }
         }
 
         if !Self.continuesBacktickCycle(event) {
@@ -1939,6 +1950,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             quitSelectedApp()
         case .closeSelectedWindow:
             closeSelectedWindow()
+        }
+
+        // A command can legitimately stop at an edge without otherwise changing the model. The
+        // view still needs to hear that the keyboard consumed hover so a stationary pointer does
+        // not keep drawing (or later restoring) the old pointer selection.
+        if keyboardTookOverlayOwnership,
+           overlayViewUpdateSequence == overlayViewUpdateSequenceBeforeEvent,
+           isSpaceManagerVisible, !isStageStackCommitInFlight {
+            notifyOverlayUpdated()
         }
 
         // `key_event` above is filed before the handler runs, so it carries the state the
@@ -2244,6 +2264,24 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
+    /// Keys that move the overlay cursor transfer selection ownership away from hover. Action
+    /// keys still resolve their target through hover, but do not need a view update before their
+    /// close, quit, commit, or dismissal lifecycle completes.
+    private static func takesOverlaySelectionOwnership(_ event: DebutKeyEvent) -> Bool {
+        switch event {
+        case .cmdTabHold, .cmdShiftTabHold,
+             .cmdOptionTabHold, .cmdOptionShiftTabHold,
+             .altTabHold, .altTabShiftHold, .altTabHoldRepeat, .altTabShiftHoldRepeat,
+             .nextWindow, .nextWindowRepeat, .previousWindow, .previousWindowRepeat,
+             .nextSpace, .previousSpace, .nextDisplayStack,
+             .jumpToSpace, .jumpToLastSpace,
+             .moveWindowUp, .moveWindowDown, .moveWindowLeft, .moveWindowRight:
+            true
+        default:
+            false
+        }
+    }
+
     /// The session's window-stepping bindings — bare Tab and bare backtick — are matched with the
     /// held primary modifier stripped, so the flat switcher reaches them as Option+Tab and
     /// Option+backtick without either needing a global chord of its own. Both switchers show
@@ -2445,6 +2483,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     private func notifyOverlayUpdated() {
         guard isOverlayPresented else { return }
+        overlayViewUpdateSequence += 1
         delegate?.spaceControllerDidUpdateSelection(self)
     }
 
