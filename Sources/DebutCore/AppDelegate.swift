@@ -262,6 +262,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         controller.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
         controller.spaceSwitcher = spaceService
+        controller.fasterDesktopSwitchingEnabled =
+            currentSettings.features.fasterDesktopSwitching
         controller.onDesktopReveal = { [weak self] in
             DispatchQueue.main.async {
                 NSWorkspace.shared.hideOtherApplications()
@@ -1055,14 +1057,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         updateFeatureMenu()
     }
 
-    static let featureMenuTitles = ["Window previews", "Workspace Command–Tab", "Numbered space shortcuts", "Control-arrow switching", "Trackpad desktop swipe"]
+    static let featureMenuTitles = ["Window previews", "Workspace Command–Tab", "Faster desktop transitions", "Numbered space shortcuts", "Control-arrow switching", "Trackpad desktop swipe"]
     private static let featureKeyPaths: [WritableKeyPath<FeatureSettings, Bool>] = [
-        \.windowPreviews, \.workspaceIsolation, \.numberShortcuts, \.controlArrows, \.trackpadSwipes,
+        \.windowPreviews, \.workspaceIsolation, \.fasterDesktopSwitching,
+        \.numberShortcuts, \.controlArrows, \.trackpadSwipes,
     ]
 
     private func updateFeatureMenu() {
         for (index, keyPath) in Self.featureKeyPaths.enumerated() {
-            statusItem?.menu?.item(withTitle: "Features")?.submenu?.item(withTag: 100 + index)?.state = currentSettings.features[keyPath: keyPath] ? .on : .off
+            let item = statusItem?.menu?.item(withTitle: "Features")?.submenu?
+                .item(withTag: 100 + index)
+            item?.state = currentSettings.features[keyPath: keyPath] ? .on : .off
+            if index >= 3 {
+                item?.isEnabled = currentSettings.features.fasterDesktopSwitching
+            }
         }
     }
 
@@ -1458,7 +1466,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         diag.report("onboarding_coachmark_shown")
     }
 
-    private func applySettings(_ newSettings: AppSettings) {
+    private func applySettings(_ incomingSettings: AppSettings) {
+        var newSettings = incomingSettings
+        newSettings.features.normalizeDesktopOverrides()
         let telemetryChanged = self.currentSettings.shareAnonymousTelemetry != newSettings.shareAnonymousTelemetry
         self.launchAtLogin.apply(enabled: newSettings.launchAtLogin)
         self.activationPolicy.apply(showsDockIcon: newSettings.showsDockIcon)
@@ -1484,6 +1494,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         self.spaceController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
         self.spaceController?.previewCacheTTL = newSettings.previewCacheTTL
         self.spaceService?.switchDuration = newSettings.spaceSwitchDuration
+        self.spaceController?.fasterDesktopSwitchingEnabled =
+            newSettings.features.fasterDesktopSwitching
         self.keyboardService?.quickSwitchModifiers = newSettings.quickSwitchModifiers
         self.keyboardService?.quickSwitchSameApplicationModifiers =
             newSettings.quickSwitchSameApplicationModifiers

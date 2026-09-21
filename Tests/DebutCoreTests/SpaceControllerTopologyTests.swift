@@ -338,6 +338,49 @@ struct SpaceControllerSpaceTests {
         #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
     }
 
+    @Test("Confirmation attention uses the native transition when faster switching is off")
+    @MainActor
+    func confirmationAttentionUsesNativeTransition() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.fasterDesktopSwitchingEnabled = false
+        controller.reconcileSpacesWithDesktops()
+        let targetSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 202,
+                ownerBundleID: "com.a",
+                ownerName: "A",
+                windowTitle: "Unsaved",
+                ownerPID: 22
+            ),
+            toSpaceID: targetSpaceID
+        )
+        spaces.windowDesktops[202] = 1
+        spaces.windowDesktops[909] = 1
+
+        keyboardService.simulateEvent(.cmdOptionTabHold)
+        keyboardService.simulateEvent(.closeSelectedWindow)
+        controller.recordOverlayActionAttention(windowID: 909, ownerPID: 22)
+
+        #expect(spaces.operations.isEmpty)
+        #expect(windowService.frontedWindows == [
+            FrontWindowRequest(windowID: 909, ownerPID: 22),
+        ])
+        #expect(windowService.raisedWindowID == nil)
+
+        spaces.current = 1
+        controller.desktopDidChange()
+
+        #expect(windowService.frontedWindows == [
+            FrontWindowRequest(windowID: 909, ownerPID: 22),
+            FrontWindowRequest(windowID: 909, ownerPID: 22),
+        ])
+        #expect(windowService.raisedWindowID == 909)
+        #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
+    }
+
     @Test("Switching space switches to the matching desktop")
     func switchesDesktop() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
@@ -1080,6 +1123,47 @@ struct SpaceControllerSpaceTests {
             .setFrontProcess(pid: 4242, desktop: 100),
             .switchToDesktop(0),
         ])
+    }
+
+    @Test("Disabling faster desktop switching lets window focus use the native transition")
+    func disabledFasterDesktopSwitchingUsesNativeWindowFocus() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
+        spaces.switchChangesDesktop = false
+        let (controller, windowService) = makeController(spaces: spaces)
+        controller.fasterDesktopSwitchingEnabled = false
+        controller.spaceManager.createSpace(position: .below)
+        let targetSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 22,
+                ownerBundleID: "com.b",
+                ownerName: "B",
+                windowTitle: "B",
+                ownerPID: 4242
+            ),
+            toSpaceID: targetSpaceID
+        )
+        spaces.windowDesktops = [22: 0]
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[1].id)
+
+        controller.switchToSpace(id: targetSpaceID, raiseWindowID: 22)
+
+        #expect(spaces.operations.isEmpty)
+        #expect(windowService.frontedWindows == [
+            FrontWindowRequest(windowID: 22, ownerPID: 4242),
+        ])
+        #expect(windowService.raisedWindowID == nil)
+        #expect(controller.spaceManager.activeSpaceID != targetSpaceID)
+
+        spaces.current = 0
+        controller.desktopDidChange()
+
+        #expect(windowService.frontedWindows == [
+            FrontWindowRequest(windowID: 22, ownerPID: 4242),
+            FrontWindowRequest(windowID: 22, ownerPID: 4242),
+        ])
+        #expect(windowService.raisedWindowID == 22)
+        #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
     }
 
     /// Plain quick switch deliberately leaves the final choice of app to macOS, so there is no

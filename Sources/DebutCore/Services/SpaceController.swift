@@ -407,6 +407,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// The macOS desktops that back the spaces. The space at index N is desktop N.
     public var spaceSwitcher: (any SpaceSwitching)?
 
+    /// Off leaves cross-desktop window activation to macOS, preserving the system transition.
+    public var fasterDesktopSwitchingEnabled = true
+
     /// Where the frontmost app's focused window sat when the overlay last opened, in Quartz
     /// global coordinates. The delegate resolves it to the display it presents the stages on.
     public private(set) var focusedWindowFrame: CGRect?
@@ -1346,7 +1349,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             let toLabel = spaceLabel(forID: targetID)
 
             self.previousSpaceID = previousID
-            spaceManager.activateSpace(id: targetID)
+            if fasterDesktopSwitchingEnabled {
+                spaceManager.activateSpace(id: targetID)
+            }
 
             // The space's windows already live on the target desktop, so macOS reveals all
             // of them in one composited transition. The surface architecture instead covered
@@ -1357,7 +1362,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 .spaceRaise,
                 workload: .init(windows: targetSpace?.windows.count ?? 0)
             )
-            if let index = spaceManager.spaceIndex(id: targetID),
+            if fasterDesktopSwitchingEnabled,
+               let index = spaceManager.spaceIndex(id: targetID),
                let stackID = spaceManager.spaceStackID(containingSpaceID: targetID),
                let location = spaceSwitcher?.spaceTopology().stack(id: stackID)?.location(at: index),
                let switcher = spaceSwitcher {
@@ -1366,6 +1372,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                                      desktopID: location.desktopID, switcher: switcher)
                 }
                 desktopIsSettling = switcher.switchToDesktop(location)
+            } else if !fasterDesktopSwitchingEnabled, let focusWindowID {
+                desktopIsSettling = requestNativeDesktopTransition(
+                    forWindow: focusWindowID,
+                    inSpaceID: targetID
+                )
             }
             _ = PerformanceRecorder.shared.end(raiseID)
 
@@ -1396,6 +1407,30 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         delegate?.spaceControllerDidMutateState(self)
         delegate?.spaceControllerDidSwitchSpace(self)
+    }
+
+    /// Fronting a window on another desktop asks macOS to perform its normal Space transition.
+    /// The first request starts that transition; the confirmed active-Space notification makes
+    /// the final focus and MRU update, just as it does after Debut's synthetic route.
+    private func requestNativeDesktopTransition(
+        forWindow windowID: CGWindowID,
+        inSpaceID spaceID: UUID
+    ) -> Bool {
+        guard let window = spaceManager.allSpaces.first(where: { $0.id == spaceID })?
+            .windows.first(where: { $0.windowID == windowID })
+        else { return false }
+
+        let activation = activateOwner(of: window, raising: windowID)
+        guard activation.outcome != .refused else { return false }
+        if let ownerPID = window.ownerPID {
+            focusRequest = (windowID: windowID, ownerPID: ownerPID, at: clock())
+        }
+        diag.report("native_space_transition_requested", details: [
+            "space": spaceLabel(forID: spaceID),
+            "via": activation.outcome.rawValue,
+            "windowID": "\(windowID)",
+        ])
+        return true
     }
 
     /// Tells the destination desktop which app to show forward, before it is revealed.
@@ -3025,6 +3060,22 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         guard stack.currentDesktopID != location.desktopID else {
             pendingSystemAttentionFocus = nil
             focusSystemAttention(windowID: windowID, ownerPID: ownerPID)
+            return
+        }
+
+        guard fasterDesktopSwitchingEnabled else {
+            let fronted = windowService.frontWindow(windowID: windowID, ownerPID: ownerPID)
+            let accepted = fronted || windowService.activateApp(pid: ownerPID)
+            pendingSystemAttentionFocus = accepted
+                ? PendingSystemAttentionFocus(
+                    windowID: windowID,
+                    ownerPID: ownerPID,
+                    location: location
+                )
+                : nil
+            if !accepted {
+                focusSystemAttention(windowID: windowID, ownerPID: ownerPID)
+            }
             return
         }
 
