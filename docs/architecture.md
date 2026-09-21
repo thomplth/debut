@@ -64,8 +64,9 @@ to [iss](https://github.com/joshuarli/iss).
 
 When faster desktop transitions are enabled, `DockSwipeAnimation` posts a
 high-velocity instant switch at duration zero, or a Began/Changed/Ended sequence
-over the requested duration. Each gesture crosses one desktop; longer routes
-wait for confirmation and continue through adjacent hops. The macOS 27 recipe
+over the requested duration. Each gesture crosses one desktop. Instant routes
+prepare and post all adjacent gestures as one batch; nonzero and standard-duration
+routes wait for confirmation between adjacent gestures. The macOS 27 recipe
 includes the augmented IOHID payload. Capability and system-overview gates
 preserve native input when Debut cannot safely own the navigation. When the
 parent feature is disabled, Debut-owned cross-desktop window selection still sends

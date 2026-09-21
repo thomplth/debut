@@ -4,11 +4,11 @@ import Testing
 
 @Suite("Measured gesture recipes")
 struct GestureRecipeTests {
-    @Test("Debut instant is the current confirmed two-phase gesture")
+    @Test("Debut instant batches its two-phase gestures")
     func debutInstant() {
         let recipe = GestureRecipe.preset(.debutInstant)
 
-        #expect(recipe.hopScheduling == .confirmedAdjacent)
+        #expect(recipe.hopScheduling == .batched)
         #expect(recipe.durationMilliseconds == 0)
         #expect(recipe.velocity == 400)
         #expect(recipe.includeEnvelope)
