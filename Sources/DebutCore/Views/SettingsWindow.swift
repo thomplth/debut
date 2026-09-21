@@ -73,8 +73,9 @@ public struct SettingsView: View {
                     switch selectedSection {
                     case .general: generalSection
                     case .desktops: desktopsSection
-                    case .switcher:
-                        switcherSection
+                    case .switcher: switcherSection
+                    case .appearance:
+                        appearanceSection
                         Divider()
                         selectorSection
                     case .shortcuts: keyboardShortcutsSection
@@ -208,7 +209,7 @@ public struct SettingsView: View {
             Text("Switcher")
                 .font(.title2.bold())
 
-            Text("Control what appears when you switch windows and how it looks.")
+            Text("Control which windows appear and where the switcher opens.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -249,9 +250,59 @@ public struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("Layout")
+            Text("Preview freshness")
                 .font(.headline)
                 .padding(.top, 8)
+
+            HStack {
+                Text("Refresh")
+                Spacer()
+                Picker("", selection: $viewModel.settings.previewRefreshPolicy) {
+                    ForEach(PreviewRefreshPolicy.allCases, id: \.self) { policy in
+                        Text(policy.displayName).tag(policy)
+                    }
+                }
+                .frame(width: 250)
+            }
+
+            if viewModel.settings.previewRefreshPolicy == .all {
+                Label(
+                    "Capturing every window on every activation delays the overlay, especially with many windows open.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Re-capture previews older than")
+                    Spacer()
+                    Text("\(Int(viewModel.settings.previewCacheTTL.rounded())) s")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $viewModel.settings.previewCacheTTL, in: 5...600, step: 5)
+                Text("Keeps previews current for windows that change on their own, such as video or chat.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(viewModel.settings.previewRefreshPolicy == .all)
+        }
+    }
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Appearance")
+                .font(.title2.bold())
+
+            Text("Fine-tune workspace cards and window previews.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Text("Layout")
+                .font(.headline)
+                .padding(.top, 4)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -322,45 +373,6 @@ public struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            Text("Preview freshness")
-                .font(.headline)
-                .padding(.top, 8)
-
-            HStack {
-                Text("Refresh")
-                Spacer()
-                Picker("", selection: $viewModel.settings.previewRefreshPolicy) {
-                    ForEach(PreviewRefreshPolicy.allCases, id: \.self) { policy in
-                        Text(policy.displayName).tag(policy)
-                    }
-                }
-                .frame(width: 250)
-            }
-
-            if viewModel.settings.previewRefreshPolicy == .all {
-                Label(
-                    "Capturing every window on every activation delays the overlay, especially with many windows open.",
-                    systemImage: "exclamationmark.triangle"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Re-capture previews older than")
-                    Spacer()
-                    Text("\(Int(viewModel.settings.previewCacheTTL.rounded())) s")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(value: $viewModel.settings.previewCacheTTL, in: 5...600, step: 5)
-                Text("Keeps previews current for windows that change on their own, such as video or chat.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .disabled(viewModel.settings.previewRefreshPolicy == .all)
         }
     }
 
@@ -815,6 +827,7 @@ public struct SettingsView: View {
         case .general: "gearshape"
         case .desktops: "rectangle.3.group"
         case .switcher: "macwindow.on.rectangle"
+        case .appearance: "paintbrush"
         case .shortcuts: "keyboard"
         case .support: "questionmark.circle"
         }

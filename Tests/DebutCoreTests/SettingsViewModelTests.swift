@@ -71,8 +71,32 @@ struct SettingsViewModelTests {
             .general,
             .desktops,
             .switcher,
+            .appearance,
             .shortcuts,
             .support,
+        ])
+    }
+
+    @Test("Appearance owns visual options while Switcher owns behavior")
+    func appearanceOptions() {
+        #expect(SettingsSection.switcher.options == [
+            .workspaceIsolation,
+            .windowPreviews,
+            .mainDisplayOnly,
+            .previewRefreshPolicy,
+            .previewCacheTTL,
+        ])
+        #expect(SettingsSection.appearance.options == [
+            .glassStyle,
+            .stageCornerRadius,
+            .stageScale,
+            .adaptiveCardSizing,
+            .inactiveStageScale,
+            .windowSelectionStyle,
+            .selectorOutset,
+            .selectorCornerRadius,
+            .magnifyScale,
+            .magnifyShadowStrength,
         ])
     }
 

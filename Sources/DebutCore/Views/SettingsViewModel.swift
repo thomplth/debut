@@ -4,6 +4,7 @@ public enum SettingsSection: String, CaseIterable, Sendable {
     case general = "General"
     case desktops = "Desktops"
     case switcher = "Switcher"
+    case appearance = "Appearance"
     case shortcuts = "Shortcuts"
     case support = "Support"
 
@@ -25,13 +26,16 @@ public enum SettingsSection: String, CaseIterable, Sendable {
                 .workspaceIsolation,
                 .windowPreviews,
                 .mainDisplayOnly,
+                .previewRefreshPolicy,
+                .previewCacheTTL,
+            ]
+        case .appearance:
+            [
                 .glassStyle,
                 .stageCornerRadius,
                 .stageScale,
                 .adaptiveCardSizing,
                 .inactiveStageScale,
-                .previewRefreshPolicy,
-                .previewCacheTTL,
                 .windowSelectionStyle,
                 .selectorOutset,
                 .selectorCornerRadius,
