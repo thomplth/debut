@@ -170,6 +170,50 @@ struct TelemetryTests {
         #expect(quota.acceptedByOperation.isEmpty)
     }
 
+    @Test("Legacy stage operation names migrate throughout the disk queue")
+    func legacyOperationNamesMigrate() async throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DebutTelemetryLegacyOperations-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let data = Data(#"""
+        {
+          "payloads": [
+            {
+              "schemaVersion": 1,
+              "event": "anomaly",
+              "workload": "typical",
+              "operation": "stage_switch",
+              "latency": "gte_500ms"
+            },
+            {
+              "schemaVersion": 1,
+              "event": "session_summary",
+              "workload": "typical",
+              "operationCounts": { "stage_raise": 2 },
+              "latencyBuckets": { "stage_switch": "10_25ms" },
+              "anomalyCount": 0
+            }
+          ],
+          "quota": {
+            "day": "2026-08-27",
+            "sent": 0,
+            "dropped": 0,
+            "acceptedByOperation": { "stage_switch": 1 }
+          }
+        }
+        """#.utf8)
+        try data.write(to: file)
+
+        let queue = DiskTelemetryQueue(file: file)
+        let payloads = try await queue.payloads()
+        let quota = try await queue.quota()
+
+        #expect(payloads[0].operation == .spaceSwitch)
+        #expect(payloads[1].operationCounts?["space_raise"] == 2)
+        #expect(payloads[1].latencyBuckets?["space_switch"] == .milliseconds10To25)
+        #expect(quota.acceptedByOperation == ["space_switch": 1])
+    }
+
     @Test("TelemetryDeck adapter uses v2 EU ingestion with an empty user and flat allowlisted primitives")
     func telemetryDeckRequest() throws {
         let client = TelemetryDeckClient(namespace: "debut", appID: "app-id")
