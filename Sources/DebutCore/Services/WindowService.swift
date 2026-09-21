@@ -288,12 +288,6 @@ public protocol WindowService: Sendable {
         windowID: CGWindowID,
         ownerPID: pid_t
     ) -> FrontWindowDeliveryTrace
-    /// Selects the exact target window before fronting its process so macOS's native
-    /// application activation follows that window to its desktop.
-    func frontWindowForNativeDesktopTransition(
-        windowID: CGWindowID,
-        ownerPID: pid_t
-    ) -> Bool
     /// The first visible layer-zero window for this process in the window server's front-to-back
     /// order. Unlike Accessibility focus, this describes which app window is actually in front.
     func frontmostWindowID(ownerPID: pid_t) -> CGWindowID?
@@ -334,12 +328,6 @@ public extension WindowService {
             processSerialNumberSymbolResolved: false,
             keyWindowEventSymbolResolved: false
         )
-    }
-    func frontWindowForNativeDesktopTransition(
-        windowID: CGWindowID,
-        ownerPID: pid_t
-    ) -> Bool {
-        frontWindow(windowID: windowID, ownerPID: ownerPID)
     }
     func frontmostWindowID(ownerPID: pid_t) -> CGWindowID? { nil }
     func focusObservation(ownerPID: pid_t) -> WindowFocusObservation {

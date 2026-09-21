@@ -68,11 +68,11 @@ over the requested duration. Each gesture crosses one desktop; longer routes
 wait for confirmation and continue through adjacent hops. The macOS 27 recipe
 includes the augmented IOHID payload. Capability and system-overview gates
 preserve native input when Debut cannot safely own the navigation. When the
-parent feature is disabled, cross-desktop window selection fronts the requested
-window through the native-transition path: it selects the exact window before
-fronting its process so macOS follows that window to its desktop. This is not a
-global change to macOS's animation preferences. The parent gates the numbered,
-Control-arrow, and trackpad integrations without erasing their saved settings.
+parent feature is disabled, Debut-owned cross-desktop window selection still sends
+an addressed gesture to Dock, but uses a fixed standard 400 ms slide instead of the
+configured faster duration. It waits for the active-Space notification before
+focusing the selected window. Physical numbered, Control-arrow, and trackpad input
+is left to macOS, while the disabled child controls retain their saved settings.
 
 Stage commits, numbered navigation, cross-desktop Option-Tab selection, enabled
 Control-arrow/trackpad input, and move-and-follow commands use this common

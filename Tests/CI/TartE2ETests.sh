@@ -48,6 +48,10 @@ if [[ -f "$host_runner" ]]; then
         "Tart E2E must create an isolated guest key without prompting"
     expect_contains "$host_runner" 'ssh .*admin@' \
         "the E2E input driver must be launched by the image-authorized SSH service"
+    expect_contains "$host_runner" 'tart ip .*--wait' \
+        "Tart E2E must wait for DHCP before deciding the guest has no address"
+    expect_contains "$host_runner" 'admin@127\.0\.0\.1' \
+        "Tart E2E must retain the SSH TCC identity through loopback when DHCP is unavailable"
     expect_contains "$host_runner" 'DebutE2E' \
         "Tart E2E must space the release E2E executable"
     expect_contains "$host_runner" 'ARTIFACT_ID' \

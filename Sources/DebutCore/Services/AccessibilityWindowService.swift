@@ -191,16 +191,6 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         FrontProcessManagement.frontWithTrace(windowID: windowID, ownerPID: ownerPID)
     }
 
-    public func frontWindowForNativeDesktopTransition(
-        windowID: CGWindowID,
-        ownerPID: pid_t
-    ) -> Bool {
-        FrontProcessManagement.frontForNativeDesktopTransition(
-            windowID: windowID,
-            ownerPID: ownerPID
-        )
-    }
-
     public func frontmostApplicationPID() -> pid_t? {
         NSWorkspace.shared.frontmostApplication?.processIdentifier
     }

@@ -26,7 +26,6 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public var activatedBundleID: String?
     public var activatedPID: pid_t?
     public var frontedWindows: [FrontWindowRequest] = []
-    public var nativeDesktopTransitionRequests: [FrontWindowRequest] = []
     /// The window server declines a fronting request for a window it no longer knows. A mock that
     /// cannot refuse can only ever prove Debut asked, never that it noticed the answer — which is
     /// how an activation that macOS had stopped honouring stayed green for a day.
@@ -104,16 +103,6 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
             processSerialNumberSymbolResolved: true,
             keyWindowEventSymbolResolved: true
         )
-    }
-
-    public func frontWindowForNativeDesktopTransition(
-        windowID: CGWindowID,
-        ownerPID: pid_t
-    ) -> Bool {
-        let request = FrontWindowRequest(windowID: windowID, ownerPID: ownerPID)
-        nativeDesktopTransitionRequests.append(request)
-        frontedWindows.append(request)
-        return frontWindowResult
     }
 
     public func frontmostWindowID(ownerPID: pid_t) -> CGWindowID? {

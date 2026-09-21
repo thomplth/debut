@@ -107,6 +107,27 @@ struct SpaceSwitchCoordinatorTests {
         #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
     }
 
+    @Test("System animation is retained across every hop to a far desktop")
+    func systemAnimationIsRetainedAcrossHops() throws {
+        var coordinator = SpaceSwitchCoordinator()
+
+        let first = try #require(coordinator.request(
+            to: location(3),
+            in: topology(current: 0),
+            animation: .system
+        ).hop)
+        let second = try #require(coordinator.desktopDidChange(
+            to: topology(current: 1)
+        ).first)
+        let third = try #require(coordinator.desktopDidChange(
+            to: topology(current: 2)
+        ).first)
+
+        #expect(first.animation == .system)
+        #expect(second.animation == .system)
+        #expect(third.animation == .system)
+    }
+
     @Test("A request back to the showing desktop is retained while a hop is in flight")
     func reversesAfterConfirmingInFlightHop() {
         var coordinator = SpaceSwitchCoordinator()
@@ -178,6 +199,19 @@ struct SpaceSwitchCoordinatorTests {
 
 @Suite("SpaceService switch speed")
 struct SpaceServiceSpeedTests {
+
+    @Test("System animation ignores the configured faster-switch duration")
+    func systemAnimationIgnoresConfiguredDuration() {
+        #expect(SpaceSwitchAnimation.configured.duration(configuredDuration: 0.07) == 0.07)
+        #expect(
+            SpaceSwitchAnimation.system.duration(configuredDuration: 0)
+                == SpaceSwitchAnimation.systemDuration
+        )
+        #expect(
+            SpaceSwitchAnimation.system.duration(configuredDuration: 0.13)
+                == SpaceSwitchAnimation.systemDuration
+        )
+    }
 
     @Test("Space service is safe to capture in its dispatch work")
     func serviceIsSendable() {

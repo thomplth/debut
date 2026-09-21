@@ -35,7 +35,7 @@ require_tart() {
 }
 
 vm_exists() {
-    tart list --source local --quiet | grep -Fqx "$VM_NAME"
+    tart get "$VM_NAME" >/dev/null 2>&1
 }
 
 prepare_vm() {
@@ -148,12 +148,28 @@ run_e2e() {
     prepare_ssh
 
     echo "Running the full E2E suite inside $VM_NAME..."
-    guest_ip="$(tart ip "$VM_NAME")"
     printf -v remote_command '/bin/bash %q %q %q' \
         "/Volumes/My Shared Files/$GUEST_ARTIFACT" "$APP_ARTIFACT" "$E2E_ARTIFACT"
     set +e
-    ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$KNOWN_HOSTS" "admin@$guest_ip" "$remote_command" 2>&1 | tee "$SHARE_DIR/e2e-latest.log"
-    ssh_status="${PIPESTATUS[0]}"
+    if guest_ip="$(tart ip "$VM_NAME" --wait 15 2>/dev/null)"; then
+        ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$KNOWN_HOSTS" "admin@$guest_ip" "$remote_command" \
+            2>&1 | tee "$SHARE_DIR/e2e-latest.log"
+        ssh_status="${PIPESTATUS[0]}"
+    else
+        # DHCP is not guaranteed in a headless Tart guest. Enter over vsock, then
+        # launch through loopback SSH so the input driver keeps the same TCC-responsible
+        # identity as the ordinary network path.
+        tart exec "$VM_NAME" /bin/bash -c '
+            set -e
+            umask 077
+            key="$HOME/.ssh/id_ed25519_debut_e2e_loopback"
+            [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N "" -C "debut-e2e-loopback" -f "$key"
+            grep -qxF "$(<"$key.pub")" "$HOME/.ssh/authorized_keys" || cat "$key.pub" >> "$HOME/.ssh/authorized_keys"
+            exec ssh -i "$key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new admin@127.0.0.1 "$1"
+        ' _ "$remote_command" 2>&1 | tee "$SHARE_DIR/e2e-latest.log"
+        ssh_status="${PIPESTATUS[0]}"
+    fi
     set -e
     echo "Guest evidence: $SHARE_DIR/results"
     return "$ssh_status"
