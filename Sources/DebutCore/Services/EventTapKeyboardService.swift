@@ -315,7 +315,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             return nil
         }
 
-        if type == .keyDown, features.controlArrows, desktopNavigationAvailable,
+        if type == .keyDown, features.effectiveControlArrows, desktopNavigationAvailable,
            flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]) == .maskControl,
            keyCode == Int64(kVK_LeftArrow) || keyCode == Int64(kVK_RightArrow) {
             // The Dock owns this shortcut while an overview is visible. Query only after the
@@ -328,7 +328,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             return nil
         }
 
-        if type == .keyDown, features.numberShortcuts {
+        if type == .keyDown, features.effectiveNumberShortcuts {
             let quickSwitchConfiguration = configurationLock.withLock {
                 (
                     storedQuickSwitchModifiers,

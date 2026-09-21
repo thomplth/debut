@@ -365,6 +365,9 @@ struct SpaceControllerSpaceTests {
         controller.recordOverlayActionAttention(windowID: 909, ownerPID: 22)
 
         #expect(spaces.operations.isEmpty)
+        #expect(windowService.nativeDesktopTransitionRequests == [
+            FrontWindowRequest(windowID: 909, ownerPID: 22),
+        ])
         #expect(windowService.frontedWindows == [
             FrontWindowRequest(windowID: 909, ownerPID: 22),
         ])
@@ -1149,6 +1152,9 @@ struct SpaceControllerSpaceTests {
         controller.switchToSpace(id: targetSpaceID, raiseWindowID: 22)
 
         #expect(spaces.operations.isEmpty)
+        #expect(windowService.nativeDesktopTransitionRequests == [
+            FrontWindowRequest(windowID: 22, ownerPID: 4242),
+        ])
         #expect(windowService.frontedWindows == [
             FrontWindowRequest(windowID: 22, ownerPID: 4242),
         ])
@@ -1163,6 +1169,67 @@ struct SpaceControllerSpaceTests {
             FrontWindowRequest(windowID: 22, ownerPID: 4242),
         ])
         #expect(windowService.raisedWindowID == 22)
+        #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
+    }
+
+    @Test(
+        "Command-Tab cross-desktop selection follows the configured transition path",
+        arguments: [true, false]
+    )
+    func commandTabCrossDesktopSelection(fasterDesktopSwitchingEnabled: Bool) {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.fasterDesktopSwitchingEnabled = fasterDesktopSwitchingEnabled
+        controller.reconcileSpacesWithDesktops()
+        let sourceSpaceID = controller.spaceManager.spaces[0].id
+        let targetSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 101,
+                ownerBundleID: "com.source",
+                ownerName: "Source",
+                windowTitle: "Source",
+                ownerPID: 11
+            ),
+            toSpaceID: sourceSpaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(
+                windowID: 202,
+                ownerBundleID: "com.target",
+                ownerName: "Target",
+                windowTitle: "Target",
+                ownerPID: 22
+            ),
+            toSpaceID: targetSpaceID
+        )
+        spaces.windowDesktops = [101: 0, 202: 1]
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.nextSpace)
+        keyboardService.simulateEvent(.cmdRelease)
+
+        if fasterDesktopSwitchingEnabled {
+            #expect(spaces.operations == [
+                .setFrontProcess(pid: 22, desktop: 101),
+                .switchToDesktop(1),
+            ])
+            #expect(windowService.nativeDesktopTransitionRequests.isEmpty)
+            #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
+        } else {
+            #expect(spaces.operations.isEmpty)
+            #expect(windowService.nativeDesktopTransitionRequests == [
+                FrontWindowRequest(windowID: 202, ownerPID: 22),
+            ])
+            #expect(controller.spaceManager.activeSpaceID == sourceSpaceID)
+        }
+        #expect(windowService.raisedWindowID == nil)
+
+        spaces.current = 1
+        controller.desktopDidChange()
+
+        #expect(windowService.raisedWindowID == 202)
         #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
     }
 

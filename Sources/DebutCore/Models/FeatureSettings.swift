@@ -4,28 +4,26 @@ import Foundation
 public struct FeatureSettings: Codable, Equatable, Sendable {
     public var windowPreviews = true
     public var workspaceIsolation = true
-    public var fasterDesktopSwitching = true {
-        didSet {
-            if !fasterDesktopSwitching { disableDesktopOverrides() }
-        }
-    }
+    public var fasterDesktopSwitching = true
     public var numberShortcuts = true
     public var controlArrows = true
     public var trackpadSwipes = true
     public init() {}
 
+    public var effectiveNumberShortcuts: Bool {
+        fasterDesktopSwitching && numberShortcuts
+    }
+
+    public var effectiveControlArrows: Bool {
+        fasterDesktopSwitching && controlArrows
+    }
+
+    public var effectiveTrackpadSwipes: Bool {
+        fasterDesktopSwitching && trackpadSwipes
+    }
+
     public mutating func setFasterDesktopSwitching(_ enabled: Bool) {
         fasterDesktopSwitching = enabled
-    }
-
-    public mutating func normalizeDesktopOverrides() {
-        if !fasterDesktopSwitching { disableDesktopOverrides() }
-    }
-
-    private mutating func disableDesktopOverrides() {
-        numberShortcuts = false
-        controlArrows = false
-        trackpadSwipes = false
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -51,6 +49,5 @@ public struct FeatureSettings: Codable, Equatable, Sendable {
         numberShortcuts = try container.decodeIfPresent(Bool.self, forKey: .numberShortcuts) ?? true
         controlArrows = try container.decodeIfPresent(Bool.self, forKey: .controlArrows) ?? true
         trackpadSwipes = try container.decodeIfPresent(Bool.self, forKey: .trackpadSwipes) ?? true
-        normalizeDesktopOverrides()
     }
 }
