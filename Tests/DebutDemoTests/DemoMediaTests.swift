@@ -41,7 +41,8 @@ struct DemoMediaTests {
         let center = (image.height / 2) * image.bytesPerRow + (image.width / 2) * 4
         #expect(Array(UnsafeBufferPointer(start: pixels + center, count: 4)) == [255, 255, 255, 255])
     }
-    @Test func coverRecoversRenderedGlassColorsWithoutAWhiteShadowFringe() throws {
+    @Test(arguments: [UInt8(0), UInt8(255)])
+    func coverRecoversRenderedGlassColorsWithoutAFringe(backdropWhite: UInt8) throws {
         func canvas() throws -> CGContext {
             try #require(CGContext(data: nil, width: 20, height: 20,
                 bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
@@ -52,14 +53,18 @@ struct DemoMediaTests {
         isolated.fill(CGRect(x: 5, y: 5, width: 10, height: 10))
         isolated.setFillColor(CGColor(gray: 0, alpha: 32.0 / 255))
         isolated.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        isolated.setFillColor(CGColor(colorSpace: CGColorSpaceCreateDeviceRGB(), components: [0, 0, 1, 128.0 / 255])!)
+        isolated.fill(CGRect(x: 2, y: 2, width: 1, height: 1))
         let rendered = try canvas()
-        rendered.setFillColor(CGColor(gray: 1, alpha: 1))
+        rendered.setFillColor(CGColor(colorSpace: CGColorSpaceCreateDeviceRGB(), components: Array(repeating: CGFloat(backdropWhite) / 255, count: 3) + [1])!)
         rendered.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
         rendered.setFillColor(CGColor(colorSpace: CGColorSpaceCreateDeviceRGB(), components: [0, 0, 1, 1])!)
         rendered.fill(CGRect(x: 5, y: 5, width: 10, height: 10))
         rendered.setFillColor(CGColor(gray: 0, alpha: 32.0 / 255))
         rendered.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
-        let image = try overlayCoverImage(#require(isolated.makeImage()), renderedOnWhite: #require(rendered.makeImage()))
+        rendered.setFillColor(CGColor(colorSpace: CGColorSpaceCreateDeviceRGB(), components: [0, 0, 1, 128.0 / 255])!)
+        rendered.fill(CGRect(x: 2, y: 2, width: 1, height: 1))
+        let image = try overlayCoverImage(#require(isolated.makeImage()), renderedImage: #require(rendered.makeImage()), backdropWhite: backdropWhite)
         let data = try #require(image.dataProvider?.data)
         let bytes = try #require(CFDataGetBytePtr(data))
         var sawBlue = false, sawShadow = false
@@ -67,6 +72,7 @@ struct DemoMediaTests {
             for x in 0..<image.width {
                 let p = bytes + y * image.bytesPerRow + x * 4
                 if p[3] == 255 { sawBlue = true; #expect(p[0] == 0 && p[1] == 0 && p[2] == 255) }
+                if p[3] == 128 { #expect(p[0] <= 1 && p[1] <= 1 && abs(Int(p[2]) - 128) <= 1) }
                 if p[3] == 32 { sawShadow = true; #expect(p[0] <= 1 && p[1] <= 1 && p[2] <= 1) }
             }
         }
