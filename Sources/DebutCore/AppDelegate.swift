@@ -271,9 +271,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         spaceController = controller
 
         keyboardService.keyBindings = currentSettings.keyBindings
-        keyboardService.quickSwitchExcludedBundleIDs = Set(
-            currentSettings.quickSwitchExcludedBundleIDs
-        )
         keyboardService.quickSwitchModifiers = currentSettings.quickSwitchModifiers
         keyboardService.quickSwitchSameApplicationModifiers =
             currentSettings.quickSwitchSameApplicationModifiers
@@ -1487,9 +1484,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         self.spaceController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
         self.spaceController?.previewCacheTTL = newSettings.previewCacheTTL
         self.spaceService?.switchDuration = newSettings.spaceSwitchDuration
-        self.keyboardService?.quickSwitchExcludedBundleIDs = Set(
-            newSettings.quickSwitchExcludedBundleIDs
-        )
         self.keyboardService?.quickSwitchModifiers = newSettings.quickSwitchModifiers
         self.keyboardService?.quickSwitchSameApplicationModifiers =
             newSettings.quickSwitchSameApplicationModifiers

@@ -250,7 +250,6 @@ struct StateStoreTests {
         settings.magnifyScale = 1.14
         settings.magnifyShadowStrength = 1.6
         settings.overlayPresentationDelay = 0.25
-        settings.quickSwitchExcludedBundleIDs = ["com.tinyspeck.slackmacgap"]
         settings.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
         settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(command: true)
 
@@ -266,7 +265,6 @@ struct StateStoreTests {
         #expect(loaded.magnifyScale == 1.14)
         #expect(loaded.magnifyShadowStrength == 1.6)
         #expect(loaded.overlayPresentationDelay == 0.25)
-        #expect(loaded.quickSwitchExcludedBundleIDs == ["com.tinyspeck.slackmacgap"])
         #expect(loaded.quickSwitchModifiers == ShortcutModifiers(control: true, option: true))
         #expect(loaded.quickSwitchSameApplicationModifiers == ShortcutModifiers(command: true))
     }
@@ -293,18 +291,23 @@ struct StateStoreTests {
         ))
     }
 
-    @Test("Older settings default quick switch exclusions to empty")
-    func legacySettingsDefaultQuickSwitchExclusions() throws {
+    @Test("Quick switch exclusions are neither persisted nor restored from older settings")
+    func quickSwitchExclusionsAreRemoved() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
-        object.removeValue(forKey: "quickSwitchExcludedBundleIDs")
+        #expect(object["quickSwitchExcludedBundleIDs"] == nil)
+
+        object["quickSwitchExcludedBundleIDs"] = ["com.tinyspeck.slackmacgap"]
         let legacyData = try JSONSerialization.data(withJSONObject: object)
-
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+        let reencoded = try JSONEncoder().encode(decoded)
+        let migratedObject = try #require(
+            JSONSerialization.jsonObject(with: reencoded) as? [String: Any]
+        )
 
-        #expect(decoded.quickSwitchExcludedBundleIDs.isEmpty)
+        #expect(migratedObject["quickSwitchExcludedBundleIDs"] == nil)
     }
 
     @Test("Older settings default overlay presentation delay to 100ms")

@@ -476,26 +476,41 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.cmdTabHold])
     }
 
-    @Test("Configured frontmost apps keep Ctrl digit shortcuts")
-    func configuredAppKeepsShortcut() {
-        let bundleID = "com.example.Reserved"
+    @Test("Quick-switch inputs are independent of the frontmost app")
+    func quickSwitchInputsIgnoreFrontmostApp() {
         let service = EventTapKeyboardService()
-        service.updateFrontmostApp(bundleIdentifier: bundleID)
-        service.quickSwitchExcludedBundleIDs = [bundleID]
-        let keyDown = CGEvent(
+        let delegate = TestKeyboardDelegate()
+        _ = service.start(delegate: delegate)
+        defer { service.stop() }
+        service.updateFrontmostApp(bundleIdentifier: "com.example.Frontmost")
+        let numberDown = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_ANSI_1),
             keyDown: true
         )!
-        keyDown.flags = .maskControl
-        let keyUp = CGEvent(
+        numberDown.flags = .maskControl
+        let numberUp = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_ANSI_1),
             keyDown: false
         )!
+        let arrowDown = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_RightArrow),
+            keyDown: true
+        )!
+        arrowDown.flags = .maskControl
+        let arrowUp = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(kVK_RightArrow),
+            keyDown: false
+        )!
 
-        #expect(service.handleCGEvent(type: .keyDown, event: keyDown) != nil)
-        #expect(service.handleCGEvent(type: .keyUp, event: keyUp) != nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: numberDown) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: numberUp) == nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: arrowDown) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: arrowUp) == nil)
+        #expect(delegate.receivedEvents == [.switchToSpace(1), .switchAdjacentSpace(1)])
     }
 
     @Test("Reordering events")

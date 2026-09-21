@@ -92,8 +92,7 @@ admitted just because a desktop happens to be showing. `placedWindowIDs()`
 distinguishes these cases.
 
 App exclusions apply to discovery, launch, focus/activation, reconciliation, and
-tracking. Quick-switch exclusions are separate: they let a frontmost app keep
-numbered and Control-arrow shortcuts without removing its windows from Debut.
+tracking. They do not change global numbered or Control-arrow shortcuts.
 
 ## Lifecycle and ordering
 
