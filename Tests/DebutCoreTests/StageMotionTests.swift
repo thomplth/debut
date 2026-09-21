@@ -177,6 +177,99 @@ struct StageMotionTests {
         #expect(before == [[1.2, 1.6], [0.8, 1.0]])
     }
 
+    @Test("A guided keyboard move retains an invisible source card until handoff")
+    func guidedKeyboardMoveRetainsSourceCard() {
+        let movedWindow = StageWindowData(
+            id: 42,
+            windowID: 42,
+            ownerBundleID: "com.example",
+            ownerName: "Example",
+            windowTitle: "Moved",
+            previewImage: nil
+        )
+        let remainingWindows = [10, 11].map { windowID in
+            StageWindowData(
+                id: windowID,
+                windowID: CGWindowID(windowID),
+                ownerBundleID: "com.example",
+                ownerName: "Example",
+                windowTitle: "Window \(windowID)",
+                previewImage: nil
+            )
+        }
+        let move = KeyboardWindowMoveAnimation(
+            sequence: 1,
+            windowID: movedWindow.windowID,
+            fromSpaceIndex: 0,
+            fromWindowIndex: 1,
+            toSpaceIndex: 1,
+            toWindowIndex: 0
+        )
+
+        let sourceItems = StageMotion.renderedWindows(
+            remainingWindows,
+            spaceIndex: 0,
+            keyboardDeparture: KeyboardWindowDeparture(move: move, window: movedWindow)
+        )
+        let destinationItems = StageMotion.renderedWindows(
+            [movedWindow],
+            spaceIndex: 1,
+            keyboardDeparture: KeyboardWindowDeparture(move: move, window: movedWindow)
+        )
+
+        #expect(sourceItems.map(\.window.windowID) == [10, 42, 11])
+        #expect(sourceItems.map(\.layoutIndex) == [0, nil, 1])
+        #expect(destinationItems.map(\.window.windowID) == [42])
+        #expect(destinationItems.map(\.layoutIndex) == [0])
+    }
+
+    @Test("A guided keyboard flight lands on the measured destination card")
+    func guidedKeyboardFlightUsesMeasuredDestination() {
+        let move = KeyboardWindowMoveAnimation(
+            sequence: 1,
+            windowID: 42,
+            fromSpaceIndex: 0,
+            fromWindowIndex: 0,
+            toSpaceIndex: 1,
+            toWindowIndex: 1
+        )
+        let frames = [
+            WindowIdentityFrameID(spaceIndex: 1, windowIndex: 1, windowID: 99): CGRect(
+                x: 10, y: 20, width: 100, height: 80
+            ),
+            WindowIdentityFrameID(spaceIndex: 1, windowIndex: 1, windowID: 42): CGRect(
+                x: 210, y: 320, width: 120, height: 90
+            )
+        ]
+
+        #expect(StageMotion.guidedKeyboardFlightDestination(
+            move: move,
+            windowFrames: frames
+        ) == CGPoint(x: 270, y: 365))
+        #expect(StageMotion.guidedKeyboardFlightDestination(
+            move: move,
+            windowFrames: [
+                WindowIdentityFrameID(
+                    spaceIndex: 1,
+                    windowIndex: 1,
+                    windowID: 99
+                ): CGRect(
+                    x: 10, y: 20, width: 100, height: 80
+                )
+            ]
+        ) == nil)
+        #expect(StageMotion.guidedKeyboardFlightDestination(
+            move: move,
+            windowFrames: [
+                WindowIdentityFrameID(
+                    spaceIndex: 0,
+                    windowIndex: 0,
+                    windowID: 42
+                ): CGRect(x: 20, y: 30, width: 100, height: 80)
+            ]
+        ) == nil)
+    }
+
     @Test("The window layout key sees a reorder that leaves the count alone")
     func windowLayoutKeyTracksOrderWithinASpace() {
         func stage(_ ids: [CGWindowID]) -> StageData {
