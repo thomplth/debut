@@ -46,6 +46,7 @@ struct KeyboardWindowFlightState {
     let window: StageWindowData
     var position: CGPoint
     var metrics: StageMetrics
+    var isParked: Bool
     let destinationMetrics: StageMetrics
 }
 
@@ -85,20 +86,4 @@ struct WindowFramePreferenceKey: PreferenceKey {
     ) {
         value.merge(nextValue(), uniquingKeysWith: { $1 })
     }
-}
-
-struct WindowIdentityFramePreferenceKey: PreferenceKey {
-    nonisolated(unsafe) static var defaultValue: [WindowIdentityFrameID: CGRect] = [:]
-    static func reduce(
-        value: inout [WindowIdentityFrameID: CGRect],
-        nextValue: () -> [WindowIdentityFrameID: CGRect]
-    ) {
-        value.merge(nextValue(), uniquingKeysWith: { $1 })
-    }
-}
-
-struct WindowIdentityFrameID: Hashable {
-    let spaceIndex: Int
-    let windowIndex: Int
-    let windowID: CGWindowID
 }
