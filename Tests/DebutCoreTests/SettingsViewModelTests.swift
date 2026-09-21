@@ -85,8 +85,9 @@ struct SettingsViewModelTests {
         let vm = SettingsViewModel()
         let preview = try vm.telemetryPayloadPreview()
         let data = try #require(preview.data(using: .utf8))
-        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(object["schemaVersion"] as? Int == 1)
+        let payloads = try #require(try JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        #expect(payloads.allSatisfy { $0["schemaVersion"] as? Int == 2 })
+        #expect(payloads.allSatisfy { $0["latencyBuckets"] == nil })
         #expect(vm.telemetryExcludedData.contains("window titles"))
         #expect(!preview.contains("bundleID"))
     }
@@ -98,7 +99,7 @@ struct SettingsViewModelTests {
 
         #expect(!presentation.json.isEmpty)
         #expect(presentation.json == (try vm.telemetryPayloadPreview()))
-        #expect(presentation.json.contains("\"schemaVersion\" : 1"))
+        #expect(!presentation.json.contains("latencyBucket"))
     }
 
     @Test("Troubleshooting actions are forwarded to the app")

@@ -46,18 +46,23 @@ not required to use any app feature and is not used for advertising, cross-app t
 profiling, or automated decisions. Its only purpose is to help maintainers find
 reliability and performance regressions and prioritize improvements.
 
-When sharing is enabled, Debut sends one aggregate session-summary event and a
-small number of rate-limited performance-anomaly events. The allowlist is:
+When sharing is enabled, Debut records three user-facing latency measurements
+locally and sends one numeric P95 summary for each interaction that occurred in
+the preceding hour. The three interactions are window-switcher presentation,
+first-preview readiness, and desktop switching. Active-hour summaries are sent
+together in one HTTPS request. A normal app quit also attempts to send the
+current partial hour; an uncatchable force-kill cannot run that final hook, so at
+most the current partial hour can be lost. The allowlist is:
 
 - event type and schema version;
 - Debut version and macOS major version;
-- coarse workload and first-use or cache-temperature classes;
-- canonical operation names with aggregate counts;
-- bucketed latency ranges and an aggregate anomaly count; and
+- coarse workload class;
+- one of the three canonical interaction names;
+- the exact local hourly P95 duration in milliseconds and its aggregate sample count; and
 - a server-generated receipt time and event count added by TelemetryDeck.
 
 Debut sends an empty `clientUser` value. It does not send a session ID, user ID,
-installation ID, trace ID, exact timing, locale, time zone, screen or hardware
+installation ID, trace ID, individual interaction timing, locale, time zone, screen or hardware
 details, window titles, app names or bundle IDs, PIDs, window IDs, paths,
 screenshots, raw diagnostics, free-form errors, or cache counts. The direct HTTPS
 integration does not use TelemetryDeck's SDK and therefore does not add the SDK's
@@ -65,7 +70,7 @@ automatic device or user fields. Like any HTTPS request, the connection presents
 an IP address to the receiving server. TelemetryDeck states that it neither
 stores nor logs IP addresses.
 
-You can inspect the exact current session-summary JSON in Settings → Privacy →
+You can inspect the exact current hourly-summary JSON in Settings → Privacy →
 View data being shared.
 
 ## Recipient, location, and retention
@@ -75,8 +80,8 @@ Germany. TelemetryDeck states that usage data is hosted within the European Unio
 using infrastructure in Germany and the Netherlands. Debut does not intentionally
 send the telemetry to another recipient or region.
 
-The local queue holds at most 100 unsent records and delivery is capped at 20
-events per installation day. A successfully delivered record is removed from
+The local queue holds at most 100 unsent records and delivery is capped at 24
+events per installation day. Inactive hours create no records. A successfully delivered record is removed from
 that queue. Disabling sharing immediately deletes all queued unsent records and
 prevents future collection until sharing is enabled again. Local diagnostics
 remain available and are never uploaded automatically.
