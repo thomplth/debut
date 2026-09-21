@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+extension Notification.Name {
+    static let debutSettingsChanged = Notification.Name("DebutSettingsChanged")
+}
+
 @MainActor
 public final class SettingsWindow: NSWindow {
     public init<Content: View>(rootView: Content) {
@@ -24,7 +28,7 @@ public final class SettingsWindow: NSWindow {
 
 public struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
-    @State private var selectedSection: SettingsSection = .features
+    @State private var selectedSection: SettingsSection = .general
     @State private var showingResetConfirmation = false
     @State private var showingRestoreDefaultsConfirmation = false
     private let shortcutRecordingService: (any ShortcutRecordingService)?
@@ -32,7 +36,7 @@ public struct SettingsView: View {
 
     public init(
         viewModel: SettingsViewModel = SettingsViewModel(),
-        selectedSection: SettingsSection = .features,
+        selectedSection: SettingsSection = .general,
         shortcutRecordingService: (any ShortcutRecordingService)? = nil
     ) {
         self._selectedSection = State(initialValue: selectedSection)
@@ -67,16 +71,14 @@ public struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     switch selectedSection {
-                    case .features: featuresSection
-                    case .excludedApps: excludedAppsSection
-                    case .app: appSection
-                    case .keyboardShortcuts: keyboardShortcutsSection
-                    case .advanced:
-                        appearanceSection
+                    case .general: generalSection
+                    case .desktops: desktopsSection
+                    case .switcher:
+                        switcherSection
                         Divider()
                         selectorSection
-                    case .troubleshooting: troubleshootingSection
-                    case .about: aboutSection
+                    case .shortcuts: keyboardShortcutsSection
+                    case .support: supportSection
                     }
                 }
                 .padding(24)
@@ -102,13 +104,92 @@ public struct SettingsView: View {
 
     // MARK: - Sections
 
-    private var featuresSection: some View {
+    private var generalSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Make each desktop a workspace").font(.title2.bold())
-            FeatureControlsView(features: $viewModel.settings.features)
+            Text("General")
+                .font(.title2.bold())
+
+            Text("App")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 4) {
+                settingsToggle("Launch at login", isOn: $viewModel.settings.launchAtLogin)
+                Text("Start Debut when you sign in.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                settingsToggle("Show in Dock", isOn: $viewModel.settings.showsDockIcon)
+                Text("Debut remains available in the menu bar when this is off.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Debut follows the system Reduce Motion setting in System Settings ▸ Accessibility ▸ Display.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Divider()
+
+            excludedAppsGroup
+        }
+    }
+
+    private var desktopsSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Desktops")
+                .font(.title2.bold())
+
+            Text("Choose how Debut moves between macOS desktops.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 5) {
+                settingsToggle(
+                    "Faster desktop switching",
+                    isOn: Binding(
+                        get: { viewModel.settings.features.fasterDesktopSwitching },
+                        set: { viewModel.settings.features.setFasterDesktopSwitching($0) }
+                    )
+                )
+                Text("Turn this off to use the original macOS desktop transition.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Ways to switch")
+                    .font(.headline)
+
+                settingsToggle(
+                    "Number keys · Control + 1–9 by default",
+                    isOn: $viewModel.settings.features.numberShortcuts
+                )
+                settingsToggle(
+                    "Control + Left / Right Arrow",
+                    isOn: $viewModel.settings.features.controlArrows
+                )
+                VStack(alignment: .leading, spacing: 4) {
+                    settingsToggle(
+                        "Trackpad desktop swipe",
+                        isOn: $viewModel.settings.features.trackpadSwipes
+                    )
+                    Text("Uses your macOS three- or four-finger desktop gesture. Other gestures keep their normal behavior.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(!viewModel.settings.features.fasterDesktopSwitching)
+
+            Divider()
+
+            Text("Timing and feedback")
+                .font(.headline)
+
             SwitchDurationControl(duration: $viewModel.settings.spaceSwitchDuration)
                 .disabled(!viewModel.settings.features.fasterDesktopSwitching)
+
             VStack(alignment: .leading, spacing: 4) {
                 settingsToggle(
                     "Show desktop switch indicator",
@@ -122,14 +203,40 @@ public struct SettingsView: View {
         }
     }
 
-    private var appearanceSection: some View {
+    private var switcherSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Appearance")
+            Text("Switcher")
                 .font(.title2.bold())
 
-            Text("Fine-tune the space cards and window previews.")
+            Text("Control what appears when you switch windows and how it looks.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+
+            Text("Behavior")
+                .font(.headline)
+                .padding(.top, 4)
+
+            VStack(alignment: .leading, spacing: 4) {
+                settingsToggle(
+                    "Keep Command–Tab in the current desktop",
+                    isOn: $viewModel.settings.features.workspaceIsolation
+                )
+                Text("Cycle windows on this desktop. Off restores native Command–Tab and Command–`.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                settingsToggle(
+                    "Show window previews",
+                    isOn: $viewModel.settings.features.windowPreviews
+                )
+                Text("Show screenshots in the workspace and all-windows switchers.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 settingsToggle(
@@ -141,6 +248,10 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Text("Layout")
+                .font(.headline)
+                .padding(.top, 8)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -212,7 +323,7 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("Window previews")
+            Text("Preview freshness")
                 .font(.headline)
                 .padding(.top, 8)
 
@@ -255,8 +366,8 @@ public struct SettingsView: View {
 
     private var selectorSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Selector")
-                .font(.title2.bold())
+            Text("Selection")
+                .font(.headline)
 
             Text("Choose how the selected window stands out inside its stage.")
                 .font(.subheadline)
@@ -350,12 +461,12 @@ public struct SettingsView: View {
 
     @State private var selectedAppToExclude: String = ""
 
-    private var excludedAppsSection: some View {
+    private var excludedAppsGroup: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Excluded Apps")
-                .font(.title2.bold())
+            Text("Ignored apps")
+                .font(.headline)
 
-            Text("Excluded apps are invisible to the space manager. They won't appear in any space and won't trigger space switches.")
+            Text("Ignored apps do not appear in Debut and do not trigger desktop switches.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -430,42 +541,16 @@ public struct SettingsView: View {
         return bundleID.components(separatedBy: ".").last ?? bundleID
     }
 
-    private var appSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("App")
-                .font(.title2.bold())
-
-            VStack(alignment: .leading, spacing: 4) {
-                settingsToggle("Launch at login", isOn: $viewModel.settings.launchAtLogin)
-                Text("Start Debut when you sign in.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                settingsToggle("Show in Dock", isOn: $viewModel.settings.showsDockIcon)
-                Text("Debut is always available in the menu bar.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text("Debut follows the system Reduce Motion setting for overlay animations. Turn it on in System Settings ▸ Accessibility ▸ Display to remove them.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
-        }
-    }
-
     static func switchDurationLabel(_ duration: TimeInterval) -> String {
         duration <= 0 ? "Instant" : "\(Int((duration * 1000).rounded())) ms"
     }
 
     private var keyboardShortcutsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Keyboard Shortcuts")
+            Text("Shortcuts")
                 .font(.title2.bold())
 
-            Text("Click a shortcut to change it. Feature switches are in Features.")
+            Text("Click a shortcut to change it. Desktop navigation switches are in Desktops.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -632,10 +717,13 @@ public struct SettingsView: View {
         }
     }
 
-    private var aboutSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("About")
+    private var supportSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Support")
                 .font(.title2.bold())
+
+            Text("About Debut")
+                .font(.headline)
 
             HStack(spacing: 16) {
                 Image(nsImage: DebutGlyph.image(size: 44))
@@ -656,13 +744,11 @@ public struct SettingsView: View {
             Button("Check for Updates…") {
                 viewModel.checkForUpdates()
             }
-        }
-    }
 
-    private var troubleshootingSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+
             Text("Troubleshooting")
-                .font(.title2.bold())
+                .font(.headline)
 
             Text("Export a snapshot before resetting so window assignments, Accessibility tracking, lifecycle events, and persisted state can be investigated.")
                 .font(.caption)
@@ -702,8 +788,13 @@ public struct SettingsView: View {
     // MARK: - Helpers
 
     private func settingsToggle(_ label: String, isOn: Binding<Bool>) -> some View {
-        Toggle(label, isOn: isOn)
-            .toggleStyle(.switch)
+        HStack {
+            Text(label)
+            Spacer(minLength: 16)
+            Toggle(label, isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
     }
 
     private func shortcutRow(_ label: String, shortcut: String, configurable: Bool) -> some View {
@@ -721,13 +812,11 @@ public struct SettingsView: View {
 
     private func sectionIcon(_ section: SettingsSection) -> String {
         switch section {
-        case .features: "square.stack.3d.up"
-        case .advanced: "slider.horizontal.3"
-        case .excludedApps: "eye.slash"
-        case .app: "gearshape"
-        case .keyboardShortcuts: "keyboard"
-        case .troubleshooting: "stethoscope"
-        case .about: "info.circle"
+        case .general: "gearshape"
+        case .desktops: "rectangle.3.group"
+        case .switcher: "macwindow.on.rectangle"
+        case .shortcuts: "keyboard"
+        case .support: "questionmark.circle"
         }
     }
 }
