@@ -15,6 +15,7 @@ KNOWN_HOSTS="$SHARE_DIR/known_hosts"
 MEDIA_DIR="$PROJECT_DIR/docs/media"
 DISPLAY_MODE="${DEBUT_DEMO_DISPLAY:-1440x900}"
 GIF_WIDTH="${DEBUT_DEMO_GIF_WIDTH:-1440}"
+GIF_COLORS="${DEBUT_DEMO_GIF_COLORS:-128}"
 STILL_WIDTH="${DEBUT_DEMO_STILL_WIDTH:-820}"
 
 usage() {
@@ -23,14 +24,14 @@ Usage: scripts/demo-capture.sh [--clips a,b,c] [--keep-raw]
 
 Records the README media in the Tart guest and converts it into docs/media.
 Requires the VM from scripts/tart-e2e.sh prepare, plus ffmpeg on the host.
-The default clip is command-tab; use --clips to select other demo sequences.
+The default captures the cover and all four README demos.
 
 Overrides: DEBUT_TART_VM, DEBUT_TART_SHARE, DEBUT_DEMO_DISPLAY, DEBUT_DEMO_GIF_WIDTH,
-           DEBUT_DEMO_STILL_WIDTH
+           DEBUT_DEMO_GIF_COLORS, DEBUT_DEMO_STILL_WIDTH
 EOF
 }
 
-CLIPS="command-tab"
+CLIPS="cover,command-tab,organize-windows,option-tab,faster-space-switching"
 KEEP_RAW=0
 while (( $# > 0 )); do
     case "$1" in
@@ -48,6 +49,13 @@ tart list --source local --quiet | grep -Fqx "$VM_NAME" || {
     echo "Tart VM $VM_NAME does not exist. Run scripts/tart-e2e.sh prepare first." >&2
     exit 1
 }
+
+# Pin the visualizer so captures are reproducible. It is never installed on the host.
+mkdir -p "$SHARE_DIR"
+if [[ ! -f "$SHARE_DIR/KeyCastr-0.11.1.app.zip" ]]; then
+    curl -fL https://github.com/keycastr/keycastr/releases/download/v0.11.1/KeyCastr.app.zip \
+        -o "$SHARE_DIR/KeyCastr-0.11.1.app.zip"
+fi
 
 echo "Building Debut and the demo driver on the host..."
 "$PROJECT_DIR/scripts/build-app.sh"
@@ -124,7 +132,7 @@ RAW_DIR="$SHARE_DIR/media"
 
 echo "Converting..."
 mkdir -p "$MEDIA_DIR"
-# The cover is a tightly framed capture of the actual overlay window on a plain light canvas.
+# The cover preserves the actual overlay alpha and leaves margin around its shadow.
 # Keep its text lossless in PNG; onboarding stills retain their existing JPEG format.
 for still in "$RAW_DIR"/*.png; do
     [[ -e "$still" ]] || continue
@@ -150,12 +158,18 @@ done
 for clip in "$RAW_DIR"/*.mov; do
     [[ -e "$clip" ]] || continue
     name="$(basename "${clip%.mov}")"
-    [[ "$name" == onboarding-* ]] && continue
+    [[ "$name" == onboarding-* || "$name" == speed-* ]] && continue
     ffmpeg -loglevel error -y -i "$clip" \
-        -vf "fps=15,scale=$GIF_WIDTH:-1:flags=lanczos,mpdecimate,split[a][b];[a]palettegen=max_colors=256:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
+        -vf "fps=15,scale=$GIF_WIDTH:-1:flags=lanczos,mpdecimate,split[a][b];[a]palettegen=max_colors=$GIF_COLORS:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
         -fps_mode vfr -gifflags +transdiff+offsetting -loop 0 -final_delay 180 "$MEDIA_DIR/$name.gif"
     echo "  $name.gif $(du -h "$MEDIA_DIR/$name.gif" | cut -f1)"
 done
+
+if [[ -f "$RAW_DIR/speed-native.mov" && -f "$RAW_DIR/speed-instant.mov" ]]; then
+    ffmpeg -loglevel error -y -i "$RAW_DIR/speed-native.mov" -i "$RAW_DIR/speed-instant.mov" \
+        -filter_complex "[0:v]fps=15,scale=720:450:flags=lanczos,setpts=PTS-STARTPTS,pad=720:498:0:48:color=0x15171b,drawtext=text='macOS default':fontfile=/System/Library/Fonts/Helvetica.ttc:fontsize=26:fontcolor=white:x=(w-tw)/2:y=10[a];[1:v]fps=15,scale=720:450:flags=lanczos,setpts=PTS-STARTPTS,pad=720:498:0:48:color=0x15171b,drawtext=text='Instant':fontfile=/System/Library/Fonts/Helvetica.ttc:fontsize=26:fontcolor=white:x=(w-tw)/2:y=10[b];[a][b]hstack=inputs=2,mpdecimate,split[c][d];[c]palettegen=max_colors=$GIF_COLORS:stats_mode=diff[p];[d][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
+        -fps_mode vfr -gifflags +transdiff+offsetting -loop 0 -final_delay 180 "$MEDIA_DIR/faster-space-switching.gif"
+fi
 
 if [[ -f "$RAW_DIR/onboarding-native.mov" && -f "$RAW_DIR/onboarding-instant.mov" ]]; then
     ffmpeg -loglevel error -y -i "$RAW_DIR/onboarding-native.mov" -i "$RAW_DIR/onboarding-instant.mov" \
