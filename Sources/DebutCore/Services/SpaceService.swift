@@ -132,32 +132,6 @@ public enum FrontProcessManagement {
         windowID: CGWindowID,
         ownerPID: pid_t
     ) -> FrontWindowDeliveryTrace {
-        frontWithTrace(
-            windowID: windowID,
-            ownerPID: ownerPID,
-            selectsWindowBeforeFronting: false
-        )
-    }
-
-    /// Native application activation chooses a Space from the app's key window. Select the
-    /// requested window before moving the process globally to the front, then repeat the key
-    /// request afterwards so the chosen window also owns the keyboard when the transition lands.
-    public static func frontForNativeDesktopTransition(
-        windowID: CGWindowID,
-        ownerPID: pid_t
-    ) -> Bool {
-        frontWithTrace(
-            windowID: windowID,
-            ownerPID: ownerPID,
-            selectsWindowBeforeFronting: true
-        ).accepted
-    }
-
-    private static func frontWithTrace(
-        windowID: CGWindowID,
-        ownerPID: pid_t,
-        selectsWindowBeforeFronting: Bool
-    ) -> FrontWindowDeliveryTrace {
         let readiness = readiness
         guard let slpsSetFrontProcessWithOptions, let getProcessForPID else {
             return FrontWindowDeliveryTrace(
@@ -182,9 +156,6 @@ public enum FrontProcessManagement {
                 processSerialNumberSymbolResolved: readiness.processSerialNumberResolved,
                 keyWindowEventSymbolResolved: readiness.eventRecordPostResolved
             )
-        }
-        if selectsWindowBeforeFronting {
-            _ = makeKeyWindow(windowID: windowID, of: &psn)
         }
         let frontStatus = slpsSetFrontProcessWithOptions(&psn, windowID, kSLPSUserGenerated)
         guard frontStatus == .success else {
@@ -433,11 +404,43 @@ extension SpaceSwitchDirection: Equatable {}
 ///
 /// A far target is deliberately not represented as one large gesture. Dock owns an
 /// asynchronous state machine, so Debut confirms this hop before planning another one.
+enum SpaceSwitchAnimation: Equatable {
+    case configured
+    case system
+
+    /// A normal macOS desktop slide is about four tenths of a second. Keep that timing
+    /// independent of Debut's speed slider so disabling the feature actually disables the
+    /// configured acceleration instead of merely routing through another activation API.
+    static let systemDuration: TimeInterval = 0.4
+
+    func duration(configuredDuration: TimeInterval) -> TimeInterval {
+        switch self {
+        case .configured: configuredDuration
+        case .system: Self.systemDuration
+        }
+    }
+}
+
 struct SpaceSwitchHop: Equatable {
     let stackID: String
     let fromDesktopID: CGSSpaceID
     let toDesktopID: CGSSpaceID
     let direction: SpaceSwitchDirection
+    let animation: SpaceSwitchAnimation
+
+    init(
+        stackID: String,
+        fromDesktopID: CGSSpaceID,
+        toDesktopID: CGSSpaceID,
+        direction: SpaceSwitchDirection,
+        animation: SpaceSwitchAnimation = .configured
+    ) {
+        self.stackID = stackID
+        self.fromDesktopID = fromDesktopID
+        self.toDesktopID = toDesktopID
+        self.direction = direction
+        self.animation = animation
+    }
 
     /// Every adjacent instant hop is the same committed flick. Distance lives in the number
     /// of confirmed hops, never in velocity — multiplying both caused the edge overshoot.
@@ -467,6 +470,7 @@ struct SpaceSwitchCoordinator {
         var desiredTarget: DesktopLocation
         var originDesktopID: CGSSpaceID
         var expectedDesktopID: CGSSpaceID
+        var animation: SpaceSwitchAnimation
     }
 
     private var pendingByStackID: [String: PendingSwitch] = [:]
@@ -477,7 +481,8 @@ struct SpaceSwitchCoordinator {
 
     mutating func request(
         to target: DesktopLocation,
-        in topology: SpaceTopology
+        in topology: SpaceTopology,
+        animation: SpaceSwitchAnimation = .configured
     ) -> SpaceSwitchRequestResult {
         guard let stack = topology.stack(id: target.stackID),
               stack.desktopIDs.indices.contains(target.index),
@@ -488,18 +493,25 @@ struct SpaceSwitchCoordinator {
 
         if var pending = pendingByStackID[target.stackID] {
             pending.desiredTarget = target
+            pending.animation = animation
             pendingByStackID[target.stackID] = pending
             return .coalesced
         }
 
         guard currentDesktopID != target.desktopID else { return .noChange }
-        guard let hop = Self.nextHop(from: currentIndex, toward: target, in: stack) else {
+        guard let hop = Self.nextHop(
+            from: currentIndex,
+            toward: target,
+            in: stack,
+            animation: animation
+        ) else {
             return .declined
         }
         pendingByStackID[target.stackID] = PendingSwitch(
             desiredTarget: target,
             originDesktopID: hop.fromDesktopID,
-            expectedDesktopID: hop.toDesktopID
+            expectedDesktopID: hop.toDesktopID,
+            animation: animation
         )
         return .post(hop)
     }
@@ -539,7 +551,8 @@ struct SpaceSwitchCoordinator {
             guard let hop = Self.nextHop(
                 from: currentIndex,
                 toward: pending.desiredTarget,
-                in: stack
+                in: stack,
+                animation: pending.animation
             ) else {
                 pendingByStackID.removeValue(forKey: stackID)
                 continue
@@ -547,7 +560,8 @@ struct SpaceSwitchCoordinator {
             pendingByStackID[stackID] = PendingSwitch(
                 desiredTarget: pending.desiredTarget,
                 originDesktopID: hop.fromDesktopID,
-                expectedDesktopID: hop.toDesktopID
+                expectedDesktopID: hop.toDesktopID,
+                animation: pending.animation
             )
             nextHops.append(hop)
         }
@@ -572,7 +586,8 @@ struct SpaceSwitchCoordinator {
     private static func nextHop(
         from currentIndex: Int,
         toward target: DesktopLocation,
-        in stack: SpaceStackDescriptor
+        in stack: SpaceStackDescriptor,
+        animation: SpaceSwitchAnimation
     ) -> SpaceSwitchHop? {
         guard let plan = SpaceSwitchPlan(
             from: currentIndex,
@@ -585,7 +600,8 @@ struct SpaceSwitchCoordinator {
             stackID: stack.id,
             fromDesktopID: stack.desktopIDs[currentIndex],
             toDesktopID: stack.desktopIDs[nextIndex],
-            direction: plan.direction
+            direction: plan.direction,
+            animation: animation
         )
     }
 }
@@ -1015,6 +1031,10 @@ public protocol SpaceSwitching: AnyObject, Sendable {
     func desktopIndexes(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: Int]
     @discardableResult func switchToDesktop(index: Int) -> Bool
     @discardableResult func switchToDesktop(_ location: DesktopLocation) -> Bool
+    /// Switches through Dock at macOS's standard slide duration, ignoring Debut's configured
+    /// acceleration. This is used for Debut-owned selections while the speed feature is off;
+    /// physical system shortcuts remain completely unhandled by Debut.
+    @discardableResult func switchToDesktopWithSystemAnimation(_ location: DesktopLocation) -> Bool
     /// True from the first posted hop until WindowServer confirms the final target.
     func isSwitchInFlight(stackID: String) -> Bool
     /// Advances a confirmed multi-hop switch from the topology macOS now reports.
@@ -1096,6 +1116,11 @@ public extension SpaceSwitching {
     @discardableResult
     func switchToDesktop(_ location: DesktopLocation) -> Bool {
         switchToDesktop(index: location.index)
+    }
+
+    @discardableResult
+    func switchToDesktopWithSystemAnimation(_ location: DesktopLocation) -> Bool {
+        switchToDesktop(location)
     }
 
     func moveWindow(windowID: CGWindowID, to location: DesktopLocation,
@@ -1429,10 +1454,22 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     /// separate Spaces.
     @discardableResult
     public func switchToDesktop(_ location: DesktopLocation) -> Bool {
+        requestSwitch(to: location, animation: .configured)
+    }
+
+    @discardableResult
+    public func switchToDesktopWithSystemAnimation(_ location: DesktopLocation) -> Bool {
+        requestSwitch(to: location, animation: .system)
+    }
+
+    private func requestSwitch(
+        to location: DesktopLocation,
+        animation: SpaceSwitchAnimation
+    ) -> Bool {
         guard canSwitchSpaces else { return false }
         let topology = spaceTopology()
         let request = switchCoordinatorLock.withLock {
-            switchCoordinator.request(to: location, in: topology)
+            switchCoordinator.request(to: location, in: topology, animation: animation)
         }
 
         switch request {
@@ -1490,7 +1527,8 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             return CGPoint(x: bounds.midX, y: bounds.midY)
         }
 
-        let samples = DockSwipeAnimation.samples(duration: switchDuration)
+        let duration = hop.animation.duration(configuredDuration: switchDuration)
+        let samples = DockSwipeAnimation.samples(duration: duration)
         guard !samples.isEmpty else {
             return DockSwipeEvent.postSwitch(
                 direction: hop.direction,
