@@ -3376,7 +3376,6 @@ if moveSpaces.desktopCount() >= 4, let fixture = moveFixture {
         settings.features.workspaceIsolation = true
         settings.features.numberShortcuts = true
         settings.excludedBundleIDs.removeAll { $0 == fixture.ownerBundleID }
-        settings.quickSwitchExcludedBundleIDs.removeAll { $0 == fixture.ownerBundleID }
         settings.spaceSwitchDuration = Double(milliseconds) / 1_000
         try? settingsStore.saveSettings(settings)
         clearDiagnosticFile()

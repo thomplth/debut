@@ -154,7 +154,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var overlayPresentationDelay: TimeInterval
     public var heldCycleMinimumInterval: TimeInterval
     public var keyBindings: KeyBindings
-    public var quickSwitchExcludedBundleIDs: [String]
     public var quickSwitchModifiers: ShortcutModifiers
     public var quickSwitchSameApplicationModifiers: ShortcutModifiers
 
@@ -188,7 +187,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
         self.heldCycleMinimumInterval = Self.defaultHeldCycleMinimumInterval
         self.keyBindings = KeyBindings()
-        self.quickSwitchExcludedBundleIDs = []
         self.quickSwitchModifiers = .control
         self.quickSwitchSameApplicationModifiers = ShortcutModifiers(
             control: true,
@@ -265,10 +263,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
             forKey: .spaceSwitchDuration
         ) ?? Self.defaultSpaceSwitchDuration
         keyBindings = try container.decodeIfPresent(KeyBindings.self, forKey: .keyBindings) ?? KeyBindings()
-        quickSwitchExcludedBundleIDs = try container.decodeIfPresent(
-            [String].self,
-            forKey: .quickSwitchExcludedBundleIDs
-        ) ?? []
         quickSwitchModifiers = try container.decodeIfPresent(
             ShortcutModifiers.self,
             forKey: .quickSwitchModifiers
@@ -285,9 +279,5 @@ public struct AppSettings: Codable, Sendable, Equatable {
             TimeInterval.self,
             forKey: .previewCacheTTL
         ) ?? Self.defaultPreviewCacheTTL
-    }
-
-    public func isQuickSwitchExcluded(bundleID: String) -> Bool {
-        quickSwitchExcludedBundleIDs.contains(bundleID)
     }
 }

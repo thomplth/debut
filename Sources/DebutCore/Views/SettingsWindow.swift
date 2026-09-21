@@ -364,7 +364,6 @@ public struct SettingsView: View {
     }
 
     @State private var selectedAppToExclude: String = ""
-    @State private var selectedQuickSwitchExcludedApp: String = ""
 
     private var excludedAppsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -605,66 +604,6 @@ public struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Text("Quick switch exclusions")
-                .font(.headline)
-                .padding(.top, 8)
-
-            Text("Let these apps handle numbered shortcuts and Control-arrow while frontmost.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack {
-                Picker("Add app", selection: $selectedQuickSwitchExcludedApp) {
-                    Text("Select an app...").tag("")
-                    ForEach(
-                        runningAppNames(
-                            excluding: viewModel.settings.quickSwitchExcludedBundleIDs
-                        ),
-                        id: \.bundleID
-                    ) { app in
-                        Text(app.name).tag(app.bundleID)
-                    }
-                }
-                .frame(maxWidth: 250)
-
-                Button("Add") {
-                    guard !selectedQuickSwitchExcludedApp.isEmpty,
-                          !viewModel.settings.quickSwitchExcludedBundleIDs.contains(
-                            selectedQuickSwitchExcludedApp
-                          )
-                    else { return }
-                    viewModel.settings.quickSwitchExcludedBundleIDs.append(
-                        selectedQuickSwitchExcludedApp
-                    )
-                    selectedQuickSwitchExcludedApp = ""
-                }
-                .disabled(selectedQuickSwitchExcludedApp.isEmpty)
-            }
-
-            if !viewModel.settings.quickSwitchExcludedBundleIDs.isEmpty {
-                ForEach(viewModel.settings.quickSwitchExcludedBundleIDs, id: \.self) { bundleID in
-                    HStack {
-                        AppIconImage(bundleID: bundleID, name: bundleID, iconSize: 20)
-                            .frame(width: 20, height: 20)
-                        Text(appName(for: bundleID))
-                        Spacer()
-                        Text(bundleID)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Button(role: .destructive) {
-                            viewModel.settings.quickSwitchExcludedBundleIDs.removeAll {
-                                $0 == bundleID
-                            }
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                    .padding(8)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                }
             }
 
             Text("Space Manager session")

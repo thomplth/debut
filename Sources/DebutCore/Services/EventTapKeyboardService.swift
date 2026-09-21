@@ -34,7 +34,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private var storedOverlayVisible: Bool = false
     private var storedKeyBindings: KeyBindings = KeyBindings()
     private var storedExcludedBundleIDs: Set<String> = []
-    private var storedQuickSwitchExcludedBundleIDs: Set<String> = []
     private var storedQuickSwitchModifiers: ShortcutModifiers = .control
     private var storedQuickSwitchSameApplicationModifiers = ShortcutModifiers(
         control: true,
@@ -61,10 +60,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     public var excludedBundleIDs: Set<String> {
         get { configurationLock.withLock { storedExcludedBundleIDs } }
         set { configurationLock.withLock { storedExcludedBundleIDs = newValue } }
-    }
-    public var quickSwitchExcludedBundleIDs: Set<String> {
-        get { configurationLock.withLock { storedQuickSwitchExcludedBundleIDs } }
-        set { configurationLock.withLock { storedQuickSwitchExcludedBundleIDs = newValue } }
     }
     public var quickSwitchModifiers: ShortcutModifiers {
         get { configurationLock.withLock { storedQuickSwitchModifiers } }
@@ -323,10 +318,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         if type == .keyDown, features.controlArrows, desktopNavigationAvailable,
            flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]) == .maskControl,
            keyCode == Int64(kVK_LeftArrow) || keyCode == Int64(kVK_RightArrow) {
-            let excluded = configurationLock.withLock {
-                cachedFrontmostAppBundleIdentifier.map { storedQuickSwitchExcludedBundleIDs.contains($0) } ?? false
-            }
-            if excluded { return event }
             // The Dock owns this shortcut while an overview is visible. Query only after the
             // exact chord matches so ordinary keyboard delivery never pays for a window scan.
             if desktopNavigationBlocked() { return event }
@@ -341,9 +332,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             let quickSwitchConfiguration = configurationLock.withLock {
                 (
                     storedQuickSwitchModifiers,
-                    storedQuickSwitchSameApplicationModifiers,
-                    storedQuickSwitchExcludedBundleIDs,
-                    cachedFrontmostAppBundleIdentifier
+                    storedQuickSwitchSameApplicationModifiers
                 )
             }
             let spacePosition = Self.quickSwitchSpacePosition(
@@ -358,11 +347,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             )
             if let spacePosition = spacePosition ?? sameApplicationSpacePosition {
                 if quickSwitchKeysDown.contains(keyCode) { return nil }
-                if !quickSwitchConfiguration.2.isEmpty,
-                   let bundleID = quickSwitchConfiguration.3,
-                   quickSwitchConfiguration.2.contains(bundleID) {
-                    return event
-                }
                 if quickSwitchKeysDown.insert(keyCode).inserted {
                     let keyEvent: DebutKeyEvent = sameApplicationSpacePosition != nil
                         ? .switchToSpaceKeepingCurrentApplication(spacePosition)

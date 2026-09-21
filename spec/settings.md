@@ -32,7 +32,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Preview refresh / cache age | Only windows that may have changed / 60 seconds |
 | Numbered / same-app numbered modifiers | Control / Control-Option |
 | Launch at login / show in Dock | On / On |
-| Excluded apps / quick-switch exclusions | Empty |
+| Excluded apps | Empty |
 | Share anonymous usage and performance data | On, delivery gated until onboarding completion |
 
 Cache age is evaluated when capture work is requested; it is not a recurring
@@ -53,8 +53,8 @@ wallpaper. Accessibility is required for global input and window control.
 Numbered shortcuts, Control-arrow, and trackpad interception are independent.
 The duration applies to desktop changes requested through Debut's shared switching
 path. A trackpad desktop gesture commits one adjacent hop. Other gestures and
-unclaimed shortcuts keep their native behavior. Quick-switch exclusions apply
-to numbered and Control-arrow inputs while a configured app is frontmost.
+unclaimed shortcuts keep their native behavior. Enabled numbered and
+Control-arrow shortcuts apply regardless of which app is frontmost.
 Mission Control, App Exposé, and Show Desktop retain their native navigation;
 unsupported synthetic switching is passed through rather than swallowed.
 
@@ -73,7 +73,7 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | Excluded Apps | Running-app picker for applications omitted from window management. |
 | App | Login launch and Dock visibility. The menu-bar item remains available with the Dock icon off. |
 | Privacy | Sharing switch and preview of the exact allowlisted session-summary payload. |
-| Keyboard Shortcuts | Activation/session bindings, numbered modifier sets, hold delay, repeat pace, shortcut exclusions, a confirmed restore-defaults action, and reference for fixed move chords. |
+| Keyboard Shortcuts | Activation/session bindings, numbered modifier sets, hold delay, repeat pace, a confirmed restore-defaults action, and reference for fixed move chords. |
 | Advanced | Main-display overlay placement, glass, stage/card geometry, adaptive sizing, selector appearance, and preview refresh/cache policy. |
 | Troubleshooting | Export local diagnostics or reset window assignments against the real desktop list while preserving settings. |
 | About | Version and update check. |
