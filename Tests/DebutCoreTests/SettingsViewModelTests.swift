@@ -27,6 +27,7 @@ struct SettingsViewModelTests {
         #expect(vm.settings.overlayPresentationDelay == 0.1)
         #expect(vm.settings.spaceSwitchDuration == 0)
         #expect(vm.settings.excludedBundleIDs.isEmpty)
+        #expect(!vm.settings.shareAnonymousTelemetry)
         #expect(vm.settings.quickSwitchSameApplicationModifiers == ShortcutModifiers(
             control: true,
             option: true

@@ -333,9 +333,8 @@ public actor DiskTelemetryQueue: TelemetryQueue {
 /// Decides whether telemetry may send, given the user's setting and how far
 /// through first-run they are.
 ///
-/// The setting ships on, but the toggle is only meaningful once the user has
-/// seen it. Sending before onboarding finishes would collect from someone who
-/// was never shown the choice, so completion is what turns the setting live.
+/// The setting ships off. Even after a user opts in, sending stays gated until
+/// onboarding finishes so the choice is presented before the first delivery.
 public enum TelemetryActivationPolicy {
     public static func shouldSend(setting: Bool, onboardingCompleted: Bool) -> Bool {
         setting && onboardingCompleted

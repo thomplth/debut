@@ -4,19 +4,29 @@ import Testing
 
 @Suite("Anonymous telemetry")
 struct TelemetryTests {
-    @Test("Settings migration defaults to sharing and remains codable")
+    @Test("Fresh and legacy settings default to no sharing while explicit choices remain codable")
     func settingsMigration() throws {
         var settings = AppSettings()
-        #expect(settings.shareAnonymousTelemetry)
-        settings.shareAnonymousTelemetry = false
-        let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
-        #expect(!decoded.shareAnonymousTelemetry)
+        #expect(!settings.shareAnonymousTelemetry)
+        let decodedOptOut = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONEncoder().encode(settings)
+        )
+        #expect(!decodedOptOut.shareAnonymousTelemetry)
+
+        settings.shareAnonymousTelemetry = true
+        let decodedOptIn = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONEncoder().encode(settings)
+        )
+        #expect(decodedOptIn.shareAnonymousTelemetry)
 
         let current = try JSONSerialization.jsonObject(with: JSONEncoder().encode(AppSettings())) as! [String: Any]
         var legacy = current
         legacy.removeValue(forKey: "shareAnonymousTelemetry")
         let legacyData = try JSONSerialization.data(withJSONObject: legacy)
-        #expect(try JSONDecoder().decode(AppSettings.self, from: legacyData).shareAnonymousTelemetry)
+        let decodedLegacy = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+        #expect(!decodedLegacy.shareAnonymousTelemetry)
     }
 
     @Test("Payload contains only approved aggregate dimensions")
