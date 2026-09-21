@@ -67,6 +67,33 @@ public struct StageData: Sendable, Identifiable {
     public let index: Int
 }
 
+/// A cross-stage move initiated by the overlay's Up/Down shortcuts. Pointer drops deliberately
+/// never publish this event: they already own a separate cursor-preview and settling handoff.
+public struct KeyboardWindowMoveAnimation: Sendable, Equatable {
+    public let sequence: Int
+    public let windowID: CGWindowID
+    public let fromSpaceIndex: Int
+    public let fromWindowIndex: Int
+    public let toSpaceIndex: Int
+    public let toWindowIndex: Int
+
+    public init(
+        sequence: Int,
+        windowID: CGWindowID,
+        fromSpaceIndex: Int,
+        fromWindowIndex: Int,
+        toSpaceIndex: Int,
+        toWindowIndex: Int
+    ) {
+        self.sequence = sequence
+        self.windowID = windowID
+        self.fromSpaceIndex = fromSpaceIndex
+        self.fromWindowIndex = fromWindowIndex
+        self.toSpaceIndex = toSpaceIndex
+        self.toWindowIndex = toWindowIndex
+    }
+}
+
 public struct StageOverlayViewModel: Sendable {
     public var tutorialScope: TutorialSwitcherScope?
     public var tutorialCoachmark: TutorialCoachmark?
@@ -83,6 +110,7 @@ public struct StageOverlayViewModel: Sendable {
     /// Test-only presentation mode used by the single-display Tart guest so screenshots can
     /// review the display indicator without changing normal display-stack behavior.
     public var forceDisplayStackIndicator: Bool
+    public var keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation?
 
     public var displayStackName: String {
         spaceManager.selectedSpaceStack?.displayName ?? "Display"
@@ -107,7 +135,7 @@ public struct StageOverlayViewModel: Sendable {
 
     public var displayStackShortcutSpacing: CGFloat { 3.5 }
 
-    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], windowSizes: [CGWindowID: CGSize] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, forceDisplayStackIndicator: Bool = false) {
+    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], windowSizes: [CGWindowID: CGSize] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, forceDisplayStackIndicator: Bool = false, keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation? = nil) {
         self.spaceManager = spaceManager
         self.activeSpaceIndex = activeSpaceIndex
         self.selectedWindowIndex = selectedWindowIndex
@@ -116,6 +144,7 @@ public struct StageOverlayViewModel: Sendable {
         self.appearance = appearance
         self.wallpaperLuminance = wallpaperLuminance
         self.forceDisplayStackIndicator = forceDisplayStackIndicator
+        self.keyboardWindowMoveAnimation = keyboardWindowMoveAnimation
     }
 
     public var stages: [StageData] {

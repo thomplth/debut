@@ -286,6 +286,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var isOverlaySessionYielded: Bool = false
     public var selectedSpaceIndex: Int = 0
     public var selectedWindowIndex: Int = 0
+    public private(set) var keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation?
+    private var keyboardWindowMoveSequence = 0
 
     /// Which switcher the one overlay session is presenting. The event tap tracks a single
     /// session, so the two can never be open at once.
@@ -3197,6 +3199,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             windowIndex: 0,
             source: .keyboard,
             activatedAt: clock()
+        )
+        keyboardWindowMoveSequence += 1
+        keyboardWindowMoveAnimation = KeyboardWindowMoveAnimation(
+            sequence: keyboardWindowMoveSequence,
+            windowID: window.windowID,
+            fromSpaceIndex: selectedSpaceIndex,
+            fromWindowIndex: selectedWindowIndex,
+            toSpaceIndex: targetSpaceIndex,
+            toWindowIndex: 0
         )
         diag.report("window_move_previewed_by_key", level: .transient, details: [
             "windowID": "\(window.windowID)",
