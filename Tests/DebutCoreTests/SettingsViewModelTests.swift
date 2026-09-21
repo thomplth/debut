@@ -9,6 +9,7 @@ struct SettingsViewModelTests {
     func defaults() {
         let vm = SettingsViewModel()
         #expect(vm.settings.launchAtLogin == true)
+        #expect(vm.settings.features.fasterDesktopSwitching)
         #expect(vm.settings.features.controlArrows)
         #expect(vm.settings.features.trackpadSwipes)
         #expect(vm.settings.glassStyle == .clear)

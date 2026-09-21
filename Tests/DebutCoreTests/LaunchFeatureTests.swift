@@ -13,9 +13,38 @@ struct LaunchFeatureTests {
         let restored = try JSONDecoder().decode(AppSettings.self, from: JSONSerialization.data(withJSONObject: json))
         #expect(restored.features.windowPreviews)
         #expect(restored.features.workspaceIsolation)
+        #expect(restored.features.fasterDesktopSwitching)
         #expect(restored.features.numberShortcuts)
         #expect(restored.features.controlArrows)
         #expect(restored.features.trackpadSwipes)
+    }
+
+    @Test("Existing feature preferences enable faster desktop switching")
+    func fasterDesktopSwitchingMigration() throws {
+        let data = try JSONEncoder().encode(AppSettings())
+        var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var features = try #require(json["features"] as? [String: Any])
+        features.removeValue(forKey: "fasterDesktopSwitching")
+        json["features"] = features
+
+        let restored = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONSerialization.data(withJSONObject: json)
+        )
+
+        #expect(restored.features.fasterDesktopSwitching)
+    }
+
+    @Test("Disabling faster desktop switching turns off every desktop override")
+    func disablingFasterDesktopSwitchingDisablesOverrides() {
+        var features = FeatureSettings()
+
+        features.setFasterDesktopSwitching(false)
+
+        #expect(!features.fasterDesktopSwitching)
+        #expect(!features.numberShortcuts)
+        #expect(!features.controlArrows)
+        #expect(!features.trackpadSwipes)
     }
 
     @Test("Choices survive settings round trip independently")
@@ -23,9 +52,7 @@ struct LaunchFeatureTests {
         var settings = AppSettings()
         settings.features.windowPreviews = false
         settings.features.workspaceIsolation = false
-        settings.features.numberShortcuts = false
-        settings.features.controlArrows = true
-        settings.features.trackpadSwipes = true
+        settings.features.setFasterDesktopSwitching(false)
         #expect(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings)) == settings)
     }
 

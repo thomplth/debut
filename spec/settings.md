@@ -17,6 +17,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | --- | --- |
 | Window previews | On |
 | Workspace isolation (Command-Tab and same-app cycling) | On |
+| Faster desktop transitions | On |
 | Numbered desktop shortcuts | On |
 | Faster Control-arrow switching | On |
 | Faster trackpad desktop swipe | On |
@@ -50,11 +51,14 @@ cards show icons and titles. Screen Recording enables screenshot previews and
 can affect title availability. Debut no longer captures or paints desktop
 wallpaper. Accessibility is required for global input and window control.
 
-Numbered shortcuts, Control-arrow, and trackpad interception are independent.
-The duration applies to desktop changes requested through Debut's shared switching
-path. A trackpad desktop gesture commits one adjacent hop. Other gestures and
-unclaimed shortcuts keep their native behavior. Enabled numbered and
-Control-arrow shortcuts apply regardless of which app is frontmost.
+Faster desktop transitions is the parent for numbered shortcuts, Control-arrow,
+trackpad interception, and Debut's synthetic transition when selecting a window
+on another desktop. Turning it off clears and disables the three child overrides,
+disables the duration control, and lets macOS perform cross-desktop window
+activation with its original transition. The duration applies only while the
+parent is enabled. A trackpad desktop gesture commits one adjacent hop. Other
+gestures and unclaimed shortcuts keep their native behavior. Enabled numbered
+and Control-arrow shortcuts apply regardless of which app is frontmost.
 Mission Control, App Exposé, and Show Desktop retain their native navigation;
 unsupported synthetic switching is passed through rather than swallowed.
 
@@ -69,7 +73,7 @@ changes save immediately and update shared onboarding controls and menu checkmar
 
 | Page | Contents |
 | --- | --- |
-| Features | Preview and workspace switches, three desktop-navigation switches, duration, and desktop indicator. |
+| Features | Preview and workspace switches, a faster-desktop parent with three navigation overrides, duration, and desktop indicator. |
 | Excluded Apps | Running-app picker for applications omitted from window management. |
 | App | Login launch and Dock visibility. The menu-bar item remains available with the Dock icon off. |
 | Privacy | Sharing switch and preview of the exact allowlisted session-summary payload. |
