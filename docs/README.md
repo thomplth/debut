@@ -18,6 +18,8 @@ select windows across desktops, and navigate desktops faster.
 - [Agent guidance](../AGENTS.md): concise architectural constraints.
 - [Performance observability](performance-observability.md): local measurements
   and benchmark commands.
+- [README media capture](readme-capture.md): visual baseline, scoped capture in a
+  disposable guest, conversion, and verification.
 - [Release verification](release-verification.md): channels, publication gates,
   update rehearsal, and recovery.
 - [Privacy](privacy.md) and [privacy release checklist](privacy-release-checklist.md).
