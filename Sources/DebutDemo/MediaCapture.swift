@@ -149,7 +149,7 @@ func startDemoMovie(at url: URL) throws -> DemoMovieRecorder {
 }
 
 /// Capture the real overlay alone. A display screenshot would bake the desktop into the cover.
-func captureOverlayCover(to url: URL) throws {
+func captureOverlayCover(to url: URL, dark: Bool = false) throws {
     try awaitCapture {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         guard let window = content.windows.first(where: {
@@ -169,7 +169,7 @@ func captureOverlayCover(to url: URL) throws {
         configuration.sourceRect = window.frame
         let rendered = try await SCScreenshotManager.captureImage(
             contentFilter: SCContentFilter(display: display, excludingWindows: []), configuration: configuration)
-        let cropped = try overlayCoverImage(image, renderedOnWhite: rendered)
+        let cropped = try overlayCoverImage(image, renderedImage: rendered, backdropWhite: dark ? 0 : 255)
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
         else { throw CaptureFailure.failed }
         CGImageDestinationAddImage(destination, cropped, nil)

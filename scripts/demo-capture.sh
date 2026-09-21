@@ -137,9 +137,9 @@ mkdir -p "$MEDIA_DIR"
 for still in "$RAW_DIR"/*.png; do
     [[ -e "$still" ]] || continue
     name="$(basename "${still%.png}")"
-    if [[ "$name" == overlay ]]; then
-        cp "$still" "$MEDIA_DIR/overlay.png"
-        echo "  overlay.png $(du -h "$MEDIA_DIR/overlay.png" | cut -f1)"
+    if [[ "$name" == overlay || "$name" == overlay-dark ]]; then
+        cp "$still" "$MEDIA_DIR/$name.png"
+        echo "  $name.png $(du -h "$MEDIA_DIR/$name.png" | cut -f1)"
         continue
     fi
     crop=""

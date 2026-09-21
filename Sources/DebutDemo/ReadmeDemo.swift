@@ -38,6 +38,130 @@ func dismissDemoOnboarding() {
     }
 }
 
+private func findDemoElement(_ root: AXUIElement, depth: Int = 0,
+                             matching predicate: (AXUIElement) -> Bool) -> AXUIElement? {
+    guard depth < 16 else { return nil }
+    if predicate(root) { return root }
+    for child in axValue(root, kAXChildrenAttribute) as? [AXUIElement] ?? [] {
+        if let found = findDemoElement(child, depth: depth + 1, matching: predicate) { return found }
+    }
+    return nil
+}
+
+/// Select a named city rather than the location inferred from the capture machine's network.
+func prepareDemoWeather() {
+    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.weather").first else {
+        log("FAILED: Weather is not running"); exit(1)
+    }
+    app.activate(options: [])
+    wait(1)
+    let root = AXUIElementCreateApplication(app.processIdentifier)
+    guard let search = findDemoElement(root, matching: {
+        (axValue($0, kAXRoleAttribute) as? String) == kAXTextFieldRole
+    }) else { log("FAILED: Weather search is unavailable"); exit(1) }
+    AXUIElementSetAttributeValue(search, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    guard AXUIElementSetAttributeValue(search, kAXValueAttribute as CFString, "Cupertino" as CFString) == .success else {
+        log("FAILED: Weather search could not be set"); exit(1)
+    }
+    let deadline = Date().addingTimeInterval(15)
+    var result: AXUIElement?
+    while result == nil, Date() < deadline {
+        wait(0.25)
+        result = findDemoElement(root, matching: {
+            (axValue($0, kAXRoleAttribute) as? String) == kAXButtonRole &&
+            (axValue($0, kAXDescriptionAttribute) as? String)?.hasPrefix("Cupertino, CA") == true
+        })
+    }
+    guard let result, AXUIElementPerformAction(result, kAXPressAction as CFString) == .success else {
+        log("FAILED: Cupertino was not found in Weather"); exit(1)
+    }
+    wait(2)
+    if let add = findDemoElement(root, matching: {
+        (axValue($0, kAXRoleAttribute) as? String) == kAXButtonRole &&
+        (axValue($0, kAXDescriptionAttribute) as? String) == "Add"
+    }) { AXUIElementPerformAction(add, kAXPressAction as CFString) }
+    wait(1)
+    // Selecting an already-saved city leaves search open; return to its normal sidebar.
+    if let clear = findDemoElement(root, matching: {
+        (axValue($0, kAXRoleAttribute) as? String) == kAXButtonRole &&
+        (axValue($0, kAXDescriptionAttribute) as? String) == "Clear text"
+    }) { AXUIElementPerformAction(clear, kAXPressAction as CFString) }
+    postTap(Key.escape)
+    wait(0.5)
+    // Dismiss both forecast and menu-bar tips, which can appear after first use.
+    for _ in 0..<6 {
+        guard let close = findDemoElement(root, matching: {
+            (axValue($0, kAXRoleAttribute) as? String) == kAXButtonRole &&
+            (axValue($0, kAXIdentifierAttribute) as? String) == "xmark.circle.fill"
+        }) else { break }
+        AXUIElementPerformAction(close, kAXPressAction as CFString)
+        wait(0.3)
+    }
+    // Stock VM images can include saved example cities. Keep this fixture's list singular.
+    for _ in 0..<8 {
+        guard let list = findDemoElement(root, matching: {
+            (axValue($0, kAXDescriptionAttribute) as? String) == "Location List"
+        }) else { wait(1); continue }
+        guard let city = findDemoElement(list, matching: {
+            guard (axValue($0, kAXRoleAttribute) as? String) == kAXButtonRole,
+                  let label = axValue($0, kAXDescriptionAttribute) as? String else { return false }
+            return label.contains(",") && !label.hasPrefix("Cupertino,")
+        }) else { break }
+        guard AXUIElementPerformAction(city, kAXShowMenuAction as CFString) == .success else {
+            log("FAILED: could not open the example city's menu"); exit(1)
+        }
+        wait(0.3)
+        guard let delete = findDemoElement(root, matching: {
+            (axValue($0, kAXRoleAttribute) as? String) == kAXMenuItemRole &&
+            (axValue($0, kAXIdentifierAttribute) as? String) == "delete"
+        }), AXUIElementPerformAction(delete, kAXPressAction as CFString) == .success else {
+            log("FAILED: could not remove the extra example city"); exit(1)
+        }
+        wait(0.5)
+        if let confirmation = findDemoElement(root, matching: {
+            (axValue($0, kAXRoleAttribute) as? String) == kAXButtonRole &&
+            ((axValue($0, kAXTitleAttribute) as? String) == "Delete" ||
+             (axValue($0, kAXDescriptionAttribute) as? String) == "Delete")
+        }) {
+            AXUIElementPerformAction(confirmation, kAXPressAction as CFString)
+            // Weather rebuilds the sidebar after dismissing the confirmation sheet.
+            wait(2)
+        }
+    }
+    guard findDemoElement(root, matching: {
+        (axValue($0, kAXRoleAttribute) as? String) == kAXSheetRole
+    }) == nil, let list = findDemoElement(root, matching: {
+        (axValue($0, kAXDescriptionAttribute) as? String) == "Location List"
+    }), findDemoElement(list, matching: {
+        guard (axValue($0, kAXRoleAttribute) as? String) == kAXButtonRole,
+              let label = axValue($0, kAXDescriptionAttribute) as? String else { return false }
+        return label.contains(",") && !label.hasPrefix("Cupertino,")
+    }) == nil else {
+        log("FAILED: Weather still has a dialog or extra cities"); exit(1)
+    }
+    guard let windows = axValue(root, kAXWindowsAttribute) as? [AXUIElement],
+          windows.contains(where: { (axValue($0, kAXTitleAttribute) as? String) == "Cupertino" }) else {
+        log("FAILED: Weather is not showing Cupertino"); exit(1)
+    }
+    log("verified Weather: Cupertino")
+}
+
+func setDemoAppearance(dark: Bool) {
+    let value = dark ? "true" : "false"
+    let script = """
+    with timeout of 15 seconds
+        tell application "System Events" to tell appearance preferences
+            set dark mode to \(value)
+            if dark mode is not \(value) then error "Appearance did not change"
+        end tell
+    end timeout
+    """
+    guard run("/usr/bin/osascript", ["-e", script]) == 0 else {
+        log("FAILED: could not set the capture appearance"); exit(1)
+    }
+    wait(2)
+}
+
 struct ReadmeScene {
     let windows: [WindowInfo]
     let groups: [[WindowInfo]]
@@ -139,7 +263,7 @@ struct ReadmeScene {
         }
     }
 
-    func startKeys(fontSize: Int = 32) {
+    func startKeys(fontSize: Int = 64) {
         _ = run("/usr/bin/defaults", ["write", "io.github.keycastr", "default.fontSize", "-int", String(fontSize)])
         _ = run("/usr/bin/open", ["-g", "-a", "KeyCastr"])
         wait(1)
@@ -148,37 +272,10 @@ struct ReadmeScene {
     }
 }
 
-/// KeyCastr owns the keystrokes; a short caption makes modifier release explicit.
-@MainActor
-final class ReleaseCaption {
-    let panel: NSPanel
-    init(_ text: String) {
-        let screen = NSScreen.main!.frame
-        panel = NSPanel(contentRect: NSRect(x: screen.maxX - 430, y: 38, width: 390, height: 54),
-            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.backgroundColor = NSColor(calibratedWhite: 0.08, alpha: 0.92)
-        panel.isOpaque = false
-        panel.hasShadow = false
-        panel.level = .screenSaver
-        panel.hidesOnDeactivate = false
-        panel.ignoresMouseEvents = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 28, weight: .medium)
-        label.textColor = .white
-        label.alignment = .center
-        label.frame = NSRect(x: 8, y: 9, width: 374, height: 36)
-        panel.contentView?.addSubview(label)
-        panel.orderFrontRegardless()
-    }
-}
-
-func releaseWithCaption(_ modifier: String) {
-    let caption = MainActor.assumeIsolated { ReleaseCaption("Release \(modifier)") }
+func releaseDemoModifier() {
     wait(0.4)
     postFlags([])
     wait(1.1)
-    MainActor.assumeIsolated { caption.panel.orderOut(nil) }
 }
 
 func setDemoInstant(_ enabled: Bool) {
@@ -196,7 +293,9 @@ func setDemoInstant(_ enabled: Bool) {
 func recordReadme() {
     guard AXIsProcessTrusted() else { log("FAILED: demo driver needs Accessibility"); exit(1) }
     log("requested README clips: \(requestedClips.sorted().joined(separator: ", "))")
+    setDemoAppearance(dark: false)
     dismissDemoOnboarding()
+    prepareDemoWeather()
     setDemoInstant(false)
     let scene = ReadmeScene()
     scene.restore()
@@ -205,29 +304,37 @@ func recordReadme() {
     scene.focus(scene.groups[1][0])
     clearNotifications()
     if requestedClips.isEmpty || requestedClips.contains("cover") {
-        holding(.maskCommand) {
-            postTap(Key.tab, flags: .maskCommand, duration: 0.2)
-            wait(1.0)
-            postTap(Key.digits[1], flags: .maskCommand)
-            wait(1.0)
-            let backdrop = MainActor.assumeIsolated { () -> NSPanel in
-                let panel = NSPanel(contentRect: NSScreen.main!.frame,
-                    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-                panel.backgroundColor = .white
-                panel.isOpaque = true
-                panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue - 1)
-                panel.hidesOnDeactivate = false
-                panel.ignoresMouseEvents = true
-                panel.orderFrontRegardless()
-                panel.displayIfNeeded()
-                return panel
+        for dark in [false, true] {
+            setDemoAppearance(dark: dark)
+            // Refresh previews after the system appearance changes.
+            setDemoInstant(false)
+            scene.focus(scene.groups[1][0])
+            holding(.maskCommand) {
+                postTap(Key.tab, flags: .maskCommand, duration: 0.2)
+                wait(1.0)
+                postTap(Key.digits[1], flags: .maskCommand)
+                wait(1.0)
+                let backdrop = MainActor.assumeIsolated { () -> NSPanel in
+                    let panel = NSPanel(contentRect: NSScreen.main!.frame,
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+                    panel.backgroundColor = dark ? .black : .white
+                    panel.isOpaque = true
+                    panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue - 1)
+                    panel.hidesOnDeactivate = false
+                    panel.ignoresMouseEvents = true
+                    panel.orderFrontRegardless()
+                    panel.displayIfNeeded()
+                    return panel
+                }
+                wait(0.8)
+                do { try captureOverlayCover(to: outputDirectory.appendingPathComponent(dark ? "overlay-dark.png" : "overlay.png"), dark: dark) }
+                catch { log("FAILED cover: \(error)"); exit(1) }
+                MainActor.assumeIsolated { backdrop.orderOut(nil) }
+                postTap(Key.escape, flags: .maskCommand)
             }
-            wait(0.8)
-            do { try captureOverlayCover(to: outputDirectory.appendingPathComponent("overlay.png")) }
-            catch { log("FAILED cover: \(error)"); exit(1) }
-            MainActor.assumeIsolated { backdrop.orderOut(nil) }
-            postTap(Key.escape, flags: .maskCommand)
         }
+        setDemoAppearance(dark: false)
+        setDemoInstant(false)
     }
     if requestedClips.isEmpty || requestedClips.contains("command-tab") {
         scene.restore()
@@ -240,7 +347,7 @@ func recordReadme() {
             wait(1.1)
             postTap(Key.tab, flags: .maskCommand, duration: 0.2)
             wait(1.1)
-            releaseWithCaption("⌘")
+            releaseDemoModifier()
             scene.verifyFocus(scene.groups[2][1], space: 2)
         }
     }
@@ -255,7 +362,7 @@ func recordReadme() {
             wait(1.2)
             postTap(Key.upArrow, flags: .maskCommand, duration: 0.2)
             wait(1.4)
-            releaseWithCaption("⌘")
+            releaseDemoModifier()
             scene.verifyFocus(scene.groups[1][1], space: 0)
         }
     }
@@ -268,13 +375,14 @@ func recordReadme() {
             postFlags(.maskAlternate)
             postTap(Key.tab, flags: .maskAlternate, duration: 0.2)
             wait(1.5)
-            releaseWithCaption("⌥")
+            releaseDemoModifier()
             scene.verifyFocus(scene.groups[0][1], space: 0)
         }
     }
     if requestedClips.contains("faster-space-switching") || requestedClips.isEmpty {
         let defaults = UserDefaults(suiteName: "com.apple.symbolichotkeys")!
         var hotkeys = defaults.dictionary(forKey: "AppleSymbolicHotKeys") ?? [:]
+        hotkeys["79"] = ["enabled": true, "value": ["type": "standard", "parameters": [65535, 123, 262144]]]
         hotkeys["81"] = ["enabled": true, "value": ["type": "standard", "parameters": [65535, 124, 262144]]]
         defaults.set(hotkeys, forKey: "AppleSymbolicHotKeys")
         defaults.synchronize()
@@ -285,7 +393,7 @@ func recordReadme() {
             setDemoInstant(instant)
             scene.restore()
             // Each side is scaled to half width, so keep the final key text the same size.
-            scene.startKeys(fontSize: 64)
+            scene.startKeys(fontSize: 128)
             let name = instant ? "speed-instant" : "speed-native"
             do {
                 let url = outputDirectory.appendingPathComponent(name + ".mov")
@@ -295,10 +403,15 @@ func recordReadme() {
                 postFlags(.maskControl)
                 postTap(124, flags: [.maskControl, .maskSecondaryFn, .maskNumericPad], duration: 0.15)
                 postFlags([])
+                wait(1.5)
+                guard SpaceService().currentDesktopIndex() == 2 else { log("FAILED: \(name) did not reach space 3"); exit(1) }
+                postFlags(.maskControl)
+                postTap(123, flags: [.maskControl, .maskSecondaryFn, .maskNumericPad], duration: 0.15)
+                postFlags([])
                 wait(2.5)
-                guard SpaceService().currentDesktopIndex() == 2 else { log("FAILED: \(name) did not switch"); exit(1) }
+                guard SpaceService().currentDesktopIndex() == 1 else { log("FAILED: \(name) did not return to space 2"); exit(1) }
                 try awaitCapture { try await recorder.stop() }
-                log("verified \(name), space 3")
+                log("verified \(name), space 2 → 3 → 2")
             } catch { log("FAILED \(name): \(error)"); exit(1) }
         }
     }

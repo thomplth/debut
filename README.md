@@ -5,7 +5,11 @@ individual windows, organize them by space, and switch between spaces faster.
 
 [**Download Debut**](https://github.com/thomplth/debut/releases/latest) · macOS 26 or later · Apple Silicon
 
-<img src="docs/media/overlay.png" alt="Debut window previews grouped into three spaces, with space 2 expanded" width="960">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/overlay-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/media/overlay.png">
+  <img src="docs/media/overlay.png" alt="Debut window previews grouped into three spaces, with space 2 expanded" width="960">
+</picture>
 
 ## Command-Tab: windows grouped by space
 
@@ -41,7 +45,7 @@ This view is inspired by Windows Alt-Tab and
 
 ## Faster space switching
 
-<img src="docs/media/faster-space-switching.gif" alt="Synchronized Control-Right space switches: the macOS default animation on the left and Debut Instant on the right" width="960">
+<img src="docs/media/faster-space-switching.gif" alt="Synchronized Control-Right then Control-Left space switches: the macOS default animation on the left and Debut Instant on the right" width="960">
 
 Choose faster or instant transitions for space switching, including
 **Control-← / →** and trackpad gestures. **Control-1–9** jumps directly to a space.
