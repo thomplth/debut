@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>TelemetryDeckNamespace</key>
-    <string></string>
+    <string>com.thomplth</string>
     <key>TelemetryDeckAppID</key>
-    <string></string>
+    <string>C7FA86E4-55ED-46DD-B0EC-E547FD37BA2C</string>
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
