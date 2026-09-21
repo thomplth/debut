@@ -1371,6 +1371,91 @@ struct SpaceControllerSpaceTests {
         #expect(!controller.isSpaceManagerVisible)
     }
 
+    @Test("Arrow-key move previews the moved window as destination MRU and cancel restores state")
+    func keyboardMovePreviewsDestinationMRUAndCancels() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
+        let sourceSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let destinationSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.activateSpace(id: sourceSpaceID)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A"),
+            toSpaceID: sourceSpaceID
+        )
+        for (windowID, activatedAt) in [
+            (CGWindowID(202), Date(timeIntervalSinceReferenceDate: 200)),
+            (CGWindowID(303), Date(timeIntervalSinceReferenceDate: 100)),
+        ] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.\(windowID)",
+                    ownerName: "Destination",
+                    windowTitle: "Destination \(windowID)",
+                    lastActivatedAt: activatedAt
+                ),
+                toSpaceID: destinationSpaceID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.moveWindowDown)
+
+        #expect(controller.overlaySpaceManager.spaces[1].windows.map(\.windowID)
+                == [101, 202, 303])
+        #expect(controller.overlaySpaceManager.globalWindowOrder().first?.window.windowID == 101)
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [101])
+        #expect(controller.spaceManager.spaces[1].windows.map(\.windowID) == [202, 303])
+
+        keyboardService.simulateEvent(.escape)
+
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [101])
+        #expect(controller.spaceManager.spaces[0].windows[0].lastActivatedAt == nil)
+        #expect(controller.spaceManager.spaces[1].windows.map(\.windowID) == [202, 303])
+        #expect(spaces.moveRequests.isEmpty)
+    }
+
+    @Test("Arrow-key move commits the moved window as destination MRU")
+    @MainActor
+    func keyboardMoveCommitsDestinationMRU() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.completesMovesImmediately = false
+        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
+        let sourceSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let destinationSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.activateSpace(id: sourceSpaceID)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A"),
+            toSpaceID: sourceSpaceID
+        )
+        for (windowID, activatedAt) in [
+            (CGWindowID(202), Date(timeIntervalSinceReferenceDate: 200)),
+            (CGWindowID(303), Date(timeIntervalSinceReferenceDate: 100)),
+        ] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.\(windowID)",
+                    ownerName: "Destination",
+                    windowTitle: "Destination \(windowID)",
+                    lastActivatedAt: activatedAt
+                ),
+                toSpaceID: destinationSpaceID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateEvent(.moveWindowDown)
+        keyboardService.simulateEvent(.cmdRelease)
+
+        #expect(controller.spaceManager.spaces[1].windows.map(\.windowID) == [101, 202, 303])
+        #expect(controller.spaceManager.globalWindowOrder().first?.window.windowID == 101)
+        #expect(spaces.moveRequests.map(\.windowID) == [101])
+        #expect(spaces.moveRequests.map(\.desktop) == [1])
+    }
+
     @Test("Space focus waits for every committed window move")
     @MainActor
     func spaceFocusWaitsForEveryWindowMove() {

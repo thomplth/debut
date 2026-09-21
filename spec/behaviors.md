@@ -159,6 +159,9 @@ previews changes, and commit applies them to the model and requests the required
 desktop relocations. Escape discards the preview. The bridge's capability gate
 refuses unsupported cross-desktop moves. Delivery failures are diagnosed, and
 subsequent reconciliation corrects optimistic state from macOS membership.
+Moving a window between stages with Up or Down places it at the destination's
+MRU head and refreshes its global activation recency; pointer drops and Left or
+Right reordering retain their chosen slot.
 
 Immediate focused-window movement keeps the requested window throughout an
 in-flight route, follows it to the adjacent desktop, and focuses it after

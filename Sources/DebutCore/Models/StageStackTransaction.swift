@@ -31,6 +31,7 @@ struct StageStackTransaction: Sendable {
         let toSpaceID: UUID
         let windowIndex: Int
         let source: Source
+        let activatedAt: Date?
     }
 
     private var moves: [Move] = []
@@ -46,14 +47,16 @@ struct StageStackTransaction: Sendable {
         fromSpaceID: UUID,
         toSpaceID: UUID,
         windowIndex: Int,
-        source: Source
+        source: Source,
+        activatedAt: Date? = nil
     ) {
         moves.append(Move(
             windowID: windowID,
             fromSpaceID: fromSpaceID,
             toSpaceID: toSpaceID,
             windowIndex: windowIndex,
-            source: source
+            source: source,
+            activatedAt: activatedAt
         ))
     }
 
@@ -108,6 +111,13 @@ struct StageStackTransaction: Sendable {
                 toSpaceID: move.toSpaceID,
                 at: move.windowIndex
             )
+            if let activatedAt = move.activatedAt {
+                spaceManager.bringWindowToFront(
+                    windowID: move.windowID,
+                    inSpaceID: move.toSpaceID,
+                    activatedAt: activatedAt
+                )
+            }
         }
     }
 }
