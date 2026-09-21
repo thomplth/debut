@@ -771,6 +771,44 @@ struct StageMotionTests {
         #expect(abs((precedingCenter ?? 0) - 222.4) < 0.001)
     }
 
+    @Test("Focused stack geometry includes bottom-edge scrolling")
+    func focusedStackTranslationIncludesEdgeScroll() throws {
+        let aspects: [[CGFloat?]] = [
+            [1.5698, 1.5698, 1.1568, 1.5698],
+            [1.5698],
+            [],
+            [],
+        ]
+        let container = CGSize(width: 1_024, height: 744)
+        let metrics = StageConstants.drawnMetrics(
+            stageScale: 1.5,
+            contentAspects: aspects,
+            containerSize: container
+        )
+        let centeredCard = try #require(StageConstants.windowCardCenter(
+            spaceIndex: 1,
+            windowIndex: 0,
+            contentAspects: aspects,
+            activeSpaceIndex: 1,
+            inactiveScale: 0.7,
+            containerSize: container,
+            metrics: metrics
+        ))
+        let translation = try #require(StageConstants.focusedStackTranslation(
+            contentAspects: aspects,
+            screenWidth: container.width,
+            activeSpaceIndex: 0,
+            focusedSpaceIndex: 1,
+            inactiveScale: 0.7,
+            containerHeight: container.height,
+            pointerY: container.height - 1,
+            metrics: metrics
+        ))
+        #expect(translation.isFinite)
+        #expect(centeredCard.y + translation > 0)
+        #expect(centeredCard.y + translation < container.height)
+    }
+
     @Test("The default filled selector does not magnify its window")
     func filledWindowScale() {
         #expect(StageMotion.windowScale(

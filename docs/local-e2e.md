@@ -41,7 +41,9 @@ The first run boots the VM headlessly; later runs reuse the warm guest and its
 GUI session. Results, screenshots, and the latest console output — retained even
 when the suite fails — land in the shared directory, by default under
 `~/Library/Caches/Debut/TartE2E`. `DEBUT_TART_VM` and `DEBUT_TART_SHARE` override
-the VM and shared-directory names.
+the VM and shared-directory names. The host prefers SSH over the guest's DHCP
+address. If DHCP is unavailable, it enters through the guest agent and opens SSH
+over guest loopback instead, preserving the suite's macOS TCC attribution.
 
 Use `./scripts/tart-e2e.sh stop` when the warm VM is no longer needed, and
 `./scripts/tart-e2e.sh status` to inspect it.
