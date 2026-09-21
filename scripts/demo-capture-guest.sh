@@ -110,7 +110,7 @@ as_console mkdir -p "$console_home/Library/Application Support/Debut"
 demo_stage_scale=1.4
 [[ "${*:6}" == *onboarding* ]] && demo_stage_scale=1.0
 as_console tee "$console_home/Library/Application Support/Debut/settings.json" >/dev/null <<JSON
-{"launchAtLogin":false,"excludedBundleIDs":[],"shareAnonymousTelemetry":false,"glassStyle":"Clear","stageCornerRadius":40,"inactiveStageScale":0.7,"stageScale":$demo_stage_scale}
+{"launchAtLogin":false,"excludedBundleIDs":[],"glassStyle":"Clear","stageCornerRadius":40,"inactiveStageScale":0.7,"stageScale":$demo_stage_scale}
 JSON
 
 echo "Provisioning three real desktops through Mission Control..."

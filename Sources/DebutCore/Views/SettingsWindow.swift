@@ -28,7 +28,6 @@ public struct SettingsView: View {
     @State private var showingResetConfirmation = false
     @State private var showingRestoreDefaultsConfirmation = false
     private let shortcutRecordingService: (any ShortcutRecordingService)?
-    @State private var telemetryPayloadPresentation: TelemetryPayloadPresentation?
     @State private var externallyAppliedSettings: AppSettings?
 
     public init(
@@ -71,7 +70,6 @@ public struct SettingsView: View {
                     case .features: featuresSection
                     case .excludedApps: excludedAppsSection
                     case .app: appSection
-                    case .privacy: privacySection
                     case .keyboardShortcuts: keyboardShortcutsSection
                     case .advanced:
                         appearanceSection
@@ -93,23 +91,6 @@ public struct SettingsView: View {
             }
         } message: {
             Text("This removes all space window assignments, including dormant windows, and rebuilds assignments from your current macOS desktops. Settings are preserved.")
-        }
-        .sheet(item: $telemetryPayloadPresentation) { presentation in
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Data being shared").font(.title2.bold())
-                Text("These are the exact current allowlisted hourly P95 payloads.")
-                    .foregroundStyle(.secondary)
-                ScrollView {
-                    Text(presentation.json).font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(minWidth: 540, minHeight: 260)
-                Text(viewModel.telemetryExcludedData).font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    Spacer()
-                    Button("Close") { telemetryPayloadPresentation = nil }
-                        .keyboardShortcut(.defaultAction)
-                }
-            }.padding(24)
         }
     }
 
@@ -651,31 +632,6 @@ public struct SettingsView: View {
         }
     }
 
-    private var privacySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Privacy").font(.title2.bold())
-            settingsToggle(
-                "Share anonymous usage and performance data",
-                isOn: $viewModel.settings.shareAnonymousTelemetry
-            )
-            Text("Off by default on new installs. If enabled, shares exact hourly P95 latency summaries for the window switcher, first preview, and desktop switching. Active-hour metrics are batched, capped at 24 records per day, and flushed on normal quit. The choice takes effect immediately and local diagnostics stay available.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("View data being shared…") {
-                    telemetryPayloadPresentation = (try? viewModel.telemetryPayloadPresentation())
-                        ?? TelemetryPayloadPresentation(json: "Payload unavailable.")
-                }
-                Button("Privacy Policy") {
-                    NSWorkspace.shared.open(URL(string: "https://github.com/thomplth/Debut/blob/main/docs/privacy.md")!)
-                }
-            }
-            Text("Anonymous records contain no stable identifier, so they cannot later be located for per-user deletion. Disabling sharing deletes queued unsent records immediately.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("TelemetryDeck stores the records in the European Union. Its active dashboard retention depends on the account plan; older records may remain in cold storage for an expected 7–10 years without a guaranteed deletion date.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
     private var aboutSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("About")
@@ -769,7 +725,6 @@ public struct SettingsView: View {
         case .advanced: "slider.horizontal.3"
         case .excludedApps: "eye.slash"
         case .app: "gearshape"
-        case .privacy: "hand.raised"
         case .keyboardShortcuts: "keyboard"
         case .troubleshooting: "stethoscope"
         case .about: "info.circle"

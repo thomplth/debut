@@ -106,7 +106,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// every discovery path admits regular applications only.
     public var showsDockIcon: Bool
     public var excludedBundleIDs: [String]
-    public var shareAnonymousTelemetry: Bool
 
     // Appearance
     /// Enlarge the complete presentation proportionally while retaining the original size as
@@ -169,7 +168,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.launchAtLogin = true
         self.showsDockIcon = true
         self.excludedBundleIDs = []
-        self.shareAnonymousTelemetry = false
 
         self.glassStyle = .clear
         self.stageCornerRadius = 30
@@ -206,10 +204,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
             forKey: .showsDockIcon
         ) ?? true
         excludedBundleIDs = try container.decode([String].self, forKey: .excludedBundleIDs)
-        shareAnonymousTelemetry = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .shareAnonymousTelemetry
-        ) ?? false
         glassStyle = try container.decode(GlassStyle.self, forKey: .glassStyle)
         stageCornerRadius = try container.decode(Double.self, forKey: .stageCornerRadius)
         inactiveStageScale = try container.decode(Double.self, forKey: .inactiveStageScale)

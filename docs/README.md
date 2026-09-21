@@ -16,12 +16,11 @@ select windows across desktops, and navigate desktops faster.
 
 - [Contributing](../CONTRIBUTING.md): setup, verification, and pull requests.
 - [Agent guidance](../AGENTS.md): concise architectural constraints.
-- [Performance observability](performance-observability.md): local measurements,
-  benchmark commands, and the remote payload boundary.
+- [Performance observability](performance-observability.md): local measurements
+  and benchmark commands.
 - [Release verification](release-verification.md): channels, publication gates,
   update rehearsal, and recovery.
-- [Privacy](privacy.md), [telemetry anonymization assessment](telemetry-anonymization-assessment.md),
-  and [privacy release checklist](privacy-release-checklist.md).
+- [Privacy](privacy.md) and [privacy release checklist](privacy-release-checklist.md).
 
 These Markdown documents describe the current implementation. Source and tests
 remain authoritative when prose falls behind.
