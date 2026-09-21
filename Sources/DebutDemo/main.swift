@@ -4,8 +4,8 @@ import DebutCore
 import Foundation
 
 // Captures the README media inside the Tart guest. It shares no code with DebutE2E on
-// purpose: the suite asserts, this one performs, and a demo that fails a capture should
-// say so and move on rather than fail a build.
+// purpose: the suite exercises general behavior, while this driver verifies the
+// selected windows and space membership for the demonstration scene.
 
 let arguments = ProcessInfo.processInfo.arguments
 let outputDirectory = URL(fileURLWithPath: value(after: "--output") ?? "/tmp/debut-demo-media")
@@ -110,8 +110,6 @@ func describeWindows(_ label: String) {
 
 // MARK: - Input
 
-var keyDisplay: DemoKeyDisplay?
-
 enum Key {
     static let tab: CGKeyCode = 48
     static let escape: CGKeyCode = 53
@@ -122,19 +120,17 @@ enum Key {
 }
 
 func postFlags(_ flags: CGEventFlags) {
-    MainActor.assumeIsolated { keyDisplay?.update(flags: flags) }
     guard let event = CGEvent(source: nil) else { return }
     event.type = .flagsChanged
     event.flags = flags
-    event.post(tap: .cgSessionEventTap)
+    event.post(tap: .cghidEventTap)
 }
 
 func postTap(_ keyCode: CGKeyCode, flags: CGEventFlags = [], duration: Double = 0.08) {
     for down in [true, false] {
-        MainActor.assumeIsolated { keyDisplay?.update(flags: flags, key: keyCode, down: down) }
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: down) else { continue }
         event.flags = flags
-        event.post(tap: .cgSessionEventTap)
+        event.post(tap: .cghidEventTap)
         if down { wait(duration) }
     }
 }
@@ -212,164 +208,7 @@ func clip(_ name: String, seconds: Int, _ body: () -> Void) {
     }
 }
 
-// MARK: - Space arrangement
-
-/// Distributes windows across three provisioned desktops using Debut's overlay rather
-/// than writing state.json, because window IDs are ephemeral and would not survive a write.
-func arrangeSpaces(windowsPerSpace: Int) {
-    guard SpaceService().userDesktops().count >= 3 else {
-        log("Demo requires three real desktops. Run the guest provisioning step first.")
-        exit(1)
-    }
-    describeState("before arrange")
-    describeWindows("before arrange")
-
-    // Every in-overlay command carries only the held activation modifier. Adding Option
-    // turns Tab into space cycling and stops the digits matching.
-    let held: CGEventFlags = .maskCommand
-    holding(held) {
-        postTap(Key.tab, flags: held)
-        wait(0.8)
-        // A moved window drags the selection with it, so reaching space 2 is two hops and
-        // every hop starts by jumping back to space 1.
-        let plan = Array(repeating: 1, count: windowsPerSpace)
-            + Array(repeating: 2, count: windowsPerSpace)
-        for hops in plan {
-            postTap(Key.digits[0], flags: held)
-            wait(0.4)
-            for _ in 0..<hops {
-                postTap(Key.downArrow, flags: held)
-                wait(0.4)
-            }
-            describeState("  after \(hops)-hop move")
-        }
-
-        postTap(Key.digits[0], flags: held)
-        wait(0.5)
-    }
-
-    wait(2)
-    describeState("after arrange")
-    describeWindows("after arrange")
-    let counts = spaceWindowCounts()
-    if counts.count != 3 || counts.contains(0) {
-        log("FAILED: expected three non-empty desktops, got \(counts)")
-        exit(1)
-    }
-}
-
-// MARK: - Clips
-
-func recordSpaceSwitch() {
-    clip("space-switch", seconds: 11) {
-        holding([.maskCommand, .maskAlternate]) {
-            postTap(Key.tab, flags: [.maskCommand, .maskAlternate])
-            wait(1.6)
-            postTap(Key.tab, flags: [.maskCommand, .maskAlternate])
-            wait(1.4)
-            postTap(Key.tab, flags: [.maskCommand, .maskAlternate])
-            wait(1.6)
-            postTap(Key.tab, flags: [.maskCommand, .maskAlternate, .maskShift])
-            wait(1.6)
-        }
-        wait(2.0)
-    }
-}
-
-func recordWindowCycle() {
-    clip("command-tab", seconds: 10) {
-        MainActor.assumeIsolated { keyDisplay = DemoKeyDisplay() }
-        wait(1)
-        holding(.maskCommand) {
-            postTap(Key.tab, flags: .maskCommand, duration: 0.4)
-            wait(1.5)
-            MainActor.assumeIsolated { keyDisplay?.caption = "Keep holding Command · press Tab again" }
-            postTap(Key.tab, flags: .maskCommand, duration: 0.35)
-            wait(2.2)
-            MainActor.assumeIsolated { keyDisplay?.caption = "Release Command to focus the window" }
-            wait(0.7)
-        }
-        MainActor.assumeIsolated { keyDisplay?.caption = "Selected window focused" }
-        wait(2.0)
-    }
-    MainActor.assumeIsolated { keyDisplay?.panel.orderOut(nil); keyDisplay = nil }
-}
-
-func recordAllWindows() {
-    clip("all-windows", seconds: 10) {
-        holding(.maskAlternate) {
-            postTap(Key.tab, flags: .maskAlternate)
-            wait(1.5)
-            still("all-windows")
-            for _ in 0..<3 {
-                postTap(Key.tab, flags: .maskAlternate)
-                wait(1.3)
-            }
-        }
-        wait(2)
-    }
-}
-
-func recordQuickSwitch() {
-    clip("quick-switch", seconds: 9) {
-        for digit in [1, 2, 0, 2] {
-            postFlags(.maskControl)
-            wait(0.1)
-            postTap(Key.digits[digit], flags: .maskControl)
-            postFlags([])
-            wait(1.7)
-        }
-    }
-}
-
-func recordWindowMove() {
-    clip("window-move", seconds: 10) {
-        holding(.maskCommand) {
-            postTap(Key.tab, flags: .maskCommand)
-            wait(1.8)
-            postTap(Key.downArrow, flags: .maskCommand)
-            wait(2.2)
-            postTap(Key.upArrow, flags: .maskCommand)
-            wait(1.8)
-        }
-        wait(1.5)
-    }
-}
-
-func captureStills() {
-    holding(.maskCommand) {
-        postTap(Key.tab, flags: .maskCommand)
-        wait(1.5)
-        postTap(Key.digits[1], flags: .maskCommand)
-        wait(1)
-        // Start the movie over the light Notes window so the glass labels remain legible.
-        postTap(Key.tab, flags: .maskCommand)
-        wait(0.3)
-        postTap(Key.tab, flags: .maskCommand)
-        wait(0.3)
-        // Neutral backing for the glass, kept out of the isolated-window PNG itself.
-        let backdrop = MainActor.assumeIsolated { () -> NSPanel in
-            let panel = NSPanel(contentRect: NSScreen.main!.frame,
-                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            panel.backgroundColor = .white
-            panel.isOpaque = true
-            panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue - 1)
-            panel.hidesOnDeactivate = false
-            panel.ignoresMouseEvents = true
-            panel.orderFrontRegardless()
-            panel.displayIfNeeded()
-            return panel
-        }
-        wait(1)
-        do {
-            try captureOverlayCover(to: outputDirectory.appendingPathComponent("overlay.png"))
-            log("still overlay.png (isolated overlay)")
-        } catch { log("overlay cover FAILED: \(error)"); exit(1) }
-        MainActor.assumeIsolated { backdrop.orderOut(nil) }
-        // Commit this desktop so the following demo opens the same workspace.
-        wait(0.5)
-    }
-}
+// MARK: - Onboarding media
 
 func resetOnboardingDesktop() {
     let service = SpaceService()
@@ -509,31 +348,16 @@ guard CGPreflightScreenCaptureAccess() else {
 log("output: \(outputDirectory.path)")
 selectDisplayMode(value(after: "--display"))
 if arguments.contains("--prepare-display") { exit(0) }
-
-if requestedClips.contains("onboarding") { arrangeOnboardingWindows() }
-else { arrangeSpaces(windowsPerSpace: Int(value(after: "--windows-per-space") ?? "") ?? 3) }
-wait(1.0)
-
-// After the arrangement, not before: Debut's login-item banner arrives on its first launch and
-// the arrangement takes a minute, so an early sweep would clear a store that then refills.
-clearNotifications()
-
-if requestedClips.contains("onboarding") {
-    recordOnboarding()
-    log("done")
+if let snapshot = value(after: "--snapshot") {
+    try captureDemoStill(to: URL(fileURLWithPath: snapshot))
     exit(0)
 }
-captureStills()
-wait(1.0)
-recordSpaceSwitch()
-wait(1.0)
-recordWindowCycle()
-wait(1.0)
-recordQuickSwitch()
-wait(1.0)
-recordAllWindows()
-wait(1.0)
-recordWindowMove()
 
-describeState("final")
+if requestedClips.contains("onboarding") {
+    arrangeOnboardingWindows()
+    clearNotifications()
+    recordOnboarding()
+} else {
+    recordReadme()
+}
 log("done")
