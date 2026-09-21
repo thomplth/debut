@@ -97,7 +97,7 @@ public struct SettingsView: View {
         .sheet(item: $telemetryPayloadPresentation) { presentation in
             VStack(alignment: .leading, spacing: 12) {
                 Text("Data being shared").font(.title2.bold())
-                Text("This is the exact current allowlisted session-summary payload.")
+                Text("These are the exact current allowlisted hourly P95 payloads.")
                     .foregroundStyle(.secondary)
                 ScrollView {
                     Text(presentation.json).font(.system(.body, design: .monospaced))
@@ -658,7 +658,7 @@ public struct SettingsView: View {
                 "Share anonymous usage and performance data",
                 isOn: $viewModel.settings.shareAnonymousTelemetry
             )
-            Text("Off by default on new installs. If enabled, shares one bucketed aggregate session summary and a small number of rate-limited performance anomalies. The choice takes effect immediately and local diagnostics stay available.")
+            Text("Off by default on new installs. If enabled, shares exact hourly P95 latency summaries for the window switcher, first preview, and desktop switching. Active-hour metrics are batched, capped at 24 records per day, and flushed on normal quit. The choice takes effect immediately and local diagnostics stay available.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("View data being shared…") {

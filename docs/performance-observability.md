@@ -32,9 +32,9 @@ Tart baselines require at least 20 iterations where practical. A regression gate
 
 ## Remote privacy contract
 
-The remote allowlist is: schema version, event kind, app version, operating-system major version, workload class, overlay temperature class, canonical operation name/count, latency bucket, and aggregate anomaly count. Values are bucketed before enqueue. Expected volume is one session summary plus at most 19 anomaly records per installation day; each operation may contribute at most two anomaly records per day so a noisy capture path cannot crowd out UI latency. The queue holds at most 100 records.
+The remote allowlist is: schema version, event kind, app version, operating-system major version, workload class, canonical interaction name, exact locally computed hourly P95 duration in milliseconds, and aggregate sample count. Only `overlay_end_to_end_visible`, `preview_first`, and `space_switch` leave the Mac. Individual durations remain local. Each active hour produces at most three TelemetryDeck events, sent together in one Ingest v2 request; inactive hours produce none. Delivery is capped at 24 events per installation day and the queue holds at most 100 records. Startup discards incompatible schema-v1 bucketed records rather than mixing them into the numeric time series.
 
-Latency anomalies require at least 500 ms of delayed work. `hidden_idle` is excluded because its duration measures an expected inactive interval rather than execution latency; startup also prunes idle anomalies queued by older builds.
+The app records qualifying observations in memory, drains and resets the aggregate every hour, and attempts a final partial-hour batch during normal termination. The final batch is persisted before its network attempt, so a failed request retries at next launch. An uncatchable force-kill cannot execute termination code and may lose the current in-memory partial hour.
 
 The denylist includes window titles, bundle IDs, app names, PIDs, CGWindowIDs, paths, screenshots, raw diagnostics, free-form error descriptions, locale/time zone, precise hardware identity, and persistent user or installation identifiers. No automatic SDK fields are accepted. Local diagnostics remain available when sharing is disabled.
 

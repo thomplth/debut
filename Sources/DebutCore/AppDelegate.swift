@@ -46,6 +46,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var debouncedSaver: DebouncedSaver?
     private var runtimeWindowReconciler = RuntimeWindowReconciler()
     private var telemetryExporter: TelemetryExporter?
+    private var telemetryHourlyTimer: Timer?
     private var hiddenIdlePerformanceID: UUID?
     private let forceDisplayStackIndicator =
         ProcessInfo.processInfo.environment["DEBUT_FORCE_DISPLAY_STACK_INDICATOR"] == "1"
@@ -673,14 +674,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             try? stateStore.saveRetiredWindows(windowDiscovery.retiredWindowRecords)
         }
         let exporter = MainActor.assumeIsolated { self.telemetryExporter }
-        let payload = MainActor.assumeIsolated { self.currentTelemetrySummary() }
+        MainActor.assumeIsolated {
+            self.telemetryHourlyTimer?.invalidate()
+            self.telemetryHourlyTimer = nil
+        }
         if let exporter {
-            let queued = DispatchSemaphore(value: 0)
+            let flushed = DispatchSemaphore(value: 0)
             Task {
-                try? await exporter.enqueue(payload)
-                queued.signal()
+                try? await exporter.flushHourly(
+                    appVersion: DebutCore.version,
+                    operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+                )
+                flushed.signal()
             }
-            _ = queued.wait(timeout: .now() + 0.5)
+            _ = flushed.wait(timeout: .now() + 2)
         }
     }
 
@@ -1752,49 +1759,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         )
         telemetryExporter = exporter
         PerformanceRecorder.shared.setObservationHandler { observation in
-            guard PerformanceAnomalyPolicy.shouldReport(observation) else { return }
-            let workload: TelemetryWorkload = observation.workload.windows >= 50
-                ? .stress : (observation.workload.windows >= 21 ? .busy : .typical)
             Task {
-                try? await exporter.enqueue(.anomaly(
-                    operation: observation.operation,
-                    latency: TelemetryLatencyBucket(milliseconds: observation.durationMilliseconds),
-                    workload: workload,
-                    temperature: observation.temperature
-                ))
-                try? await exporter.flush()
+                await exporter.record(observation)
             }
         }
+        let timer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { _ in
+            Task {
+                try? await exporter.flushHourly(
+                    appVersion: DebutCore.version,
+                    operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+                )
+            }
+        }
+        timer.tolerance = 60
+        telemetryHourlyTimer = timer
         let telemetryEnabled = TelemetryActivationPolicy.shouldSend(settings: currentSettings)
         Task {
-            try? await exporter.pruneInvalidAnomalies()
+            try? await exporter.pruneLegacyPayloads()
             if telemetryEnabled { try? await exporter.flush() }
         }
-    }
-
-    private func currentTelemetrySummary() -> TelemetryPayload {
-        let performance = PerformanceRecorder.shared.snapshot()
-        var counts: [PerformanceOperation: Int] = [:]
-        var latency: [PerformanceOperation: TelemetryLatencyBucket] = [:]
-        for observation in performance.recent { counts[observation.operation, default: 0] += 1 }
-        for (name, summary) in performance.summaries {
-            if let operation = PerformanceOperation(rawValue: name) {
-                latency[operation] = TelemetryLatencyBucket(milliseconds: summary.p95Milliseconds)
-            }
-        }
-        let windowCount = spaceController?.spaceManager.liveWindowCount ?? 0
-        let workload: TelemetryWorkload = windowCount >= 50 ? .stress : (windowCount >= 21 ? .busy : .typical)
-        let anomalyCount = performance.recent.reduce(into: 0) { count, observation in
-            if PerformanceAnomalyPolicy.shouldReport(observation) { count += 1 }
-        }
-        return .sessionSummary(
-            appVersion: DebutCore.version,
-            operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
-            workload: workload,
-            operationCounts: counts,
-            latencyBuckets: latency,
-            anomalyCount: anomalyCount
-        )
     }
 
 }
