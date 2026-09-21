@@ -248,7 +248,7 @@ public final class OverlayPresentationRecorder: @unchecked Sendable {
         active[context.traceID] = trace
         lock.unlock()
         performanceRecorder.updateWorkload(workload, for: context.traceID)
-        let temperature: TelemetryTemperature = if trace.environment.processUse == .firstAttempt {
+        let temperature: PerformanceTemperature = if trace.environment.processUse == .firstAttempt {
             .processFirst
         } else if previewCache == .empty {
             .cacheCold

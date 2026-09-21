@@ -1,6 +1,6 @@
 # Performance observability contract
 
-Performance recording is triggered by existing work; it adds no recurring window-discovery poll. Bounded animation, retry, verification, and presentation schedules remain part of the app behavior. `diagnostic.json` is the offline source of truth; Instruments signposts, deterministic benchmark JSON, Tart artifacts, and anonymous summaries use the same `PerformanceOperation` names and millisecond units.
+Performance recording is triggered by existing work; it adds no recurring window-discovery poll. Bounded animation, retry, verification, and presentation schedules remain part of the app behavior. `diagnostic.json` is the offline source of truth; Instruments signposts, deterministic benchmark JSON, and Tart artifacts use the same `PerformanceOperation` names and millisecond units.
 
 Stage presentation uses `overlay_end_to_end_visible` as its primary user-facing latency. The span begins when the event tap recognizes a non-repeating activation and ends when the overlay's reveal animation completes. `diagnostic.json.overlayPresentation` retains the latest 20 correlated traces, including main-actor delivery, fullscreen probing, intentional presentation delay, deadline overshoot, preparation, window ordering, render submission, reveal completion, and preview capture. Wallpaper fields remain in the schema for compatibility, but the current overlay reports wallpaper as unavailable: Debut no longer captures or draws a desktop backdrop. Rejected and cancelled attempts remain local diagnostic traces but never enter the successful latency summary.
 
@@ -30,13 +30,12 @@ Durations use a monotonic clock and milliseconds. Event-driven process samples e
 
 Tart baselines require at least 20 iterations where practical. A regression gates only when it exceeds both the absolute budget and the recorded baseline by the configured percentage. Hidden-idle checks use CPU, wakeups, memory growth, and layout/signpost activity. System budgets remain separate from deterministic algorithm responsiveness tests.
 
-## Remote privacy contract
+## Local-only boundary
 
-The remote allowlist is: schema version, event kind, app version, operating-system major version, workload class, canonical interaction name, exact locally computed hourly P95 duration in milliseconds, and aggregate sample count. Only `overlay_end_to_end_visible`, `preview_first`, and `space_switch` leave the Mac. Individual durations remain local. Each active hour produces at most three TelemetryDeck events, sent together in one Ingest v2 request; inactive hours produce none. Delivery is capped at 24 events per installation day and the queue holds at most 100 records. Startup discards incompatible schema-v1 bucketed records rather than mixing them into the numeric time series.
-
-The app records qualifying observations in memory, drains and resets the aggregate every hour, and attempts a final partial-hour batch during normal termination. The final batch is persisted before its network attempt, so a failed request retries at next launch. An uncatchable force-kill cannot execute termination code and may lose the current in-memory partial hour.
-
-The denylist includes window titles, bundle IDs, app names, PIDs, CGWindowIDs, paths, screenshots, raw diagnostics, free-form error descriptions, locale/time zone, precise hardware identity, and persistent user or installation identifiers. No automatic SDK fields are accepted. Local diagnostics remain available when sharing is disabled.
+Performance observations remain on the Mac. They feed `diagnostic.json`, local
+signposts, deterministic benchmark output, and user-initiated diagnostic exports.
+The app does not queue or transmit performance summaries. Diagnostic exports are
+redacted as described in the [privacy notice](privacy.md).
 
 ## Commands
 

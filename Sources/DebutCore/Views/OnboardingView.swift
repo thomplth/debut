@@ -198,14 +198,6 @@ public struct OnboardingView: View {
             heading("Setup complete", "You’re ready to use Debut.")
             Text("Open Debut from the Dock or menu bar to change settings or repeat the tutorial.")
                 .foregroundStyle(.secondary)
-            Toggle("Share anonymous usage and performance data", isOn: Binding(
-                get: { viewModel.shareAnonymousTelemetry }, set: { viewModel.setShareAnonymousTelemetry($0) }))
-                .toggleStyle(.switch)
-                .help("No screenshots, app or window names, or persistent identifiers.")
-            Text("Optional and off by default. If enabled, Debut sends only bucketed performance data after setup finishes; you can turn it off at any time in Settings → Privacy.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             if !viewModel.permissions.accessibilityGranted { accessibilityPrompt }
         }.padding(.vertical, 24)
     }

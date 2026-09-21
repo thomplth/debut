@@ -45,8 +45,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var pendingSpaceManager: SpaceManager?
     private var debouncedSaver: DebouncedSaver?
     private var runtimeWindowReconciler = RuntimeWindowReconciler()
-    private var telemetryExporter: TelemetryExporter?
-    private var telemetryHourlyTimer: Timer?
     private var hiddenIdlePerformanceID: UUID?
     private let forceDisplayStackIndicator =
         ProcessInfo.processInfo.environment["DEBUT_FORCE_DISPLAY_STACK_INDICATOR"] == "1"
@@ -103,7 +101,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         activationPolicy.apply(showsDockIcon: currentSettings.showsDockIcon)
         launchAtLogin.apply(enabled: currentSettings.launchAtLogin)
-        setupTelemetry()
+        // Builds that offered remote performance sharing may have left an unsent queue.
+        // It is obsolete and must not survive the integration that created it.
+        LegacyDataCleanup.removeObsoleteRemoteMetricsQueue()
 
         let accessibility = AccessibilityWindowService()
         accessibility.restoreContradictions(
@@ -673,22 +673,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         if let stateStore, let windowDiscovery {
             try? stateStore.saveRetiredWindows(windowDiscovery.retiredWindowRecords)
         }
-        let exporter = MainActor.assumeIsolated { self.telemetryExporter }
-        MainActor.assumeIsolated {
-            self.telemetryHourlyTimer?.invalidate()
-            self.telemetryHourlyTimer = nil
-        }
-        if let exporter {
-            let flushed = DispatchSemaphore(value: 0)
-            Task {
-                try? await exporter.flushHourly(
-                    appVersion: DebutCore.version,
-                    operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-                )
-                flushed.signal()
-            }
-            _ = flushed.wait(timeout: .now() + 2)
-        }
     }
 
     // MARK: - SpaceControllerDelegate
@@ -1201,13 +1185,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 settings.spaceSwitchDuration = duration
                 self.applySettings(settings)
             },
-            shareAnonymousTelemetry: currentSettings.shareAnonymousTelemetry,
-            onTelemetryChanged: { [weak self] enabled in
-                guard let self else { return }
-                var settings = self.currentSettings
-                settings.shareAnonymousTelemetry = enabled
-                self.applySettings(settings)
-            },
             onPermissionStateChanged: { [weak self] state in
                 self?.handlePermissionStateChange(state, source: "onboarding")
             },
@@ -1448,16 +1425,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         onboardingWindow = nil
         onboardingViewModel = nil
 
-        // The exporter started this launch gated, since completion is what makes
-        // the telemetry toggle a choice the user has actually been offered.
-        if let exporter = telemetryExporter {
-            let sending = TelemetryActivationPolicy.shouldSend(settings: currentSettings)
-            Task {
-                await exporter.setEnabled(sending)
-                if sending { try? await exporter.flush() }
-            }
-        }
-
         diag.report("onboarding_completed")
         showMenuBarCoachmark()
     }
@@ -1481,7 +1448,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     private func applySettings(_ incomingSettings: AppSettings) {
         let newSettings = incomingSettings
-        let telemetryChanged = self.currentSettings.shareAnonymousTelemetry != newSettings.shareAnonymousTelemetry
         self.launchAtLogin.apply(enabled: newSettings.launchAtLogin)
         self.activationPolicy.apply(showsDockIcon: newSettings.showsDockIcon)
         self.currentSettings = newSettings
@@ -1513,13 +1479,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             newSettings.quickSwitchSameApplicationModifiers
         self.keyboardService?.heldCycleMinimumInterval =
             newSettings.heldCycleMinimumInterval
-        if telemetryChanged, let exporter = self.telemetryExporter {
-            let sending = TelemetryActivationPolicy.shouldSend(settings: newSettings)
-            Task {
-                await exporter.setEnabled(sending)
-                if sending { try? await exporter.flush() }
-            }
-        }
         if desktopSwipeService?.setEnabled(newSettings.features.effectiveTrackpadSwipes) == false {
             diag.report("desktop_swipe_tap_failed")
         }
@@ -1738,46 +1697,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
         return "Debut-Diagnostics-\(formatter.string(from: Date())).json"
-    }
-
-    private func setupTelemetry() {
-        let environment = ProcessInfo.processInfo.environment
-        let namespace = environment["DEBUT_TELEMETRYDECK_NAMESPACE"]
-            ?? Bundle.main.object(forInfoDictionaryKey: "TelemetryDeckNamespace") as? String
-            ?? ""
-        let appID = environment["DEBUT_TELEMETRYDECK_APP_ID"]
-            ?? Bundle.main.object(forInfoDictionaryKey: "TelemetryDeckAppID") as? String
-            ?? ""
-        let client: any TelemetryClient = namespace.isEmpty || appID.isEmpty
-            ? UnavailableTelemetryClient()
-            : TelemetryDeckClient(namespace: namespace, appID: appID)
-        let support = DebutCore.applicationSupportDirectory
-        let exporter = TelemetryExporter(
-            client: client,
-            queue: DiskTelemetryQueue(file: support.appendingPathComponent("telemetry-queue.json")),
-            enabled: TelemetryActivationPolicy.shouldSend(settings: currentSettings)
-        )
-        telemetryExporter = exporter
-        PerformanceRecorder.shared.setObservationHandler { observation in
-            Task {
-                await exporter.record(observation)
-            }
-        }
-        let timer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { _ in
-            Task {
-                try? await exporter.flushHourly(
-                    appVersion: DebutCore.version,
-                    operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-                )
-            }
-        }
-        timer.tolerance = 60
-        telemetryHourlyTimer = timer
-        let telemetryEnabled = TelemetryActivationPolicy.shouldSend(settings: currentSettings)
-        Task {
-            try? await exporter.pruneLegacyPayloads()
-            if telemetryEnabled { try? await exporter.flush() }
-        }
     }
 
 }

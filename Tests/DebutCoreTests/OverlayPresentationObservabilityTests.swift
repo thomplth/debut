@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import DebutCore
 
-@Suite("Overlay presentation telemetry")
-struct OverlayPresentationTelemetryTests {
+@Suite("Overlay presentation observability")
+struct OverlayPresentationObservabilityTests {
     private final class Clock: @unchecked Sendable {
         var nanoseconds: UInt64 = 0
         var date = Date(timeIntervalSince1970: 1_700_000_000)

@@ -129,19 +129,6 @@ struct PerformanceObservabilityTests {
         #expect(recorder.snapshot().resources == nil)
     }
 
-    @Test("Completed observations are published without exposing identifiers beyond correlation")
-    func observationHandler() {
-        final class Box: @unchecked Sendable { var observation: PerformanceObservation? }
-        let box = Box()
-        let recorder = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader(), now: { 1 })
-        recorder.setObservationHandler { box.observation = $0 }
-        let id = recorder.begin(.spaceSwitch, workload: .init(spaces: 4, windows: 12))
-        _ = recorder.end(id)
-
-        #expect(box.observation?.correlationID == id)
-        #expect(box.observation?.operation == .spaceSwitch)
-    }
-
     @Test("High-frequency event taps cannot evict recent evidence for other operations")
     func recentEvidenceIsBoundedPerOperation() {
         let recorder = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader(), now: { 1 })

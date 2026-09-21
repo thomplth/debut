@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import os
 
-/// Stable operation names shared by diagnostics, benchmark artifacts, signposts, and telemetry.
+/// Stable operation names shared by diagnostics, benchmark artifacts, and signposts.
 public enum PerformanceOperation: String, CaseIterable, Codable, Sendable {
     case eventTap = "event_tap"
     case mainQueueDelivery = "main_queue_delivery"
@@ -21,6 +21,13 @@ public enum PerformanceOperation: String, CaseIterable, Codable, Sendable {
     case wallpaperCapture = "wallpaper_capture"
     case statePersistence = "state_persistence"
     case hiddenIdle = "hidden_idle"
+}
+
+/// Local performance context retained by overlay diagnostics.
+public enum PerformanceTemperature: String, Codable, Sendable {
+    case processFirst = "process_first"
+    case cacheCold = "cache_cold"
+    case warm
 }
 
 public struct PerformanceWorkload: Codable, Equatable, Sendable {
@@ -219,7 +226,7 @@ public struct PerformanceObservation: Codable, Equatable, Sendable {
     public let operation: PerformanceOperation
     public let durationMilliseconds: Double
     public let workload: PerformanceWorkload
-    public let temperature: TelemetryTemperature?
+    public let temperature: PerformanceTemperature?
     /// Measured across this span alone. A process-wide delta shared between
     /// operations is overwritten by whichever one ends last, which makes it
     /// unusable as evidence about any of them.
@@ -231,7 +238,7 @@ public struct PerformanceObservation: Codable, Equatable, Sendable {
         operation: PerformanceOperation,
         durationMilliseconds: Double,
         workload: PerformanceWorkload,
-        temperature: TelemetryTemperature? = nil,
+        temperature: PerformanceTemperature? = nil,
         resourceDelta: ProcessResourceDelta? = nil
     ) {
         self.correlationID = correlationID
@@ -255,7 +262,7 @@ public final class PerformanceRecorder: @unchecked Sendable {
         let operation: PerformanceOperation
         let started: UInt64
         var workload: PerformanceWorkload
-        var temperature: TelemetryTemperature?
+        var temperature: PerformanceTemperature?
         let signpostID: OSSignpostID
         var traceID: UUID?
         let startResources: ProcessResourceSnapshot?
@@ -278,7 +285,6 @@ public final class PerformanceRecorder: @unchecked Sendable {
     private var buffers: [PerformanceOperation: PerformanceSampleBuffer] = [:]
     private var observations: [PerformanceOperation: [PerformanceObservation]] = [:]
     private var resources: ProcessResourceSnapshot?
-    private var observationHandler: (@Sendable (PerformanceObservation) -> Void)?
 
     public init(
         resourceReader: any ProcessResourceReading = SystemProcessResourceReader(),
@@ -353,12 +359,10 @@ public final class PerformanceRecorder: @unchecked Sendable {
         }
         observations[span.operation] = recentForOperation
         if let sampled { resources = sampled }
-        let handler = observationHandler
         lock.unlock()
         let signpostMetadata = "operation=\(span.operation.rawValue) correlation=\(correlationID.uuidString) duration_ms=\(duration)" as NSString
         os_signpost(.end, log: log, name: "DebutOperation", signpostID: span.signpostID,
                     "%{public}@", signpostMetadata)
-        handler?(observation)
         return observation
     }
 
@@ -372,7 +376,7 @@ public final class PerformanceRecorder: @unchecked Sendable {
     }
 
     public func updateTemperature(
-        _ temperature: TelemetryTemperature,
+        _ temperature: PerformanceTemperature,
         for correlationID: UUID
     ) {
         lock.lock()
@@ -400,14 +404,6 @@ public final class PerformanceRecorder: @unchecked Sendable {
         let metadata = "operation=\(span.operation.rawValue) correlation=\(correlationID.uuidString) cancelled=true" as NSString
         os_signpost(.end, log: log, name: "DebutOperation", signpostID: span.signpostID,
                     "%{public}@", metadata)
-    }
-
-    public func setObservationHandler(
-        _ handler: (@Sendable (PerformanceObservation) -> Void)?
-    ) {
-        lock.lock()
-        observationHandler = handler
-        lock.unlock()
     }
 
     public func point(

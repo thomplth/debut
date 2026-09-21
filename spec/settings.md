@@ -34,7 +34,6 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Numbered / same-app numbered modifiers | Control / Control-Option |
 | Launch at login / show in Dock | On / On |
 | Excluded apps | Empty |
-| Share anonymous usage and performance data | Off; the user may opt in during onboarding or later in Settings |
 
 Cache age is evaluated when capture work is requested; it is not a recurring
 refresh timer. The code remains authoritative for control ranges, decoding
@@ -77,7 +76,6 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | Features | Preview and workspace switches, a faster-desktop parent with three navigation overrides, duration, and desktop indicator. |
 | Excluded Apps | Running-app picker for applications omitted from window management. |
 | App | Login launch and Dock visibility. The menu-bar item remains available with the Dock icon off. |
-| Privacy | Sharing switch and preview of the exact allowlisted session-summary payload. |
 | Keyboard Shortcuts | Activation/session bindings, numbered modifier sets, hold delay, repeat pace, a confirmed restore-defaults action, and reference for fixed move chords. |
 | Advanced | Main-display overlay placement, glass, stage/card geometry, adaptive sizing, selector appearance, and preview refresh/cache policy. |
 | Troubleshooting | Export local diagnostics or reset window assignments against the real desktop list while preserving settings. |
@@ -85,7 +83,8 @@ changes save immediately and update shared onboarding controls and menu checkmar
 
 The menu-bar item provides feature toggles, Settings, Tutorial, update checks,
 and Quit. System Reduce Motion changes overlay animation; it is not a separate
-Debut animation switch. See [privacy](../docs/privacy.md) for local and remote data.
+Debut animation switch. See [privacy](../docs/privacy.md) for local data and the
+user-initiated diagnostic export boundary.
 
 ## Onboarding
 
@@ -101,6 +100,4 @@ With only one desktop, the tutorial can teach local window switching and
 Option-Tab without pretending to cross desktops. It offers Mission Control for
 adding another desktop; Debut itself does not create one. Progress checkpoints
 allow resuming, and Tutorial can be reopened from the menu bar. Feature and
-duration choices are shared with Settings. The Ready page presents the
-anonymous-sharing choice off by default, and delivery begins only if the user
-opts in and completes onboarding.
+duration choices are shared with Settings.

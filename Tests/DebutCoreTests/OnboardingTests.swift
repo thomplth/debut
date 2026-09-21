@@ -162,21 +162,16 @@ struct OnboardingTests {
         #expect(completed == 1)
     }
 
-    @Test("Permission and telemetry requests remain explicit")
+    @Test("Permission requests remain explicit")
     func explicitChoices() {
         let permissions = MockOnboardingPermissionClient()
-        var sharing: [Bool] = []
-        let model = OnboardingViewModel(permissionClient: permissions,
-            onTelemetryChanged: { sharing.append($0) })
-        #expect(!model.shareAnonymousTelemetry)
+        let model = OnboardingViewModel(permissionClient: permissions)
         #expect(permissions.accessibilityRequestCount == 0)
         #expect(permissions.screenRecordingRequestCount == 0)
         model.requestAccessibility()
         model.requestScreenRecording()
         #expect(permissions.accessibilityRequestCount == 1)
         #expect(permissions.screenRecordingRequestCount == 1)
-        model.setShareAnonymousTelemetry(true)
-        #expect(sharing == [true])
     }
 
     @Test("A new install resumes onboarding until completion")
@@ -223,38 +218,8 @@ struct OnboardingTests {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(true, forKey: OnboardingLaunchPolicy.legacyLaunchKey)
 
-        // Reading completion must not depend on `shouldPresent` having run first,
-        // or an existing user's telemetry stays gated until the next launch.
+        // Reading completion must not depend on `shouldPresent` having run first.
         #expect(OnboardingLaunchPolicy.hasCompleted(defaults: defaults))
-    }
-}
-
-@Suite("TelemetryActivationPolicy")
-struct TelemetryActivationPolicyTests {
-
-    @Test("Nothing is sent before onboarding completes, even with the setting on")
-    func onboardingGatesSending() {
-        #expect(!TelemetryActivationPolicy.shouldSend(setting: true, onboardingCompleted: false))
-    }
-
-    @Test("Completing onboarding without opting in keeps sending disabled")
-    func completingOnboardingDoesNotOverrideDefault() {
-        let settings = AppSettings()
-        #expect(!TelemetryActivationPolicy.shouldSend(
-            setting: settings.shareAnonymousTelemetry,
-            onboardingCompleted: true
-        ))
-    }
-
-    @Test("Opting in after onboarding starts sending")
-    func optingInAfterOnboardingEnablesSending() {
-        #expect(TelemetryActivationPolicy.shouldSend(setting: true, onboardingCompleted: true))
-    }
-
-    @Test("Opting out wins regardless of onboarding state")
-    func optingOutWins() {
-        #expect(!TelemetryActivationPolicy.shouldSend(setting: false, onboardingCompleted: true))
-        #expect(!TelemetryActivationPolicy.shouldSend(setting: false, onboardingCompleted: false))
     }
 }
 
