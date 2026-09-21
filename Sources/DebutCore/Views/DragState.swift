@@ -28,11 +28,26 @@ struct WindowDropSettlingState {
     let destination: CGPoint
 }
 
+struct KeyboardWindowDeparture {
+    let move: KeyboardWindowMoveAnimation
+    let window: StageWindowData
+}
+
+struct StageWindowRenderItem: Identifiable {
+    let window: StageWindowData
+    let layoutIndex: Int?
+
+    var id: CGWindowID { window.windowID }
+}
+
 struct KeyboardWindowFlightState {
     let sequence: Int
+    let move: KeyboardWindowMoveAnimation
     let window: StageWindowData
     var position: CGPoint
     var metrics: StageMetrics
+    let destinationMetrics: StageMetrics
+    var isAnimating: Bool
 }
 
 struct WindowLayoutKey: Equatable {
@@ -71,4 +86,20 @@ struct WindowFramePreferenceKey: PreferenceKey {
     ) {
         value.merge(nextValue(), uniquingKeysWith: { $1 })
     }
+}
+
+struct WindowIdentityFramePreferenceKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: [WindowIdentityFrameID: CGRect] = [:]
+    static func reduce(
+        value: inout [WindowIdentityFrameID: CGRect],
+        nextValue: () -> [WindowIdentityFrameID: CGRect]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
+    }
+}
+
+struct WindowIdentityFrameID: Hashable {
+    let spaceIndex: Int
+    let windowIndex: Int
+    let windowID: CGWindowID
 }
