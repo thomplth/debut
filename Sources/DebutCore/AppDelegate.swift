@@ -10,16 +10,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var desktopSwitchIndicatorWindows: [String: DesktopSwitchIndicatorWindow] = [:]
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
-    private var onboardingTargetWindow: NSWindow?
-    private var onboardingWindowNeedsReplacement = false
-    private var onboardingWindowAwaitingPlacement = false
+    private var onboardingViewModel: OnboardingViewModel?
+    private var tutorialWindow: NSWindow?
+    private var tutorialTargetWindow: NSWindow?
+    private var tutorialWindowNeedsReplacement = false
+    private var tutorialWindowAwaitingPlacement = false
     private var pendingTutorialTarget: OnboardingTarget?
     private var preparingTutorialTarget = false
     private var tutorialGeneration = 0
     private var desktopSwipeService: DesktopSwipeService?
     private var desktopNavigationStackID: String?
     private var desktopNavigationEligibility: DesktopNavigationEligibility?
-    private var onboardingViewModel: OnboardingViewModel?
+    private var tutorialViewModel: TutorialViewModel?
     private var coachmarkPopover: NSPopover?
     private var statusItem: NSStatusItem?
     private var stateStore: StateStore?
@@ -144,6 +146,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             showOnboarding()
         }
 
+        if ProcessInfo.processInfo.arguments.contains("--show-tutorial"), !shouldShowOnboarding {
+            showTutorial()
+        }
+
         if ProcessInfo.processInfo.arguments.contains("--show-settings") {
             showSettings(settings: currentSettings)
         }
@@ -157,8 +163,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         _ sender: NSApplication,
         hasVisibleWindows: Bool
     ) -> Bool {
-        if onboardingWindow != nil {
+        if onboardingWindow != nil || OnboardingLaunchPolicy.shouldPresent() {
             showOnboarding()
+            return true
+        }
+        if tutorialWindow != nil {
+            showTutorial()
             return true
         }
         guard !hasVisibleWindows else { return true }
@@ -336,7 +346,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 self.publishTutorialTargetIfDiscovered()
                 // New AppKit windows receive a desktop asynchronously. Discovery is the
                 // event that makes preparation safe after a lesson has been reopened.
-                if self.onboardingWindowAwaitingPlacement { self.prepareTutorialTarget() }
+                if self.tutorialWindowAwaitingPlacement { self.prepareTutorialTarget() }
             }
         }
         discovery.onWindowCreated = { [weak self] snapshot in
@@ -359,7 +369,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                     self.debouncedSaver?.scheduleSave(controller.spaceManager)
                 }
                 self.publishTutorialTargetIfDiscovered()
-                if self.onboardingWindowAwaitingPlacement { self.prepareTutorialTarget() }
+                if self.tutorialWindowAwaitingPlacement { self.prepareTutorialTarget() }
             }
         }
         discovery.onWindowClosed = { [weak self] windowID in
@@ -550,7 +560,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 self.showDesktopSwitchIndicator(presentation)
             }
             self.refreshDesktopNavigationAvailability()
-            self.refreshOnboardingEnvironment()
+            self.refreshTutorialEnvironment()
             // Moving a window between desktops activates no app, so without this the move is
             // only noticed the next time the user clicks the window.
             self.windowDiscovery?.refreshDesktopAssignmentsInBackground()
@@ -603,7 +613,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         spaceController?.reconcileSpacesWithDesktops()
         refreshDesktopNavigationAvailability()
-        refreshOnboardingEnvironment()
+        refreshTutorialEnvironment()
     }
 
     @objc private func screenParametersDidChange(_ notification: Notification) {
@@ -615,6 +625,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     @objc private func workspaceApplicationActivated(_ notification: Notification) {
+        tutorialViewModel?.refreshPermissions()
         onboardingViewModel?.refreshPermissions()
         handlePermissionStateChange(
             onboardingPermissionClient.currentState(),
@@ -623,6 +634,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     public func applicationDidBecomeActive(_ notification: Notification) {
+        tutorialViewModel?.refreshPermissions()
         onboardingViewModel?.refreshPermissions()
         handlePermissionStateChange(
             onboardingPermissionClient.currentState(),
@@ -646,7 +658,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             spaceController?.windowPreviewsEnabled = captureEnabled
             if captureEnabled { spaceController?.prewarmWindowPreviews() }
         }
-        if let onboardingWindow, !onboardingWindowNeedsReplacement { admitSettingsWindowToSpaceManager(onboardingWindow) }
+        if let tutorialWindow, !tutorialWindowNeedsReplacement { admitSettingsWindowToSpaceManager(tutorialWindow) }
         prepareTutorialTarget()
         stopAccessibilityObservation()
     }
@@ -1032,7 +1044,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             let item = NSMenuItem(title: title, action: #selector(toggleFeature(_:)), keyEquivalent: "")
             item.tag = 100 + index
             item.target = self
-            if index == 2 { featureMenu.addItem(.separator()) }
+            if index == 3 { featureMenu.addItem(.separator()) }
             featureMenu.addItem(item)
         }
         let featuresItem = NSMenuItem(title: "Features", action: nil, keyEquivalent: "")
@@ -1054,9 +1066,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         updateFeatureMenu()
     }
 
-    static let featureMenuTitles = ["Window previews", "Workspace Command–Tab", "Faster desktop transitions", "Numbered space shortcuts", "Control-arrow switching", "Trackpad desktop swipe"]
+    static let featureMenuTitles = ["Window previews", "Workspace Command–Tab", "Option–Tab", "Faster desktop transitions", "Numbered space shortcuts", "Control-arrow switching", "Trackpad desktop swipe"]
     private static let featureKeyPaths: [WritableKeyPath<FeatureSettings, Bool>] = [
-        \.windowPreviews, \.workspaceIsolation, \.fasterDesktopSwitching,
+        \.windowPreviews, \.workspaceIsolation, \.optionTab, \.fasterDesktopSwitching,
         \.numberShortcuts, \.controlArrows, \.trackpadSwipes,
     ]
 
@@ -1065,7 +1077,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             let item = statusItem?.menu?.item(withTitle: "Features")?.submenu?
                 .item(withTag: 100 + index)
             item?.state = currentSettings.features[keyPath: keyPath] ? .on : .off
-            if index >= 3 {
+            if index >= 4 {
                 item?.isEnabled = currentSettings.features.fasterDesktopSwitching
             }
         }
@@ -1142,84 +1154,68 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     @objc private func openTutorial() {
-        showOnboarding()
+        if OnboardingLaunchPolicy.hasCompleted() { showTutorial() }
+        else { showOnboarding() }
     }
 
     @objc private func checkForUpdates(_ sender: Any?) {
         applicationUpdater.checkForUpdates()
     }
 
-    private func showOnboarding() {
-        if onboardingWindowNeedsReplacement, let model = onboardingViewModel {
+    private func showTutorial() {
+        if tutorialWindowNeedsReplacement, let model = tutorialViewModel {
             // A closed AppKit window can reuse its CG ID, which discovery correctly retired.
             // Give the resumed lesson a new window instead of reviving a destroyed identity.
-            onboardingWindow = makeOnboardingWindow(model)
-            onboardingWindowNeedsReplacement = false
-            onboardingWindow?.makeKeyAndOrderFront(nil)
+            tutorialWindow = makeTutorialWindow(model)
+            tutorialWindowNeedsReplacement = false
+            tutorialWindow?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
-            if let onboardingWindow { admitSettingsWindowToSpaceManager(onboardingWindow) }
+            if let tutorialWindow { admitSettingsWindowToSpaceManager(tutorialWindow) }
             restartTutorialExercise()
-            refreshOnboardingEnvironment()
+            refreshTutorialEnvironment()
             return
         }
-        if let onboardingWindow {
-            onboardingWindow.makeKeyAndOrderFront(nil)
+        if let tutorialWindow {
+            tutorialWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
-            admitSettingsWindowToSpaceManager(onboardingWindow)
-            refreshOnboardingEnvironment()
+            admitSettingsWindowToSpaceManager(tutorialWindow)
+            refreshTutorialEnvironment()
             return
         }
 
-        let replay = ProcessInfo.processInfo.arguments.contains("--show-onboarding")
-            || OnboardingLaunchPolicy.hasCompleted()
-        let checkpoint = replay ? nil : UserDefaults.standard.data(forKey: "onboardingCheckpoint")
-            .flatMap { try? JSONDecoder().decode(OnboardingCheckpoint.self, from: $0) }
-        let viewModel = OnboardingViewModel(
+        let checkpoint = UserDefaults.standard.data(forKey: "tutorialCheckpoint")
+            .flatMap { try? JSONDecoder().decode(TutorialCheckpoint.self, from: $0) }
+        let viewModel = TutorialViewModel(
             permissionClient: onboardingPermissionClient,
             features: currentSettings.features,
-            onFeaturesChanged: { [weak self] features in self?.applyFeatures(features) },
-            duration: currentSettings.spaceSwitchDuration,
-            onDurationChanged: { [weak self] duration in
-                guard let self else { return }
-                var settings = self.currentSettings
-                settings.spaceSwitchDuration = duration
-                self.applySettings(settings)
-            },
             onPermissionStateChanged: { [weak self] state in
-                self?.handlePermissionStateChange(state, source: "onboarding")
+                self?.handlePermissionStateChange(state, source: "tutorial")
             },
             checkpoint: checkpoint,
             onProgressChanged: { progress in
-                if !replay, let data = try? JSONEncoder().encode(progress) {
-                    UserDefaults.standard.set(data, forKey: "onboardingCheckpoint")
+                if let data = try? JSONEncoder().encode(progress) {
+                    UserDefaults.standard.set(data, forKey: "tutorialCheckpoint")
                 }
             },
-            onCompleted: { [weak self] in
-                self?.completeOnboarding()
-            }
+            onCompleted: { [weak self] in self?.completeTutorial() }
         )
-        viewModel.onEnvironmentRefresh = { [weak self] in self?.refreshOnboardingEnvironment() }
+        viewModel.onEnvironmentRefresh = { [weak self] in self?.refreshTutorialEnvironment() }
         viewModel.onRestartExercise = { [weak self] in self?.restartTutorialExercise() }
-        viewModel.onOpenMissionControl = {
-            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app"))
-        }
-        let window = makeOnboardingWindow(viewModel)
-        onboardingWindowNeedsReplacement = false
+        let window = makeTutorialWindow(viewModel)
+        tutorialWindowNeedsReplacement = false
 
-        onboardingViewModel = viewModel
-        onboardingWindow = window
+        tutorialViewModel = viewModel
+        tutorialWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        refreshOnboardingEnvironment()
+        refreshTutorialEnvironment()
         admitSettingsWindowToSpaceManager(window)
         prepareTutorialTarget()
-        diag.report("onboarding_shown", details: [
-            "forced": "\(ProcessInfo.processInfo.arguments.contains("--show-onboarding"))",
-        ])
+        diag.report("tutorial_shown")
     }
 
-    private func makeOnboardingWindow(_ viewModel: OnboardingViewModel) -> NSWindow {
-        onboardingWindowAwaitingPlacement = true
+    private func makeTutorialWindow(_ viewModel: TutorialViewModel) -> NSWindow {
+        tutorialWindowAwaitingPlacement = true
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 820, height: 650),
             styleMask: [.titled, .closable, .miniaturizable],
@@ -1234,15 +1230,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         window.title = "Debut Tutorial"
         window.collectionBehavior = []
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: OnboardingView(viewModel: viewModel))
+        window.contentView = NSHostingView(rootView: tutorialContent(viewModel))
         window.center()
         return window
     }
 
-    private func refreshOnboardingEnvironment() {
-        guard let onboardingViewModel else { return }
+    private func refreshTutorialEnvironment() {
+        refreshOnboardingEnvironment()
+        guard let tutorialViewModel else { return }
         spaceController?.reconcileSpacesWithDesktops()
-        onboardingViewModel.updateEnvironment(
+        tutorialViewModel.updateEnvironment(
             desktopCount: spaceController?.spaceManager.spaces.count ?? 1,
             windowCount: spaceController?.spaceManager.activeSpace.windows.count ?? 0)
         prepareTutorialTarget()
@@ -1253,38 +1250,36 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         tutorialGeneration += 1
         pendingTutorialTarget = nil
         preparingTutorialTarget = false
-        onboardingTargetWindow?.close()
-        onboardingTargetWindow = nil
-        onboardingViewModel?.setTarget(nil)
+        tutorialTargetWindow?.close()
+        tutorialTargetWindow = nil
+        tutorialViewModel?.setTarget(nil)
         prepareTutorialTarget()
     }
 
     private func prepareTutorialTarget() {
-        guard !onboardingWindowNeedsReplacement, !preparingTutorialTarget, pendingTutorialTarget == nil, let model = onboardingViewModel,
-              let tutorial = onboardingWindow, let service = spaceService,
-              model.permissions.accessibilityGranted, model.desktopCount >= 1,
+        guard !tutorialWindowNeedsReplacement, !preparingTutorialTarget, pendingTutorialTarget == nil, let model = tutorialViewModel,
+              let tutorial = tutorialWindow, let service = spaceService,
+              model.permissions.accessibilityGranted, model.shortcutEnabled, model.desktopCount >= 1,
               model.page == .workspace || model.page == .previews else { return }
-        if model.page == .previews, model.features.windowPreviews,
-           !model.permissions.screenRecordingGranted { return }
-        if let target = model.target, onboardingTargetWindow != nil {
+        if let target = model.target, tutorialTargetWindow != nil {
             configureTutorialScope(target)
             return
         }
-        onboardingTargetWindow?.close()
-        onboardingTargetWindow = nil
+        tutorialTargetWindow?.close()
+        tutorialTargetWindow = nil
         guard let origin = service.desktopIndex(forWindow: CGWindowID(tutorial.windowNumber)) else {
-            if !onboardingWindowAwaitingPlacement {
+            if !tutorialWindowAwaitingPlacement {
                 model.targetError = "The tutorial is not on a regular desktop. Move it to a desktop, then restart this exercise."
             }
             return
         }
-        onboardingWindowAwaitingPlacement = false
+        tutorialWindowAwaitingPlacement = false
         let adjacent = model.desktopCount == 1 ? origin : (origin + 1 < model.desktopCount ? origin + 1 : origin - 1)
         let title: String
         let placement: Int
         let destination: Int
         if model.page == .previews {
-            title = "Instant desktop switching"
+            title = "Tutorial complete"
             placement = adjacent
             destination = adjacent
         } else {
@@ -1312,11 +1307,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         target.isReleasedWhenClosed = false
         let hosting = NSHostingView(rootView: OnboardingDestinationView(title: title, onReturn: { [weak self] in
             guard let self else { return }
-            if self.onboardingWindowNeedsReplacement {
-                self.showOnboarding()
+            if self.tutorialWindowNeedsReplacement {
+                self.showTutorial()
                 return
             }
-            guard let tutorial = self.onboardingWindow else { return }
+            guard let tutorial = self.tutorialWindow else { return }
             if let controller = self.spaceController,
                let spaceID = controller.spaceManager.spaceContainingWindow(windowID: CGWindowID(tutorial.windowNumber)) {
                 controller.switchToSpace(id: spaceID, raiseWindowID: CGWindowID(tutorial.windowNumber))
@@ -1330,19 +1325,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         target.center()
         target.orderBack(nil)
         tutorial.makeKeyAndOrderFront(nil)
-        onboardingTargetWindow = target
+        tutorialTargetWindow = target
         let windowID = CGWindowID(target.windowNumber)
         configureTutorialScope(.init(windowID: windowID, originDesktop: origin,
                                      destinationDesktop: destination, title: title))
         let finish: @Sendable (Bool) -> Void = { [weak self] moved in
             DispatchQueue.main.async {
                 guard let self, self.tutorialGeneration == generation,
-                      self.onboardingTargetWindow === target else { return }
+                      self.tutorialTargetWindow === target else { return }
                 self.preparingTutorialTarget = false
                 guard moved, service.desktopIndex(forWindow: windowID) == placement else {
                     self.spaceController?.tutorialScope = nil
                     target.close()
-                    self.onboardingTargetWindow = nil
+                    self.tutorialTargetWindow = nil
                     model.targetError = "The tutorial target could not be placed on the desktop. Restart this exercise to try again."
                     return
                 }
@@ -1357,15 +1352,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func configureTutorialScope(_ target: OnboardingTarget) {
-        guard let lesson = onboardingWindow, let model = onboardingViewModel else { return }
+        guard let lesson = tutorialWindow, let model = tutorialViewModel else { return }
         let practice: OnboardingPractice = model.page == .previews ? .allWindows
             : model.exercise == .switchWindow ? .workspace : model.exercise == .switchDesktop ? .desktop : .moveWindow
         spaceController?.tutorialScope = .init(lessonWindowID: CGWindowID(lesson.windowNumber), target: target, practice: practice)
     }
 
     private func publishTutorialTargetIfDiscovered() {
-        guard let target = pendingTutorialTarget, let model = onboardingViewModel,
-              let window = onboardingTargetWindow, CGWindowID(window.windowNumber) == target.windowID,
+        guard let target = pendingTutorialTarget, let model = tutorialViewModel,
+              let window = tutorialTargetWindow, CGWindowID(window.windowNumber) == target.windowID,
               spaceController?.spaceManager.allSpaces.contains(where: { space in
                   space.windows.contains { $0.windowID == target.windowID }
               }) == true else { return }
@@ -1376,7 +1371,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             "windowID": "\(target.windowID)", "title": target.title,
             "placementDesktop": "\(spaceService?.desktopIndex(forWindow: target.windowID) ?? -1)",
             "destinationDesktop": "\(target.destinationDesktop)",
-            "lessonWindowID": "\(onboardingWindow?.windowNumber ?? -1)",
+            "lessonWindowID": "\(tutorialWindow?.windowNumber ?? -1)",
             "originDesktop": "\(target.originDesktop)",
             "exercise": model.exercise.rawValue, "page": "\(model.page)",
             "currentDesktop": "\(spaceService?.currentDesktopIndex() ?? -1)",
@@ -1385,26 +1380,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func completeTutorialSelection(windowID: CGWindowID, practice: OnboardingPractice) {
-        if let target = onboardingTargetWindow, CGWindowID(target.windowNumber) == windowID {
+        if let target = tutorialTargetWindow, CGWindowID(target.windowNumber) == windowID {
             diag.report("onboarding_selection_checked", details: [
                 "practice": "\(practice)", "windowID": "\(windowID)",
                 "keyWindowID": "\(NSApp.keyWindow?.windowNumber ?? -1)",
                 "desktop": "\(spaceService?.currentDesktopIndex() ?? -1)",
             ])
         }
-        guard let model = onboardingViewModel, let target = onboardingTargetWindow,
+        guard let model = tutorialViewModel, let target = tutorialTargetWindow,
               CGWindowID(target.windowNumber) == windowID,
               NSApp.keyWindow === target,
               let desktop = spaceService?.desktopIndex(forWindow: windowID),
               spaceService?.currentDesktopIndex() == desktop,
               model.recordPractice(practice, windowID: windowID, desktopIndex: desktop) else { return }
         spaceController?.tutorialScope = nil
-        let previous = onboardingWindow
-        onboardingWindow = target
-        onboardingTargetWindow = nil
+        let previous = tutorialWindow
+        tutorialWindow = target
+        tutorialTargetWindow = nil
         target.title = "Debut Tutorial"
         target.setContentSize(NSSize(width: 820, height: 650))
-        target.contentView = NSHostingView(rootView: OnboardingView(viewModel: model))
+        target.contentView = NSHostingView(rootView: tutorialContent(model))
         target.center()
         target.makeKeyAndOrderFront(nil)
         previous?.close()
@@ -1412,21 +1407,106 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         diag.report("onboarding_practice_verified", details: [
             "practice": "\(practice)", "windowID": "\(windowID)", "desktop": "\(desktop)",
         ])
+        refreshTutorialEnvironment()
+    }
+
+    private func tutorialContent(_ model: TutorialViewModel) -> TutorialView {
+        TutorialView(viewModel: model, onExit: { [weak self] in self?.endTutorial() },
+            onOpenSettings: { [weak self] in self?.openSettings() })
+    }
+
+    private func completeTutorial() {
+        UserDefaults.standard.removeObject(forKey: "tutorialCheckpoint")
+        endTutorial()
+        diag.report("tutorial_completed")
+    }
+
+    private func endTutorial() {
+        tutorialGeneration += 1
+        pendingTutorialTarget = nil
+        preparingTutorialTarget = false
+        if spaceController?.activeTutorialScope != nil { spaceController?.handleKeyEvent(.escape) }
+        spaceController?.tutorialScope = nil
+        let lesson = tutorialWindow
+        let target = tutorialTargetWindow
+        tutorialWindow = nil
+        tutorialTargetWindow = nil
+        tutorialViewModel = nil
+        tutorialWindowNeedsReplacement = false
+        tutorialWindowAwaitingPlacement = false
+        lesson?.close()
+        target?.close()
+    }
+
+    private func showOnboarding() {
+        if let onboardingWindow {
+            onboardingWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            refreshOnboardingEnvironment()
+            return
+        }
+        // Separate setup storage intentionally ignores the old exercise-based checkpoint.
+        let checkpoint = UserDefaults.standard.data(forKey: "setupCheckpoint")
+            .flatMap { try? JSONDecoder().decode(OnboardingCheckpoint.self, from: $0) }
+        let model = OnboardingViewModel(permissionClient: onboardingPermissionClient,
+            features: currentSettings.features,
+            onFeaturesChanged: { [weak self] in self?.applyFeatures($0) },
+            onPermissionStateChanged: { [weak self] in self?.handlePermissionStateChange($0, source: "onboarding") },
+            checkpoint: checkpoint,
+            onProgressChanged: { progress in
+                if let data = try? JSONEncoder().encode(progress) {
+                    UserDefaults.standard.set(data, forKey: "setupCheckpoint")
+                }
+            },
+            onCompleted: { [weak self] in self?.completeOnboarding() },
+            onDestination: { [weak self] destination in
+                switch destination {
+                case .tutorial: self?.showTutorial()
+                case .settings: self?.openSettings()
+                case .useDebut: self?.showMenuBarCoachmark()
+                }
+            })
+        model.onEnvironmentRefresh = { [weak self] in self?.refreshOnboardingEnvironment() }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 650),
+            styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+        if let screen = NSScreen.main {
+            let titleBarHeight = window.frame.height - window.contentRect(forFrameRect: window.frame).height
+            window.setContentSize(NSSize(width: 820, height: OnboardingLayout.contentHeight(
+                visibleHeight: screen.visibleFrame.height, titleBarHeight: titleBarHeight)))
+        }
+        window.title = "Welcome to Debut"
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: OnboardingView(viewModel: model))
+        window.delegate = self
+        onboardingWindow = window
+        onboardingViewModel = model
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
         refreshOnboardingEnvironment()
+        diag.report("onboarding_shown", details: ["forced": "\(ProcessInfo.processInfo.arguments.contains("--show-onboarding"))"])
+    }
+
+    private func refreshOnboardingEnvironment() {
+        guard onboardingViewModel != nil else { return }
+        // Count every connected stack; do not mistake one desktop on the focused display
+        // for a device with only one desktop. Exclude disconnected recovery stacks.
+        let count = spaceService?.spaceTopology().stacks.reduce(0) { $0 + $1.desktopIDs.count }
+        if let count { onboardingViewModel?.updateEnvironment(desktopCount: count) }
     }
 
     private func completeOnboarding() {
-        spaceController?.tutorialScope = nil
         OnboardingLaunchPolicy.markCompleted()
+        UserDefaults.standard.removeObject(forKey: "setupCheckpoint")
         UserDefaults.standard.removeObject(forKey: "onboardingCheckpoint")
-        onboardingTargetWindow?.close()
-        onboardingTargetWindow = nil
-        onboardingWindow?.close()
+        // Exiting the tutorial keeps a checkpoint to resume from, but finishing setup starts the
+        // tutorial over: its destination button promises the first lesson, not someone else's place.
+        UserDefaults.standard.removeObject(forKey: "tutorialCheckpoint")
+        let window = onboardingWindow
         onboardingWindow = nil
         onboardingViewModel = nil
-
+        window?.close()
         diag.report("onboarding_completed")
-        showMenuBarCoachmark()
     }
 
     private func showMenuBarCoachmark() {
@@ -1486,9 +1566,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         spaceController?.windowPreviewsEnabled = OnboardingCapturePolicy.isEnabled(
             previewsRequested: newSettings.features.windowPreviews,
             screenRecordingGranted: onboardingPermissionClient.currentState().screenRecordingGranted)
+        let tutorialShortcutWasEnabled = tutorialViewModel?.shortcutEnabled
+        tutorialViewModel?.features = newSettings.features
         onboardingViewModel?.features = newSettings.features
-        onboardingViewModel?.duration = newSettings.spaceSwitchDuration
-        prepareTutorialTarget()
+        if tutorialShortcutWasEnabled != tutorialViewModel?.shortcutEnabled { restartTutorialExercise() }
+        else { prepareTutorialTarget() }
         NotificationCenter.default.post(name: .debutSettingsChanged, object: newSettings)
         updateFeatureMenu()
     }
@@ -1569,12 +1651,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     public func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
-        if window === onboardingWindow { onboardingWindowNeedsReplacement = true }
-        if window === onboardingTargetWindow || window === onboardingWindow { spaceController?.tutorialScope = nil }
-        if window === onboardingTargetWindow {
-            onboardingTargetWindow = nil
-            onboardingViewModel?.setTarget(nil)
-            onboardingViewModel?.targetError = "The next lesson window was closed. Restart the exercise to reopen it."
+        if window === onboardingWindow {
+            onboardingWindow = nil
+            onboardingViewModel = nil
+        }
+        if window === tutorialWindow {
+            tutorialWindowNeedsReplacement = true
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window, self.tutorialWindow === window else { return }
+                self.endTutorial()
+            }
+        }
+        if window === tutorialTargetWindow || window === tutorialWindow { spaceController?.tutorialScope = nil }
+        if window === tutorialTargetWindow {
+            tutorialTargetWindow = nil
+            tutorialViewModel?.setTarget(nil)
+            tutorialViewModel?.targetError = "The next lesson window was closed. Restart the exercise to reopen it."
         }
         windowService?.setOwnWindowConsent(false, windowID: CGWindowID(window.windowNumber))
         windowDiscovery?.onWindowClosed?(CGWindowID(window.windowNumber))

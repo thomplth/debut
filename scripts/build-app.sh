@@ -36,7 +36,7 @@ for image in overlay all-windows; do
     fi
 done
 
-for media in onboarding-workspace.jpg onboarding-previews.jpg onboarding-no-previews.jpg onboarding-speed.mp4 onboarding-speed.jpg; do
+for media in onboarding-workspace.png onboarding-workspace-no-previews.png onboarding-previews.png onboarding-no-previews.png; do
     if [[ ! -f "$PROJECT_DIR/docs/media/$media" ]]; then
         echo "Missing onboarding demonstration: $media" >&2
         exit 1
