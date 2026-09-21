@@ -137,6 +137,15 @@ func prepareDemoWeather() {
               let label = axValue($0, kAXDescriptionAttribute) as? String else { return false }
         return label.contains(",") && !label.hasPrefix("Cupertino,")
     }) == nil else {
+        func describe(_ element: AXUIElement, depth: Int = 0) {
+            guard depth < 12 else { return }
+            let text = [kAXRoleAttribute, kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute]
+                .compactMap { axValue(element, $0) as? String }.joined(separator: " | ")
+            if !text.isEmpty { log("Weather AX: \(String(repeating: " ", count: depth))\(text)") }
+            for child in axValue(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] { describe(child, depth: depth + 1) }
+        }
+        describe(root)
+        try? captureDemoStill(to: outputDirectory.appendingPathComponent("weather-failure.png"))
         log("FAILED: Weather still has a dialog or extra cities"); exit(1)
     }
     guard let windows = axValue(root, kAXWindowsAttribute) as? [AXUIElement],
@@ -303,6 +312,46 @@ func recordReadme() {
     setDemoInstant(false)
     scene.focus(scene.groups[1][0])
     clearNotifications()
+    if requestedClips.contains("onboarding") {
+        for previews in [true, false] {
+            _ = run("/usr/bin/pkill", ["-x", "Debut"])
+            wait(0.6)
+            let settingsURL = DebutCore.applicationSupportDirectory.appendingPathComponent("settings.json")
+            var settings = try! JSONDecoder().decode(AppSettings.self, from: Data(contentsOf: settingsURL))
+            settings.features.windowPreviews = previews
+            try! JSONEncoder().encode(settings).write(to: settingsURL, options: .atomic)
+            setDemoInstant(false)
+            scene.restore()
+            scene.focus(scene.groups[1][0])
+            for command in [true, false] {
+                let modifier: CGEventFlags = command ? .maskCommand : .maskAlternate
+                let name = command ? (previews ? "onboarding-workspace" : "onboarding-workspace-no-previews")
+                    : (previews ? "onboarding-previews" : "onboarding-no-previews")
+                holding(modifier) {
+                    postTap(Key.tab, flags: modifier, duration: 0.2)
+                    wait(1.2)
+                    if command { postTap(Key.digits[1], flags: modifier); wait(0.5) }
+                    let backdrop = MainActor.assumeIsolated { () -> NSPanel in
+                        let panel = NSPanel(contentRect: NSScreen.main!.frame,
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+                        panel.backgroundColor = .white
+                        panel.isOpaque = true
+                        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue - 1)
+                        panel.hidesOnDeactivate = false
+                        panel.ignoresMouseEvents = true
+                        panel.orderFrontRegardless()
+                        return panel
+                    }
+                    wait(0.6)
+                    do { try captureOverlayCover(to: outputDirectory.appendingPathComponent(name + ".png")) }
+                    catch { log("FAILED \(name): \(error)"); exit(1) }
+                    MainActor.assumeIsolated { backdrop.orderOut(nil) }
+                    postTap(Key.escape, flags: modifier)
+                    log("captured \(name)")
+                }
+            }
+        }
+    }
     if requestedClips.isEmpty || requestedClips.contains("cover") {
         for dark in [false, true] {
             setDemoAppearance(dark: dark)

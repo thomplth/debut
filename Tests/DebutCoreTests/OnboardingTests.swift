@@ -3,177 +3,8 @@ import Testing
 @testable import DebutCore
 
 @MainActor
-private final class MockOnboardingPermissionClient: OnboardingPermissionClient {
-    var state = OnboardingPermissionState(
-        accessibilityGranted: false,
-        screenRecordingGranted: false
-    )
-    var accessibilityRequestCount = 0
-    var screenRecordingRequestCount = 0
-
-    func currentState() -> OnboardingPermissionState {
-        state
-    }
-
-    func requestAccessibility() {
-        accessibilityRequestCount += 1
-    }
-
-    func requestScreenRecording() {
-        screenRecordingRequestCount += 1
-    }
-}
-
-@MainActor
-@Suite("Onboarding")
+@Suite("Onboarding lifecycle")
 struct OnboardingTests {
-    @Test("One desktop can finish both window exercises without creating a desktop")
-    func singleDesktop() {
-        let permissions = MockOnboardingPermissionClient()
-        permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: true)
-        let model = OnboardingViewModel(permissionClient: permissions)
-        model.advance()
-        model.updateEnvironment(desktopCount: 1, windowCount: 2)
-        model.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: 0, title: "Window previews"))
-        #expect(model.recordPractice(.workspace, windowID: 42, desktopIndex: 0))
-        #expect(model.page == .previews)
-        model.setTarget(.init(windowID: 43, originDesktop: 0, destinationDesktop: 0, title: "Instant desktop switching"))
-        #expect(model.recordPractice(.allWindows, windowID: 43, desktopIndex: 0))
-        #expect(model.page == .speed)
-        model.back()
-        model.back()
-        #expect(model.page == .workspace)
-        #expect(model.exercise == .switchWindow)
-    }
-
-    @Test("Losing the second desktop resets an unavailable exercise")
-    func desktopRemoved() {
-        let permissions = MockOnboardingPermissionClient()
-        let model = OnboardingViewModel(permissionClient: permissions,
-            checkpoint: .init(page: .workspace, exercise: .moveWindow, workspacePracticed: false, allWindowsPracticed: false))
-        model.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: 1, title: "Window previews"))
-        model.updateEnvironment(desktopCount: 1, windowCount: 2)
-        #expect(model.exercise == .switchWindow)
-        #expect(model.target == nil)
-    }
-
-    @Test("Preview warmup never asks for a permission before its lesson")
-    func captureGate() {
-        #expect(!OnboardingCapturePolicy.isEnabled(previewsRequested: true, screenRecordingGranted: false))
-        #expect(!OnboardingCapturePolicy.isEnabled(previewsRequested: false, screenRecordingGranted: true))
-        #expect(OnboardingCapturePolicy.isEnabled(previewsRequested: true, screenRecordingGranted: true))
-    }
-
-    private func finishWorkspace(_ model: OnboardingViewModel) {
-        for action in [OnboardingPractice.workspace, .desktop, .moveWindow] {
-            model.setTarget(.init(windowID: 42, originDesktop: action == .workspace ? 1 : 0, destinationDesktop: 1, title: "Next lesson"))
-            model.recordPractice(action, windowID: 42, desktopIndex: 1)
-        }
-    }
-    private func finishPreviews(_ model: OnboardingViewModel) {
-        model.setTarget(.init(windowID: 43, originDesktop: 0, destinationDesktop: 1, title: "Instant desktop switching"))
-        model.recordPractice(.allWindows, windowID: 43, desktopIndex: 1)
-    }
-
-    @Test("A permission restart resumes the exact exercise without bypassing permission checks")
-    func resumesAfterPermissionRestart() throws {
-        let permissions = MockOnboardingPermissionClient()
-        permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: false)
-        var checkpoint: OnboardingCheckpoint?
-        let model = OnboardingViewModel(permissionClient: permissions, onProgressChanged: { checkpoint = $0 })
-        model.advance()
-        model.updateEnvironment(desktopCount: 2, windowCount: 2)
-        model.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: 0, title: "Desktop switching"))
-        model.recordPractice(.workspace, windowID: 42, desktopIndex: 0)
-        let restored = try JSONDecoder().decode(OnboardingCheckpoint.self, from: JSONEncoder().encode(try #require(checkpoint)))
-        let resumed = OnboardingViewModel(permissionClient: permissions, checkpoint: restored)
-        #expect(resumed.page == .workspace)
-        #expect(resumed.exercise == .switchDesktop)
-        #expect(resumed.target == nil)
-        permissions.state = .init(accessibilityGranted: false, screenRecordingGranted: true)
-        resumed.refreshPermissions()
-        #expect(!resumed.canAdvance)
-    }
-
-    @Test("Accessibility is mandatory, while capture can be declined")
-    func permissionGate() {
-        let permissions = MockOnboardingPermissionClient()
-        let model = OnboardingViewModel(permissionClient: permissions)
-        model.advance()
-        model.updateEnvironment(desktopCount: 2, windowCount: 2)
-        finishWorkspace(model)
-        #expect(model.page == .workspace)
-        #expect(model.exercise == .switchWindow)
-        permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: false)
-        model.refreshPermissions()
-        finishWorkspace(model)
-        #expect(model.page == .previews)
-        finishPreviews(model)
-        #expect(model.page == .previews)
-        model.useWithoutPreviews()
-        #expect(!model.features.windowPreviews)
-        finishPreviews(model)
-        #expect(model.page == .speed)
-    }
-
-    @Test("Revoking Accessibility blocks every later page")
-    func revokedPermission() {
-        for page in [OnboardingPage.previews, .speed, .ready] {
-            let permissions = MockOnboardingPermissionClient()
-            let model = OnboardingViewModel(permissionClient: permissions,
-                checkpoint: .init(page: page, workspacePracticed: true, allWindowsPracticed: true))
-            model.updateEnvironment(desktopCount: 2, windowCount: 2)
-            finishPreviews(model)
-            model.advance()
-            #expect(model.page == page)
-            #expect(!model.canAdvance)
-        }
-    }
-
-    @Test("Live feature and duration choices publish immediately and completion is explicit")
-    func liveSettingsAndCompletion() {
-        let permissions = MockOnboardingPermissionClient()
-        permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: true)
-        var changes: [FeatureSettings] = []
-        var durations: [TimeInterval] = []
-        var completed = 0
-        let model = OnboardingViewModel(permissionClient: permissions,
-            onFeaturesChanged: { changes.append($0) },
-            onDurationChanged: { durations.append($0) },
-            onCompleted: { completed += 1 })
-        model.advance()
-        model.updateEnvironment(desktopCount: 2, windowCount: 2)
-        finishWorkspace(model)
-        finishPreviews(model)
-        #expect(model.page == .speed)
-        model.setDuration(0.25)
-        #expect(durations == [0.25])
-        model.setAllOverrides(false)
-        #expect(changes.last?.workspaceIsolation == false)
-        #expect(changes.last?.fasterDesktopSwitching == false)
-        #expect(changes.last?.numberShortcuts == false)
-        #expect(changes.last?.controlArrows == false)
-        #expect(changes.last?.trackpadSwipes == false)
-        model.advance()
-        #expect(model.page == .ready)
-        #expect(completed == 0)
-        model.advance()
-        model.advance()
-        #expect(completed == 1)
-    }
-
-    @Test("Permission requests remain explicit")
-    func explicitChoices() {
-        let permissions = MockOnboardingPermissionClient()
-        let model = OnboardingViewModel(permissionClient: permissions)
-        #expect(permissions.accessibilityRequestCount == 0)
-        #expect(permissions.screenRecordingRequestCount == 0)
-        model.requestAccessibility()
-        model.requestScreenRecording()
-        #expect(permissions.accessibilityRequestCount == 1)
-        #expect(permissions.screenRecordingRequestCount == 1)
-    }
-
     @Test("A new install resumes onboarding until completion")
     func launchPolicy() throws {
         let suiteName = "DebutOnboardingTests-\(UUID().uuidString)"
@@ -220,6 +51,12 @@ struct OnboardingTests {
 
         // Reading completion must not depend on `shouldPresent` having run first.
         #expect(OnboardingLaunchPolicy.hasCompleted(defaults: defaults))
+    }
+    @Test("Capture is optional and never requested without consent")
+    func captureGate() {
+        #expect(!OnboardingCapturePolicy.isEnabled(previewsRequested: true, screenRecordingGranted: false))
+        #expect(!OnboardingCapturePolicy.isEnabled(previewsRequested: false, screenRecordingGranted: true))
+        #expect(OnboardingCapturePolicy.isEnabled(previewsRequested: true, screenRecordingGranted: true))
     }
 }
 

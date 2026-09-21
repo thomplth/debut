@@ -371,6 +371,8 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                 return event
             }
 
+            if !features.optionTab, KeyAction.altTabActions.contains(globalAction) { return event }
+
             // Same-app cycling is Debut's replacement for macOS's Cmd-` handling. Excluded
             // apps have no tracked windows, so leave that shortcut untouched for macOS until
             // Debut's overlay is visible and owns the keyboard session.

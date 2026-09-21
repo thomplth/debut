@@ -1116,34 +1116,37 @@ struct ScreenshotTests {
         controller.handleKeyEvent(.escape)
     }
 
-    @Test("Onboarding pages and permission states fit the window", arguments: ["welcome", "permission", "one-desktop", "practice", "desktop-switch", "window-move", "previews", "previews-active", "previews-disabled", "speed", "ready", "small-speed"])
+    @Test("Minimal onboarding pages fit the window", arguments: ["welcome", "permission", "one-desktop", "workspace", "workspace-no-previews", "previews", "previews-disabled", "speed", "ready", "small-welcome", "small-one-desktop"])
     func onboardingPages(_ state: String) throws {
-        let smallScreen = state == "small-speed"
-        let state = smallScreen ? "speed" : state
+        let smallScreen = state.hasPrefix("small-")
+        let state = state.replacingOccurrences(of: "small-", with: "")
         let page: OnboardingPage = switch state {
-        case "welcome": .welcome
-        case "previews", "previews-active", "previews-disabled": .previews
+        case "welcome", "permission": .welcome
+        case "previews", "previews-disabled": .previews
         case "speed": .speed
         case "ready": .ready
         default: .workspace
         }
         let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient(
-            accessibilityGranted: state != "permission", screenRecordingGranted: state == "previews-active"),
-            checkpoint: .init(page: page, exercise: state == "desktop-switch" ? .switchDesktop : state == "window-move" ? .moveWindow : .switchWindow, workspacePracticed: page.rawValue > 1, allWindowsPracticed: page.rawValue > 2))
-        if state == "one-desktop" {
-            vm.updateEnvironment(desktopCount: 1, windowCount: 2)
-            vm.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: 0, title: "Window previews"))
-        }
-        if !["welcome", "permission", "one-desktop"].contains(state) {
-            vm.updateEnvironment(desktopCount: 2, windowCount: 2)
-            if state == "previews-disabled" { vm.useWithoutPreviews() }
-            vm.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: state == "practice" ? 0 : 1,
-                              title: page == .previews ? "Instant desktop switching" : state == "desktop-switch" ? "Move a window" : state == "window-move" ? "Window previews" : "Desktop switching"))
-        }
+            accessibilityGranted: state != "permission", screenRecordingGranted: !["permission", "workspace-no-previews", "previews-disabled"].contains(state)),
+            checkpoint: .init(page: page))
+        vm.updateEnvironment(desktopCount: state == "one-desktop" ? 1 : 3)
         let image = try #require(renderSwiftUI(
-            OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media")),
-            size: NSSize(width: 820, height: smallScreen ? 620 : 650)))
-        try saveImage(image, name: "onboarding_\(smallScreen ? "small-speed" : state)")
+            OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media"),
+                iconURL: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Resources/AppIcon.icns")),
+            size: NSSize(width: 820, height: smallScreen ? 570 : 650)))
+        try saveImage(image, name: "onboarding_\(smallScreen ? "small-" : "")\(state)")
+    }
+
+    @Test("Optional tutorial has separate exercise and completion views", arguments: ["workspace", "previews", "ready", "disabled"])
+    func tutorialPages(_ state: String) throws {
+        let page: TutorialPage = state == "previews" ? .previews : state == "ready" ? .ready : .workspace
+        let vm = TutorialViewModel(permissionClient: PreviewOnboardingPermissionClient(accessibilityGranted: true),
+            checkpoint: .init(page: page, workspacePracticed: false, allWindowsPracticed: false))
+        vm.features.workspaceIsolation = state != "disabled"
+        vm.setTarget(.init(windowID: 42, originDesktop: 0, destinationDesktop: 1, title: "Next lesson"))
+        let image = try #require(renderSwiftUI(TutorialView(viewModel: vm), size: NSSize(width: 820, height: 650)))
+        try saveImage(image, name: "tutorial_\(state)")
     }
 
 }

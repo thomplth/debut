@@ -6,6 +6,24 @@ import Testing
 
 @Suite("Keyboard shortcut customization", .serialized)
 struct KeyboardShortcutCustomizationTests {
+    @Test("Disabling Option-Tab passes both directions through without disabling Command-Tab")
+    func disabledOptionTab() throws {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        service.features = try JSONDecoder().decode(FeatureSettings.self, from: Data(#"{"optionTab":false}"#.utf8))
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+        for flags: CGEventFlags in [.maskAlternate, [.maskAlternate, .maskShift]] {
+            let event = keyEvent(keyCode: kVK_Tab, flags: flags)
+            #expect(service.handleCGEvent(type: .keyDown, event: event) === event)
+            #expect(service.handleCGEvent(type: .keyUp, event: event) === event)
+        }
+        #expect(delegate.receivedEvents.isEmpty)
+        let commandTab = keyEvent(keyCode: kVK_Tab, flags: .maskCommand)
+        #expect(service.handleCGEvent(type: .keyDown, event: commandTab) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold])
+    }
+
     @Test("Command-Option-backtick is the alternate previous-space shortcut")
     func previousSpaceAlternateDefault() {
         let bindings = KeyBindings()

@@ -1,7 +1,7 @@
 # Settings and onboarding
 
-The feature controls describe three capabilities: screenshot previews, switching
-within the current desktop, and faster desktop navigation. **Stage** is the
+The feature controls cover screenshot previews, switching within the current
+desktop, switching across all desktops, and faster desktop navigation. **Stage** is the
 product term for a desktop's window group. Existing UI labels such as “workspace,”
 “space,” and “Space Manager session” refer to these desktop-backed stages and
 their switcher; they do not denote independent virtual workspaces.
@@ -17,6 +17,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | --- | --- |
 | Window previews | On |
 | Workspace isolation (Command-Tab and same-app cycling) | On |
+| Option-Tab across all desktops | On |
 | Faster desktop transitions | On |
 | Numbered desktop shortcuts | On |
 | Faster Control-arrow switching | On |
@@ -43,7 +44,9 @@ fallbacks, and [default bindings](../Sources/DebutCore/Models/KeyBinding.swift).
 
 Disabling workspace isolation returns Command-Tab and Command-backtick activation
 to macOS and disables the fixed focused-window move chords. Stage browsing and
-Option-Tab remain available. Saved shortcuts are retained when a feature is off.
+Option-Tab remain available. Option-Tab has its own enable control; disabling it
+passes its configured activation shortcuts through unchanged.
+Saved shortcuts are retained when a feature is off.
 
 Disabling previews stops window screenshot capture and clears cached images;
 cards show icons and titles. Screen Recording enables screenshot previews and
@@ -75,7 +78,7 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | --- | --- |
 | General | Login launch, Dock visibility, Reduce Motion guidance, and a running-app picker for applications ignored by window management. The menu-bar item remains available with the Dock icon off. |
 | Desktops | Faster switching and its number-key, Control-arrow, and trackpad methods, followed by transition duration and the desktop-change indicator. |
-| Switcher | Command-Tab desktop isolation, window previews, display placement, and preview freshness. |
+| Switcher | Command-Tab desktop isolation, Option-Tab activation, window previews, display placement, and preview freshness. |
 | Appearance | Glass and card layout, adaptive preview sizing, inactive-stage scale, and selected-window treatment. |
 | Shortcuts | Activation/session bindings, numbered modifier sets, hold delay, repeat pace, a confirmed restore-defaults action, and reference for fixed move chords. |
 | Support | Version and update checks, diagnostic export, and a confirmed window-cache reset that preserves settings. |
@@ -91,18 +94,36 @@ and Quit. System Reduce Motion changes overlay animation; it is not a separate
 Debut animation switch. See [privacy](../docs/privacy.md) for local data and the
 user-initiated diagnostic export boundary.
 
-## Onboarding
+## Onboarding and tutorial
 
-The tutorial progresses through Welcome, Workspace, Previews, Speed, and Ready.
-It requests Accessibility for interaction and Screen Recording for enabled
-previews. Workspace practice uses real windows to teach within-stage switching,
-desktop switching, and window movement; the previews page teaches Option-Tab.
-Exercises verify the intended window and destination instead of passing merely
-because an overlay opened. Practice constrains the switcher to tutorial targets
-and disables unrelated destructive actions.
+Setup has five pages and never requires shortcut practice:
 
-With only one desktop, the tutorial can teach local window switching and
-Option-Tab without pretending to cross desktops. It offers Mission Control for
-adding another desktop; Debut itself does not create one. Progress checkpoints
-allow resuming, and Tutorial can be reopened from the menu bar. Feature and
-duration choices are shared with Settings.
+1. Welcome retains the icon and Debut name with “Turns the macOS Command-Tab
+   switcher into a workspace manager”. Accessibility is required for shortcuts
+   and window control; Screen Recording is optional and enables window previews.
+   Permission requests happen only when the user clicks the corresponding button.
+2. Command-Tab introduces the desktop-grouped switcher with a real screenshot and
+   its enable toggle. Only a device with exactly one desktop sees verbal Mission
+   Control instructions for adding another; creation is never required.
+3. Option-Tab introduces the all-desktops switcher with a real screenshot and its
+   independent enable toggle. Both switchers default on.
+4. Faster desktop switching exposes only its master toggle (default on). Duration,
+   gestures and shortcut controls remain in Settings; toggling the master preserves
+   those saved choices.
+5. You’re ready offers Start using Debut, Start tutorial, and Open Settings. Every
+   action completes setup before opening its destination.
+
+Without Screen Recording, both example screenshots show the icon-based fallback.
+No remote telemetry or sharing consent is part of setup. Back/Continue never
+changes feature preferences. Setup progress survives restarts, and existing users
+are not forced through setup again.
+
+Tutorial is a separate optional flow opened from the final setup page or the menu
+bar. It teaches window switching, desktop navigation, moving windows, and Option-Tab
+using verified practice targets. Each lesson can be skipped and the tutorial can
+be exited at any time; neither action changes setup completion or feature choices.
+A disabled switcher offers Settings or Skip lesson instead of enabling itself.
+With one desktop, practice omits cross-desktop exercises. Screen Recording is not
+required. Tutorial progress resumes independently after exiting or restarting;
+finishing clears only tutorial progress. The switcher isolates practice windows
+only while the learner is working from the tutorial.

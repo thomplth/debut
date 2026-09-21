@@ -43,6 +43,7 @@ and that its sidebar has no extra cities.
 
 | Clip selector | Sequence and verified result |
 | --- | --- |
+| `onboarding` | Four lossless transparent UI screenshots: Command-Tab and Option-Tab, each with previews enabled and disabled; same nine-window scene, no keystroke captions |
 | `cover` | Both `overlay.png` and native dark-mode `overlay-dark.png`, with space 2 expanded |
 | `command-tab` | Space 2 → hold Command-Tab → 3 → Tab → release → Project notes, second window in space 3 |
 | `organize-windows` | Space 2 → hold Command-Tab, Weather selected → Up → release → Weather in space 1 |
@@ -71,6 +72,12 @@ DEBUT_TART_VM=debut-readme-capture \
 DEBUT_TART_SHARE="$HOME/Library/Caches/Debut/ReadmeCapture" \
 ./scripts/demo-capture.sh --clips organize-windows,option-tab --keep-raw
 ```
+
+For onboarding assets only, use `--clips onboarding --keep-raw`. This uses the same
+nine-window fixture and fresh light-mode Debut process as README capture, producing
+`onboarding-workspace.png`, `onboarding-workspace-no-previews.png`,
+`onboarding-previews.png`, and `onboarding-no-previews.png`. It leaves README assets
+unchanged. The app bundles these four PNGs; onboarding does not use a video.
 
 Omitting `--clips` regenerates both covers and all four README GIFs. Keep raw output
 until visual review passes. The script starts the guest without graphics, audio,

@@ -7,9 +7,10 @@ public enum OnboardingPage: Int, CaseIterable, Sendable, Codable {
 
 public struct OnboardingCheckpoint: Codable, Sendable {
     public let page: OnboardingPage
-    public var exercise: OnboardingExercise? = nil
-    public let workspacePracticed: Bool
-    public let allWindowsPracticed: Bool
+}
+
+public enum OnboardingDestination: Sendable {
+    case useDebut, tutorial, settings
 }
 
 public enum OnboardingPractice: Sendable, Equatable {
@@ -49,204 +50,92 @@ public protocol OnboardingPermissionClient: AnyObject {
     func requestScreenRecording()
 }
 
+/// Setup has no practice targets; its only prerequisite is Accessibility.
 @MainActor
 @Observable
 public final class OnboardingViewModel {
-    public private(set) var page: OnboardingPage = .welcome
-    public private(set) var exercise: OnboardingExercise = .switchWindow
-    public private(set) var target: OnboardingTarget?
-    public var targetError: String?
-    public private(set) var lastResult: String?
-    public var onRestartExercise: @MainActor () -> Void = {}
+    public private(set) var page: OnboardingPage
     public var features: FeatureSettings
-    public var duration: TimeInterval
     public private(set) var permissions: OnboardingPermissionState
-    public private(set) var desktopCount = 1
-    public private(set) var windowCount = 0
-    public private(set) var workspacePracticed = false
-    public private(set) var allWindowsPracticed = false
+    public private(set) var desktopCount: Int?
+    public var onEnvironmentRefresh: @MainActor () -> Void = {}
     private var didComplete = false
     private let permissionClient: any OnboardingPermissionClient
     private let onFeaturesChanged: @MainActor (FeatureSettings) -> Void
-    private let onDurationChanged: @MainActor (TimeInterval) -> Void
     private let onPermissionStateChanged: @MainActor (OnboardingPermissionState) -> Void
     private let onProgressChanged: @MainActor (OnboardingCheckpoint) -> Void
     private let onCompleted: @MainActor () -> Void
-    public var onEnvironmentRefresh: @MainActor () -> Void = {}
-    public var onOpenMissionControl: @MainActor () -> Void = {}
+    private let onDestination: @MainActor (OnboardingDestination) -> Void
 
     public init(
         permissionClient: any OnboardingPermissionClient,
         features: FeatureSettings = FeatureSettings(),
         onFeaturesChanged: @escaping @MainActor (FeatureSettings) -> Void = { _ in },
-        duration: TimeInterval = 0,
-        onDurationChanged: @escaping @MainActor (TimeInterval) -> Void = { _ in },
         onPermissionStateChanged: @escaping @MainActor (OnboardingPermissionState) -> Void = { _ in },
         checkpoint: OnboardingCheckpoint? = nil,
         onProgressChanged: @escaping @MainActor (OnboardingCheckpoint) -> Void = { _ in },
-        onCompleted: @escaping @MainActor () -> Void = {}
+        onCompleted: @escaping @MainActor () -> Void = {},
+        onDestination: @escaping @MainActor (OnboardingDestination) -> Void = { _ in }
     ) {
         self.permissionClient = permissionClient
         self.permissions = permissionClient.currentState()
         self.features = features
-        self.duration = duration
+        self.page = checkpoint?.page ?? .welcome
         self.onFeaturesChanged = onFeaturesChanged
-        self.onDurationChanged = onDurationChanged
         self.onPermissionStateChanged = onPermissionStateChanged
-        self.onCompleted = onCompleted
         self.onProgressChanged = onProgressChanged
-        if let checkpoint {
-            page = checkpoint.page
-            exercise = checkpoint.exercise ?? .switchWindow
-            workspacePracticed = checkpoint.workspacePracticed
-            allWindowsPracticed = checkpoint.allWindowsPracticed
-        }
+        self.onCompleted = onCompleted
+        self.onDestination = onDestination
     }
 
-    public var canAdvance: Bool {
-        if page == .welcome { return true }
-        guard permissions.accessibilityGranted else { return false }
-        switch page {
-        case .workspace: return false
-        case .previews: return false
-        case .speed, .ready: return true
-        case .welcome: return true
-        }
-    }
+    public var canAdvance: Bool { permissions.accessibilityGranted }
+    public var showsDesktopGuidance: Bool { page == .workspace && desktopCount == 1 }
+    public var showsWindowPreviews: Bool { features.windowPreviews && permissions.screenRecordingGranted }
+
+    public func updateEnvironment(desktopCount: Int) { self.desktopCount = desktopCount }
 
     public func advance() {
         refreshPermissions()
         guard canAdvance, !didComplete else { return }
-        if page == .ready {
-            didComplete = true
-            onCompleted()
-        } else if let next = OnboardingPage(rawValue: page.rawValue + 1) {
+        if page == .ready { finish(.useDebut) }
+        else if let next = OnboardingPage(rawValue: page.rawValue + 1) {
             page = next
-            if next == .workspace {
-                var enabled = features
-                enabled.workspaceIsolation = true
-                setFeatures(enabled)
-            }
+            onProgressChanged(.init(page: page))
             onEnvironmentRefresh()
-            saveProgress()
         }
     }
 
     public func back() {
-        target = nil
-        if page == .workspace, exercise != .switchWindow, desktopCount > 1 {
-            exercise = exercise == .moveWindow ? .switchDesktop : .switchWindow
-        } else if let previous = OnboardingPage(rawValue: page.rawValue - 1) { page = previous }
-        if page == .workspace {
-            if desktopCount < 2 { exercise = .switchWindow }
-            var enabled = features
-            enabled.workspaceIsolation = true
-            setFeatures(enabled)
-        }
-        lastResult = nil
-        refreshPermissions()
-        onRestartExercise()
+        guard !didComplete, let previous = OnboardingPage(rawValue: page.rawValue - 1) else { return }
+        page = previous
+        onProgressChanged(.init(page: page))
         onEnvironmentRefresh()
-        saveProgress()
     }
 
-    public func updateEnvironment(desktopCount: Int, windowCount: Int) {
-        self.desktopCount = desktopCount
-        self.windowCount = windowCount
-        if desktopCount < 2, page == .workspace, exercise != .switchWindow {
-            exercise = .switchWindow
-            target = nil
-            targetError = nil
-        }
-    }
-
-    public func setTarget(_ target: OnboardingTarget?) {
-        self.target = target
-        targetError = nil
-    }
-
-    /// The app supplies the selected window, confirmed desktop and actual switcher action.
-    /// Merely opening the overlay, clicking a destination, or choosing another window cannot pass.
-    @discardableResult
-    public func recordPractice(_ practice: OnboardingPractice, windowID: UInt32, desktopIndex: Int) -> Bool {
-        guard permissions.accessibilityGranted, desktopCount >= 1,
-              let target, target.windowID == windowID,
-              target.destinationDesktop == desktopIndex else { return false }
-        let changesDesktop = target.originDesktop != target.destinationDesktop
-        switch practice {
-        case .workspace: guard !changesDesktop else { return false }
-        case .allWindows: guard changesDesktop || desktopCount == 1 else { return false }
-        case .desktop, .moveWindow: guard desktopCount > 1, changesDesktop else { return false }
-        }
-        if page == .workspace {
-            switch (exercise, practice) {
-            case (.switchWindow, .workspace):
-                if desktopCount == 1 {
-                    workspacePracticed = true
-                    page = .previews
-                } else { exercise = .switchDesktop }
-            case (.switchDesktop, .desktop): exercise = .moveWindow
-            case (.moveWindow, .moveWindow):
-                workspacePracticed = true
-                page = .previews
-            default: return false
-            }
-        } else if page == .previews, practice == .allWindows,
-                  !features.windowPreviews || permissions.screenRecordingGranted {
-            allWindowsPracticed = true
-            page = .speed
-        } else { return false }
-        lastResult = switch practice {
-        case .workspace: "You selected this window with Command-Tab."
-        case .desktop: "You switched from Desktop \(target.originDesktop + 1) to Desktop \(desktopIndex + 1)."
-        case .moveWindow: "You moved this window from Desktop \(target.originDesktop + 1) to Desktop \(desktopIndex + 1)."
-        case .allWindows: "You opened this window on Desktop \(desktopIndex + 1) with Option-Tab."
-        }
-        self.target = nil
-        saveProgress()
-        return true
-    }
-
-    private func saveProgress() {
-        onProgressChanged(.init(page: page, exercise: exercise, workspacePracticed: workspacePracticed,
-                                allWindowsPracticed: allWindowsPracticed))
+    public func finish(_ destination: OnboardingDestination) {
+        refreshPermissions()
+        guard page == .ready, canAdvance, !didComplete else { return }
+        didComplete = true
+        // Persist completion and close setup before opening either destination.
+        onCompleted()
+        onDestination(destination)
     }
 
     public func setFeatures(_ features: FeatureSettings) {
         self.features = features
         onFeaturesChanged(features)
     }
-    public func setAllOverrides(_ enabled: Bool) {
-        var updated = features
-        updated.workspaceIsolation = enabled
-        updated.setFasterDesktopSwitching(enabled)
-        updated.numberShortcuts = enabled
-        updated.controlArrows = enabled
-        updated.trackpadSwipes = enabled
-        setFeatures(updated)
-    }
-    public func setDuration(_ duration: TimeInterval) {
-        self.duration = min(AppSettings.maximumSpaceSwitchDuration, max(AppSettings.minimumSpaceSwitchDuration, duration))
-        onDurationChanged(self.duration)
-    }
-    public func useWithoutPreviews() {
-        var updated = features
-        updated.windowPreviews = false
-        setFeatures(updated)
-    }
+
     public func requestAccessibility() {
         permissionClient.requestAccessibility()
         refreshPermissions()
     }
+
     public func requestScreenRecording() {
         permissionClient.requestScreenRecording()
         refreshPermissions()
-        if permissions.screenRecordingGranted {
-            var updated = features
-            updated.windowPreviews = true
-            setFeatures(updated)
-        }
     }
+
     public func refreshPermissions() {
         permissions = permissionClient.currentState()
         onPermissionStateChanged(permissions)

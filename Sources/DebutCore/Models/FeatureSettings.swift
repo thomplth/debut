@@ -4,6 +4,7 @@ import Foundation
 public struct FeatureSettings: Codable, Equatable, Sendable {
     public var windowPreviews = true
     public var workspaceIsolation = true
+    public var optionTab = true
     public var fasterDesktopSwitching = true
     public var numberShortcuts = true
     public var controlArrows = true
@@ -29,6 +30,7 @@ public struct FeatureSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case windowPreviews
         case workspaceIsolation
+        case optionTab
         case fasterDesktopSwitching
         case numberShortcuts
         case controlArrows
@@ -42,6 +44,7 @@ public struct FeatureSettings: Codable, Equatable, Sendable {
             Bool.self,
             forKey: .workspaceIsolation
         ) ?? true
+        optionTab = try container.decodeIfPresent(Bool.self, forKey: .optionTab) ?? true
         fasterDesktopSwitching = try container.decodeIfPresent(
             Bool.self,
             forKey: .fasterDesktopSwitching

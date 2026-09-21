@@ -245,97 +245,6 @@ func arrangeOnboardingWindows() {
     wait(1)
 }
 
-// Dedicated first-use media, always recorded in the disposable guest.
-func recordOnboarding() {
-    guard requestedClips.contains("onboarding") else { return }
-    _ = run("/usr/bin/killall", ["Dock"])
-    wait(3)
-    holding(.maskCommand) {
-        // Keep Tab down long enough to open the visual switcher.
-        let down = CGEvent(keyboardEventSource: nil, virtualKey: Key.tab, keyDown: true)!
-        down.flags = .maskCommand
-        down.post(tap: .cgSessionEventTap)
-        wait(1.2)
-        still("onboarding-workspace")
-        let up = CGEvent(keyboardEventSource: nil, virtualKey: Key.tab, keyDown: false)!
-        up.flags = .maskCommand
-        up.post(tap: .cgSessionEventTap)
-        postTap(Key.escape, flags: .maskCommand)
-    }
-    holding(.maskAlternate) {
-        postTap(Key.tab, flags: .maskAlternate)
-        wait(1.2)
-        still("onboarding-previews")
-        postTap(Key.escape, flags: .maskAlternate)
-    }
-    // The comparison uses an unmodified OS shortcut while Debut is stopped.
-    // Each path starts on the same desktop and records both directions.
-    _ = run("/usr/bin/pkill", ["-x", "Debut"])
-    wait(1)
-    let defaults = UserDefaults(suiteName: "com.apple.symbolichotkeys")!
-    var hotkeys = defaults.dictionary(forKey: "AppleSymbolicHotKeys") ?? [:]
-    for (id, code) in [("79", 123), ("81", 124)] {
-        hotkeys[id] = ["enabled": true, "value": ["type": "standard", "parameters": [65535, code, 262144]]]
-    }
-    defaults.set(hotkeys, forKey: "AppleSymbolicHotKeys")
-    defaults.synchronize()
-    _ = run("/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings", ["-u"])
-    _ = run("/usr/bin/killall", ["Dock"])
-    wait(3)
-    for native in [true, false] {
-        resetOnboardingDesktop()
-        let url = outputDirectory.appendingPathComponent(native ? "onboarding-native.mov" : "onboarding-instant.mov")
-        do {
-            let recorder = try startDemoMovie(at: url)
-            wait(0.8)
-            for destination in [1, 0] {
-                let started = Date()
-                if native {
-                    let source = CGEventSource(stateID: .hidSystemState)
-                    for down in [true, false] {
-                        let event = CGEvent(keyboardEventSource: source, virtualKey: destination == 1 ? 124 : 123, keyDown: down)!
-                        // Physical arrow keys carry the function-key and numeric-pad flags.
-                        // A session event with only Control is ignored by the native shortcut.
-                        event.flags = [.maskControl, .maskSecondaryFn, .maskNumericPad]
-                        event.post(tap: .cghidEventTap)
-                    }
-                    wait(0.6)
-                } else {
-                    // A fresh service owns one gesture. Reusing an unsettled coordinator would
-                    // queue the reset forever and record a still image on the second trial.
-                    let service = SpaceService()
-                    service.switchDuration = 0
-                    service.switchToDesktop(index: destination)
-                    wait(0.6)
-                }
-                guard SpaceService().currentDesktopIndex() == destination else {
-                    log("FAILED: \(native ? "macOS default" : "Instant") never reached desktop \(destination)")
-                    exit(1)
-                }
-                log("verified \(native ? "macOS default" : "Instant") desktop \(destination)")
-                wait(max(0, 2 - Date().timeIntervalSince(started)))
-            }
-            try awaitCapture { try await recorder.stop() }
-        } catch { log("onboarding movie failed: \(error)"); exit(1) }
-    }
-    _ = run("/usr/bin/pkill", ["-x", "Debut"])
-    wait(1)
-    let withoutPreviews = Process()
-    withoutPreviews.executableURL = URL(fileURLWithPath: "/Applications/Debut.app/Contents/MacOS/Debut")
-    var environment = ProcessInfo.processInfo.environment
-    environment["DEBUT_DISABLE_WINDOW_PREVIEWS"] = "1"
-    withoutPreviews.environment = environment
-    try! withoutPreviews.run()
-    wait(4)
-    holding(.maskAlternate) {
-        postTap(Key.tab, flags: .maskAlternate)
-        wait(1)
-        still("onboarding-no-previews")
-        postTap(Key.escape, flags: .maskAlternate)
-    }
-    withoutPreviews.terminate()
-}
-
 // MARK: - Main
 
 try? FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
@@ -353,11 +262,5 @@ if let snapshot = value(after: "--snapshot") {
     exit(0)
 }
 
-if requestedClips.contains("onboarding") {
-    arrangeOnboardingWindows()
-    clearNotifications()
-    recordOnboarding()
-} else {
-    recordReadme()
-}
+recordReadme()
 log("done")
