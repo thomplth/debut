@@ -533,22 +533,45 @@ func postFlagsChanged(flags: CGEventFlags) {
     event.post(tap: .cgSessionEventTap)
 }
 
+/// The Tart guest script provisions this directory before the suite starts, but the hosted
+/// runner's own fixtures live under `RUNNER_TEMP`, so on CI it exists only once a scenario has
+/// made it. A scenario that wrote its fixture without creating it got no file and then asked
+/// LaunchServices to open one that was not there.
+func writeFixtureFile(named name: String, contents: String) -> URL {
+    let directory = URL(fileURLWithPath: "/tmp/debut-e2e-fixtures")
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let fixture = directory.appendingPathComponent(name)
+    try? contents.write(to: fixture, atomically: true, encoding: .utf8)
+    return fixture
+}
+
 func launchNewTextEditInstance(opening urls: [URL]) -> pid_t {
     guard let editor = NSWorkspace.shared.urlForApplication(
         withBundleIdentifier: "com.apple.TextEdit"
-    ) else { return -1 }
+    ) else {
+        info("TextEdit is not installed on this host")
+        return -1
+    }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = true
     configuration.createsNewApplicationInstance = true
     let ready = DispatchSemaphore(value: 0)
     let result = LockedBox<pid_t>()
+    let failure = LockedBox<String>()
     NSWorkspace.shared.open(urls, withApplicationAt: editor, configuration: configuration) {
-        app, _ in
+        app, error in
+        // Discarding this left a refused launch to surface as a bare `-1` pid in a later check.
+        failure.store(error.map { String(describing: $0) })
         result.store(app?.processIdentifier ?? -1)
         ready.signal()
     }
-    _ = ready.wait(timeout: .now() + 20)
-    return result.load() ?? -1
+    let signalled = ready.wait(timeout: .now() + 20) == .success
+    guard let pid = result.load(), pid > 0 else {
+        info("TextEdit refused to open \(urls.map(\.lastPathComponent).joined(separator: ", ")): "
+            + (signalled ? (failure.load() ?? "no process and no error") : "timed out"))
+        return -1
+    }
+    return pid
 }
 
 func postMouseMove(to point: CGPoint) {
@@ -2310,13 +2333,9 @@ let nativeFixtureDesktopReady = nativeTransitionSpaces.currentDesktopIndex() == 
     || (nativeTransitionSpaces.switchToDesktop(index: 0)
         && waitFor { nativeTransitionSpaces.currentDesktopIndex() == 0 })
 let nativeTransitionWindows = AccessibilityWindowService()
-let nativeTransitionFixtureURL = URL(
-    fileURLWithPath: "/tmp/debut-e2e-fixtures/native-desktop-transition.txt"
-)
-try? "Debut native desktop transition fixture\n".write(
-    to: nativeTransitionFixtureURL,
-    atomically: true,
-    encoding: .utf8
+let nativeTransitionFixtureURL = writeFixtureFile(
+    named: "native-desktop-transition.txt",
+    contents: "Debut native desktop transition fixture\n"
 )
 let nativeTransitionFixturePID = launchNewTextEditInstance(opening: [nativeTransitionFixtureURL])
 let nativeTransitionFixtureReady = nativeTransitionFixturePID > 0 && waitFor(timeout: 15) {
@@ -2916,15 +2935,9 @@ test("Switching from another app during onboarding uses the ordinary switcher") 
         $0.ownerBundleID == "com.apple.TextEdit" && spaces.desktopIndex(forWindow: $0.windowID) != nil
     }
     if otherCandidates.isEmpty {
-        let fixture = URL(fileURLWithPath: "/tmp/debut-e2e-fixtures/onboarding-ordinary.txt")
-        try? FileManager.default.createDirectory(
-            at: fixture.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try? "Debut onboarding ordinary switcher fixture\n".write(
-            to: fixture,
-            atomically: true,
-            encoding: .utf8
+        let fixture = writeFixtureFile(
+            named: "onboarding-ordinary.txt",
+            contents: "Debut onboarding ordinary switcher fixture\n"
         )
         let open = Process()
         open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
@@ -3587,16 +3600,8 @@ if NSRunningApplication.runningApplications(withBundleIdentifier: debutBundleID)
 }
 // Two files so the app comes up with two windows whose titles cannot be confused with the
 // shared fixture's, and so focus has somewhere to move without leaving the app.
-let launchFocusFixtures = [
-    URL(fileURLWithPath: "/tmp/debut-e2e-fixtures/mru-alpha.txt"),
-    URL(fileURLWithPath: "/tmp/debut-e2e-fixtures/mru-beta.txt"),
-]
-try? FileManager.default.createDirectory(
-    at: launchFocusFixtures[0].deletingLastPathComponent(),
-    withIntermediateDirectories: true
-)
-for fixture in launchFocusFixtures {
-    try? "Debut E2E \(fixture.lastPathComponent)\n".write(to: fixture, atomically: true, encoding: .utf8)
+let launchFocusFixtures = ["mru-alpha.txt", "mru-beta.txt"].map {
+    writeFixtureFile(named: $0, contents: "Debut E2E \($0)\n")
 }
 
 // A new instance, not the shared fixture's: the refusal is per process, so only a pid whose AX
@@ -3832,20 +3837,29 @@ func focusMoveFixture(_ window: WindowInfo, timeout: TimeInterval = 8) -> Bool {
         return focus?.ownerPID == window.ownerPID && focus?.windowID == window.windowID
     }
 }
-// listWindows() only reports the desktop being shown, so candidates must come from the one this
-// scenario runs on, and earlier scenarios leave windows there that cannot take keyboard focus.
+// This scenario used to adopt whichever TextEdit window an earlier one happened to leave behind,
+// but by the time it runs there is none on this desktop: 16b moves the last one away to prove
+// startup reconcile reaches other desktops, and 18 terminates the instance it launched. Launch a
+// dedicated instance on desktop 0 instead — `listWindows()` only reports the desktop being shown,
+// so a window it returns after this switch is already the one the sweep needs.
 _ = moveSpaces.switchToDesktop(index: 0)
 _ = waitFor { moveSpaces.currentDesktopIndex() == 0 }
-let moveFixture = moveWindows.listWindows().first { candidate in
-    candidate.ownerBundleID == "com.apple.TextEdit"
-        && moveSpaces.desktopIndex(forWindow: candidate.windowID) != nil
-        && focusMoveFixture(candidate, timeout: 4)
+let moveFixtureURL = writeFixtureFile(
+    named: "window-move-chaining.txt",
+    contents: "Debut window move chaining fixture\n"
+)
+let moveFixturePID = launchNewTextEditInstance(opening: [moveFixtureURL])
+_ = waitFor(timeout: 15) {
+    moveWindows.listWindows().contains {
+        $0.ownerPID == moveFixturePID && moveSpaces.desktopIndex(forWindow: $0.windowID) == 0
+    }
 }
+let moveFixtureWindow = moveWindows.listWindows().first {
+    $0.ownerPID == moveFixturePID && moveSpaces.desktopIndex(forWindow: $0.windowID) == 0
+}
+let moveFixture = moveFixtureWindow.flatMap { focusMoveFixture($0) ? $0 : nil }
 
 if moveSpaces.desktopCount() >= 4, let fixture = moveFixture {
-    let originalDesktop = moveSpaces.desktopIndex(forWindow: fixture.windowID)
-    moveSpaces.moveWindow(windowID: fixture.windowID, toDesktop: 0)
-    let fixtureMoved = waitFor { moveSpaces.desktopIndex(forWindow: fixture.windowID) == 0 }
     var measurements: [[String: Any]] = []
     for milliseconds in stride(from: 0, through: 400, by: 10) {
         _ = terminateDebutAndWait()
@@ -3904,7 +3918,7 @@ if moveSpaces.desktopCount() >= 4, let fixture = moveFixture {
         // Leave margin for guest scheduling, but catch per-key delays or stalled confirmations.
         let responsivenessBudget = 3 * settings.spaceSwitchDuration + 1.0
         test("Command-Option arrows chain 1→4→1 with focus at \(milliseconds) ms") {
-            fixtureMoved && ready && atFirst && focused && forwardLanded && stillFocused
+            ready && atFirst && focused && forwardLanded && stillFocused
                 && reverseLanded && forwardElapsed < responsivenessBudget && reverseElapsed < responsivenessBudget
         }
         measurements.append(["configuredMilliseconds": milliseconds,
@@ -3925,14 +3939,15 @@ if moveSpaces.desktopCount() >= 4, let fixture = moveFixture {
     if let data = try? JSONSerialization.data(withJSONObject: measurements, options: [.prettyPrinted, .sortedKeys]) {
         try? data.write(to: screenshotDir.appendingPathComponent("window-move-timings.json"))
     }
-    if let originalDesktop {
-        moveSpaces.moveWindow(windowID: fixture.windowID, toDesktop: originalDesktop)
-        _ = waitFor { moveSpaces.desktopIndex(forWindow: fixture.windowID) == originalDesktop }
-        _ = quickSwitch(to: originalDesktop, using: moveSpaces)
-    }
+    _ = quickSwitch(to: 0, using: moveSpaces)
 } else {
+    info("Window-move fixture: desktops=\(moveSpaces.desktopCount()) pid=\(moveFixturePID) "
+        + "window=\(moveFixtureWindow?.windowID.description ?? "none") "
+        + "focusable=\(moveFixture != nil) "
+        + "current=\(moveSpaces.currentDesktopIndex().map(String.init) ?? "none")")
     test("Window-move chaining fixture has four desktops and a tracked TextEdit window") { false }
 }
+NSRunningApplication(processIdentifier: moveFixturePID)?.forceTerminate()
 _ = terminateDebutAndWait()
 if let moveSettingsBackup { try? moveSettingsBackup.write(to: settingsFile, options: .atomic) }
 else { try? FileManager.default.removeItem(at: settingsFile) }
