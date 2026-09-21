@@ -168,14 +168,15 @@ struct OnboardingTests {
         var sharing: [Bool] = []
         let model = OnboardingViewModel(permissionClient: permissions,
             onTelemetryChanged: { sharing.append($0) })
+        #expect(!model.shareAnonymousTelemetry)
         #expect(permissions.accessibilityRequestCount == 0)
         #expect(permissions.screenRecordingRequestCount == 0)
         model.requestAccessibility()
         model.requestScreenRecording()
         #expect(permissions.accessibilityRequestCount == 1)
         #expect(permissions.screenRecordingRequestCount == 1)
-        model.setShareAnonymousTelemetry(false)
-        #expect(sharing == [false])
+        model.setShareAnonymousTelemetry(true)
+        #expect(sharing == [true])
     }
 
     @Test("A new install resumes onboarding until completion")
@@ -236,8 +237,17 @@ struct TelemetryActivationPolicyTests {
         #expect(!TelemetryActivationPolicy.shouldSend(setting: true, onboardingCompleted: false))
     }
 
-    @Test("Proceeding through onboarding without opting out starts sending")
-    func completingOnboardingEnablesSending() {
+    @Test("Completing onboarding without opting in keeps sending disabled")
+    func completingOnboardingDoesNotOverrideDefault() {
+        let settings = AppSettings()
+        #expect(!TelemetryActivationPolicy.shouldSend(
+            setting: settings.shareAnonymousTelemetry,
+            onboardingCompleted: true
+        ))
+    }
+
+    @Test("Opting in after onboarding starts sending")
+    func optingInAfterOnboardingEnablesSending() {
         #expect(TelemetryActivationPolicy.shouldSend(setting: true, onboardingCompleted: true))
     }
 

@@ -15,12 +15,20 @@ grep -q 'typical.*4.*12.*4' docs/performance-observability.md
 grep -q 'p95' docs/performance-observability.md
 grep -q 'window titles' docs/privacy.md
 grep -q 'TelemetryDeck GmbH' docs/privacy.md
-grep -q 'legitimate interest' docs/privacy.md
+grep -q 'disabled on a fresh install' docs/privacy.md
+grep -q 'opt in' docs/privacy.md
 grep -q 'European Union' docs/privacy.md
 grep -q '7–10 years' docs/privacy.md
-grep -q 'right to object' docs/privacy.md
-grep -q 'supervisory authority' docs/privacy.md
 grep -q 'Disabling sharing' docs/privacy.md
+! grep -q 'Article 6' docs/privacy.md
+! grep -q 'GDPR' docs/privacy.md
+! grep -q 'portability' docs/privacy.md
+! grep -q 'supervisory authority' docs/privacy.md
+test -f docs/telemetry-anonymization-assessment.md
+grep -qi 'singling out' docs/telemetry-anonymization-assessment.md
+grep -qi 'linkability' docs/telemetry-anonymization-assessment.md
+grep -qi 'inference' docs/telemetry-anonymization-assessment.md
+grep -qi 'review triggers' docs/telemetry-anonymization-assessment.md
 ! grep -q 'retention to at most 90 days' docs/privacy.md
 ! grep -q '90-day retention policy' docs/privacy-release-checklist.md
 /usr/bin/plutil -extract NSPrivacyTracking raw -o - Resources/PrivacyInfo.xcprivacy | grep -qx false

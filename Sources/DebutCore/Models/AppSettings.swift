@@ -169,7 +169,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.launchAtLogin = true
         self.showsDockIcon = true
         self.excludedBundleIDs = []
-        self.shareAnonymousTelemetry = true
+        self.shareAnonymousTelemetry = false
 
         self.glassStyle = .clear
         self.stageCornerRadius = 30
@@ -209,7 +209,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         shareAnonymousTelemetry = try container.decodeIfPresent(
             Bool.self,
             forKey: .shareAnonymousTelemetry
-        ) ?? true
+        ) ?? false
         glassStyle = try container.decode(GlassStyle.self, forKey: .glassStyle)
         stageCornerRadius = try container.decode(Double.self, forKey: .stageCornerRadius)
         inactiveStageScale = try container.decode(Double.self, forKey: .inactiveStageScale)

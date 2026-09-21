@@ -25,7 +25,8 @@ select windows across desktops, and navigate desktops faster.
   benchmark commands, and the remote payload boundary.
 - [Release verification](release-verification.md): channels, publication gates,
   update rehearsal, and recovery.
-- [Privacy](privacy.md) and [privacy release checklist](privacy-release-checklist.md).
+- [Privacy](privacy.md), [telemetry anonymization assessment](telemetry-anonymization-assessment.md),
+  and [privacy release checklist](privacy-release-checklist.md).
 
 These Markdown documents describe the current implementation. The legacy HTML
 documentation is deprecated and is not a source of current behavior; it is retained
