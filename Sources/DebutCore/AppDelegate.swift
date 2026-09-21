@@ -29,11 +29,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     /// Verdicts are published from an AX destroy callback and from `listWindows()`, so the write
     /// they trigger is moved off whichever thread produced the evidence.
     private nonisolated let verdictQueue = DispatchQueue(
-        label: "com.thomplth.Debut.verdictPersistence"
+        label: "com.thomplth.Debut.verdictPersistence",
+        qos: .utility
     )
     private let onboardingPermissionClient = SystemOnboardingPermissionClient()
     private let launchAtLogin = LaunchAtLoginCoordinator()
     private let activationPolicy = ActivationPolicyCoordinator()
+    private let processResponsivenessActivity = ProcessResponsivenessActivity()
     private let applicationUpdater: any ApplicationUpdating
 
     private var windowService: AccessibilityWindowService?
@@ -70,6 +72,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        processResponsivenessActivity.start()
         NSApp.setActivationPolicy(.accessory)
         diag.report("app_launched")
         NSApp.mainMenu = Self.makeMainMenu(target: self)
@@ -549,7 +552,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             self.refreshOnboardingEnvironment()
             // Moving a window between desktops activates no app, so without this the move is
             // only noticed the next time the user clicks the window.
-            self.windowDiscovery?.refreshDesktopAssignments()
+            self.windowDiscovery?.refreshDesktopAssignmentsInBackground()
         }
     }
 
@@ -606,7 +609,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.spaceController?.reconcileSpacesWithDesktops()
-            self.windowDiscovery?.refreshDesktopAssignments()
+            self.windowDiscovery?.refreshDesktopAssignmentsInBackground()
         }
     }
 

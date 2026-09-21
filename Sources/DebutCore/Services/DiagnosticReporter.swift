@@ -39,7 +39,15 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     private let overlayPresentationRecorder: OverlayPresentationRecorder
     private let redactor: DiagnosticRedactor
     private var eventLog: [[String: String]] = []
-    private let queue = DispatchQueue(label: "com.thomplth.Debut.diagnostic")
+    private let queue = DispatchQueue(label: "com.thomplth.Debut.diagnostic", qos: .utility)
+    private let snapshotCoalescingMilliseconds: Int
+    private var pendingSnapshot: (
+        state: [String: String],
+        performance: PerformanceSnapshot,
+        overlayPresentation: OverlayPresentationSnapshot
+    )?
+    private var snapshotWriteScheduled = false
+    private var snapshotWriteCount = 0
 
     /// Allocating a formatter per event is measurable on the input path. Only touched on
     /// `queue`, which serializes the access the type itself does not guarantee.
@@ -65,12 +73,14 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     init(
         directory: URL,
         rotationByteLimit: Int = 2_000_000,
+        snapshotCoalescingMilliseconds: Int = 50,
         performanceRecorder: PerformanceRecorder = .shared,
         overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
         redactor: DiagnosticRedactor = DiagnosticRedactor(salt: DiagnosticSalt.current())
     ) {
         self.directory = directory
         self.rotationByteLimit = rotationByteLimit
+        self.snapshotCoalescingMilliseconds = max(0, snapshotCoalescingMilliseconds)
         self.performanceRecorder = performanceRecorder
         self.overlayPresentationRecorder = overlayPresentationRecorder
         self.redactor = redactor
@@ -106,7 +116,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
                 self.eventLog.removeFirst(self.eventLog.count - 100)
             }
             if level == .lifecycle { self.appendDurableEvent(entry) }
-            self.writeSnapshotFile(
+            self.scheduleSnapshotWrite(
                 state: state,
                 performance: performance,
                 overlayPresentation: overlayPresentation
@@ -124,7 +134,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         let performance = performanceRecorder.snapshot()
         let overlayPresentation = overlayPresentationRecorder.snapshot()
         queue.async {
-            self.writeSnapshotFile(
+            self.scheduleSnapshotWrite(
                 state: state,
                 performance: performance,
                 overlayPresentation: overlayPresentation
@@ -154,7 +164,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         let performance = performanceRecorder.snapshot()
         let overlayPresentation = overlayPresentationRecorder.snapshot()
         queue.async {
-            self.writeSnapshotFile(
+            self.scheduleSnapshotWrite(
                 state: state,
                 performance: performance,
                 overlayPresentation: overlayPresentation
@@ -165,7 +175,11 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     /// Drains pending writes. Tests need a deterministic point at which the
     /// files on disk reflect every reported event.
     func flush() {
-        queue.sync {}
+        queue.sync { flushPendingSnapshot() }
+    }
+
+    var snapshotWriteCountForTesting: Int {
+        queue.sync { snapshotWriteCount }
     }
 
     private func currentState() -> [String: String] {
@@ -216,7 +230,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
             let performance = self.performanceRecorder.snapshot()
             let overlayPresentation = self.overlayPresentationRecorder.snapshot()
             self.queue.async {
-                self.writeSnapshotFile(
+                self.scheduleSnapshotWrite(
                     state: state,
                     performance: performance,
                     overlayPresentation: overlayPresentation
@@ -266,6 +280,36 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
 
     // MARK: - Current-state snapshot
 
+    /// Keeps the newest state from every event while replacing a burst of expensive, atomic full
+    /// file rewrites with one write. The append-only durable stream above is deliberately not
+    /// coalesced: lifecycle evidence must retain every event.
+    private func scheduleSnapshotWrite(
+        state: [String: String],
+        performance: PerformanceSnapshot,
+        overlayPresentation: OverlayPresentationSnapshot
+    ) {
+        pendingSnapshot = (state, performance, overlayPresentation)
+        guard !snapshotWriteScheduled else { return }
+        snapshotWriteScheduled = true
+        queue.asyncAfter(
+            deadline: .now() + .milliseconds(snapshotCoalescingMilliseconds)
+        ) { [weak self] in
+            self?.flushPendingSnapshot()
+        }
+    }
+
+    /// Must be called on `queue`.
+    private func flushPendingSnapshot() {
+        snapshotWriteScheduled = false
+        guard let pendingSnapshot else { return }
+        self.pendingSnapshot = nil
+        writeSnapshotFile(
+            state: pendingSnapshot.state,
+            performance: pendingSnapshot.performance,
+            overlayPresentation: pendingSnapshot.overlayPresentation
+        )
+    }
+
     /// Must be called on `queue`.
     private func writeSnapshotFile(
         state: [String: String],
@@ -285,6 +329,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         ) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try? data.write(to: snapshotFile, options: .atomic)
+        snapshotWriteCount += 1
     }
 
     private func jsonObject<T: Encodable>(_ value: T) -> Any? {

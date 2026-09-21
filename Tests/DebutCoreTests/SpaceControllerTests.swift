@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 import Foundation
 import CoreGraphics
@@ -282,6 +283,91 @@ struct SpaceControllerTests {
         controller.handleKeyEvent(.cmdTabHold)
 
         #expect(controller.focusedWindowFrame == frame)
+    }
+
+    @Test("Production overlay opening uses cached focus geometry")
+    @MainActor
+    func overlayUsesCachedFocusGeometry() {
+        let frame = CGRect(x: 1920, y: 200, width: 900, height: 700)
+        var manager = SpaceManager()
+        manager.addWindow(
+            SpaceWindow(
+                windowID: 42,
+                ownerBundleID: "com.example.cached",
+                ownerName: "Cached",
+                windowTitle: "Window",
+                ownerPID: 4242
+            ),
+            toSpaceID: manager.activeSpaceID
+        )
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            spaceManager: manager,
+            overlayPresentationDelay: 0
+        )
+        controller.recordWindowSizes([
+            WindowInfo(
+                windowID: 42,
+                ownerBundleID: "com.example.cached",
+                ownerName: "Cached",
+                ownerPID: 4242,
+                title: "Window",
+                bounds: frame,
+                isOnScreen: true
+            ),
+        ])
+        controller.recordWindowActivation(windowID: 42)
+
+        controller.handleKeyEvent(.cmdTabHold)
+
+        #expect(controller.focusedWindowID == 42)
+        #expect(controller.focusedWindowFrame == frame)
+    }
+
+    @Test("A focused window resize refreshes cached fullscreen geometry")
+    @MainActor
+    func focusedResizeRefreshesCachedFullscreenGeometry() throws {
+        let screen = try #require(NSScreen.main)
+        let initialFrame = CGRect(
+            origin: screen.frame.origin,
+            size: CGSize(width: screen.frame.width / 2, height: screen.frame.height / 2)
+        )
+        var manager = SpaceManager()
+        manager.addWindow(
+            SpaceWindow(
+                windowID: 42,
+                ownerBundleID: "com.example.cached",
+                ownerName: "Cached",
+                windowTitle: "Window",
+                ownerPID: 4242
+            ),
+            toSpaceID: manager.activeSpaceID
+        )
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            spaceManager: manager,
+            overlayPresentationDelay: 0
+        )
+        controller.recordWindowSizes([
+            WindowInfo(
+                windowID: 42,
+                ownerBundleID: "com.example.cached",
+                ownerName: "Cached",
+                ownerPID: 4242,
+                title: "Window",
+                bounds: initialFrame,
+                isOnScreen: true
+            ),
+        ])
+        controller.recordWindowActivation(windowID: 42)
+        controller.recordWindowSize(windowID: 42, size: screen.frame.size)
+
+        controller.handleKeyEvent(.cmdTabHold)
+
+        #expect(controller.focusedWindowFrame?.size == screen.frame.size)
+        #expect(controller.focusedWindowIsFullscreen)
     }
 
     @Test("A rejected overlay leaves no stale focused frame behind")

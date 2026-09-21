@@ -1,6 +1,8 @@
 import Carbon.HIToolbox
 
 public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingService, @unchecked Sendable {
+    static let eventTapQualityOfService: QualityOfService = .userInteractive
+    static let deliveryQualityOfService: DispatchQoS = .userInteractive
     private let lifecycleLock = NSLock()
     private var storedIsRunning: Bool = false
     private var storedEventTapRunsOnDedicatedThread: Bool = false
@@ -145,6 +147,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             self.runEventTap(startupSignal: startupSignal)
         }
         thread.name = "com.thomplth.Debut.event-tap"
+        thread.qualityOfService = Self.eventTapQualityOfService
         lifecycleLock.withLock {
             eventTapThread = thread
         }
@@ -516,7 +519,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             sampleResources: false
         )
         if asynchronously {
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async(
+                qos: Self.deliveryQualityOfService,
+                flags: .enforceQoS
+            ) { [weak self] in
                 _ = self?.performanceRecorder.end(deliveryID)
                 if let overlayPresentation {
                     self?.overlayPresentationRecorder.mark(
