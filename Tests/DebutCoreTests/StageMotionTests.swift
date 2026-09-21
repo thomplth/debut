@@ -731,8 +731,8 @@ struct StageMotionTests {
         ) == 1)
     }
 
-    @Test("Magnify selection uses the configured scale")
-    func magnifiedWindowScale() {
+    @Test("A dragged window keeps its resting scale through the drop handoff")
+    func draggedWindowScale() {
         #expect(StageMotion.windowScale(
             isSelected: true,
             isDragging: false,
@@ -744,7 +744,24 @@ struct StageMotionTests {
             isDragging: true,
             style: .magnify,
             magnifyScale: 1.12
-        ) == 0.96)
+        ) == 1)
+    }
+
+    @Test("A committed drop does not replay window lifecycle insertion motion")
+    func settlingDropSkipsLifecycleTransition() {
+        #expect(StageMotion.windowLifecycleTransition(
+            reduceMotion: false,
+            isSettlingDrop: false
+        ) == .spring(duration: 0.36, bounce: 0))
+        #expect(StageMotion.windowLifecycleTransition(
+            reduceMotion: false,
+            isSettlingDrop: false,
+            usesGuidedKeyboardMoveMotion: true
+        ) == .spring(duration: 0.26, bounce: 0))
+        #expect(StageMotion.windowLifecycleTransition(
+            reduceMotion: false,
+            isSettlingDrop: true
+        ) == nil)
     }
 
     @Test("The fill appears only on a selected window resting in its stage")

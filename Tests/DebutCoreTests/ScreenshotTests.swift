@@ -366,6 +366,56 @@ struct ScreenshotTests {
         }
     }
 
+    @Test("A dragged preview keeps the exact resting card size")
+    func draggedPreviewKeepsRestingSize() throws {
+        let size = NSSize(width: 500, height: 300)
+        let context = try #require(CGContext(
+            data: nil, width: 160, height: 100, bitsPerComponent: 8,
+            bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.3, green: 0.6, blue: 0.9, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: context.width, height: context.height))
+        let preview = try #require(context.makeImage())
+        let window = StageWindowData(
+            id: 100,
+            windowID: 100,
+            ownerBundleID: "com.apple.finder",
+            ownerName: "Finder",
+            windowTitle: "Preview",
+            previewImage: preview
+        )
+        let resting = try #require(renderSwiftUI(
+            WindowPreviewView(
+                window: window,
+                isWindowSelected: false,
+                isDragging: false,
+                metrics: .standard,
+                appearance: AppSettings()
+            ),
+            size: size
+        ))
+        let dragging = try #require(renderSwiftUI(
+            WindowPreviewView(
+                window: window,
+                isWindowSelected: false,
+                isDragging: true,
+                metrics: .standard,
+                appearance: AppSettings()
+            ),
+            size: size
+        ))
+        try saveImage(resting, name: "05_window_preview_resting")
+        try saveImage(dragging, name: "05_window_preview_dragging")
+
+        let restingBitmap = try #require(normalizedBitmap(resting, size: size))
+        let draggingBitmap = try #require(normalizedBitmap(dragging, size: size))
+        let difference = screenshotDifference(restingBitmap, draggingBitmap)
+        #expect(difference.comparedPixelCount > 10_000)
+        #expect(difference.meanChannelDifference < 0.001)
+        #expect(difference.changedPixelRatio < 0.001)
+    }
+
     @Test("Placeholder cards cast a halo on a light background at every stage scale",
           arguments: [0.5, 1.0, 2.0])
     func placeholderHalo(scale: CGFloat) throws {

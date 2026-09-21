@@ -399,7 +399,9 @@ enum StageMotion {
         style: WindowSelectionStyle = .magnify,
         magnifyScale: CGFloat = CGFloat(AppSettings.defaultMagnifyScale)
     ) -> CGFloat {
-        if isDragging { return 0.96 }
+        // The floating drag proxy hands directly to the resting grid card. Giving it a smaller
+        // drag-only scale makes that handoff look like a new card growing into the destination.
+        if isDragging { return 1 }
         guard isSelected, style == .magnify else { return 1 }
         return magnifyScale
     }
@@ -441,6 +443,20 @@ enum StageMotion {
 
     static func sourceWindowDisablesAnimation(isDragging: Bool) -> Bool {
         isDragging
+    }
+
+    /// A committed drop is a handoff between the floating proxy and the same card in its new
+    /// grid slot, not a new window arriving. Lifecycle insertions keep their scale-and-fade
+    /// transition; a drop's model update must not animate the stage's window-count change.
+    static func windowLifecycleTransition(
+        reduceMotion: Bool,
+        isSettlingDrop: Bool,
+        usesGuidedKeyboardMoveMotion: Bool = false
+    ) -> StageFocusTransition? {
+        guard !isSettlingDrop else { return nil }
+        return usesGuidedKeyboardMoveMotion
+            ? guidedKeyboardMoveTransition(reduceMotion: reduceMotion)
+            : windowRemovalTransition(reduceMotion: reduceMotion)
     }
 
     static let cursorPreviewOpacity: Double = 1
@@ -1859,10 +1875,12 @@ struct StageSwiftUIView: View {
     var onWindowDropRequested: ((WindowMoveRequest) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var removalTransition: StageFocusTransition {
-        usesGuidedKeyboardMoveMotion
-            ? StageMotion.guidedKeyboardMoveTransition(reduceMotion: reduceMotion)
-            : StageMotion.windowRemovalTransition(reduceMotion: reduceMotion)
+    private var lifecycleTransition: StageFocusTransition? {
+        StageMotion.windowLifecycleTransition(
+            reduceMotion: reduceMotion,
+            isSettlingDrop: settlingWindowID != nil,
+            usesGuidedKeyboardMoveMotion: usesGuidedKeyboardMoveMotion
+        )
     }
 
     var body: some View {
@@ -2003,7 +2021,7 @@ struct StageSwiftUIView: View {
         }
         // Keyed on the count, not the IDs: a drag reorder keeps the count and must keep
         // its own motion, while an arrival or departure is what this animates.
-        .animation(removalTransition.animation, value: stage.windows.count)
+        .animation(lifecycleTransition?.animation, value: stage.windows.count)
     }
 
     private func windowDragGesture(window: StageWindowData, windowIndex: Int) -> some Gesture {

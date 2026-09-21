@@ -115,6 +115,9 @@ move, then accepts only a small measured correction after layout has settled bef
 Keyboard Left/Right reorders within the selected stage. These edits affect the
 displayed preview until the user commits by releasing the modifier or choosing a
 window. Escape discards them without moving real windows.
+On pointer release, the dragged card moves into the prepared slot at its existing
+size and remains there until the committed model order is visible; the handoff to
+the grid does not replay the lifecycle insertion animation.
 
 On commit, Debut sends desktop relocations through the bridged window-server
 operation. Dragging a card is an overlay interaction; Debut does not synthesize a
