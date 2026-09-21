@@ -3139,13 +3139,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         let targetSpaceID = preview.spaces[targetSpaceIndex].id
-        let targetIndex = preview.spaces[targetSpaceIndex].windows.count
         stageStackTransaction.spaceMove(
             windowID: window.windowID,
             fromSpaceID: space.id,
             toSpaceID: targetSpaceID,
-            windowIndex: targetIndex,
-            source: .keyboard
+            windowIndex: 0,
+            source: .keyboard,
+            activatedAt: clock()
         )
         diag.report("window_move_previewed_by_key", level: .transient, details: [
             "windowID": "\(window.windowID)",
