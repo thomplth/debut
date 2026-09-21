@@ -45,7 +45,9 @@ desktop; the all-windows overlay uses a flat global recency order.
 
 With faster desktop transitions enabled, a requested desktop switch uses the
 DockSwipe path in `SpaceService`. A multi-desktop route is a sequence of adjacent
-hops, with the configured duration per hop. The default is Instant. Where
+gestures. At the default Instant duration, Debut prepares and posts the complete
+route as one batch so Dock does not settle between desktops. Nonzero and standard
+system-duration routes wait for confirmation between adjacent gestures. Where
 available, Debut seeds the destination's front-process memory before switching;
 the actual window focus waits until macOS confirms the destination through the
 active-Space notification. Landing elsewhere invalidates the pending focus
@@ -69,7 +71,7 @@ desktop. Native navigation remains valid and is reflected in Debut.
 The optional desktop indicator appears after a confirmed desktop change, showing
 the desktop number and count on the affected display. It also reflects native
 switches, is suppressed while the switcher is visible, and does not announce an
-unconfirmed switch request.
+unconfirmed switch request or an intermediate desktop in a Debut-owned route.
 
 ## Discovery and membership
 

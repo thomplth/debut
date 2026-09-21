@@ -688,11 +688,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // an intermediate desktop is expected rather than a user overtaking the switch.
         spaceSwitcher?.spaceDidChange()
         let topology = spaceSwitcher?.spaceTopology()
-        let indicatorPresentations: [DesktopSwitchIndicatorPresentation] = if let topology,
+        let confirmedChanges: [DesktopSwitchIndicatorPresentation] = if let topology,
             !topology.stacks.isEmpty {
             desktopSwitchIndicatorTracker.recordConfirmedChanges(in: topology)
         } else {
             []
+        }
+        // Keep the tracker's confirmed baseline current, but do not visually announce a
+        // desktop that is only an intermediate stop on a Debut-owned route. Unexpected
+        // landings clear the route above and remain visible; the final endpoint does too.
+        let indicatorPresentations = confirmedChanges.filter { presentation in
+            !(spaceSwitcher?.isSwitchInFlight(stackID: presentation.stackID) ?? false)
         }
         let previousActiveSpaceID = spaceManager.activeSpaceID
         if let topology {

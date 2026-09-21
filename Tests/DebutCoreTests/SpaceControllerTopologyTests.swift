@@ -846,6 +846,24 @@ struct SpaceControllerSpaceTests {
         #expect(presentation.desktopCount == 3)
     }
 
+    @Test("An in-flight route announces only its final desktop")
+    func inFlightRouteSuppressesIntermediateIndicator() throws {
+        let spaces = MockSpaceSwitcher(desktops: 4, current: 0)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+
+        spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
+        spaces.current = 1
+        #expect(controller.desktopDidChange().isEmpty)
+
+        spaces.switchingStackIDs = []
+        spaces.current = 3
+        let presentations = controller.desktopDidChange()
+
+        #expect(presentations.count == 1)
+        #expect(try #require(presentations.first).desktopPosition == 4)
+    }
+
     @Test("A desktop notification without movement emits no indicator")
     func unchangedDesktopEmitsNoIndicator() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 1)

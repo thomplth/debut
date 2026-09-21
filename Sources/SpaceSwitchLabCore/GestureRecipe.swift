@@ -22,7 +22,7 @@ public enum GesturePreset: String, Codable, CaseIterable, Identifiable, Sendable
     public var summary: String {
         switch self {
         case .debutInstant:
-            "Began → Ended at velocity 400, with Dock envelopes; confirms every adjacent hop."
+            "Began → Ended at velocity 400, with Dock envelopes; batches distant hops."
         case .debutDriven:
             "Began → timed Changed samples → Ended; cubic ease-out over 150 ms."
         case .spaceRabbitLegacy:
@@ -179,7 +179,7 @@ public struct GestureRecipe: Codable, Equatable, Sendable {
                 includeHorizontalMotion: true,
                 includeScrollY: true,
                 eventLocation: .displayCenter,
-                hopScheduling: .confirmedAdjacent,
+                hopScheduling: .batched,
                 scaleVelocityByDistance: false
             )
         case .debutDriven:

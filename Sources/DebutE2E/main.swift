@@ -484,8 +484,8 @@ func digitKeyCode(_ digit: Int) -> CGKeyCode {
 
 /// Posts the global quick-switch chord and waits for the desktop to actually land.
 ///
-/// The settle afterwards is not padding. A far target is a notification-confirmed chain of
-/// adjacent hops, and later scenarios should not inherit its final compositor/focus settling.
+/// The settle afterwards is not padding. Instant far targets batch their adjacent gestures,
+/// but later scenarios still must not inherit the final compositor/focus settling.
 func quickSwitch(to index: Int, using service: SpaceService) -> Bool {
     let from = service.currentDesktopIndex()
     let modelBefore = readState()["activeSpaceIndex"] ?? "none"
@@ -1310,9 +1310,8 @@ if userDesktopCount < 2 {
         returned && waitFor { Int(readState()["activeSpaceIndex"] ?? "") == startingDesktop }
     }
 
-    // Dock progress saturates at one desktop per gesture. The coordinator therefore advances a
-    // far target one confirmed adjacent hop at a time, using active-Space notifications as its
-    // acknowledgement before it posts the next gesture.
+    // Dock progress saturates at one desktop per gesture. Instant mode posts the complete
+    // adjacent-gesture route as one batch so Dock does not settle between its endpoints.
     if userDesktopCount >= 3 {
         let atFirst = quickSwitch(to: 0, using: switchSpaceService)
         let jumped = quickSwitch(to: 2, using: switchSpaceService)
@@ -1322,6 +1321,19 @@ if userDesktopCount < 2 {
 
         test("A jump across two desktops lands on the far desktop") {
             atFirst && jumped
+        }
+
+        if userDesktopCount >= 4 {
+            let resetForThreeHop = quickSwitch(to: 0, using: switchSpaceService)
+            let threeHopJumped = quickSwitch(to: 3, using: switchSpaceService)
+
+            test("A batched jump across three desktops lands on the far desktop") {
+                resetForThreeHop && threeHopJumped
+                    && switchSpaceService.currentDesktopIndex() == 3
+            }
+        } else {
+            skipTest("A batched jump across three desktops lands on the far desktop",
+                     reason: "This host has fewer than four desktops")
         }
 
         let resetForBurst = quickSwitch(to: 0, using: switchSpaceService)
@@ -1365,6 +1377,8 @@ if userDesktopCount < 2 {
     } else {
         skipTest("A jump across two desktops lands on the far desktop",
                  reason: "This host has fewer than three desktops, so there is no two-hop jump")
+        skipTest("A batched jump across three desktops lands on the far desktop",
+                 reason: "This host has fewer than four desktops, so there is no three-hop jump")
         skipTest("Rapid direct targets coalesce without overshooting the last desktop",
                  reason: "This host has fewer than three desktops, so there is no burst edge")
         skipTest("A rapid switch settles at the same visual endpoint as a normal switch",
