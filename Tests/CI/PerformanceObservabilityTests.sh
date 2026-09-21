@@ -14,6 +14,15 @@ test -f PerformanceBudgets.json
 grep -q 'typical.*4.*12.*4' docs/performance-observability.md
 grep -q 'p95' docs/performance-observability.md
 grep -q 'window titles' docs/privacy.md
+grep -q 'TelemetryDeck GmbH' docs/privacy.md
+grep -q 'legitimate interest' docs/privacy.md
+grep -q 'European Union' docs/privacy.md
+grep -q '7–10 years' docs/privacy.md
+grep -q 'right to object' docs/privacy.md
+grep -q 'supervisory authority' docs/privacy.md
+grep -q 'Disabling sharing' docs/privacy.md
+! grep -q 'retention to at most 90 days' docs/privacy.md
+! grep -q '90-day retention policy' docs/privacy-release-checklist.md
 /usr/bin/plutil -extract NSPrivacyTracking raw -o - Resources/PrivacyInfo.xcprivacy | grep -qx false
 grep -q 'PrivacyInfo.xcprivacy' scripts/build-app.sh
 grep -q 'DEBUT_PERFORMANCE_PROFILE' Sources/DebutPerformanceFixture/main.swift

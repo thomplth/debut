@@ -11,6 +11,16 @@ public enum SettingsSection: String, CaseIterable, Sendable {
     case about = "About"
 }
 
+public struct TelemetryPayloadPresentation: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let json: String
+
+    public init(id: UUID = UUID(), json: String) {
+        self.id = id
+        self.json = json
+    }
+}
+
 public struct SettingsViewModel: Sendable {
     public var settings: AppSettings
     public var spaceManager: SpaceManager
@@ -71,5 +81,9 @@ public struct SettingsViewModel: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return String(decoding: try encoder.encode(payload), as: UTF8.self)
+    }
+
+    public func telemetryPayloadPresentation() throws -> TelemetryPayloadPresentation {
+        TelemetryPayloadPresentation(json: try telemetryPayloadPreview())
     }
 }

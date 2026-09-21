@@ -28,8 +28,7 @@ public struct SettingsView: View {
     @State private var showingResetConfirmation = false
     @State private var showingRestoreDefaultsConfirmation = false
     private let shortcutRecordingService: (any ShortcutRecordingService)?
-    @State private var showingTelemetryPayload = false
-    @State private var telemetryPayload = ""
+    @State private var telemetryPayloadPresentation: TelemetryPayloadPresentation?
     @State private var externallyAppliedSettings: AppSettings?
 
     public init(
@@ -95,17 +94,21 @@ public struct SettingsView: View {
         } message: {
             Text("This removes all space window assignments, including dormant windows, and rebuilds assignments from your current macOS desktops. Settings are preserved.")
         }
-        .sheet(isPresented: $showingTelemetryPayload) {
+        .sheet(item: $telemetryPayloadPresentation) { presentation in
             VStack(alignment: .leading, spacing: 12) {
                 Text("Data being shared").font(.title2.bold())
                 Text("This is the exact current allowlisted session-summary payload.")
                     .foregroundStyle(.secondary)
                 ScrollView {
-                    Text(telemetryPayload).font(.system(.body, design: .monospaced))
+                    Text(presentation.json).font(.system(.body, design: .monospaced))
                         .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(minWidth: 540, minHeight: 260)
                 Text(viewModel.telemetryExcludedData).font(.caption).foregroundStyle(.secondary)
-                HStack { Spacer(); Button("Close") { showingTelemetryPayload = false }.keyboardShortcut(.defaultAction) }
+                HStack {
+                    Spacer()
+                    Button("Close") { telemetryPayloadPresentation = nil }
+                        .keyboardShortcut(.defaultAction)
+                }
             }.padding(24)
         }
     }
@@ -659,14 +662,16 @@ public struct SettingsView: View {
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("View data being shared…") {
-                    telemetryPayload = (try? viewModel.telemetryPayloadPreview()) ?? "Payload unavailable."
-                    showingTelemetryPayload = true
+                    telemetryPayloadPresentation = (try? viewModel.telemetryPayloadPresentation())
+                        ?? TelemetryPayloadPresentation(json: "Payload unavailable.")
                 }
                 Button("Privacy Policy") {
                     NSWorkspace.shared.open(URL(string: "https://github.com/thomplth/Debut/blob/main/docs/privacy.md")!)
                 }
             }
             Text("Anonymous records contain no stable identifier, so they cannot later be located for per-user deletion. Disabling sharing deletes queued unsent records immediately.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("TelemetryDeck stores the records in the European Union. Its active dashboard retention depends on the account plan; older records may remain in cold storage for an expected 7–10 years without a guaranteed deletion date.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
