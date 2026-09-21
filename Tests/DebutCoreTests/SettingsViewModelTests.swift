@@ -26,7 +26,6 @@ struct SettingsViewModelTests {
         #expect(vm.settings.overlayPresentationDelay == 0.1)
         #expect(vm.settings.spaceSwitchDuration == 0)
         #expect(vm.settings.excludedBundleIDs.isEmpty)
-        #expect(vm.settings.quickSwitchExcludedBundleIDs.isEmpty)
         #expect(vm.settings.quickSwitchSameApplicationModifiers == ShortcutModifiers(
             control: true,
             option: true
@@ -37,9 +36,9 @@ struct SettingsViewModelTests {
     func updateSettings() {
         var vm = SettingsViewModel()
         vm.settings.launchAtLogin = true
-        vm.settings.quickSwitchExcludedBundleIDs.append("com.tinyspeck.slackmacgap")
+        vm.settings.quickSwitchModifiers = ShortcutModifiers(control: true, shift: true)
         #expect(vm.settings.launchAtLogin == true)
-        #expect(vm.settings.isQuickSwitchExcluded(bundleID: "com.tinyspeck.slackmacgap"))
+        #expect(vm.settings.quickSwitchModifiers == ShortcutModifiers(control: true, shift: true))
     }
 
     @Test("Restore default shortcuts resets only shortcut preferences")
