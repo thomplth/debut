@@ -987,8 +987,11 @@ enum DockSwipeEvent {
 /// Where spaces get their desktops. Kept as a protocol so space-switching logic can be
 /// tested without a window server — nothing else about a Space switch is observable in a
 /// unit test.
-public protocol SpaceSwitching: AnyObject {
+public protocol SpaceSwitching: AnyObject, Sendable {
     func spaceTopology() -> SpaceTopology
+    /// The most recently observed topology. Production uses this on the presentation path so a
+    /// WindowServer round trip cannot delay an overlay; simple conformers may answer live.
+    func cachedSpaceTopology() -> SpaceTopology?
     func desktopLocation(forWindow windowID: CGWindowID) -> DesktopLocation?
     func desktopLocations(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: DesktopLocation]
     /// Every window on every desktop, keyed by window ID. Unlike `desktopLocations(forWindows:)`
@@ -1034,6 +1037,7 @@ public protocol SpaceSwitching: AnyObject {
 }
 
 public extension SpaceSwitching {
+    func cachedSpaceTopology() -> SpaceTopology? { spaceTopology() }
     func parentedWindowIDs(among candidates: [CGWindowID]) -> Set<CGWindowID> { [] }
     func placedWindowIDs() -> Set<CGWindowID> { Set(windowLocations().keys) }
     func isSwitchInFlight(stackID: String) -> Bool { false }
@@ -1115,16 +1119,35 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     }
 
     /// A driven slide blocks for its whole duration, and the main thread runs the event tap.
-    private let switchQueue = DispatchQueue(label: "com.thomplth.debut.space-switch")
+    private let switchQueue = DispatchQueue(
+        label: "com.thomplth.debut.space-switch",
+        qos: .userInteractive
+    )
     private let switchCoordinatorLock = NSLock()
     private var switchCoordinator = SpaceSwitchCoordinator()
 
     /// Confirming a move means re-reading the assignment until the window server catches up.
     /// That settles in single-digit milliseconds, but it is still a wait, and the main thread
     /// runs the event tap.
-    private let moveQueue = DispatchQueue(label: "com.thomplth.debut.space-move")
+    private let moveQueue = DispatchQueue(
+        label: "com.thomplth.debut.space-move",
+        qos: .userInteractive
+    )
+    private let topologyCacheLock = NSLock()
+    private var storedTopology: SpaceTopology?
 
     public init() {}
+
+    public func cachedSpaceTopology() -> SpaceTopology? {
+        topologyCacheLock.withLock { storedTopology }
+    }
+
+    private func cache(_ topology: SpaceTopology) -> SpaceTopology {
+        if !topology.stacks.isEmpty {
+            topologyCacheLock.withLock { storedTopology = topology }
+        }
+        return topology
+    }
 
     public func desktopCount() -> Int { spaceTopology().stacks.first?.desktopIDs.count ?? 0 }
 
@@ -1190,7 +1213,9 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     /// The display-scoped desktop lists Mission Control owns right now.
     public func spaceTopology() -> SpaceTopology {
         let managed = managedDisplaySpaces()
-        guard !managed.isEmpty else { return SpaceTopology(separateSpaces: false, stacks: []) }
+        guard !managed.isEmpty else {
+            return SpaceTopology(separateSpaces: false, stacks: [])
+        }
 
         let screens = NSScreen.screens
         let separate = NSScreen.screensHaveSeparateSpaces
@@ -1201,7 +1226,7 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             let frames = screens.map(\.frame)
             let frame = frames.dropFirst().reduce(frames.first ?? .zero) { $0.union($1) }
             let desktops = Self.desktops(in: display)
-            return SpaceTopology(separateSpaces: false, stacks: [
+            return cache(SpaceTopology(separateSpaces: false, stacks: [
                 SpaceStackDescriptor(
                     id: SpaceTopology.sharedStackID,
                     displayID: NSScreen.main?.displayID,
@@ -1212,7 +1237,7 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
                     currentDesktopID: Self.currentDesktopID(in: display),
                     currentDesktopUUID: Self.currentDesktopUUID(in: display)
                 ),
-            ])
+            ]))
         }
 
         var remaining = managed
@@ -1251,7 +1276,7 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
                 currentDesktopUUID: Self.currentDesktopUUID(in: display)
             ))
         }
-        return SpaceTopology(separateSpaces: true, stacks: descriptors)
+        return cache(SpaceTopology(separateSpaces: true, stacks: descriptors))
     }
 
     /// User desktops on the first stack, retained for compatibility with index-only callers.

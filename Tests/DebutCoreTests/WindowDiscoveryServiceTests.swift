@@ -789,6 +789,33 @@ struct WindowDiscoveryServiceTests {
         #expect(snapshot?.focusedWindowID == nil)
     }
 
+    @Test("A background desktop refresh publishes the same complete snapshot")
+    func backgroundDesktopRefreshSnapshotsDesktops() async {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(1), liveWindow(2)]
+        windowService.allWindowIDList = [1, 2]
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        spaces.windowDesktops = [1: 0, 2: 2]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+
+        await confirmation("desktop snapshot published") { published in
+            await withCheckedContinuation { continuation in
+                service.onDesktopsChanged = { snapshot in
+                    #expect(snapshot.desktopIndexes == [1: 0, 2: 2])
+                    #expect(snapshot.liveWindows.map(\.windowID) == [1, 2])
+                    #expect(snapshot.focusedWindowID == nil)
+                    published()
+                    continuation.resume()
+                }
+                service.refreshDesktopAssignmentsInBackground()
+            }
+        }
+    }
+
     // A window can only be contradicted while its own desktop is showing, and the desktop
     // change that reveals it runs this refresh — not a full reconcile. Leaving the verdict
     // out of the snapshot means nothing ever evicts a ghost that was already assigned.

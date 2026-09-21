@@ -23,6 +23,8 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     }
     private(set) var operations: [Operation] = []
     private(set) var spaceDidChangeCount = 0
+    private(set) var liveTopologyReadCount = 0
+    private(set) var cachedTopologyReadCount = 0
     private var pendingMoveCompletions: [(@Sendable () -> Void)] = []
 
     /// The desktops in display order, each named by a stable key. `nil` numbers them 0..<n,
@@ -38,6 +40,16 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     private var keys: [Int] { desktopKeys ?? Array(0..<desktops) }
 
     func spaceTopology() -> SpaceTopology {
+        liveTopologyReadCount += 1
+        return topologySnapshot()
+    }
+
+    func cachedSpaceTopology() -> SpaceTopology? {
+        cachedTopologyReadCount += 1
+        return topologySnapshot()
+    }
+
+    private func topologySnapshot() -> SpaceTopology {
         let keys = self.keys
         let desktopIDs = keys.map { CGSSpaceID($0 + 100) }
         return SpaceTopology(separateSpaces: false, stacks: [
@@ -114,6 +126,25 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     func completeNextMove() {
         guard !pendingMoveCompletions.isEmpty else { return }
         pendingMoveCompletions.removeFirst()()
+    }
+}
+
+@Suite("Cached overlay topology")
+struct CachedOverlayTopologyTests {
+    @Test("Opening the overlay does not synchronously query live topology")
+    func overlayUsesCachedTopology() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            focusedWindowSnapshotProvider: { .unfocused }
+        )
+        controller.spaceSwitcher = spaces
+
+        controller.handleKeyEvent(.cmdTabHold)
+
+        #expect(spaces.cachedTopologyReadCount == 1)
+        #expect(spaces.liveTopologyReadCount == 0)
     }
 }
 

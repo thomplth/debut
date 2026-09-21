@@ -6,6 +6,14 @@ Stage presentation uses `overlay_end_to_end_visible` as its primary user-facing 
 
 `overlay_render_submission` replaces the old `overlay_first_frame` name. It means AppKit drew pending content and Core Animation was flushed; it is not evidence that WindowServer displayed a physical frame. Installed-app performance validation may compare that marker and reveal completion against ScreenCaptureKit pixel observations inside the headless Tart VM.
 
+## Responsiveness policy
+
+Debut holds a process-lifetime `userInitiatedAllowingIdleSystemSleep` activity so App Nap cannot demote its global switcher while the app has no ordinary visible window. The assertion still permits idle system sleep. The event-tap thread, its main-queue delivery block, and user-driven desktop switch/move workers use interactive QoS; diagnostics and persistence remain utility work.
+
+Overlay invocation is cache-only for cross-process state. Focus identity and geometry come from event-driven window discovery, and desktop topology comes from the most recent launch, desktop-change, or display-change read. The invocation path must not add a synchronous AX or WindowServer query. External AX, WindowServer, and process reads have separate bounded scheduler lanes so one unresponsive dependency cannot consume every worker.
+
+`diagnostic.json` still represents every reported state transition, but snapshot writes are coalesced over a 50 ms burst window. `flush()` forces the newest pending snapshot for tests and exporters. Durable lifecycle JSONL records are never coalesced.
+
 ## Workloads and measurement phases
 
 | Profile | Stages (desktops) | Windows | Processes |

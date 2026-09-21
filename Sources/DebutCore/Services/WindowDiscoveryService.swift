@@ -42,11 +42,6 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     static let focusProbeTimeout: TimeInterval = 0.05
     static let windowCreationRetryDelays: [TimeInterval] = [0.05, 0.1, 0.25, 0.5]
     private static let windowCreationObserverRetryDelays: [TimeInterval] = [0.25, 0.5, 1, 2]
-    private static let focusProbeQueue = DispatchQueue(
-        label: "com.thomplth.Debut.focusProbe",
-        qos: .userInitiated
-    )
-
     private let diag: DiagnosticReporter
     private let windowService: any WindowService
     public var onWindowsDiscovered: (([WindowInfo]) -> Void)?
@@ -189,6 +184,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private var focusChangeProbeGeneration = 0
     private var launchProbeGeneration = 0
     private var destructionProbeGeneration = 0
+    private var desktopRefreshGeneration = 0
 
     private struct WindowOwnerIdentity: Hashable {
         let windowID: CGWindowID
@@ -255,9 +251,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             }
         } else {
             self.focusProbeScheduler = { pid, completion in
-                Self.focusProbeQueue.async {
+                ExternalCallScheduler.shared.schedule(on: .accessibility) {
                     let windowID = Self.boundedFocusedWindowID(for: pid)
-                    DispatchQueue.main.async { completion(windowID) }
+                    DispatchQueue.main.async(
+                        qos: EventTapKeyboardService.deliveryQualityOfService,
+                        flags: .enforceQoS
+                    ) { completion(windowID) }
                 }
             }
         }
@@ -1588,6 +1587,48 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             axContradictedWindowIDs: windowService.listAXContradictedWindowIDs(),
             skyLightWindowIDs: skyLightWindowIDs()
         ))
+    }
+
+    /// Production desktop-change handling performs its Core Graphics, AX, and SkyLight snapshot
+    /// away from the main queue. The generation check drops an older answer when two display or
+    /// desktop events arrive while WindowServer is already under pressure.
+    public func refreshDesktopAssignmentsInBackground() {
+        desktopRefreshGeneration += 1
+        let generation = desktopRefreshGeneration
+        let excludedBundleIDs = excludedBundleIDs
+        let retiredWindowOwners = retiredWindowOwners
+        let unarmedWindowIDs = unarmedWindowIDs
+        let windowService = windowService
+        let spaceSwitcher = spaceSwitcher
+
+        ExternalCallScheduler.shared.schedule(on: .windowServer) { [weak self] in
+            let liveWindows = windowService.listWindows().filter { window in
+                !excludedBundleIDs.contains(window.ownerBundleID) &&
+                    retiredWindowOwners[window.windowID]?.ownerPID != window.ownerPID
+            }
+            let liveIDs = Set(liveWindows.map(\.windowID))
+            let locations = spaceSwitcher?.windowLocations().filter {
+                liveIDs.contains($0.key)
+            } ?? [:]
+            let snapshot = RuntimeWindowSnapshot(
+                liveWindows: liveWindows,
+                allWindowIDs: windowService.listAllWindowIDs(),
+                unarmedWindowIDs: unarmedWindowIDs,
+                desktopIndexes: locations.mapValues(\.index),
+                desktopLocations: locations,
+                axContradictedWindowIDs: windowService.listAXContradictedWindowIDs(),
+                skyLightWindowIDs: spaceSwitcher.map { $0.placedWindowIDs() }
+            )
+            DispatchQueue.main.async(qos: .userInitiated, flags: .enforceQoS) {
+                guard let self, self.desktopRefreshGeneration == generation else { return }
+                self.reportWindowsDetectedByLaterScan(liveWindows, trigger: "desktop_changed")
+                for window in liveWindows where
+                    self.windowOwnerPIDs[window.windowID] != window.ownerPID {
+                    self.trackAndRegister(windowID: window.windowID, pid: window.ownerPID)
+                }
+                self.onDesktopsChanged?(snapshot)
+            }
+        }
     }
 
     func handleAppActivation(_ app: AppInfo) {
