@@ -223,54 +223,110 @@ struct StageMotionTests {
         #expect(destinationItems.map(\.layoutIndex) == [0])
     }
 
-    @Test("A guided keyboard flight does not steer toward geometry sampled during layout")
-    func guidedKeyboardFlightUsesStableEstimatedPath() {
-        #expect(StageMotion.guidedKeyboardFlightDestination(
-            estimated: CGPoint(x: 400, y: 500)
-        ) == CGPoint(x: 400, y: 500))
-    }
-
-    @Test("A guided keyboard flight corrects to measured geometry only at handoff")
-    func guidedKeyboardFlightCorrectsAtHandoff() {
-        let move = KeyboardWindowMoveAnimation(
-            sequence: 1,
-            windowID: 42,
-            fromSpaceIndex: 0,
-            fromWindowIndex: 0,
-            toSpaceIndex: 1,
-            toWindowIndex: 1
+    @Test("A guided keyboard flight uses the destination card's rendered stack coordinate")
+    func guidedKeyboardFlightUsesRenderedDestination() {
+        let layouts = [grid(2, capacity: 2), grid(3, capacity: 3)]
+        let stack = StageMotion.stackLayout(
+            stageHeights: layouts.map(\.stageSize.height),
+            focusIndex: 1,
+            spacing: 20,
+            inactiveScale: 0.8
         )
-        let measuredDestination = WindowIdentityFrameID(
+        let stackOffset: CGFloat = 73
+        let cardOffset = layouts[1].cardOffsetFromCenter(at: 1)
+
+        let destination = StageMotion.renderedWindowCenter(
             spaceIndex: 1,
             windowIndex: 1,
-            windowID: 42
+            containerWidth: 1_200,
+            stackOffset: stackOffset,
+            layouts: layouts,
+            stackLayout: stack
         )
 
-        #expect(StageMotion.guidedKeyboardFlightHandoffDestination(
-            currentPosition: CGPoint(x: 265, y: 360),
-            move: move,
-            windowFrames: [
-                measuredDestination: CGRect(x: 210, y: 320, width: 120, height: 90)
-            ]
-        ) == CGPoint(x: 270, y: 365))
-        #expect(StageMotion.guidedKeyboardFlightHandoffDestination(
-            currentPosition: CGPoint(x: 265, y: 360),
-            move: move,
-            windowFrames: [
-                WindowIdentityFrameID(
-                    spaceIndex: 0,
-                    windowIndex: 0,
-                    windowID: 42
-                ): CGRect(x: 20, y: 30, width: 100, height: 80)
-            ]
+        #expect(destination == CGPoint(
+            x: 600 + cardOffset.width * stack.scales[1],
+            y: stackOffset
+                + layouts[1].stageSize.height / 2
+                + StageMotion.stageSlotOffset(layout: stack, index: 1)
+                + cardOffset.height * stack.scales[1]
+        ))
+        #expect(StageMotion.renderedWindowCenter(
+            spaceIndex: 4,
+            windowIndex: 0,
+            containerWidth: 1_200,
+            stackOffset: stackOffset,
+            layouts: layouts,
+            stackLayout: stack
         ) == nil)
-        #expect(StageMotion.guidedKeyboardFlightHandoffDestination(
-            currentPosition: CGPoint(x: 700, y: 700),
-            move: move,
-            windowFrames: [
-                measuredDestination: CGRect(x: 210, y: 320, width: 120, height: 90)
-            ]
+    }
+
+    @Test("A guided keyboard move overrides stale pointer stage focus")
+    func guidedKeyboardMoveOverridesPointerFocus() {
+        #expect(StageMotion.pointerFocusedSpaceIndex(
+            hovered: 0,
+            hasGuidedKeyboardMove: true
         ) == nil)
+        #expect(StageMotion.pointerFocusedSpaceIndex(
+            hovered: 0,
+            hasGuidedKeyboardMove: false
+        ) == 0)
+    }
+
+    @Test("A guided keyboard move keeps the destination card selected at handoff")
+    func guidedKeyboardMoveOverridesPointerWindowSelection() {
+        let windows = [10, 42].map { windowID in
+            StageWindowData(
+                id: windowID,
+                windowID: CGWindowID(windowID),
+                ownerBundleID: "com.example",
+                ownerName: "Example",
+                windowTitle: "Window \(windowID)",
+                previewImage: nil
+            )
+        }
+        let stalePointerSelection = PointerSelection(spaceIndex: 1, windowIndex: 0)
+
+        #expect(StageMotion.selectedWindowIndex(
+            windows: windows,
+            spaceIndex: 1,
+            activeSpaceIndex: 1,
+            keyboardSelectedWindowIndex: 1,
+            pointerSelection: stalePointerSelection,
+            guidedKeyboardWindowID: 42
+        ) == 1)
+        #expect(StageMotion.selectedWindowIndex(
+            windows: windows,
+            spaceIndex: 1,
+            activeSpaceIndex: 1,
+            keyboardSelectedWindowIndex: 1,
+            pointerSelection: stalePointerSelection,
+            guidedKeyboardWindowID: nil
+        ) == 0)
+    }
+
+    @Test("A parked guided proxy remains the only visible copy")
+    func guidedKeyboardMoveKeepsOneVisibleOwner() {
+        #expect(StageMotion.guidedKeyboardCardOpacity(
+            isDeparture: false,
+            isGuidedWindow: true
+        ) == 0)
+        #expect(StageMotion.guidedKeyboardCardOpacity(
+            isDeparture: true,
+            isGuidedWindow: true
+        ) == 0)
+        #expect(StageMotion.guidedKeyboardCardOpacity(
+            isDeparture: false,
+            isGuidedWindow: false
+        ) == 1)
+        #expect(StageMotion.shouldRetainParkedKeyboardFlight(
+            flightWindowID: 42,
+            selectedWindowID: 42
+        ))
+        #expect(!StageMotion.shouldRetainParkedKeyboardFlight(
+            flightWindowID: 42,
+            selectedWindowID: 43
+        ))
     }
 
     @Test("The window layout key sees a reorder that leaves the count alone")

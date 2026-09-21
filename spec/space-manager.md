@@ -114,7 +114,10 @@ the selected card directly into the adjacent stage's MRU slot; this guided fligh
 keyboard-only and does not replace the pointer drag preview or its drop handoff.
 The source card stays invisibly retained for the flight so its ordinary removal transition
 cannot leave an afterimage. The proxy follows reconstructed stable coordinates while the stages
-move, then accepts only a small measured correction after layout has settled before handoff.
+move and uses the destination card's rendered stack coordinate as its endpoint. After landing,
+that same proxy remains the visible owner while the real grid card stays hidden, avoiding a
+second rendered-card handoff. Another pointer or keyboard selection reconciles the parked proxy;
+repeated Up/Down moves reuse it directly.
 Keyboard Left/Right reorders within the selected stage. These edits affect the
 displayed preview until the user commits by releasing the modifier or choosing a
 window. Escape discards them without moving real windows.
