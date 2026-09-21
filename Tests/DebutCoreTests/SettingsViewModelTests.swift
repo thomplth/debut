@@ -90,6 +90,16 @@ struct SettingsViewModelTests {
         #expect(!preview.contains("bundleID"))
     }
 
+    @Test("Privacy payload presentation carries the generated JSON on first display")
+    func privacyPayloadPresentation() throws {
+        let vm = SettingsViewModel()
+        let presentation = try vm.telemetryPayloadPresentation()
+
+        #expect(!presentation.json.isEmpty)
+        #expect(presentation.json == (try vm.telemetryPayloadPreview()))
+        #expect(presentation.json.contains("\"schemaVersion\" : 1"))
+    }
+
     @Test("Troubleshooting actions are forwarded to the app")
     func troubleshootingActions() {
         final class Calls: @unchecked Sendable {
