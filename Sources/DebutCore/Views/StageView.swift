@@ -1138,6 +1138,63 @@ public struct StageConstants {
             + layout.centers[spaceIndex]
     }
 
+    /// Translation from a stack centered on `focusedSpaceIndex` to the position the overlay
+    /// actually renders after preserving the active layout's anchor and applying edge scroll.
+    /// Consumers that drive real pointer input use this to hit the post-focus geometry exactly.
+    public static func focusedStackTranslation(
+        contentAspects: [[CGFloat?]],
+        screenWidth: CGFloat,
+        activeSpaceIndex: Int,
+        focusedSpaceIndex: Int,
+        inactiveScale: CGFloat,
+        containerHeight: CGFloat,
+        pointerY: CGFloat,
+        metrics: StageMetrics = .standard
+    ) -> CGFloat? {
+        guard contentAspects.indices.contains(activeSpaceIndex),
+              contentAspects.indices.contains(focusedSpaceIndex)
+        else { return nil }
+
+        let heights = stageLayouts(
+            forContentAspects: contentAspects,
+            screenWidth: screenWidth,
+            metrics: metrics
+        ).map(\.stageSize.height)
+        let spacing = compactStageSpacing * metrics.scaleFactor
+        let baseline = StageMotion.stackLayout(
+            stageHeights: heights,
+            focusIndex: activeSpaceIndex,
+            spacing: spacing,
+            inactiveScale: inactiveScale
+        )
+        let focused = StageMotion.stackLayout(
+            stageHeights: heights,
+            focusIndex: focusedSpaceIndex,
+            spacing: spacing,
+            inactiveScale: inactiveScale
+        )
+        guard baseline.centers.indices.contains(activeSpaceIndex),
+              baseline.centers.indices.contains(focusedSpaceIndex),
+              focused.centers.indices.contains(focusedSpaceIndex)
+        else { return nil }
+
+        let baselineOffset = containerHeight / 2 - baseline.centers[activeSpaceIndex]
+        let anchorY = baselineOffset + baseline.centers[focusedSpaceIndex]
+        let restingOffset = StageMotion.anchoredOffset(
+            layout: focused,
+            anchorIndex: focusedSpaceIndex,
+            anchorY: anchorY
+        )
+        let stackOffset = StageMotion.edgeScrollDestination(
+            pointerY: pointerY,
+            containerHeight: containerHeight,
+            restingOffset: restingOffset,
+            topLimit: edgeScrollMargin,
+            bottomLimit: containerHeight - edgeScrollMargin - focused.totalHeight
+        )
+        return stackOffset + focused.centers[focusedSpaceIndex] - containerHeight / 2
+    }
+
     /// Where a window card is drawn, for callers outside the view hierarchy. E2E clicks and drags
     /// real screen coordinates; a second copy of the grid math there drifts from what the overlay
     /// draws without either side failing.

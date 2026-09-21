@@ -57,7 +57,7 @@ grant_accessibility() {
     escaped_client="${client//\'/\'\'}"
     timestamp="$(date +%s)"
 
-    sudo sqlite3 "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+    sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceAccessibility','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
@@ -72,9 +72,9 @@ grant_screen_capture() {
     escaped_client="${client//\'/\'\'}"
     timestamp="$(date +%s)"
 
-    sudo sqlite3 "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+    sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceScreenCapture','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
-    sqlite3 "$USER_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+    sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServiceScreenCapture','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
@@ -93,9 +93,9 @@ grant_post_event() {
     escaped_client="${client//\'/\'\'}"
     timestamp="$(date +%s)"
 
-    sudo sqlite3 "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+    sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServicePostEvent','$escaped_client',1,2,4,1,$csreq_sql,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
-    sqlite3 "$USER_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+    sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
 'kTCCServicePostEvent','$escaped_client',1,2,4,1,$csreq_sql,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
@@ -145,6 +145,27 @@ wait_for_fixture_apps() {
     return 1
 }
 
+provision_desktops() {
+    local deadline=$((SECONDS + 30))
+
+    while (( SECONDS < deadline )); do
+        if as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 4; then
+            return 0
+        fi
+        # A freshly restarted tccd can briefly answer from its pre-grant cache even though the
+        # signed-path row is already committed. Reassert the current staged binary's grant before
+        # restarting it: permission-denial fixtures restart tccd several times, and a warm guest
+        # can otherwise keep the previous executable's cached code requirement for this path.
+        grant_accessibility "$E2E_SOURCE" 1 "$E2E_SOURCE"
+        grant_post_event "$E2E_SOURCE" "$E2E_SOURCE"
+        sudo killall tccd 2>/dev/null || true
+        sleep 2
+    done
+
+    echo "The E2E input driver's Accessibility grant did not become live within 30 seconds." >&2
+    return 1
+}
+
 echo "Installing the host build in the isolated guest..."
 sudo rm -rf "$APP_PATH"
 sudo ditto -x -k "$APP_ARCHIVE" /Applications
@@ -171,8 +192,8 @@ sudo killall tccd 2>/dev/null || true
 # nothing: the alerts simply stay on the desktop. They had stacked seven deep, covering the region
 # every pixel-sampling check reads. Suppressing the reminder stops new ones, and quitting the
 # presenter clears whatever an earlier run left behind.
-# macOS keys this store by whatever it holds responsible for the capture: a bundle ID for Debut, and
-# for the suite the ssh session that launched it rather than the binary itself.
+# macOS keys this store by whatever it holds responsible for the capture: a bundle ID for Debut,
+# and for the suite the SSH session that launched it rather than the binary itself.
 screen_capture_approvals="$console_home/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
 reset_capture_reminders() {
     for approval_client in "$bundle_id" "$E2E_SOURCE" "/usr/libexec/sshd-keygen-wrapper"; do
@@ -225,7 +246,7 @@ wait_for_fixture_apps
 # suite cannot switch a space or move a window between two. Debut builds its space list at
 # launch, so the desktops have to exist first.
 echo "Provisioning desktops so spaces have somewhere to be..."
-as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 4
+provision_desktops
 
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
@@ -247,10 +268,10 @@ for denied_permission in accessibility capture desktop; do
     grant_accessibility "$bundle_id" 0 "$APP_PATH"
     grant_screen_capture "$bundle_id" 0 "$APP_PATH"
     if [[ "$denied_permission" == accessibility ]]; then
-        sudo sqlite3 "$SYSTEM_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceAccessibility';"
+        sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceAccessibility';"
     elif [[ "$denied_permission" == capture ]]; then
-        sudo sqlite3 "$SYSTEM_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
-        sqlite3 "$USER_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
+        sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
+        sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
     fi
     if [[ "$denied_permission" == desktop ]]; then
         if ! as_console env HOME="$console_home" "$E2E_SOURCE" reset-desktops; then
@@ -280,7 +301,7 @@ sudo killall tccd 2>/dev/null || true
 reset_capture_reminders
 
 # Restore the full suite fixture after the isolated first-run journeys.
-as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 4
+provision_desktops
 as_console rm -rf "$support_dir"
 as_console pkill -x TextEdit 2>/dev/null || true
 as_console open -na TextEdit "$FIXTURE_DIR/one.txt"

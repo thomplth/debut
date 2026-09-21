@@ -41,7 +41,7 @@ if [[ -f "$host_runner" ]]; then
     expect_contains "$host_runner" 'tart run.*--no-pointer.*--no-keyboard' \
         "Tart E2E must not attach host input devices"
     expect_contains "$host_runner" 'tart exec' \
-        "Tart E2E must use the guest agent to bootstrap SSH"
+        "Tart E2E must run through the guest agent"
     expect_not_contains "$host_runner" 'tart exec -t' \
         "Tart E2E must not require an interactive host terminal"
     expect_contains "$host_runner" 'ssh-keygen' \
@@ -52,6 +52,10 @@ if [[ -f "$host_runner" ]]; then
         "Tart E2E must wait for DHCP before deciding the guest has no address"
     expect_contains "$host_runner" 'admin@127\.0\.0\.1' \
         "Tart E2E must retain the SSH TCC identity through loopback when DHCP is unavailable"
+    expect_contains "$host_runner" 'shlock .*RUN_LOCK' \
+        "Tart E2E must atomically lock its shared artifact directory"
+    expect_contains "$host_runner" 'Another Tart E2E run already owns' \
+        "a concurrent shared-directory run must fail with a useful explanation"
     expect_contains "$host_runner" 'DebutE2E' \
         "Tart E2E must space the release E2E executable"
     expect_contains "$host_runner" 'ARTIFACT_ID' \
@@ -73,8 +77,14 @@ if [[ -f "$guest_runner" ]]; then
         "the disposable guest must provision Accessibility"
     expect_contains "$guest_runner" 'kTCCServicePostEvent' \
         "the guest E2E driver must be authorized to inject HID events"
+    expect_contains "$guest_runner" "sqlite3 -cmd '\\.timeout 10000'" \
+        "TCC fixture writes must wait out tccd's transient database lock"
+    expect_contains "$guest_runner" 'provision_desktops' \
+        "desktop provisioning must wait for the freshly written Accessibility grant"
     expect_contains "$guest_runner" 'grant_screen_capture "\$E2E_SOURCE"' \
         "the guest suite must hold Screen Recording, since it samples frames in-process"
+    expect_contains "$guest_runner" '/usr/libexec/sshd-keygen-wrapper' \
+        "the guest must suppress the SSH executor's screen-capture reminder"
     expect_contains "$guest_runner" 'unset GITHUB_ACTIONS' \
         "the isolated local guest must run hosted-skipped gesture checks"
     expect_not_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
@@ -132,6 +142,10 @@ if [[ -f "$e2e_source" ]]; then
         "a single-answer lookup cannot tell a hijacked launch from a real one"
     expect_contains "$e2e_source" 'claim the bundle identifier' \
         "an ambiguous install must be named and refused, not silently resolved"
+    expect_contains "$e2e_source" 'focusedStackTranslation' \
+        "reverse-drag geometry must include the focused stack's live edge-scroll position"
+    expect_contains "$e2e_source" 'nativeTransitionSpaces\.switchToDesktop\(index: 0\)' \
+        "the native Command-Tab fixture must return to the desktop where AX can enumerate it"
 fi
 
 if (( failures > 0 )); then
