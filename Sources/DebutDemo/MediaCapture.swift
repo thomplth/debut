@@ -165,15 +165,11 @@ func captureOverlayCover(to url: URL) throws {
         configuration.ignoreShadowsSingleWindow = true
         let image = try await SCScreenshotManager.captureImage(
             contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration)
-        // An independent window supplies accurate alpha bounds, but macOS flattens its glass
-        // against gray. Capture the same rectangle as displayed over the demo's white panel
-        // for the actual colors, then use the isolated alpha to trim away the desktop margins.
         let display = try await demoDisplay()
         configuration.sourceRect = window.frame
         let rendered = try await SCScreenshotManager.captureImage(
-            contentFilter: SCContentFilter(display: display, excludingWindows: []),
-            configuration: configuration)
-        let cropped = try overlayCoverImage(image, renderedImage: rendered)
+            contentFilter: SCContentFilter(display: display, excludingWindows: []), configuration: configuration)
+        let cropped = try overlayCoverImage(image, renderedOnWhite: rendered)
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
         else { throw CaptureFailure.failed }
         CGImageDestinationAddImage(destination, cropped, nil)

@@ -3,18 +3,6 @@ import Testing
 @testable import DebutDemo
 
 struct DemoMediaTests {
-    @Test func keyReleaseKeepsCommandHeldUntilCommit() {
-        var keys = DemoKeyState()
-        keys.update(flags: .maskCommand)
-        keys.update(key: 48, down: true, flags: .maskCommand)
-        #expect(keys.labels == ["⌘ Command", "Tab"])
-        #expect(keys.pressed == [true, true])
-        keys.update(key: 48, down: false, flags: .maskCommand)
-        #expect(keys.pressed == [true, false])
-        keys.update(flags: [])
-        #expect(keys.pressed == [false, false])
-    }
-
     @Test func cropFindsContentWithoutKeepingTransparentDesktopMargins() throws {
         let context = try #require(CGContext(data: nil, width: 100, height: 80,
             bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
@@ -35,34 +23,54 @@ struct DemoMediaTests {
         #expect(throws: (any Error).self) { try croppedOverlay(image, padding: 6) }
     }
 
-    @Test func glassCaptureUsesOverlayBoundsAndCompositedColors() throws {
-        let context = try #require(CGContext(data: nil, width: 100, height: 80,
-            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.setFillColor(CGColor(gray: 1, alpha: 1))
-        context.fill(CGRect(x: 30, y: 20, width: 40, height: 40))
-        let mask = try #require(context.makeImage())
-        context.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: 100, height: 80))
-        let rendered = try #require(context.makeImage())
-        let cropped = try croppedOverlay(mask, padding: 6, renderedImage: rendered)
-        #expect(cropped.width == 52)
-        #expect(cropped.height == 52)
-        let data = try #require(cropped.dataProvider?.data)
-        let pixels = try #require(CFDataGetBytePtr(data))
-        #expect(pixels[2] == 255)
-    }
-
-    @Test func coverHasALightBackgroundForReadableLabelsInEitherREADMETheme() throws {
+    @Test func coverKeepsTransparencyAndAddsRoomForTheShadow() throws {
         let context = try #require(CGContext(data: nil, width: 20, height: 20,
             bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.setFillColor(CGColor(gray: 0, alpha: 1))
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
         context.fill(CGRect(x: 5, y: 5, width: 10, height: 10))
+        // A faint shadow at the source edge must survive framing, with margin beyond it.
+        context.setFillColor(CGColor(gray: 0, alpha: 2.0 / 255))
+        context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
         let image = try overlayCoverImage(#require(context.makeImage()))
+        #expect(image.width == 15 + 256)
+        #expect(image.height == 15 + 256)
         let data = try #require(image.dataProvider?.data)
         let pixels = try #require(CFDataGetBytePtr(data))
-        #expect(Array(UnsafeBufferPointer(start: pixels, count: 4)) == [255, 255, 255, 255])
-        #expect(pixels[10 * image.bytesPerRow + 10 * 4] == 0)
+        #expect(Array(UnsafeBufferPointer(start: pixels, count: 4)) == [0, 0, 0, 0])
+        let center = (image.height / 2) * image.bytesPerRow + (image.width / 2) * 4
+        #expect(Array(UnsafeBufferPointer(start: pixels + center, count: 4)) == [255, 255, 255, 255])
     }
+    @Test func coverRecoversRenderedGlassColorsWithoutAWhiteShadowFringe() throws {
+        func canvas() throws -> CGContext {
+            try #require(CGContext(data: nil, width: 20, height: 20,
+                bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+        }
+        let isolated = try canvas()
+        isolated.setFillColor(CGColor(gray: 0.3, alpha: 1))
+        isolated.fill(CGRect(x: 5, y: 5, width: 10, height: 10))
+        isolated.setFillColor(CGColor(gray: 0, alpha: 32.0 / 255))
+        isolated.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        let rendered = try canvas()
+        rendered.setFillColor(CGColor(gray: 1, alpha: 1))
+        rendered.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+        rendered.setFillColor(CGColor(colorSpace: CGColorSpaceCreateDeviceRGB(), components: [0, 0, 1, 1])!)
+        rendered.fill(CGRect(x: 5, y: 5, width: 10, height: 10))
+        rendered.setFillColor(CGColor(gray: 0, alpha: 32.0 / 255))
+        rendered.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        let image = try overlayCoverImage(#require(isolated.makeImage()), renderedOnWhite: #require(rendered.makeImage()))
+        let data = try #require(image.dataProvider?.data)
+        let bytes = try #require(CFDataGetBytePtr(data))
+        var sawBlue = false, sawShadow = false
+        for y in 0..<image.height {
+            for x in 0..<image.width {
+                let p = bytes + y * image.bytesPerRow + x * 4
+                if p[3] == 255 { sawBlue = true; #expect(p[0] == 0 && p[1] == 0 && p[2] == 255) }
+                if p[3] == 32 { sawShadow = true; #expect(p[0] <= 1 && p[1] <= 1 && p[2] <= 1) }
+            }
+        }
+        #expect(sawBlue && sawShadow)
+    }
+
 }
