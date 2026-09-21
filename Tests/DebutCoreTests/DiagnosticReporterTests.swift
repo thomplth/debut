@@ -63,6 +63,25 @@ struct DiagnosticReporterTests {
         #expect(lines.first?["event"] == "window_assigned")
     }
 
+    @Test("Bursty events coalesce full snapshot rewrites")
+    func burstyEventsCoalesceSnapshotWrites() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir)
+        for index in 0..<200 {
+            reporter.report("key_event", level: .transient, details: ["index": "\(index)"])
+        }
+        reporter.flush()
+
+        #expect(reporter.snapshotWriteCountForTesting == 1)
+        let data = try Data(contentsOf: dir.appendingPathComponent("diagnostic.json"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let events = try #require(object["events"] as? [[String: String]])
+        #expect(events.count == 100)
+        #expect(events.last?["index"] == "199")
+    }
+
     @Test("Durable log rotates and keeps exactly one previous generation")
     func durableLogRotates() throws {
         let dir = try makeTempDirectory()

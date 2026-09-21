@@ -1,6 +1,4 @@
 import AppKit
-import ApplicationServices
-import AXPrivate
 import CoreGraphics
 
 /// Which switcher an overlay session is presenting.
@@ -333,6 +331,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// `WindowInfo.bounds` rather than from a preview: bounds arrive with discovery, while a
     /// capture arrives later and would resize a card the user is already looking at.
     public private(set) var windowSizes: [CGWindowID: CGSize] = [:]
+    private var windowFrames: [CGWindowID: CGRect] = [:]
 
     /// Takes the sizes discovery just reported, unless the overlay is up. A window resized behind
     /// the overlay must not reflow the grid under the cursor, so the shapes an overlay session
@@ -341,6 +340,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         guard !isSpaceManagerVisible else { return }
         for window in windows {
             windowSizes[window.windowID] = window.bounds.size
+            windowFrames[window.windowID] = window.bounds
         }
     }
 
@@ -350,6 +350,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public func recordWindowSize(windowID: CGWindowID, size: CGSize) {
         guard !isSpaceManagerVisible else { return }
         windowSizes[windowID] = size
+        if var frame = windowFrames[windowID] {
+            frame.size = size
+            windowFrames[windowID] = frame
+        }
         // Transient, so a drag that reports every frame refreshes the observable state block
         // without any of it reaching durable storage.
         diag.report("window_resized", level: .transient, details: [
@@ -571,6 +575,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
         let topology = spaceSwitcher.spaceTopology()
+        if !topology.stacks.isEmpty {
+            desktopSwitchIndicatorTracker.seed(with: topology)
+        }
+        reconcileSpaces(with: topology)
+    }
+
+    /// Presentation consumes the topology already refreshed by launch, desktop-change, and
+    /// display-change events. A live WindowServer read here would make the global shortcut wait
+    /// behind whichever compositor work caused the user to need it.
+    private func reconcileSpacesWithCachedDesktops() {
+        guard let topology = spaceSwitcher?.cachedSpaceTopology() else { return }
         if !topology.stacks.isEmpty {
             desktopSwitchIndicatorTracker.seed(with: topology)
         }
@@ -1622,6 +1637,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         if ownerSpaceID == targetSpaceID {
+            cacheAcceptedFocus(windowID: windowID)
             spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: targetSpaceID)
             // The MRU head decides what every switch offers next, and this is the path that moves
             // it most. Leaving it silent made a wrong order unreadable from a finished session:
@@ -1694,8 +1710,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
 
+        cacheAcceptedFocus(windowID: windowID)
         spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: targetSpaceID)
         delegate?.spaceControllerDidMutateState(self)
+    }
+
+    /// Only cache focus after the callback survives the stale-switch, cycle, retired-window,
+    /// and exclusion checks above. Those callbacks can name a window that is no longer focused.
+    private func cacheAcceptedFocus(windowID: CGWindowID) {
+        focusedWindowID = windowID
+        focusedWindowFrame = windowFrames[windowID]
+        focusedWindowIsFullscreen = focusedWindowFrame.map(Self.frameFillsScreen) ?? false
     }
 
     public func updateFrontmostApp(
@@ -2375,7 +2400,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // Removing an inactive desktop need not change the Space currently showing, so there
         // may be no active-space notification. Recheck at the point where a stale space would
         // otherwise become visible; this is event-driven by the user's overlay command.
-        reconcileSpacesWithDesktops()
+        reconcileSpacesWithCachedDesktops()
 
         isSpaceManagerVisible = true
         if let tapService = keyboardService as? EventTapKeyboardService {
@@ -2479,51 +2504,44 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         if let focusedWindowSnapshotProvider {
             return focusedWindowSnapshotProvider()
         }
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return .unfocused }
-        if frontApp.bundleIdentifier == "com.thomplth.Debut" {
-            guard let window = NSApp.keyWindow, tutorialScope?.windowIDs.contains(CGWindowID(window.windowNumber)) == true else { return .unfocused }
+        // Tutorial windows belong to this process and never enter discovery's external-window
+        // cache. Reading AppKit's own key window is local and bounded, so preserve tutorial
+        // isolation without reintroducing an AX or WindowServer round trip.
+        let localTutorialFocus: FocusedWindowSnapshot? = MainActor.assumeIsolated {
+            let application = NSApplication.shared
+            guard application.isActive,
+                  let tutorialScope,
+                  let window = application.keyWindow,
+                  tutorialScope.windowIDs.contains(CGWindowID(window.windowNumber))
+            else { return nil }
             let frame = window.frame
             let top = NSScreen.screens.first?.frame.maxY ?? frame.maxY
-            return .init(windowID: CGWindowID(window.windowNumber), frame: CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height), isFullscreen: false)
+            return FocusedWindowSnapshot(
+                windowID: CGWindowID(window.windowNumber),
+                frame: CGRect(
+                    x: frame.minX,
+                    y: top - frame.maxY,
+                    width: frame.width,
+                    height: frame.height
+                ),
+                isFullscreen: false
+            )
         }
-
-        let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
-        AXUIElementSetMessagingTimeout(axApp, Float(Self.focusProbeTimeout))
-        var windowsRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &windowsRef) == .success else {
-            return .unfocused
-        }
-        let axWindow = windowsRef as! AXUIElement
-        AXUIElementSetMessagingTimeout(axWindow, Float(Self.focusProbeTimeout))
-        var windowID: CGWindowID = 0
-        let resolvedWindowID = _AXUIElementGetWindow(axWindow, &windowID) == .success
-            ? windowID
-            : nil
-        var fullscreenRef: CFTypeRef?
-        let isFullscreen = AXUIElementCopyAttributeValue(axWindow, "AXFullScreen" as CFString, &fullscreenRef) == .success
-            && (fullscreenRef as? Bool) == true
+        if let localTutorialFocus { return localTutorialFocus }
+        let windowID = focusedWindowID ?? spaceManager.activeSpace.windows.first?.windowID
+        let frame = windowID.flatMap { windowFrames[$0] }
         return FocusedWindowSnapshot(
-            windowID: resolvedWindowID,
-            frame: axFrame(of: axWindow),
-            isFullscreen: isFullscreen
+            windowID: windowID,
+            frame: frame,
+            isFullscreen: frame.map(Self.frameFillsScreen) ?? false
         )
     }
 
-    private func axFrame(of axWindow: AXUIElement) -> CGRect? {
-        var positionRef: CFTypeRef?
-        var sizeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axWindow, kAXPositionAttribute as CFString, &positionRef) == .success,
-              AXUIElementCopyAttributeValue(axWindow, kAXSizeAttribute as CFString, &sizeRef) == .success
-        else { return nil }
-
-        var origin = CGPoint.zero
-        var size = CGSize.zero
-        guard let positionValue = positionRef, CFGetTypeID(positionValue) == AXValueGetTypeID(),
-              let sizeValue = sizeRef, CFGetTypeID(sizeValue) == AXValueGetTypeID(),
-              AXValueGetValue(positionValue as! AXValue, .cgPoint, &origin),
-              AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
-        else { return nil }
-        return CGRect(origin: origin, size: size)
+    private static func frameFillsScreen(_ frame: CGRect) -> Bool {
+        NSScreen.screens.contains { screen in
+            abs(frame.width - screen.frame.width) < 1 &&
+                abs(frame.height - screen.frame.height) < 1
+        }
     }
 
     /// A missing capture can mean that a window is merely hidden, so a preview is retained until
@@ -2532,6 +2550,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private func pruneWindowPreviews(assignedWindowIDs: Set<CGWindowID>) {
         windowPreviews = windowPreviews.filter { assignedWindowIDs.contains($0.key) }
         windowSizes = windowSizes.filter { assignedWindowIDs.contains($0.key) }
+        windowFrames = windowFrames.filter { assignedWindowIDs.contains($0.key) }
         variedWindowPreviewIDs.formIntersection(assignedWindowIDs)
         previewCacheEntries = previewCacheEntries.filter { assignedWindowIDs.contains($0.key) }
     }
