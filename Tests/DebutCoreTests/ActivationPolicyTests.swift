@@ -99,4 +99,16 @@ struct MainMenuTests {
         #expect(actions.contains(#selector(NSWindow.performClose(_:))))
         #expect(actions.contains(#selector(NSWindow.performMiniaturize(_:))))
     }
+
+    @Test("The status menu reopens setup once it has been completed")
+    func statusMenuReopensSetup() {
+        let menu = AppDelegate.makeStatusMenu(target: nil)
+
+        let titles = menu.items.map(\.title)
+        #expect(titles.contains("Setup..."))
+        // Setup precedes the tutorial it hands off to, matching the order of the flow.
+        guard let setup = titles.firstIndex(of: "Setup..."),
+              let tutorial = titles.firstIndex(of: "Tutorial...") else { return }
+        #expect(setup < tutorial)
+    }
 }

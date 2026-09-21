@@ -1038,12 +1038,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             DebutGlyph.installMenuBarIcon(in: button)
         }
 
+        statusItem?.menu = Self.makeStatusMenu(target: self)
+        updateFeatureMenu()
+    }
+
+    static func makeStatusMenu(target: AnyObject?) -> NSMenu {
         let menu = NSMenu()
         let featureMenu = NSMenu(title: "Features")
         for (index, title) in Self.featureMenuTitles.enumerated() {
             let item = NSMenuItem(title: title, action: #selector(toggleFeature(_:)), keyEquivalent: "")
             item.tag = 100 + index
-            item.target = self
+            item.target = target
             if index == 3 { featureMenu.addItem(.separator()) }
             featureMenu.addItem(item)
         }
@@ -1052,18 +1057,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         menu.addItem(featuresItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: "Setup...", action: #selector(openSetup), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Tutorial...", action: #selector(openTutorial), keyEquivalent: ""))
         let updateItem = NSMenuItem(
             title: "Check for Updates...",
             action: #selector(checkForUpdates(_:)),
             keyEquivalent: ""
         )
-        updateItem.target = self
+        updateItem.target = target
         menu.addItem(updateItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Debut", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        statusItem?.menu = menu
-        updateFeatureMenu()
+        return menu
     }
 
     static let featureMenuTitles = ["Window previews", "Workspace Command–Tab", "Option–Tab", "Faster desktop transitions", "Numbered space shortcuts", "Control-arrow switching", "Trackpad desktop swipe"]
@@ -1151,6 +1156,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     @objc private func openSettings() {
         let settings = (try? stateStore?.loadSettings()) ?? AppSettings()
         showSettings(settings: settings)
+    }
+
+    @objc private func openSetup() {
+        showOnboarding()
     }
 
     @objc private func openTutorial() {

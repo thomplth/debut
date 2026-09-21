@@ -89,8 +89,8 @@ content, placement, and freshness are in Switcher; visual layout and selection a
 in Appearance; and all key assignments and held-key timing are in Shortcuts.
 Support contains actions rather than preferences.
 
-The menu-bar item provides feature toggles, Settings, Tutorial, update checks,
-and Quit. System Reduce Motion changes overlay animation; it is not a separate
+The menu-bar item provides feature toggles, Settings, Setup, Tutorial, update
+checks, and Quit. System Reduce Motion changes overlay animation; it is not a separate
 Debut animation switch. See [privacy](../docs/privacy.md) for local data and the
 user-initiated diagnostic export boundary.
 
@@ -116,7 +116,8 @@ Setup has five pages and never requires shortcut practice:
 Without Screen Recording, both example screenshots show the icon-based fallback.
 No remote telemetry or sharing consent is part of setup. Back/Continue never
 changes feature preferences. Setup progress survives restarts, and existing users
-are not forced through setup again.
+are not forced through setup again. The menu bar reopens setup at any time,
+resuming wherever it was left.
 
 Tutorial is a separate optional flow opened from the final setup page or the menu
 bar. It teaches window switching, desktop navigation, moving windows, and Option-Tab
