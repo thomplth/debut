@@ -22,8 +22,8 @@ keeps windows from other desktops out of that cycle.
 - **Command-Option-Tab** browses stages; **Control-1–9** jumps to a desktop.
 - Drag a preview between stages to prepare a window move, then release Command
   to apply it. Escape cancels pending moves.
-- **Command-Option-arrow** moves the focused window to an adjacent desktop and
-  follows it without opening the overlay.
+- **Command-Option-arrow** defaults move the focused window to an adjacent desktop
+  and follow it without opening the overlay. These shortcuts are configurable.
 - Desktop transitions default to **Instant**. Control-arrow and trackpad desktop
   switching are enabled by default and can be disabled independently in Settings.
 

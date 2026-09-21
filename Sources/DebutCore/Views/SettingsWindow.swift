@@ -610,15 +610,12 @@ public struct SettingsView: View {
                 .font(.headline)
                 .padding(.top, 4)
 
-            HStack {
-                Text("Move to previous stage")
-                Spacer()
-                Text("⌥⌘← / ⌥⌘↑").foregroundStyle(.secondary)
-            }
-            HStack {
-                Text("Move to next stage")
-                Spacer()
-                Text("⌥⌘→ / ⌥⌘↓").foregroundStyle(.secondary)
+            ForEach(KeyAction.focusedWindowMoveActions, id: \.self) { action in
+                ShortcutRecorderRow(
+                    action: action,
+                    keyBindings: $viewModel.settings.keyBindings,
+                    recordingService: shortcutRecordingService
+                )
             }
             Text("Follow the window to its desktop and keep it focused. Requires workspace isolation.")
                 .font(.caption)
