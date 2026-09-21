@@ -229,6 +229,12 @@ public struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
+                settingsToggle("Enable Debut Option–Tab", isOn: $viewModel.settings.features.optionTab)
+                Text("Switch between windows across all desktops.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
                 settingsToggle(
                     "Show window previews",
                     isOn: $viewModel.settings.features.windowPreviews

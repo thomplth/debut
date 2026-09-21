@@ -24,6 +24,7 @@ public enum SettingsSection: String, CaseIterable, Sendable {
         case .switcher:
             [
                 .workspaceIsolation,
+                .optionTab,
                 .windowPreviews,
                 .mainDisplayOnly,
                 .previewRefreshPolicy,
@@ -68,6 +69,7 @@ enum SettingsOption: String, CaseIterable, Sendable {
     case spaceSwitchDuration
     case desktopSwitchIndicator
     case workspaceIsolation
+    case optionTab
     case windowPreviews
     case mainDisplayOnly
     case glassStyle

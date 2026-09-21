@@ -81,6 +81,7 @@ struct SettingsViewModelTests {
     func appearanceOptions() {
         #expect(SettingsSection.switcher.options == [
             .workspaceIsolation,
+            .optionTab,
             .windowPreviews,
             .mainDisplayOnly,
             .previewRefreshPolicy,
