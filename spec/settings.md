@@ -34,7 +34,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Numbered / same-app numbered modifiers | Control / Control-Option |
 | Launch at login / show in Dock | On / On |
 | Excluded apps | Empty |
-| Share anonymous usage and performance data | On, delivery gated until onboarding completion |
+| Share anonymous usage and performance data | Off; the user may opt in during onboarding or later in Settings |
 
 Cache age is evaluated when capture work is requested; it is not a recurring
 refresh timer. The code remains authoritative for control ranges and decoding
@@ -101,5 +101,6 @@ With only one desktop, the tutorial can teach local window switching and
 Option-Tab without pretending to cross desktops. It offers Mission Control for
 adding another desktop; Debut itself does not create one. Progress checkpoints
 allow resuming, and Tutorial can be reopened from the menu bar. Feature and
-duration choices are shared with Settings, and the Ready page presents the
-anonymous-sharing choice before delivery is enabled.
+duration choices are shared with Settings. The Ready page presents the
+anonymous-sharing choice off by default, and delivery begins only if the user
+opts in and completes onboarding.

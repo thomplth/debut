@@ -83,7 +83,7 @@ public final class OnboardingViewModel {
         onFeaturesChanged: @escaping @MainActor (FeatureSettings) -> Void = { _ in },
         duration: TimeInterval = 0,
         onDurationChanged: @escaping @MainActor (TimeInterval) -> Void = { _ in },
-        shareAnonymousTelemetry: Bool = true,
+        shareAnonymousTelemetry: Bool = false,
         onTelemetryChanged: @escaping @MainActor (Bool) -> Void = { _ in },
         onPermissionStateChanged: @escaping @MainActor (OnboardingPermissionState) -> Void = { _ in },
         checkpoint: OnboardingCheckpoint? = nil,

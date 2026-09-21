@@ -658,7 +658,7 @@ public struct SettingsView: View {
                 "Share anonymous usage and performance data",
                 isOn: $viewModel.settings.shareAnonymousTelemetry
             )
-            Text("Shares one bucketed aggregate session summary and a small number of rate-limited performance anomalies. The choice takes effect immediately and local diagnostics stay available.")
+            Text("Off by default on new installs. If enabled, shares one bucketed aggregate session summary and a small number of rate-limited performance anomalies. The choice takes effect immediately and local diagnostics stay available.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("View data being shared…") {
