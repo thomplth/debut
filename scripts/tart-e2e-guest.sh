@@ -46,6 +46,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# tccd attributes the driver's requests to whatever launched it, and the harness always enters
+# over SSH. A deny row on the launcher outranks the driver's own grant, so these are granted
+# rather than merely reminded about screen capture.
+RESPONSIBLE_LAUNCHERS=("/usr/libexec/sshd-keygen-wrapper")
+
 grant_accessibility() {
     local client="$1"
     local client_type="$2"
@@ -182,6 +187,9 @@ echo "Granting Screen Recording and Accessibility to Debut and the E2E input dri
 grant_accessibility "$bundle_id" 0 "$APP_PATH"
 grant_screen_capture "$bundle_id" 0 "$APP_PATH"
 grant_accessibility "$E2E_SOURCE" 1 "$E2E_SOURCE"
+for launcher in "${RESPONSIBLE_LAUNCHERS[@]}"; do
+    grant_accessibility "$launcher" 1 "$launcher"
+done
 grant_post_event "$E2E_SOURCE" "$E2E_SOURCE"
 # The suite samples animation frames itself rather than spawning `screencapture`, so it is a
 # screen capture client in its own right; without this it would meet a TCC prompt mid-run.
@@ -196,7 +204,7 @@ sudo killall tccd 2>/dev/null || true
 # and for the suite the SSH session that launched it rather than the binary itself.
 screen_capture_approvals="$console_home/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
 reset_capture_reminders() {
-    for approval_client in "$bundle_id" "$E2E_SOURCE" "/usr/libexec/sshd-keygen-wrapper"; do
+    for approval_client in "$bundle_id" "$E2E_SOURCE" "${RESPONSIBLE_LAUNCHERS[@]}"; do
         as_console env HOME="$console_home" defaults write \
             "$screen_capture_approvals" "$approval_client" -date "3024-01-01 00:00:00 +0000"
     done
