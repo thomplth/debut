@@ -348,9 +348,15 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let consentedOwnWindowIDs = ownWindowLock.withLock { self.consentedOwnWindowIDs }
-        let parentedWindowIDs = spaceSwitcher?.parentedWindowIDs(
+        let verdicts = spaceSwitcher?.windowServerVerdicts(
             among: infoList.compactMap { $0[kCGWindowNumber] as? CGWindowID }
-        ) ?? []
+        ) ?? WindowServerVerdicts()
+        let ghostWindowIDs = Self.orderedOutGhostWindowIDs(
+            orderedOutWindowIDs: verdicts.orderedOut,
+            ownerPIDs: Self.windowOwnerPIDs(in: infoList),
+            hiddenPIDs: Set(runningApps.lazy.filter(\.application.isHidden)
+                .map(\.application.processIdentifier))
+        )
 
         var seen = Set<CGWindowID>()
         return infoList.compactMap { dict in
@@ -386,7 +392,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             guard !Self.evictionVerdictRefusesWindow(
                 layer: dict[kCGWindowLayer] as? Int,
                 bounds: bounds,
-                hasParentWindow: parentedWindowIDs.contains(windowID)
+                hasParentWindow: verdicts.parented.contains(windowID),
+                isOrderedOutGhost: ghostWindowIDs.contains(windowID)
             ) else { return nil }
 
             if !classification.trackable.contains(windowID) {
@@ -434,8 +441,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
     /// Whether a verdict that would park an assigned window also refuses an unassigned one.
     ///
-    /// Both signals here are volunteered by the window server about the surface itself, so
-    /// neither depends on Accessibility having classified the window — which is why this applies
+    /// The window-server signals here are volunteered about the surface itself, so none of them
+    /// depends on Accessibility having classified the window — which is why this applies
     /// to every window rather than only to the ones AX leaves unknown. Admission consulting a
     /// narrower rule than eviction is not a conservative asymmetry, it is a loop: the park
     /// creates a dormant assignment carrying the same window ID, PID and bundle, which is the
@@ -445,9 +452,33 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     static func evictionVerdictRefusesWindow(
         layer: Int?,
         bounds: CGRect,
-        hasParentWindow: Bool
+        hasParentWindow: Bool,
+        isOrderedOutGhost: Bool
     ) -> Bool {
-        hasParentWindow || isDisqualifiedWindow(layer: layer, bounds: bounds)
+        hasParentWindow || isOrderedOutGhost || isDisqualifiedWindow(layer: layer, bounds: bounds)
+    }
+
+    /// Ordered-out surfaces that no ordinary presentation state explains.
+    ///
+    /// The window server clears the ordered-in bit for minimizing, for hiding an app, and for
+    /// ordering a window out, so the bit alone would delete windows the user still expects to
+    /// switch to. Minimizing is filtered at the source, where the tag naming it is readable.
+    /// Hiding is asked of AppKit here: the window server has a tag for it too, but it does not
+    /// agree with itself — hidden Music's window 17973 is a real `AXWindow` carrying no such tag,
+    /// while hidden Calendar's window carries one.
+    ///
+    /// A window whose owner is not among the running apps abstains rather than being refused.
+    /// Hidden state is the only thing that can spare it, so an unresolved owner is missing
+    /// evidence, and this predicate carries an eviction verdict.
+    static func orderedOutGhostWindowIDs(
+        orderedOutWindowIDs: Set<CGWindowID>,
+        ownerPIDs: [CGWindowID: pid_t],
+        hiddenPIDs: Set<pid_t>
+    ) -> Set<CGWindowID> {
+        orderedOutWindowIDs.filter { windowID in
+            guard let ownerPID = ownerPIDs[windowID] else { return false }
+            return !hiddenPIDs.contains(ownerPID)
+        }
     }
 
     /// Whether a window AX has not classified either way still looks like a standard window,
@@ -629,20 +660,47 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return disqualified
     }
 
-    /// Assigned windows the window server attaches to another window.
+    /// Assigned windows the window server itself contradicts.
     ///
     /// A dismissed sheet or popup keeps a layer-0 surface on a resolved desktop for as long as
     /// its app runs, so the Core Graphics and Accessibility channels both miss it: nothing about
-    /// it degrades, and AX can only contradict it while its own desktop is showing. Parentage is
-    /// a positive statement readable from any desktop, which is what closes that gap.
-    public func listParentedWindowIDs() -> Set<CGWindowID> {
+    /// it degrades, and AX can only contradict it while its own desktop is showing. Parentage and
+    /// the ordered-in bit are positive statements readable from any desktop, which is what closes
+    /// that gap. Chrome's dismissed omnibox popup carries no parent, so it needs the second one.
+    public func listWindowServerVerdicts() -> WindowServerVerdicts {
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
             as? [[CFString: Any]]
-        else { return [] }
-        return spaceSwitcher?.parentedWindowIDs(
+        else { return WindowServerVerdicts() }
+        let verdicts = spaceSwitcher?.windowServerVerdicts(
             among: infoList.compactMap { $0[kCGWindowNumber] as? CGWindowID }
-        ) ?? []
+        ) ?? WindowServerVerdicts()
+        let hiddenPIDs = Set(
+            NSWorkspace.shared.runningApplications.lazy
+                .filter(\.isHidden).map(\.processIdentifier)
+        )
+        return WindowServerVerdicts(
+            parented: verdicts.parented,
+            orderedOut: Self.orderedOutGhostWindowIDs(
+                orderedOutWindowIDs: verdicts.orderedOut,
+                ownerPIDs: Self.windowOwnerPIDs(in: infoList),
+                hiddenPIDs: hiddenPIDs
+            )
+        )
+    }
+
+    /// Which process owns each listed window, as Core Graphics reports it. Both ghost readings
+    /// need it, and neither can fall back to the Accessibility element: the whole point of the
+    /// ordered-in bit is that it answers for windows AX cannot reach.
+    static func windowOwnerPIDs(in infoList: [[CFString: Any]]) -> [CGWindowID: pid_t] {
+        var owners: [CGWindowID: pid_t] = [:]
+        for dict in infoList {
+            guard let windowID = dict[kCGWindowNumber] as? CGWindowID,
+                  let ownerPID = dict[kCGWindowOwnerPID] as? pid_t
+            else { continue }
+            owners[windowID] = ownerPID
+        }
+        return owners
     }
 
     /// Returns window IDs that AX explicitly identifies as modal or auxiliary UI

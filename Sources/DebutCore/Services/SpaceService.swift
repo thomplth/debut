@@ -59,6 +59,17 @@ private let slsWindowIteratorGetWindowID: (@convention(c) (UnsafeMutableRawPoint
     skyLightSymbol("SLSWindowIteratorGetWindowID")
 private let slsWindowIteratorGetParentID: (@convention(c) (UnsafeMutableRawPointer) -> CGWindowID)? =
     skyLightSymbol("SLSWindowIteratorGetParentID")
+private let slsWindowIteratorGetAttributes: (@convention(c) (UnsafeMutableRawPointer) -> UInt64)? =
+    skyLightSymbol("SLSWindowIteratorGetAttributes")
+private let slsWindowIteratorGetTags: (@convention(c) (UnsafeMutableRawPointer) -> UInt64)? =
+    skyLightSymbol("SLSWindowIteratorGetTags")
+
+/// Set while the window server is willing to draw the surface. Clearing it is how minimizing,
+/// hiding an app and ordering a window out are all expressed, so the bit alone names no reason.
+private let orderedInAttribute: UInt64 = 0x2
+/// Names minimizing as the reason the bit above is clear. There is a sibling tag for app-hiding,
+/// but it is not reliable — see `orderedOutGhostWindowIDs`, which asks AppKit instead.
+private let minimizedTag: UInt64 = 1 << 60
 
 // Every Space remembers which process it shows as frontmost when it is revealed. Unlike
 // `_SLPSSetFrontProcessWithOptions`, this writes that memory for one Space only: it does not set
@@ -1057,6 +1068,24 @@ enum DockSwipeEvent {
 
 // MARK: - Service
 
+/// What the window server says about a batch of surfaces that no other channel can see.
+///
+/// Both readings answer from any desktop, which is the point: Core Graphics describes a dismissed
+/// popup exactly as it describes a real window, and Accessibility can only contradict one while
+/// its own desktop is showing. These arrive on their own.
+public struct WindowServerVerdicts: Sendable, Equatable {
+    /// Surfaces raised over another window — sheets, and an app's own popups.
+    public var parented: Set<CGWindowID> = []
+    /// Surfaces the window server will not draw and does not attribute to minimizing. Hiding an
+    /// app lands here too; `AccessibilityWindowService.orderedOutGhostWindowIDs` separates that.
+    public var orderedOut: Set<CGWindowID> = []
+
+    public init(parented: Set<CGWindowID> = [], orderedOut: Set<CGWindowID> = []) {
+        self.parented = parented
+        self.orderedOut = orderedOut
+    }
+}
+
 /// Where spaces get their desktops. Kept as a protocol so space-switching logic can be
 /// tested without a window server — nothing else about a Space switch is observable in a
 /// unit test.
@@ -1077,9 +1106,9 @@ public protocol SpaceSwitching: AnyObject, Sendable {
     /// difference between "on every desktop" and "on no desktop at all", which the location
     /// map alone collapses into the same missing key.
     func placedWindowIDs() -> Set<CGWindowID>
-    /// Windows the window server attaches to another window. Empty means nothing is known to be
-    /// parented, which is why the default conformance can return nothing without evicting.
-    func parentedWindowIDs(among candidates: [CGWindowID]) -> Set<CGWindowID>
+    /// What the window server volunteers about a batch of surfaces. Empty means nothing is known,
+    /// which is why the default conformance can return nothing without evicting.
+    func windowServerVerdicts(among candidates: [CGWindowID]) -> WindowServerVerdicts
     func desktopCount() -> Int
     func currentDesktopIndex() -> Int?
     func desktopIndex(forWindow windowID: CGWindowID) -> Int?
@@ -1115,7 +1144,9 @@ public protocol SpaceSwitching: AnyObject, Sendable {
 
 public extension SpaceSwitching {
     func cachedSpaceTopology() -> SpaceTopology? { spaceTopology() }
-    func parentedWindowIDs(among candidates: [CGWindowID]) -> Set<CGWindowID> { [] }
+    func windowServerVerdicts(among candidates: [CGWindowID]) -> WindowServerVerdicts {
+        WindowServerVerdicts()
+    }
     func placedWindowIDs() -> Set<CGWindowID> { Set(windowLocations().keys) }
     func isSwitchInFlight(stackID: String) -> Bool { false }
     func spaceDidChange() {}
@@ -1464,29 +1495,39 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         return (result, ambiguous)
     }
 
-    /// The windows the window server attaches to another window — sheets, and the popups an app
-    /// raises over one of its own windows.
+    /// What the window server itself says about a batch of surfaces: which it attaches to another
+    /// window — sheets, and the popups an app raises over one of its own windows — and which it
+    /// has ordered out for no reason it will name.
     ///
-    /// An empty result means "nothing is known to be parented", never "nothing is parented", so
-    /// a failed query errs towards admitting a window rather than parking a real one.
-    public func parentedWindowIDs(among candidates: [CGWindowID]) -> Set<CGWindowID> {
+    /// An empty result means "nothing is known", never "nothing is true", so a failed query errs
+    /// towards admitting a window rather than parking a real one.
+    public func windowServerVerdicts(among candidates: [CGWindowID]) -> WindowServerVerdicts {
         guard let connection, !candidates.isEmpty,
               let slsWindowQueryWindows, let slsWindowQueryResultCopyWindows,
               let slsWindowIteratorAdvance, let slsWindowIteratorGetWindowID,
-              let slsWindowIteratorGetParentID
-        else { return [] }
+              let slsWindowIteratorGetParentID, let slsWindowIteratorGetAttributes,
+              let slsWindowIteratorGetTags
+        else { return WindowServerVerdicts() }
 
         let identifiers = candidates.map { NSNumber(value: $0) } as CFArray
         guard let query = slsWindowQueryWindows(connection, identifiers, Int32(candidates.count)),
               let iterator = slsWindowQueryResultCopyWindows(query)
-        else { return [] }
+        else { return WindowServerVerdicts() }
 
-        var parented = Set<CGWindowID>()
+        var verdicts = WindowServerVerdicts()
         while slsWindowIteratorAdvance(iterator) {
-            guard slsWindowIteratorGetParentID(iterator) != 0 else { continue }
-            parented.insert(slsWindowIteratorGetWindowID(iterator))
+            let windowID = slsWindowIteratorGetWindowID(iterator)
+            if slsWindowIteratorGetParentID(iterator) != 0 {
+                verdicts.parented.insert(windowID)
+            }
+            // Minimizing clears the same bit, so it is filtered out here rather than by the
+            // caller: the tag that names it is only reachable from this iterator.
+            if slsWindowIteratorGetAttributes(iterator) & orderedInAttribute == 0,
+               slsWindowIteratorGetTags(iterator) & minimizedTag == 0 {
+                verdicts.orderedOut.insert(windowID)
+            }
         }
-        return parented
+        return verdicts
     }
 
     // MARK: Switching

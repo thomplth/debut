@@ -259,10 +259,14 @@ public protocol WindowService: Sendable {
     /// own desktop was showing and declining to name them. Kept separate from the Core Graphics
     /// verdict because it is only ever available for the desktop currently on screen.
     func listAXContradictedWindowIDs() -> Set<CGWindowID>
-    /// Window IDs the window server attaches to another window — sheets, and the popups an app
-    /// raises over one of its own windows. A third channel because it is the only verdict
-    /// readable from any desktop without an Accessibility element.
-    func listParentedWindowIDs() -> Set<CGWindowID>
+    /// What the window server says about the live surfaces: which it attaches to another window —
+    /// sheets, and the popups an app raises over one of its own windows — and which it has ordered
+    /// out for no reason the user would recognise. A separate channel because these are the only
+    /// verdicts readable from any desktop without an Accessibility element.
+    ///
+    /// `orderedOut` here is already narrowed to ghosts: minimized windows and the windows of
+    /// hidden apps have been removed, so every member is refusable on its own.
+    func listWindowServerVerdicts() -> WindowServerVerdicts
     func listAllWindowIDs() -> Set<CGWindowID>?
     /// `onEnumerated` reports which requested windows the shareable-content
     /// snapshot actually matched, before any of them is captured. Without it a
@@ -313,7 +317,7 @@ public extension WindowService {
     func listUntrackableWindowIDs() -> Set<CGWindowID> { [] }
     func listDisqualifiedWindowIDs() -> Set<CGWindowID> { [] }
     func listAXContradictedWindowIDs() -> Set<CGWindowID> { [] }
-    func listParentedWindowIDs() -> Set<CGWindowID> { [] }
+    func listWindowServerVerdicts() -> WindowServerVerdicts { WindowServerVerdicts() }
     func closeWindow(windowID: CGWindowID) -> Bool { false }
     func frontWindowWithTrace(
         windowID: CGWindowID,

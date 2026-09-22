@@ -337,7 +337,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
         let disqualifiedWindowIDs = windowService.listDisqualifiedWindowIDs()
         let axContradictedWindowIDs = windowService.listAXContradictedWindowIDs()
-        let parentedWindowIDs = windowService.listParentedWindowIDs()
+        let windowServerVerdicts = windowService.listWindowServerVerdicts()
         let runningApps = windowService.listRunningApps()
         _ = PerformanceRecorder.shared.end(discoveryID)
 
@@ -363,6 +363,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // degrades for Core Graphics to catch, no destroy notification arrives, and the AX verdict
         // waits on the user visiting that desktop. The window server names the window it was
         // raised over, from anywhere, and that is the only signal that arrives on its own.
+        //
+        // The ordered-in bit gets a fifth because not every ghost is parented. Chrome's dismissed
+        // omnibox popup names no host window, and the AX verdict that eventually catches it is
+        // learned state — so on a first launch, before any verdict has been recorded, this is the
+        // only channel that refuses it.
         let classificationID = PerformanceRecorder.shared.begin(
             .windowClassification,
             workload: .init(windows: liveWindows.count)
@@ -421,7 +426,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let refusedWindowIDs = untrackableWindowIDs
             .union(disqualifiedWindowIDs)
             .union(axContradictedWindowIDs)
-            .union(parentedWindowIDs)
+            .union(windowServerVerdicts.parented)
+            .union(windowServerVerdicts.orderedOut)
 
         var parkedDormantCount = 0
         for space in spaceManager.allSpaces {
@@ -433,8 +439,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     reason = "disqualified"
                 } else if axContradictedWindowIDs.contains(windowID) {
                     reason = "ax_contradicted"
-                } else if parentedWindowIDs.contains(windowID) {
+                } else if windowServerVerdicts.parented.contains(windowID) {
                     reason = "parented"
+                } else if windowServerVerdicts.orderedOut.contains(windowID) {
+                    reason = "ordered_out"
                 } else {
                     continue
                 }
