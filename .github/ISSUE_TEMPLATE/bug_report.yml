@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a problem with Debut
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Bug reports are public. Do not include private information. If you attach diagnostic data, review it before posting.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem you encountered.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: List the steps that make the problem occur.
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: input
+    id: debut-version
+    attributes:
+      label: Debut version
+      placeholder: For example, 0.0.0-dev
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: For example, macOS 26.0
+    validations:
+      required: true
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add screenshots or a redacted diagnostic export if they help explain the problem.
+    validations:
+      required: false
