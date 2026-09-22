@@ -17,4 +17,18 @@ struct SettingsWindowTests {
         #expect(window.titlebarAppearsTransparent)
         #expect(window.titlebarSeparatorStyle == .none)
     }
+
+    @Test("Bug reports open the public GitHub issue form")
+    func bugReportOpensGitHubIssueForm() throws {
+        let components = try #require(
+            URLComponents(url: AboutLinks.bugReport, resolvingAgainstBaseURL: false)
+        )
+
+        #expect(components.scheme == "https")
+        #expect(components.host == "github.com")
+        #expect(components.path == "/thomplth/Debut/issues/new")
+        #expect(components.queryItems?.contains(
+            URLQueryItem(name: "template", value: "bug_report.yml")
+        ) == true)
+    }
 }

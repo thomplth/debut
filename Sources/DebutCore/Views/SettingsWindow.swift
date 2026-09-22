@@ -7,6 +7,7 @@ extension Notification.Name {
 
 enum AboutLinks {
     static let github = URL(string: "https://github.com/thomplth/debut")!
+    static let bugReport = URL(string: "https://github.com/thomplth/Debut/issues/new?template=bug_report.yml")!
     static let twitter = URL(string: "https://twitter.com/thomplth")!
 }
 
@@ -742,6 +743,23 @@ public struct SettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Support")
                 .font(.title2.bold())
+
+            Text("Bug reports")
+                .font(.headline)
+
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Report a bug")
+                    Text("Opens a public issue. A GitHub account is required to submit.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Link("Report a Bug…", destination: AboutLinks.bugReport)
+                    .buttonStyle(.bordered)
+            }
+
+            Divider()
 
             Text("Troubleshooting")
                 .font(.headline)
