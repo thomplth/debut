@@ -178,22 +178,73 @@ struct WindowServiceTests {
     @Test("An eviction verdict refuses a window whatever Accessibility calls it")
     func evictionVerdictsRefuseRegardlessOfAXClassification() {
         #expect(AccessibilityWindowService.evictionVerdictRefusesWindow(
-            layer: 0, bounds: CGRect(x: 0, y: 0, width: 480, height: 531), hasParentWindow: true
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 480, height: 531),
+            hasParentWindow: true, isOrderedOutGhost: false
         ))
         #expect(AccessibilityWindowService.evictionVerdictRefusesWindow(
-            layer: 3, bounds: CGRect(x: 0, y: 0, width: 84, height: 77), hasParentWindow: false
+            layer: 3, bounds: CGRect(x: 0, y: 0, width: 84, height: 77),
+            hasParentWindow: false, isOrderedOutGhost: false
         ))
         #expect(AccessibilityWindowService.evictionVerdictRefusesWindow(
-            layer: 0, bounds: CGRect(x: 0, y: 0, width: 10, height: 10), hasParentWindow: false
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 10, height: 10),
+            hasParentWindow: false, isOrderedOutGhost: false
         ))
         #expect(!AccessibilityWindowService.evictionVerdictRefusesWindow(
-            layer: 0, bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440), hasParentWindow: false
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440),
+            hasParentWindow: false, isOrderedOutGhost: false
         ))
         // Admission may refuse on ambiguous evidence, but this predicate carries an eviction
         // verdict, so it must stay silent where eviction is: a missing layer is not a verdict.
         #expect(!AccessibilityWindowService.evictionVerdictRefusesWindow(
-            layer: nil, bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440), hasParentWindow: false
+            layer: nil, bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440),
+            hasParentWindow: false, isOrderedOutGhost: false
         ))
+    }
+
+    // Chrome's dismissed omnibox popup 12791 is layer 0, 992x89, unparented, and SkyLight resolves
+    // it onto desktop 3, so every other admission signal accepts it. Only the window server's
+    // ordered-in bit disagrees, and unlike Accessibility it answers from any desktop — which is
+    // what lets a first launch refuse the window before the user has ever visited desktop 3.
+    @Test("An ordered-out ghost is refused on a desktop Accessibility cannot see")
+    func orderedOutGhostIsAnEvictionVerdict() {
+        #expect(AccessibilityWindowService.evictionVerdictRefusesWindow(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 992, height: 89),
+            hasParentWindow: false, isOrderedOutGhost: true
+        ))
+        // A full-size window is refused on this verdict alone, so the ghost reading cannot be
+        // mistaken for a restatement of the size floor.
+        #expect(AccessibilityWindowService.evictionVerdictRefusesWindow(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 2338, height: 1440),
+            hasParentWindow: false, isOrderedOutGhost: true
+        ))
+    }
+
+    // Minimizing or hiding also clears the ordered-in bit, so the raw bit would delete windows the
+    // user still expects to switch to. Measured 2026-09-22 on TextEdit, Preview and nwjs: minimize
+    // sets tag 1<<60, which `orderedOutWindowIDs` filters out at the source, and hiding an app is
+    // reported by AppKit. Tag 1<<39 is not usable for the hidden case — hidden Music's window 17973
+    // is a real AXWindow yet carries no bit 39, while hidden Calendar's window does.
+    @Test("A hidden app's windows are not ordered-out ghosts")
+    func hiddenAppWindowsSurviveTheOrderedOutVerdict() {
+        let ghosts = AccessibilityWindowService.orderedOutGhostWindowIDs(
+            orderedOutWindowIDs: [12791, 17973],
+            ownerPIDs: [12791: 90962, 17973: 48584],
+            hiddenPIDs: [48584]
+        )
+        #expect(ghosts == [12791])
+    }
+
+    // A window whose owner is not among the running apps has no hidden state to consult. Treating
+    // that as "not hidden" would let an unresolved owner delete a real window, so the verdict has
+    // to abstain instead.
+    @Test("An ordered-out window with an unresolved owner is not a ghost")
+    func unresolvedOwnerIsNotAGhostVerdict() {
+        let ghosts = AccessibilityWindowService.orderedOutGhostWindowIDs(
+            orderedOutWindowIDs: [12791],
+            ownerPIDs: [:],
+            hiddenPIDs: []
+        )
+        #expect(ghosts.isEmpty)
     }
 
     // The two predicates deliberately disagree here, and that gap is the whole design: a

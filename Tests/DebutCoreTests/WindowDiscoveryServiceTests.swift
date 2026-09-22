@@ -9,6 +9,7 @@ import Testing
 enum ParkVerdict: Sendable {
     case parented
     case disqualified
+    case orderedOut
 }
 
 final class MockProcessExitMonitor: ProcessExitMonitoring, @unchecked Sendable {
@@ -1099,7 +1100,7 @@ struct WindowDiscoveryServiceTests {
     // so it proves the park and not the refusal. This one does both, and repeats the pass to
     // show the window stays parked rather than oscillating.
     @Test("A parked window is refused from the same snapshot that parked it",
-          arguments: [ParkVerdict.parented, ParkVerdict.disqualified])
+          arguments: [ParkVerdict.parented, ParkVerdict.disqualified, ParkVerdict.orderedOut])
     func reconciliationRefusesTheWindowsItParks(verdict: ParkVerdict) {
         let windowService = MockWindowService()
         windowService.apps = [
@@ -1119,6 +1120,7 @@ struct WindowDiscoveryServiceTests {
         switch verdict {
         case .parented: windowService.parentedWindowIDList = [62652]
         case .disqualified: windowService.disqualifiedWindowIDList = [62652]
+        case .orderedOut: windowService.orderedOutWindowIDList = [62652]
         }
 
         var spaceManager = SpaceManager()
