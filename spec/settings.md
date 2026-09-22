@@ -108,9 +108,11 @@ Setup has five pages and never requires shortcut practice:
    Control instructions for adding another; creation is never required.
 3. Option-Tab introduces the all-desktops switcher with a real screenshot and its
    independent enable toggle. Both switchers default on.
-4. Faster desktop switching exposes only its master toggle (default on). Duration,
-   gestures and shortcut controls remain in Settings; toggling the master preserves
-   those saved choices.
+4. Faster desktop switching shows a looping, real-time comparison of macOS default
+   switching and Debut Instant. Its master toggle defaults on, with a transition
+   duration slider from Instant to 400 ms per desktop. Changes save immediately;
+   disabling the master disables the slider and preserves its value. Gesture and
+   shortcut controls remain in Settings.
 5. You’re ready offers Start using Debut, Start tutorial, and Open Settings. Every
    action completes setup before opening its destination.
 

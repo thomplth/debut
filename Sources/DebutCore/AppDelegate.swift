@@ -1459,6 +1459,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             .flatMap { try? JSONDecoder().decode(OnboardingCheckpoint.self, from: $0) }
         let model = OnboardingViewModel(permissionClient: onboardingPermissionClient,
             features: currentSettings.features,
+            spaceSwitchDuration: currentSettings.spaceSwitchDuration,
+            onSpaceSwitchDurationChanged: { [weak self] duration in
+                guard let self else { return }
+                var settings = self.currentSettings
+                settings.spaceSwitchDuration = duration
+                self.applySettings(settings)
+            },
             onFeaturesChanged: { [weak self] in self?.applyFeatures($0) },
             onPermissionStateChanged: { [weak self] in self?.handlePermissionStateChange($0, source: "onboarding") },
             checkpoint: checkpoint,
@@ -1578,6 +1585,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let tutorialShortcutWasEnabled = tutorialViewModel?.shortcutEnabled
         tutorialViewModel?.features = newSettings.features
         onboardingViewModel?.features = newSettings.features
+        onboardingViewModel?.spaceSwitchDuration = newSettings.spaceSwitchDuration
         if tutorialShortcutWasEnabled != tutorialViewModel?.shortcutEnabled { restartTutorialExercise() }
         else { prepareTutorialTarget() }
         NotificationCenter.default.post(name: .debutSettingsChanged, object: newSettings)
