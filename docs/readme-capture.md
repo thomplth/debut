@@ -44,6 +44,7 @@ and that its sidebar has no extra cities.
 | Clip selector | Sequence and verified result |
 | --- | --- |
 | `onboarding` | Four lossless transparent UI screenshots: Command-Tab and Option-Tab, each with previews enabled and disabled; same nine-window scene, no keystroke captions |
+| `onboarding-speed` | Matched Control-Right then Control-Left at 60 fps, space 2 → 3 → 2; macOS default left, Debut Instant right; MP4 and first-frame poster for setup |
 | `cover` | Both `overlay.png` and native dark-mode `overlay-dark.png`, with space 2 expanded |
 | `command-tab` | Space 2 → hold Command-Tab → 3 → Tab → release → Project notes, second window in space 3 |
 | `organize-windows` | Space 2 → hold Command-Tab, Weather selected → Up → release → Weather in space 1 |
@@ -77,7 +78,12 @@ For onboarding assets only, use `--clips onboarding --keep-raw`. This uses the s
 nine-window fixture and fresh light-mode Debut process as README capture, producing
 `onboarding-workspace.png`, `onboarding-workspace-no-previews.png`,
 `onboarding-previews.png`, and `onboarding-no-previews.png`. It leaves README assets
-unchanged. The app bundles these four PNGs; onboarding does not use a video.
+unchanged. The app bundles these four PNGs.
+
+For the faster-switching page, use `--clips onboarding-speed --keep-raw`. It records
+both sides in one run at 60 fps and produces `onboarding-speed.mp4` plus a lossless
+first-frame `onboarding-speed.png` poster. Playback loops silently in setup and
+pauses when the page is hidden; the poster remains visible while video loads.
 
 Omitting `--clips` regenerates both covers and all four README GIFs. Keep raw output
 until visual review passes. The script starts the guest without graphics, audio,
@@ -114,6 +120,12 @@ The conversion section of `scripts/demo-capture.sh` is the source of truth.
   and transparent deltas. The final hold is 1.8 seconds.
 - Comparison: each 2880×1800 capture scales to 720×450 with a 48 px label strip;
   the combined output is 1440×498. Build both halves from the same run.
+- Onboarding comparison: 2880×996, 60 fps, full-color H.264 at CRF 16 with fast
+  start and no audio. Each half is 1440×900 with a 96 px label strip. Preserve
+  both recordings' elapsed time; do not interpolate motion or accelerate either
+  side. ScreenCaptureKit omits idle frames, so extend only the final still to a
+  common five-second endpoint. The shared starting/ending desktop makes the repeat
+  unobtrusive.
 - Covers: lossless RGBA PNG, isolated overlay alpha, and 128 physical pixels of
   transparent padding beyond the entire shadow. White and black neutral backing is
   used for light and dark compositing recovery. Do not substitute a desktop
@@ -143,7 +155,10 @@ Open the images and check plate color and label contrast, readable keys, Cuperti
 absence of dialogs and banners, correct window counts, complete transitions, and final
 focus. Driver logs must confirm actual space membership and the frontmost window, not
 just input delivery. Inspect both transitions and the return in a comparison, and
-check PNG alpha and the full shadow against light and dark backgrounds.
+check PNG alpha and the full shadow against light and dark backgrounds. The speed
+fixture settles Dock after Mission Control before recording, and asserts two Debut
+switch events for Instant and zero for the native side, preventing an accidental
+native recovery transition from being presented as accelerated switching.
 
 Confirm that unrelated assets and README prose stayed byte-identical for a scoped
 update. Choose verification proportionate to the change: media-only changes need

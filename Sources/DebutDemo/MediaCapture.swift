@@ -26,11 +26,11 @@ final class DemoMovieRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
         writer.add(input)
     }
 
-    func start(display: SCDisplay) async throws {
+    func start(display: SCDisplay, framesPerSecond: Int32 = 30) async throws {
         let configuration = SCStreamConfiguration()
         configuration.width = display.width * 2
         configuration.height = display.height * 2
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: framesPerSecond)
         configuration.queueDepth = 5
         configuration.showsCursor = false
         configuration.capturesAudio = false
@@ -139,11 +139,11 @@ func captureDemoStill(to url: URL) throws {
     }
 }
 
-func startDemoMovie(at url: URL) throws -> DemoMovieRecorder {
+func startDemoMovie(at url: URL, framesPerSecond: Int32 = 30) throws -> DemoMovieRecorder {
     try awaitCapture {
         let display = try await demoDisplay()
         let recorder = try DemoMovieRecorder(url: url, width: display.width * 2, height: display.height * 2)
-        try await recorder.start(display: display)
+        try await recorder.start(display: display, framesPerSecond: framesPerSecond)
         return recorder
     }
 }

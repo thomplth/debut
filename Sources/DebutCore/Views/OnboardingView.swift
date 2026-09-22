@@ -32,7 +32,7 @@ public struct OnboardingView: View {
                                 required: true, granted: false, action: viewModel.requestAccessibility)
                         }
                     }
-                    .padding(.horizontal, 40).padding(.vertical, compact ? 20 : 28)
+                    .padding(.horizontal, 40).padding(.vertical, viewModel.page == .speed ? 12 : compact ? 20 : 28)
                     .frame(maxWidth: 820)
                     .frame(minHeight: max(0, geometry.size.height - 80), alignment: .center)
                     .frame(maxWidth: .infinity)
@@ -186,45 +186,22 @@ public struct OnboardingView: View {
     }
 
     private func speed(compact: Bool) -> some View {
-        VStack(spacing: 20) {
+        VStack(spacing: compact ? 14 : 18) {
             heading("Faster desktop switching", "Move between desktops without the wait.")
-            HStack(spacing: 28) {
-                desktopIllustration(selected: false)
-                Image(systemName: "arrow.right").font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                desktopIllustration(selected: true)
+            OnboardingSpeedVideo(directory: previewDirectory)
+                .frame(maxWidth: compact ? 560 : .infinity)
+            VStack(spacing: 0) {
+                featureToggle("Enable faster desktop switching", detail: "Choose an instant jump or a shorter transition.",
+                    key: \.fasterDesktopSwitching, id: "faster-desktop-switching", inset: true)
+                Rectangle().fill(border).frame(height: 1).padding(.horizontal, 17)
+                SwitchDurationControl(duration: Binding(
+                    get: { viewModel.spaceSwitchDuration }, set: { viewModel.setSpaceSwitchDuration($0) }))
+                    .disabled(!viewModel.features.fasterDesktopSwitching)
+                    .padding(.horizontal, 17).padding(.vertical, 13)
             }
-            .frame(maxWidth: .infinity).frame(height: compact ? 205 : 250)
-            .background(gallery, in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).stroke(border))
-            .accessibilityHidden(true)
-            featureToggle("Enable faster desktop switching", detail: "Skip the macOS transition when you change desktops.",
-                key: \.fasterDesktopSwitching, id: "faster-desktop-switching")
-            Text("Fine-tune gestures, shortcuts, and transition speed in Settings.")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
+            .background(card, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(border))
         }
-    }
-
-    private func desktopIllustration(selected: Bool) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 14).fill(selected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.07))
-            RoundedRectangle(cornerRadius: 14).stroke(selected ? Color.accentColor.opacity(0.4) : border)
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 6).fill(card)
-                    .overlay(alignment: .topLeading) {
-                        HStack(spacing: 3) {
-                            ForEach(0..<3) { _ in Circle().fill(Color.secondary.opacity(0.3)).frame(width: 3, height: 3) }
-                        }.padding(7)
-                    }
-                VStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(selected ? 0.65 : 0.25))
-                    RoundedRectangle(cornerRadius: 6).fill(card)
-                }
-            }.padding(13)
-        }
-        .frame(width: 164, height: 112)
-        .rotationEffect(.degrees(selected ? 3 : -3))
-        .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
     }
 
     private func ready(compact: Bool) -> some View {
@@ -295,7 +272,7 @@ public struct OnboardingView: View {
             .shadow(color: .black.opacity(0.035), radius: 0, y: 2)
     }
 
-    private func featureToggle(_ title: String, detail: String, key: WritableKeyPath<FeatureSettings, Bool>, id: String) -> some View {
+    private func featureToggle(_ title: String, detail: String, key: WritableKeyPath<FeatureSettings, Bool>, id: String, inset: Bool = false) -> some View {
         Toggle(isOn: Binding(get: { viewModel.features[keyPath: key] }, set: {
             var features = viewModel.features
             features[keyPath: key] = $0
@@ -308,8 +285,8 @@ public struct OnboardingView: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
         .toggleStyle(.switch).padding(17)
-        .background(card, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(border))
+        .background(inset ? Color.clear : card, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(inset ? Color.clear : border))
         .accessibilityIdentifier("onboarding-\(id)")
     }
 

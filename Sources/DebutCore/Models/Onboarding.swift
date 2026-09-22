@@ -56,11 +56,13 @@ public protocol OnboardingPermissionClient: AnyObject {
 public final class OnboardingViewModel {
     public private(set) var page: OnboardingPage
     public var features: FeatureSettings
+    public var spaceSwitchDuration: TimeInterval
     public private(set) var permissions: OnboardingPermissionState
     public private(set) var desktopCount: Int?
     public var onEnvironmentRefresh: @MainActor () -> Void = {}
     private var didComplete = false
     private let permissionClient: any OnboardingPermissionClient
+    private let onSpaceSwitchDurationChanged: @MainActor (TimeInterval) -> Void
     private let onFeaturesChanged: @MainActor (FeatureSettings) -> Void
     private let onPermissionStateChanged: @MainActor (OnboardingPermissionState) -> Void
     private let onProgressChanged: @MainActor (OnboardingCheckpoint) -> Void
@@ -70,6 +72,8 @@ public final class OnboardingViewModel {
     public init(
         permissionClient: any OnboardingPermissionClient,
         features: FeatureSettings = FeatureSettings(),
+        spaceSwitchDuration: TimeInterval = AppSettings.defaultSpaceSwitchDuration,
+        onSpaceSwitchDurationChanged: @escaping @MainActor (TimeInterval) -> Void = { _ in },
         onFeaturesChanged: @escaping @MainActor (FeatureSettings) -> Void = { _ in },
         onPermissionStateChanged: @escaping @MainActor (OnboardingPermissionState) -> Void = { _ in },
         checkpoint: OnboardingCheckpoint? = nil,
@@ -80,6 +84,8 @@ public final class OnboardingViewModel {
         self.permissionClient = permissionClient
         self.permissions = permissionClient.currentState()
         self.features = features
+        self.spaceSwitchDuration = spaceSwitchDuration
+        self.onSpaceSwitchDurationChanged = onSpaceSwitchDurationChanged
         self.page = checkpoint?.page ?? .welcome
         self.onFeaturesChanged = onFeaturesChanged
         self.onPermissionStateChanged = onPermissionStateChanged
@@ -124,6 +130,14 @@ public final class OnboardingViewModel {
     public func setFeatures(_ features: FeatureSettings) {
         self.features = features
         onFeaturesChanged(features)
+    }
+
+    public func setSpaceSwitchDuration(_ duration: TimeInterval) {
+        guard duration.isFinite else { return }
+        let value = min(AppSettings.maximumSpaceSwitchDuration, max(AppSettings.minimumSpaceSwitchDuration, duration))
+        guard spaceSwitchDuration != value else { return }
+        spaceSwitchDuration = value
+        onSpaceSwitchDurationChanged(value)
     }
 
     public func requestAccessibility() {

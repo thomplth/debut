@@ -1189,6 +1189,21 @@ func clearDiagnosticFile() {
 // This must run after every supporting global above (diagnosticFile in particular) has been
 // initialized: main.swift runs top-level `let`s in sequential order, not lazily, and
 // Permission-negative onboarding checks are dispatched only by the disposable guest runner.
+// A focused guest-only replay for setup persistence, after a full VM validation run.
+if CommandLine.arguments.dropFirst().first == "onboarding-speed-check" {
+    _ = terminateDebutAndWait()
+    UserDefaults(suiteName: debutBundleID)?.removeObject(forKey: "setupCheckpoint")
+    clearDiagnosticFile()
+    onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
+    let ready = waitForDebutReady(onboardingApplication)
+    let passed = ready && onboardingPress("Get started") && onboardingPress("Continue")
+        && onboardingPress("Continue") && verifySetupDurationPersistence()
+    _ = takeScreenshot("onboarding_speed_persistence")
+    _ = terminateDebutAndWait()
+    print("Onboarding speed persistence: \(passed ? "PASS" : "FAIL")")
+    exit(passed ? 0 : 1)
+}
+
 if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
     let deniedAccessibility = CommandLine.arguments.last == "accessibility"
     let oneDesktop = CommandLine.arguments.last == "desktop"
@@ -2803,6 +2818,57 @@ func loadOnboardingSettings() -> AppSettings? {
 }
 
 @MainActor
+func onboardingSetDuration(_ duration: TimeInterval) -> Bool {
+    guard let current = loadOnboardingSettings()?.spaceSwitchDuration else { return false }
+    // SwiftUI does not implement AXSetValue for this slider; use its native
+    // increment/decrement actions, the same path available to VoiceOver users.
+    let steps = Int(((duration - current) / 0.01).rounded())
+    for _ in 0..<abs(steps) {
+        guard let slider = onboardingButton("", role: kAXSliderRole) else { return false }
+        let action = steps > 0 ? kAXIncrementAction : kAXDecrementAction
+        let result = AXUIElementPerformAction(slider, action as CFString)
+        guard result == .success else {
+            info("  Setup slider action failed: \(result.rawValue)")
+            return false
+        }
+        wait(0.04)
+    }
+    let saved = loadOnboardingSettings()?.spaceSwitchDuration
+    info("  Setup slider: requested=\(duration), saved=\(String(describing: saved))")
+    return true
+}
+
+@MainActor
+func verifySetupDurationPersistence() -> Bool {
+    guard onboardingSetDuration(0.23),
+          waitFor({ abs((loadOnboardingSettings()?.spaceSwitchDuration ?? -1) - 0.23) < 0.0001 }),
+          onboardingPress("onboarding-faster-desktop-switching", role: kAXCheckBoxRole) else { return false }
+    var enabled: CFTypeRef?
+    guard let disabledSlider = onboardingButton("", role: kAXSliderRole) else { return false }
+    AXUIElementCopyAttributeValue(disabledSlider, kAXEnabledAttribute as CFString, &enabled)
+    guard enabled as? Bool == false, abs((loadOnboardingSettings()?.spaceSwitchDuration ?? -1) - 0.23) < 0.0001,
+          onboardingPress("Continue"), onboardingPress("Back"),
+          onboardingContains("230 ms"),
+          onboardingPress("onboarding-faster-desktop-switching", role: kAXCheckBoxRole) else { return false }
+    let windows = AccessibilityWindowService()
+    guard let setup = windows.listWindows().first(where: {
+        $0.ownerPID == onboardingApplication?.processIdentifier && $0.title == "Welcome to Debut"
+    }), windows.closeWindow(windowID: setup.windowID),
+          waitFor({ onboardingButton("Continue") == nil }),
+          let previous = onboardingApplication else { return false }
+    previous.terminate()
+    guard waitFor({ previous.isTerminated }) else { return false }
+    onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
+    guard waitForDebutReady(onboardingApplication),
+          waitFor({ onboardingContains("230 ms") }),
+          let reopened = onboardingButton("", role: kAXSliderRole) else { return false }
+    AXUIElementCopyAttributeValue(reopened, kAXEnabledAttribute as CFString, &enabled)
+    guard enabled as? Bool == true,
+          onboardingSetDuration(0) else { return false }
+    return waitFor { loadOnboardingSettings()?.spaceSwitchDuration == 0 }
+}
+
+@MainActor
 func onboardingGetStartedEnabled() -> Bool {
     guard let button = onboardingButton("Get started") else { return false }
     var enabled: CFTypeRef?
@@ -2850,9 +2916,9 @@ test("Option-Tab setup exposes an independent switch") {
         && onboardingPress("onboarding-option-tab", role: kAXCheckBoxRole)
 }
 _ = takeScreenshot("11_setup_option_tab")
-test("Faster desktop setup changes only the master toggle") {
+test("Faster desktop setup preserves method choices when toggling its master") {
     guard onboardingPress("Continue"), onboardingContains("Enable faster desktop switching"),
-          onboardingButton("", role: kAXSliderRole) == nil,
+          onboardingButton("", role: kAXSliderRole) != nil,
           let before = loadOnboardingSettings(),
           onboardingPress("onboarding-faster-desktop-switching", role: kAXCheckBoxRole) else { return false }
     let changed = waitFor { loadOnboardingSettings()?.features.fasterDesktopSwitching != before.features.fasterDesktopSwitching }
@@ -2862,6 +2928,13 @@ test("Faster desktop setup changes only the master toggle") {
         && before.features.trackpadSwipes == after.features.trackpadSwipes
         && before.spaceSwitchDuration == after.spaceSwitchDuration
         && onboardingPress("onboarding-faster-desktop-switching", role: kAXCheckBoxRole)
+}
+test("Setup duration saves immediately and survives disabling, navigation, and reopening") {
+    verifySetupDurationPersistence()
+}
+test("Setup comparison can be paused and resumed") {
+    onboardingPress("Pause comparison") && onboardingButton("Play comparison") != nil
+        && onboardingPress("Play comparison") && onboardingButton("Pause comparison") != nil
 }
 _ = takeScreenshot("11_setup_speed")
 test("The optional tutorial starts only after setup completes") {

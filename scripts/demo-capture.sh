@@ -166,6 +166,18 @@ if [[ -f "$RAW_DIR/speed-native.mov" && -f "$RAW_DIR/speed-instant.mov" ]]; then
         -fps_mode vfr -gifflags +transdiff+offsetting -loop 0 -final_delay 180 "$MEDIA_DIR/faster-space-switching.gif"
 fi
 
+if [[ -f "$RAW_DIR/onboarding-speed-native.mov" && -f "$RAW_DIR/onboarding-speed-instant.mov" ]]; then
+    # Keep both real-time timelines intact; only align the start of each recording.
+    # ScreenCaptureKit omits idle frames; hold the ending desktop to a common 5 seconds.
+    # Full-color H.264 preserves far more detail and motion than the README GIF.
+    ffmpeg -loglevel error -y -i "$RAW_DIR/onboarding-speed-native.mov" -i "$RAW_DIR/onboarding-speed-instant.mov" \
+        -filter_complex "[0:v]setpts=PTS-STARTPTS,fps=60,scale=1440:900:flags=lanczos,pad=1440:996:0:96:color=0x15171b,drawtext=text='macOS default':fontfile=/System/Library/Fonts/Helvetica.ttc:fontsize=46:fontcolor=white:x=(w-tw)/2:y=20,tpad=stop_mode=clone:stop_duration=5[a];[1:v]setpts=PTS-STARTPTS,fps=60,scale=1440:900:flags=lanczos,pad=1440:996:0:96:color=0x15171b,drawtext=text='Debut Instant':fontfile=/System/Library/Fonts/Helvetica.ttc:fontsize=46:fontcolor=white:x=(w-tw)/2:y=20,tpad=stop_mode=clone:stop_duration=5[b];[a][b]hstack=inputs=2:shortest=1,trim=duration=5[v]" \
+        -map '[v]' -an -c:v libx264 -preset slow -crf 16 -pix_fmt yuv420p -movflags +faststart \
+        "$MEDIA_DIR/onboarding-speed.mp4"
+    ffmpeg -loglevel error -y -i "$MEDIA_DIR/onboarding-speed.mp4" -frames:v 1 "$MEDIA_DIR/onboarding-speed.png"
+    echo "  onboarding-speed.mp4 $(du -h "$MEDIA_DIR/onboarding-speed.mp4" | cut -f1)"
+fi
+
 if (( KEEP_RAW )); then
     echo "Raw captures kept at $RAW_DIR"
 else
