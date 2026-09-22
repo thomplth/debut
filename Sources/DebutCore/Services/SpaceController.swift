@@ -2061,14 +2061,21 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         if followingWindowMove == nil {
             let focused = probeFocusedWindow()
             var focusedWindowID = focused.windowID
-            // Some multi-window apps report their old desktop's AX window after a focus.
-            // A hidden window cannot own the keyboard here; prefer the visible window server
-            // order for the frontmost process rather than dropping the next move in a chain.
+            // Focus can lag behind the frontmost process, or name one of its windows on another
+            // desktop. Neither report can own the keyboard now; use the visible WindowServer
+            // order for the process actually in front rather than moving a stale assignment.
             if let reportedID = focusedWindowID,
-               let reportedLocation = switcher.desktopLocation(forWindow: reportedID),
-               switcher.spaceTopology().stack(id: reportedLocation.stackID)?.currentDesktopIndex != reportedLocation.index,
                let frontmostPID = windowService.frontmostApplicationPID() {
-                focusedWindowID = windowService.frontmostWindowID(ownerPID: frontmostPID)
+                let reportedOwnerPID = spaceManager.allSpaces.lazy.flatMap(\.windows)
+                    .first(where: { $0.windowID == reportedID })?.ownerPID
+                let reportedLocation = switcher.desktopLocation(forWindow: reportedID)
+                let reportedIsOnAnotherDesktop = reportedLocation.map { location in
+                    switcher.spaceTopology().stack(id: location.stackID)?.currentDesktopIndex
+                        != location.index
+                } ?? false
+                if reportedOwnerPID != frontmostPID || reportedIsOnAnotherDesktop {
+                    focusedWindowID = windowService.frontmostWindowID(ownerPID: frontmostPID)
+                }
             }
             guard !focused.isFullscreen, let windowID = focusedWindowID,
                   let sourceID = spaceManager.spaceContainingWindow(windowID: windowID),
