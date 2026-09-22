@@ -34,6 +34,15 @@ if grep -q 'appendingPathComponent("Screenshots")' Tests/DebutCoreTests/Screensh
     fail "screenshot tests write generated PNGs into the source tree"
 fi
 
+# Personal agent and editor configuration is expected on a contributor's disk; CONTRIBUTING.md
+# asks only that it stay untracked. Requiring absence instead fails every checkout that follows
+# those instructions, which is what the agent files themselves tell a contributor to set up.
+for path in CLAUDE.md AGENTS.override.md .debut-local; do
+    if [[ -n "$(git ls-files -- "$path")" ]]; then
+        fail "personal configuration is tracked: $path"
+    fi
+done
+
 # Documentation and package references must remain consistent.
 python3 - <<'CHECK' || fail "repository documentation contract"
 from pathlib import Path
@@ -44,7 +53,7 @@ for name in ('Sources/DebutSpaceSwitchLab', 'Sources/SpaceSwitchLabCore',
              'Tests/SpaceSwitchLabTests', 'scripts/build-space-switch-lab.sh',
              'Resources/SpaceSwitchLabInfo.plist', 'docs/html',
              'spec/behaviors.md', 'spec/space-manager.md', 'docs/local-e2e.md',
-             'Tests/CI/E2EDocumentationTests.sh', 'CLAUDE.md'):
+             'Tests/CI/E2EDocumentationTests.sh'):
     assert not Path(name).exists(), f"Obsolete or personal artifact: {name}"
 assert 'SpaceSwitchLab' not in Path('Package.swift').read_text()
 # The demo's offline browser inputs must survive documentation removal.
@@ -52,10 +61,13 @@ import re
 for page in re.findall(r'\$DESK_DIR/html/([^"\s]+)', Path('scripts/demo-capture-guest.sh').read_text()):
     assert (Path('Tests/Fixtures/Demo/html') / page).is_file(), f"Missing demo page: {page}"
 assert '$PROJECT_DIR/Tests/Fixtures/Demo/html' in Path('scripts/demo-capture.sh').read_text()
-# Local Markdown links must resolve from the document that contains them.
-for path in Path('.').rglob('*.md'):
-    if any(part in {'.git', '.build'} for part in path.parts):
-        continue
+# Local Markdown links must resolve from the document that contains them. Only tracked
+# documentation is the repository's to keep consistent; untracked agent notes may link to
+# personal files that no clone is expected to have.
+import subprocess
+tracked = subprocess.run(['git', 'ls-files', '-z', '*.md'],
+                         capture_output=True, text=True, check=True).stdout.split('\0')
+for path in (Path(name) for name in tracked if name):
     for target in re.findall(r'\]\(([^)]+)\)', path.read_text()):
         if '://' not in target and not target.startswith('#'):
             destination = path.parent / target.split('#')[0]
