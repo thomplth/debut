@@ -435,7 +435,8 @@ func recordReadme() {
             scene.verifyFocus(scene.groups[0][1], space: 0)
         }
     }
-    if requestedClips.contains("faster-space-switching") || requestedClips.isEmpty {
+    if requestedClips.contains("faster-space-switching") || requestedClips.contains("onboarding-speed") || requestedClips.isEmpty {
+        let onboarding = requestedClips.contains("onboarding-speed")
         let defaults = UserDefaults(suiteName: "com.apple.symbolichotkeys")!
         var hotkeys = defaults.dictionary(forKey: "AppleSymbolicHotKeys") ?? [:]
         hotkeys["79"] = ["enabled": true, "value": ["type": "standard", "parameters": [65535, 123, 262144]]]
@@ -448,31 +449,60 @@ func recordReadme() {
         for instant in [false, true] {
             setDemoInstant(instant)
             scene.restore()
+            clearNotifications()
+            // Provisioning/Mission Control leaves Dock's carousel in recovery. Debut
+            // deliberately yields that first shortcut to macOS. Settle it before
+            // recording either side, then verify Debut owns both Instant transitions.
+            for (key, desktop) in [(CGKeyCode(124), 2), (CGKeyCode(123), 1)] {
+                postFlags(.maskControl)
+                postTap(key, flags: [.maskControl, .maskSecondaryFn, .maskNumericPad], duration: 0.15)
+                postFlags([])
+                wait(1.5)
+                scene.verifyFocus(scene.groups[desktop][0], space: desktop)
+            }
             // Each side is scaled to half width, so keep the final key text the same size.
             scene.startKeys(fontSize: 128)
-            let name = instant ? "speed-instant" : "speed-native"
+            let name = (onboarding ? "onboarding-" : "") + (instant ? "speed-instant" : "speed-native")
             do {
+                let switchesBefore = recordedDemoSwitchCount()
                 let url = outputDirectory.appendingPathComponent(name + ".mov")
                 try? FileManager.default.removeItem(at: url)
-                let recorder = try startDemoMovie(at: url)
+                let recorder = try startDemoMovie(at: url, framesPerSecond: onboarding ? 60 : 30)
                 wait(0.5)
                 postFlags(.maskControl)
                 postTap(124, flags: [.maskControl, .maskSecondaryFn, .maskNumericPad], duration: 0.15)
                 postFlags([])
                 wait(1.5)
                 guard SpaceService().currentDesktopIndex() == 2 else { log("FAILED: \(name) did not reach space 3"); exit(1) }
+                scene.verifyFocus(scene.groups[2][0], space: 2)
                 postFlags(.maskControl)
                 postTap(123, flags: [.maskControl, .maskSecondaryFn, .maskNumericPad], duration: 0.15)
                 postFlags([])
                 wait(2.5)
                 guard SpaceService().currentDesktopIndex() == 1 else { log("FAILED: \(name) did not return to space 2"); exit(1) }
+                scene.verifyFocus(scene.groups[1][0], space: 1)
                 try awaitCapture { try await recorder.stop() }
+                let switches = recordedDemoSwitchCount() - switchesBefore
+                guard switches == (instant ? 2 : 0) else {
+                    log("FAILED: \(name) expected \(instant ? 2 : 0) Debut switches, observed \(switches)")
+                    exit(1)
+                }
                 log("verified \(name), space 2 → 3 → 2")
             } catch { log("FAILED \(name): \(error)"); exit(1) }
         }
     }
     _ = run("/usr/bin/pkill", ["-x", "KeyCastr"])
     describeState("final")
+}
+
+private func recordedDemoSwitchCount() -> Int {
+    let url = DebutCore.applicationSupportDirectory.appendingPathComponent("diagnostic.jsonl")
+    guard let text = try? String(contentsOf: url, encoding: .utf8) else { return 0 }
+    return text.split(separator: "\n").filter { line in
+        guard let data = line.data(using: .utf8),
+              let event = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return false }
+        return event["event"] == "space_switched"
+    }.count
 }
 
 /// A quiet, identical backdrop makes the windows and keys clear and GIF deltas compact.

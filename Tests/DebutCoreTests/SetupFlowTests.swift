@@ -173,4 +173,40 @@ struct SetupFlowTests {
         #expect(resumed.canAdvance)
     }
 
+    @Test("Setup speed changes publish immediately and survive master toggles and navigation")
+    func transitionDuration() {
+        let permissions = Permissions()
+        permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: false)
+        var persisted: [TimeInterval] = []
+        let model = OnboardingViewModel(permissionClient: permissions, spaceSwitchDuration: 0.18,
+            onSpaceSwitchDurationChanged: { persisted.append($0) }, checkpoint: .init(page: .speed))
+        #expect(model.spaceSwitchDuration == 0.18)
+        #expect(persisted.isEmpty)
+        model.setSpaceSwitchDuration(0.23)
+        #expect(model.spaceSwitchDuration == 0.23)
+        #expect(persisted == [0.23])
+        var features = model.features
+        features.fasterDesktopSwitching = false
+        model.setFeatures(features)
+        model.advance()
+        model.back()
+        #expect(model.spaceSwitchDuration == 0.23)
+        #expect(!model.features.fasterDesktopSwitching)
+        #expect(persisted == [0.23])
+        features.fasterDesktopSwitching = true
+        model.setFeatures(features)
+        model.setSpaceSwitchDuration(0)
+        #expect(model.spaceSwitchDuration == 0)
+        #expect(persisted == [0.23, 0])
+    }
+
+    @Test("Setup duration stays within the Settings slider's supported range")
+    func transitionDurationBounds() {
+        let model = OnboardingViewModel(permissionClient: Permissions(), spaceSwitchDuration: 0.2)
+        model.setSpaceSwitchDuration(0.8)
+        #expect(model.spaceSwitchDuration == AppSettings.maximumSpaceSwitchDuration)
+        model.setSpaceSwitchDuration(-0.1)
+        #expect(model.spaceSwitchDuration == AppSettings.minimumSpaceSwitchDuration)
+    }
+
 }
