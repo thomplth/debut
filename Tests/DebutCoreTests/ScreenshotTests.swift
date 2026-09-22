@@ -1116,10 +1116,12 @@ struct ScreenshotTests {
         controller.handleKeyEvent(.escape)
     }
 
-    @Test("Minimal onboarding pages fit the window", arguments: ["welcome", "permission", "one-desktop", "workspace", "workspace-no-previews", "previews", "previews-disabled", "speed", "ready", "small-welcome", "small-one-desktop"])
+    @Test("Minimal onboarding pages fit the window", arguments: ["welcome", "permission", "one-desktop", "workspace", "workspace-no-previews", "previews", "previews-disabled", "speed", "ready", "small-welcome", "small-permission", "small-one-desktop", "small-previews", "small-speed", "small-ready", "dark-welcome", "dark-permission", "dark-workspace", "dark-one-desktop", "dark-previews", "dark-speed", "dark-ready"])
     func onboardingPages(_ state: String) throws {
+        let outputName = state
         let smallScreen = state.hasPrefix("small-")
-        let state = state.replacingOccurrences(of: "small-", with: "")
+        let dark = state.hasPrefix("dark-")
+        let state = state.replacingOccurrences(of: "small-", with: "").replacingOccurrences(of: "dark-", with: "")
         let page: OnboardingPage = switch state {
         case "welcome", "permission": .welcome
         case "previews", "previews-disabled": .previews
@@ -1133,9 +1135,10 @@ struct ScreenshotTests {
         vm.updateEnvironment(desktopCount: state == "one-desktop" ? 1 : 3)
         let image = try #require(renderSwiftUI(
             OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media"),
-                iconURL: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Resources/AppIcon.icns")),
+                iconURL: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Resources/AppIcon.icns"))
+                .environment(\.colorScheme, dark ? .dark : .light),
             size: NSSize(width: 820, height: smallScreen ? 570 : 650)))
-        try saveImage(image, name: "onboarding_\(smallScreen ? "small-" : "")\(state)")
+        try saveImage(image, name: "onboarding_\(outputName)")
     }
 
     @Test("Optional tutorial has separate exercise and completion views", arguments: ["workspace", "previews", "ready", "disabled"])
