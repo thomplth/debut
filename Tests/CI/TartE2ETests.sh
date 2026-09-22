@@ -85,6 +85,13 @@ if [[ -f "$guest_runner" ]]; then
         "the guest suite must hold Screen Recording, since it samples frames in-process"
     expect_contains "$guest_runner" '/usr/libexec/sshd-keygen-wrapper' \
         "the guest must suppress the SSH executor's screen-capture reminder"
+    # tccd attributes an Accessibility request to whatever launched the driver, and a deny row
+    # on that launcher outranks any allow on the driver itself. One left behind on 2026-09-21
+    # aborted every later run before its first check.
+    expect_contains "$guest_runner" 'RESPONSIBLE_LAUNCHERS' \
+        "the guest must grant the launchers tccd holds responsible for the driver"
+    expect_contains "$guest_runner" 'grant_accessibility "\$launcher"' \
+        "a responsible launcher must be granted Accessibility, not only screen capture"
     expect_contains "$guest_runner" 'unset GITHUB_ACTIONS' \
         "the isolated local guest must run hosted-skipped gesture checks"
     expect_not_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
