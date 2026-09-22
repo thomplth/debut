@@ -2675,6 +2675,28 @@ func onboardingButton(_ title: String, role wantedRole: String = kAXButtonRole) 
     }
     return find(AXUIElementCreateApplication(application.processIdentifier))
 }
+
+@MainActor
+func onboardingFrame(_ element: AXUIElement) -> CGRect? {
+    var positionRef: CFTypeRef?
+    var sizeRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(
+        element, kAXPositionAttribute as CFString, &positionRef
+    ) == .success,
+        AXUIElementCopyAttributeValue(
+            element, kAXSizeAttribute as CFString, &sizeRef
+        ) == .success,
+        let positionRef, let sizeRef,
+        CFGetTypeID(positionRef) == AXValueGetTypeID(),
+        CFGetTypeID(sizeRef) == AXValueGetTypeID()
+    else { return nil }
+    var position = CGPoint.zero
+    var size = CGSize.zero
+    guard AXValueGetValue(positionRef as! AXValue, .cgPoint, &position),
+          AXValueGetValue(sizeRef as! AXValue, .cgSize, &size) else { return nil }
+    return CGRect(origin: position, size: size)
+}
+
 // Names every control of a role so a lookup failure reports what was actually on the page.
 @MainActor
 func onboardingControls(role wantedRole: String) -> [String] {
@@ -2712,6 +2734,30 @@ func onboardingPress(_ title: String, role: String = kAXButtonRole) -> Bool {
     // SwiftUI can replace the pressed control before AX finishes servicing the request. The
     // action has been delivered in that case, but AX reports cannotComplete for the vanished
     // element. Every caller still verifies the resulting page or persisted setting.
+    return result == .success || result == .cannotComplete
+}
+
+@MainActor
+func onboardingPressUniqueControl(role wantedRole: String) -> Bool {
+    guard let application = onboardingApplication else { return false }
+    var visited = Set<CFHashCode>()
+    var controls: [AXUIElement] = []
+    func visit(_ element: AXUIElement) {
+        guard visited.insert(CFHash(element)).inserted else { return }
+        var role: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        if role as? String == wantedRole { controls.append(element) }
+        var children: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        for child in children as? [AXUIElement] ?? [] { visit(child) }
+    }
+    visit(AXUIElementCreateApplication(application.processIdentifier))
+    guard controls.count == 1, let control = controls.first else {
+        info("  Expected one \(wantedRole), found \(controls.count): \(onboardingControls(role: wantedRole))")
+        return false
+    }
+    let result = AXUIElementPerformAction(control, kAXPressAction as CFString)
+    wait(0.3)
     return result == .success || result == .cannotComplete
 }
 
@@ -2820,36 +2866,53 @@ func loadOnboardingSettings() -> AppSettings? {
 @MainActor
 func onboardingSetDuration(_ duration: TimeInterval) -> Bool {
     guard let current = loadOnboardingSettings()?.spaceSwitchDuration else { return false }
-    // SwiftUI does not implement AXSetValue for this slider; use its native
-    // increment/decrement actions, the same path available to VoiceOver users.
-    let steps = Int(((duration - current) / 0.01).rounded())
-    for _ in 0..<abs(steps) {
-        guard let slider = onboardingButton("", role: kAXSliderRole) else { return false }
-        let action = steps > 0 ? kAXIncrementAction : kAXDecrementAction
-        let result = AXUIElementPerformAction(slider, action as CFString)
-        guard result == .success else {
-            info("  Setup slider action failed: \(result.rawValue)")
+    guard let slider = onboardingButton("", role: kAXSliderRole),
+          let frame = onboardingFrame(slider) else { return false }
+    let minimum = AppSettings.minimumSpaceSwitchDuration
+    let maximum = AppSettings.maximumSpaceSwitchDuration
+    let range = maximum - minimum
+    let inset = min(frame.height / 2, frame.width * 0.1)
+    let trackStart = frame.minX + inset
+    let trackWidth = frame.width - inset * 2
+    guard range > 0, trackWidth > 0 else { return false }
+
+    // AX exposes this SwiftUI Slider as an AXSlider but returns unsupportedAction for
+    // increment/decrement in the VM. Click its native track, then correct for the track's
+    // exact endpoints using the value the app persisted after the event.
+    var clickX = trackStart + ((duration - minimum) / range) * trackWidth
+    for _ in 0..<4 {
+        let previous = loadOnboardingSettings()?.spaceSwitchDuration ?? current
+        postHIDMouseClick(at: CGPoint(x: clickX, y: frame.midY))
+        guard waitFor(timeout: 2, {
+            loadOnboardingSettings()?.spaceSwitchDuration != previous
+                || abs((loadOnboardingSettings()?.spaceSwitchDuration ?? -1) - duration) < 0.0001
+        }), let saved = loadOnboardingSettings()?.spaceSwitchDuration else {
+            info("  Setup slider click did not save a duration at \(frame)")
             return false
         }
-        wait(0.04)
+        if abs(saved - duration) < 0.0001 {
+            info("  Setup slider: requested=\(duration), saved=\(saved)")
+            return true
+        }
+        clickX += ((duration - saved) / range) * trackWidth
     }
-    let saved = loadOnboardingSettings()?.spaceSwitchDuration
-    info("  Setup slider: requested=\(duration), saved=\(String(describing: saved))")
-    return true
+    info("  Setup slider did not reach \(duration); saved=\(String(describing: loadOnboardingSettings()?.spaceSwitchDuration))")
+    return false
 }
 
 @MainActor
 func verifySetupDurationPersistence() -> Bool {
     guard onboardingSetDuration(0.23),
           waitFor({ abs((loadOnboardingSettings()?.spaceSwitchDuration ?? -1) - 0.23) < 0.0001 }),
-          onboardingPress("onboarding-faster-desktop-switching", role: kAXCheckBoxRole) else { return false }
+          waitFor({ onboardingControls(role: kAXCheckBoxRole).contains { $0.contains("onboarding-faster-desktop-switching") } }),
+          onboardingPressUniqueControl(role: kAXCheckBoxRole) else { return false }
     var enabled: CFTypeRef?
     guard let disabledSlider = onboardingButton("", role: kAXSliderRole) else { return false }
     AXUIElementCopyAttributeValue(disabledSlider, kAXEnabledAttribute as CFString, &enabled)
     guard enabled as? Bool == false, abs((loadOnboardingSettings()?.spaceSwitchDuration ?? -1) - 0.23) < 0.0001,
           onboardingPress("Continue"), onboardingPress("Back"),
           onboardingContains("230 ms"),
-          onboardingPress("onboarding-faster-desktop-switching", role: kAXCheckBoxRole) else { return false }
+          onboardingPressUniqueControl(role: kAXCheckBoxRole) else { return false }
     let windows = AccessibilityWindowService()
     guard let setup = windows.listWindows().first(where: {
         $0.ownerPID == onboardingApplication?.processIdentifier && $0.title == "Welcome to Debut"
@@ -3900,14 +3963,18 @@ let moveSettingsBackup = try? Data(contentsOf: settingsFile)
 let moveWindows = AccessibilityWindowService()
 let moveSpaces = SpaceService()
 // Arriving on a desktop restores its front process, and that activation lands asynchronously, so
-// focus taken before it settles is handed straight back. Front the window until focus holds.
+// focus taken before it settles is handed straight back. Activate and front the window until both
+// the foreground process and the keyboard focus agree on the fixture.
 func focusMoveFixture(_ window: WindowInfo, timeout: TimeInterval = 8) -> Bool {
     waitFor(timeout: timeout) {
+        _ = NSRunningApplication(processIdentifier: window.ownerPID)?
+            .activate(options: [.activateAllWindows])
         guard moveWindows.frontWindow(windowID: window.windowID, ownerPID: window.ownerPID) else { return false }
         _ = moveWindows.raiseWindow(windowID: window.windowID)
         wait(0.3)
         let focus = liveKeyboardFocus()
-        return focus?.ownerPID == window.ownerPID && focus?.windowID == window.windowID
+        return moveWindows.frontmostApplicationPID() == window.ownerPID
+            && focus?.ownerPID == window.ownerPID && focus?.windowID == window.windowID
     }
 }
 // This scenario used to adopt whichever TextEdit window an earlier one happened to leave behind,

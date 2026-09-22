@@ -141,6 +141,23 @@ struct MoveFocusedWindowTests {
         #expect(spaces.moveRequests.map(\.desktop) == [2])
     }
 
+    @Test("A stale focus report from another app cannot override the app in front")
+    func staleFocusFromAnotherAppUsesFrontmostWindow() {
+        let (controller, windows, spaces) = fixture()
+        controller.spaceManager.addWindow(.init(windowID: 103, ownerBundleID: "com.test.Other",
+            ownerName: "Other", windowTitle: "Frontmost", ownerPID: 43),
+            toSpaceID: controller.spaceManager.spaces[0].id)
+        spaces.windowDesktops[103] = 0
+        windows.frontmostPID = 43
+        windows.visibleFrontWindowID = 103
+
+        // The focus probe still reports 102, but the frontmost process and WindowServer agree
+        // that 103 is the window that can receive the user's shortcut on this same desktop.
+        controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1))
+
+        #expect(spaces.moveRequests.map(\.windowID) == [103])
+    }
+
     @Test("Desktop reconciliation can observe a relocation before its confirmation callback")
     func reconciliationOverlapsConfirmation() {
         let (controller, _, spaces) = fixture()
