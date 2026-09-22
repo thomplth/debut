@@ -5,6 +5,11 @@ extension Notification.Name {
     static let debutSettingsChanged = Notification.Name("DebutSettingsChanged")
 }
 
+enum AboutLinks {
+    static let github = URL(string: "https://github.com/thomplth/debut")!
+    static let twitter = URL(string: "https://twitter.com/thomplth")!
+}
+
 @MainActor
 public final class SettingsWindow: NSWindow {
     public init<Content: View>(rootView: Content) {
@@ -80,6 +85,7 @@ public struct SettingsView: View {
                         selectorSection
                     case .shortcuts: keyboardShortcutsSection
                     case .support: supportSection
+                    case .about: aboutSection
                     }
                 }
                 .padding(24)
@@ -737,31 +743,6 @@ public struct SettingsView: View {
             Text("Support")
                 .font(.title2.bold())
 
-            Text("About Debut")
-                .font(.headline)
-
-            HStack(spacing: 16) {
-                Image(nsImage: DebutGlyph.image(size: 44))
-                    .renderingMode(.template)
-                    .foregroundStyle(.secondary)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Debut")
-                        .font(.title3.bold())
-                    Text("Version \(DebutCore.version)")
-                        .foregroundStyle(.secondary)
-                    Text("Space-based workspace manager for macOS")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Button("Check for Updates…") {
-                viewModel.checkForUpdates()
-            }
-
-            Divider()
-
             Text("Troubleshooting")
                 .font(.headline)
 
@@ -800,6 +781,55 @@ public struct SettingsView: View {
         }
     }
 
+    private var aboutSection: some View {
+        VStack(spacing: 24) {
+            Group {
+                if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+                   let icon = NSImage(contentsOf: iconURL) {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 112, height: 112)
+                } else {
+                    Image(nsImage: DebutGlyph.image(size: 112))
+                        .renderingMode(.template)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 112, height: 112)
+                }
+            }
+            .accessibilityHidden(true)
+
+            VStack(spacing: 6) {
+                Text("Debut")
+                    .font(.largeTitle.bold())
+                Text("Space-based workspace manager for macOS")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(spacing: 16) {
+                Text("Version \(DebutCore.version)")
+                    .foregroundStyle(.secondary)
+
+                Button("Check for Updates…") {
+                    viewModel.checkForUpdates()
+                }
+
+                Divider()
+
+                VStack(spacing: 12) {
+                    Link("GitHub", destination: AboutLinks.github)
+                    Link("Twitter", destination: AboutLinks.twitter)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(20)
+            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .frame(maxWidth: 420)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 28)
+    }
+
     // MARK: - Helpers
 
     private func settingsToggle(_ label: String, isOn: Binding<Bool>) -> some View {
@@ -833,6 +863,7 @@ public struct SettingsView: View {
         case .appearance: "paintbrush"
         case .shortcuts: "keyboard"
         case .support: "questionmark.circle"
+        case .about: "info.circle"
         }
     }
 }

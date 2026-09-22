@@ -7,6 +7,7 @@ public enum SettingsSection: String, CaseIterable, Sendable {
     case appearance = "Appearance"
     case shortcuts = "Shortcuts"
     case support = "Support"
+    case about = "About"
 
     var options: [SettingsOption] {
         switch self {
@@ -51,7 +52,7 @@ public enum SettingsSection: String, CaseIterable, Sendable {
                 .overlayPresentationDelay,
                 .heldCycleMinimumInterval,
             ]
-        case .support:
+        case .support, .about:
             []
         }
     }

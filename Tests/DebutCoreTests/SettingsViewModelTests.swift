@@ -74,7 +74,14 @@ struct SettingsViewModelTests {
             .appearance,
             .shortcuts,
             .support,
+            .about,
         ])
+    }
+
+    @Test("About destinations use the requested profiles")
+    func aboutDestinations() {
+        #expect(AboutLinks.github.absoluteString == "https://github.com/thomplth/debut")
+        #expect(AboutLinks.twitter.absoluteString == "https://twitter.com/thomplth")
     }
 
     @Test("Appearance owns visual options while Switcher owns behavior")
