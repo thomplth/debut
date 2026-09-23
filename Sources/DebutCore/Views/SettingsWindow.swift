@@ -823,7 +823,7 @@ public struct SettingsView: View {
                 HStack(spacing: 0) {
                     aboutLink("GitHub", subtitle: "Source code", destination: AboutLinks.github)
                     Divider().frame(height: 32)
-                    aboutLink("Twitter", subtitle: "Follow the developer", destination: AboutLinks.twitter)
+                    aboutLink("Contact", subtitle: "Get in touch", destination: AboutLinks.twitter)
                 }
                 .padding(8)
             }
