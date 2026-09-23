@@ -355,7 +355,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             orderedOutWindowIDs: verdicts.orderedOut,
             ownerPIDs: Self.windowOwnerPIDs(in: infoList),
             hiddenPIDs: Set(runningApps.lazy.filter(\.application.isHidden)
-                .map(\.application.processIdentifier))
+                .map(\.application.processIdentifier)),
+            hiddenTaggedWindowIDs: verdicts.hiddenByApp,
+            axWindowIDsByPID: classification.axWindowIDsByPID,
+            windowDesktops: windowDesktops
         )
 
         var seen = Set<CGWindowID>()
@@ -463,21 +466,32 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     /// The window server clears the ordered-in bit for minimizing, for hiding an app, and for
     /// ordering a window out, so the bit alone would delete windows the user still expects to
     /// switch to. Minimizing is filtered at the source, where the tag naming it is readable.
-    /// Hiding is asked of AppKit here: the window server has a tag for it too, but it does not
-    /// agree with itself — hidden Music's window 17973 is a real `AXWindow` carrying no such tag,
-    /// while hidden Calendar's window carries one.
+    /// Hiding is asked of AppKit here. A positive per-window hide tag protects a genuine hidden
+    /// window, but absence is not a ghost verdict: hidden Music's real AXWindow 17973 has no tag.
+    /// If AX identifies another window of the same app on this desktop and omits an untagged
+    /// ordered-out candidate, that candidate has both a window-server and AX contradiction.
     ///
-    /// A window whose owner is not among the running apps abstains rather than being refused.
-    /// Hidden state is the only thing that can spare it, so an unresolved owner is missing
-    /// evidence, and this predicate carries an eviction verdict.
+    /// A window whose owner is unresolved abstains rather than being refused. Its app's hidden
+    /// state cannot be checked, and this predicate carries an eviction verdict.
     static func orderedOutGhostWindowIDs(
         orderedOutWindowIDs: Set<CGWindowID>,
         ownerPIDs: [CGWindowID: pid_t],
-        hiddenPIDs: Set<pid_t>
+        hiddenPIDs: Set<pid_t>,
+        hiddenTaggedWindowIDs: Set<CGWindowID> = [],
+        axWindowIDsByPID: [pid_t: Set<CGWindowID>] = [:],
+        windowDesktops: [CGWindowID: Int] = [:]
     ) -> Set<CGWindowID> {
         orderedOutWindowIDs.filter { windowID in
             guard let ownerPID = ownerPIDs[windowID] else { return false }
-            return !hiddenPIDs.contains(ownerPID)
+            guard hiddenPIDs.contains(ownerPID) else { return true }
+            if hiddenTaggedWindowIDs.contains(windowID) ||
+                axWindowIDsByPID[ownerPID]?.contains(windowID) == true {
+                return false
+            }
+            guard let desktop = windowDesktops[windowID] else { return false }
+            return axWindowIDsByPID[ownerPID]?.contains {
+                windowDesktops[$0] == desktop
+            } == true
         }
     }
 
@@ -679,12 +693,25 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             NSWorkspace.shared.runningApplications.lazy
                 .filter(\.isHidden).map(\.processIdentifier)
         )
+        let ownerPIDs = Self.windowOwnerPIDs(in: infoList)
+        let hasAmbiguousHiddenWindow = verdicts.orderedOut
+            .subtracting(verdicts.hiddenByApp)
+            .contains { ownerPIDs[$0].map(hiddenPIDs.contains) == true }
+        // Most passes have no hidden, untagged candidate. Keep the extra AX and desktop reads
+        // off that path; they are only needed to distinguish a real hidden window from a popup.
+        let axWindowIDsByPID = hasAmbiguousHiddenWindow
+            ? classifyAXWindowIDs().axWindowIDsByPID : [:]
+        let windowDesktops = hasAmbiguousHiddenWindow
+            ? (spaceSwitcher?.windowLocations() ?? [:]).mapValues(\.index) : [:]
         return WindowServerVerdicts(
             parented: verdicts.parented,
             orderedOut: Self.orderedOutGhostWindowIDs(
                 orderedOutWindowIDs: verdicts.orderedOut,
-                ownerPIDs: Self.windowOwnerPIDs(in: infoList),
-                hiddenPIDs: hiddenPIDs
+                ownerPIDs: ownerPIDs,
+                hiddenPIDs: hiddenPIDs,
+                hiddenTaggedWindowIDs: verdicts.hiddenByApp,
+                axWindowIDsByPID: axWindowIDsByPID,
+                windowDesktops: windowDesktops
             )
         )
     }
