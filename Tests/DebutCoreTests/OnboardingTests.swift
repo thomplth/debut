@@ -5,6 +5,15 @@ import Testing
 @MainActor
 @Suite("Onboarding lifecycle")
 struct OnboardingTests {
+    final class ScreenRecordingGrant: OnboardingPermissionClient {
+        var state = OnboardingPermissionState(accessibilityGranted: true, screenRecordingGranted: false)
+        func currentState() -> OnboardingPermissionState { state }
+        func requestAccessibility() {}
+        func requestScreenRecording() {
+            state = OnboardingPermissionState(accessibilityGranted: true, screenRecordingGranted: true)
+        }
+    }
+
     @Test("A new install resumes onboarding until completion")
     func launchPolicy() throws {
         let suiteName = "DebutOnboardingTests-\(UUID().uuidString)"
@@ -52,6 +61,45 @@ struct OnboardingTests {
         // Reading completion must not depend on `shouldPresent` having run first.
         #expect(OnboardingLaunchPolicy.hasCompleted(defaults: defaults))
     }
+
+    @Test("A pending permission return reopens setup for a completed user")
+    func permissionReturnOverridesCompletion() throws {
+        let suiteName = "DebutOnboardingPermissionReturnTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let marker = try JSONSerialization.data(withJSONObject: [
+            "version": 1,
+            "permission": "screenRecording",
+            "page": OnboardingPage.previews.rawValue,
+            "processID": "previous-process",
+        ])
+        defaults.set(true, forKey: OnboardingLaunchPolicy.completionKey)
+        defaults.set(marker, forKey: "setupPermissionReturn")
+
+        #expect(OnboardingLaunchPolicy.shouldPresent(defaults: defaults))
+    }
+
+    @Test("A newly granted Screen Recording permission waits for a new process before previews")
+    func screenRecordingRequiresRelaunch() {
+        let permissions = ScreenRecordingGrant()
+        let model = OnboardingViewModel(permissionClient: permissions)
+
+        #expect(!model.showsWindowPreviews)
+        model.requestScreenRecording()
+        #expect(permissions.currentState().screenRecordingGranted)
+        #expect(!model.showsWindowPreviews)
+    }
+
+    @Test("Permission guides open the matching System Settings panes")
+    func permissionSettingsURLs() throws {
+        let client = SystemOnboardingPermissionClient()
+
+        #expect(try #require(client.settingsURL(for: .accessibility)?.absoluteString)
+            == "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        #expect(try #require(client.settingsURL(for: .screenRecording)?.absoluteString)
+            == "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+    }
+
     @Test("Capture is optional and never requested without consent")
     func captureGate() {
         #expect(!OnboardingCapturePolicy.isEnabled(previewsRequested: true, screenRecordingGranted: false))

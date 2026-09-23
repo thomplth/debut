@@ -35,6 +35,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         qos: .utility
     )
     private let onboardingPermissionClient = SystemOnboardingPermissionClient()
+    private lazy var onboardingPermissionGuide = OnboardingPermissionGuide(
+        permissionClient: onboardingPermissionClient
+    )
+    private let onboardingProcessID = UUID().uuidString
     private let launchAtLogin = LaunchAtLoginCoordinator()
     private let activationPolicy = ActivationPolicyCoordinator()
     private let processResponsivenessActivity = ProcessResponsivenessActivity()
@@ -127,6 +131,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let forceOnboarding = ProcessInfo.processInfo.arguments.contains("--show-onboarding")
+        let permissionReturn = OnboardingPermissionReturnStore.pending()
         let shouldShowOnboarding = OnboardingLaunchPolicy.shouldPresent(force: forceOnboarding)
 
         if onboardingPermissionClient.currentState().accessibilityGranted {
@@ -139,11 +144,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             } else {
                 diag.report("accessibility_not_granted_prompting")
                 onboardingPermissionClient.requestAccessibility()
+                onboardingPermissionClient.openSettings(for: .accessibility)
             }
         }
 
         if shouldShowOnboarding {
-            showOnboarding()
+            showOnboarding(restoring: permissionReturn?.page)
         }
 
         if ProcessInfo.processInfo.arguments.contains("--show-tutorial"), !shouldShowOnboarding {
@@ -311,7 +317,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         keyboardService.features = currentSettings.features
         controller.windowPreviewsEnabled = OnboardingCapturePolicy.isEnabled(
             previewsRequested: currentSettings.features.windowPreviews,
-            screenRecordingGranted: onboardingPermissionClient.currentState().screenRecordingGranted)
+            screenRecordingGranted: onboardingPermissionClient.currentState().screenRecordingGranted
+                && onboardingViewModel?.screenRecordingRequiresRelaunch != true)
         keyboardService.heldCycleMinimumInterval = currentSettings.heldCycleMinimumInterval
 
         // Spaces are the user's desktops, so the persisted lists are only a starting guess.
@@ -650,6 +657,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         _ state: OnboardingPermissionState,
         source: String
     ) {
+        onboardingPermissionGuide.update(
+            permissionState: state,
+            requiresRelaunch: onboardingViewModel?.screenRecordingRequiresRelaunch ?? false
+        )
+        if state.accessibilityGranted,
+           OnboardingPermissionReturnStore.pending()?.permission == .accessibility {
+            OnboardingPermissionReturnStore.clear()
+        }
         guard state.accessibilityGranted else { return }
         if spaceController == nil {
             diag.report("accessibility_granted", details: ["source": source])
@@ -657,7 +672,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         let captureEnabled = OnboardingCapturePolicy.isEnabled(
             previewsRequested: currentSettings.features.windowPreviews,
-            screenRecordingGranted: state.screenRecordingGranted)
+            screenRecordingGranted: state.screenRecordingGranted
+                && onboardingViewModel?.screenRecordingRequiresRelaunch != true)
         if spaceController?.windowPreviewsEnabled != captureEnabled {
             spaceController?.windowPreviewsEnabled = captureEnabled
             if captureEnabled { spaceController?.prewarmWindowPreviews() }
@@ -672,6 +688,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     nonisolated public func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { self.onboardingPermissionGuide.dismiss() }
         OverlayPresentationRecorder.shared.finalizeAll(outcome: .appTerminated)
         let spaceController = MainActor.assumeIsolated { self.spaceController }
         let debouncedSaver = MainActor.assumeIsolated { self.debouncedSaver }
@@ -1451,7 +1468,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         target?.close()
     }
 
-    private func showOnboarding() {
+    private func showOnboarding(restoring pendingPage: OnboardingPage? = nil) {
         if let onboardingWindow {
             onboardingWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -1459,8 +1476,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
         // Separate setup storage intentionally ignores the old exercise-based checkpoint.
-        let checkpoint = UserDefaults.standard.data(forKey: "setupCheckpoint")
-            .flatMap { try? JSONDecoder().decode(OnboardingCheckpoint.self, from: $0) }
+        let checkpoint = pendingPage.map(OnboardingCheckpoint.init(page:))
+            ?? UserDefaults.standard.data(forKey: "setupCheckpoint")
+                .flatMap { try? JSONDecoder().decode(OnboardingCheckpoint.self, from: $0) }
         let model = OnboardingViewModel(permissionClient: onboardingPermissionClient,
             features: currentSettings.features,
             spaceSwitchDuration: currentSettings.spaceSwitchDuration,
@@ -1472,10 +1490,45 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             },
             onFeaturesChanged: { [weak self] in self?.applyFeatures($0) },
             onPermissionStateChanged: { [weak self] in self?.handlePermissionStateChange($0, source: "onboarding") },
+            onPermissionRequestWillStart: { [weak self] permission, page in
+                guard let self,
+                      let checkpointData = try? JSONEncoder().encode(OnboardingCheckpoint(page: page)) else {
+                    return false
+                }
+                let defaults = UserDefaults.standard
+                defaults.set(checkpointData, forKey: "setupCheckpoint")
+                guard defaults.synchronize(), OnboardingPermissionReturnStore.save(
+                    permission: permission,
+                    page: page,
+                    processID: self.onboardingProcessID
+                ) else {
+                    self.diag.report("onboarding_permission_handoff_persistence_failed")
+                    return false
+                }
+                return true
+            },
+            onPermissionRequestDidStart: { [weak self] permission in
+                self?.presentPermissionGuide(permission)
+            },
+            onPermissionHandoffCancelled: { [weak self] permission in
+                guard let self else { return }
+                if permission != .screenRecording
+                    || !self.onboardingPermissionClient.currentState().screenRecordingGranted {
+                    OnboardingPermissionReturnStore.clear()
+                }
+                self.onboardingPermissionGuide.dismiss()
+            },
+            onRestartDebut: { [weak self] in self?.onboardingPermissionClient.restartDebut() },
             checkpoint: checkpoint,
-            onProgressChanged: { progress in
+            onProgressChanged: { [weak self] progress in
+                if let pending = OnboardingPermissionReturnStore.pending(),
+                   pending.page != progress.page,
+                   self?.onboardingViewModel?.screenRecordingRequiresRelaunch != true {
+                    OnboardingPermissionReturnStore.clear()
+                }
                 if let data = try? JSONEncoder().encode(progress) {
                     UserDefaults.standard.set(data, forKey: "setupCheckpoint")
+                    _ = UserDefaults.standard.synchronize()
                 }
             },
             onCompleted: { [weak self] in self?.completeOnboarding() },
@@ -1503,8 +1556,35 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if OnboardingPermissionReturnStore.pending() != nil {
+            OnboardingPermissionReturnStore.clear()
+            diag.report("onboarding_permission_handoff_restored", details: [
+                "page": "\(model.page.rawValue)",
+            ])
+        } else if let checkpoint = try? JSONEncoder().encode(OnboardingCheckpoint(page: model.page)) {
+            UserDefaults.standard.set(checkpoint, forKey: "setupCheckpoint")
+            _ = UserDefaults.standard.synchronize()
+        }
         refreshOnboardingEnvironment()
         diag.report("onboarding_shown", details: ["forced": "\(ProcessInfo.processInfo.arguments.contains("--show-onboarding"))"])
+    }
+
+    private func presentPermissionGuide(_ permission: OnboardingPermission) {
+        onboardingPermissionGuide.present(
+            permission: permission,
+            onReturn: { [weak self] in
+                guard let self else { return }
+                self.onboardingViewModel?.refreshPermissions()
+                if self.onboardingViewModel?.screenRecordingRequiresRelaunch != true {
+                    OnboardingPermissionReturnStore.clear()
+                }
+                self.onboardingWindow?.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            },
+            onCancel: { [weak self] permission in
+                self?.onboardingViewModel?.cancelPermissionHandoff(permission)
+            }
+        )
     }
 
     private func refreshOnboardingEnvironment() {
@@ -1517,6 +1597,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     private func completeOnboarding() {
         OnboardingLaunchPolicy.markCompleted()
+        OnboardingPermissionReturnStore.clear()
         UserDefaults.standard.removeObject(forKey: "setupCheckpoint")
         UserDefaults.standard.removeObject(forKey: "onboardingCheckpoint")
         // Exiting the tutorial keeps a checkpoint to resume from, but finishing setup starts the
@@ -1585,7 +1666,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         keyboardService?.features = newSettings.features
         spaceController?.windowPreviewsEnabled = OnboardingCapturePolicy.isEnabled(
             previewsRequested: newSettings.features.windowPreviews,
-            screenRecordingGranted: onboardingPermissionClient.currentState().screenRecordingGranted)
+            screenRecordingGranted: onboardingPermissionClient.currentState().screenRecordingGranted
+                && onboardingViewModel?.screenRecordingRequiresRelaunch != true)
         let tutorialShortcutWasEnabled = tutorialViewModel?.shortcutEnabled
         tutorialViewModel?.features = newSettings.features
         onboardingViewModel?.features = newSettings.features
