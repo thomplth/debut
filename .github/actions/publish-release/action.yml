@@ -100,7 +100,7 @@ runs:
         keychain="$RUNNER_TEMP/debut-signing.keychain-db"
         keychain_password="$(uuidgen)$(uuidgen)"
         printf '%s' "$CERTIFICATE_BASE64" | /usr/bin/base64 -D > "$certificate"
-        openssl pkcs12 -in "$certificate" -out "$identity" -nodes -passin env:CERTIFICATE_PASSWORD
+        openssl pkcs12 -in "$certificate" -out "$identity" -legacy -nodes -passin env:CERTIFICATE_PASSWORD
         security create-keychain -p "$keychain_password" "$keychain"
         security set-keychain-settings -lut 21600 "$keychain"
         security unlock-keychain -p "$keychain_password" "$keychain"
