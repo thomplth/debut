@@ -832,17 +832,30 @@ struct SpaceControllerTests {
     }
 
     @Test("Held Cmd+Tab presents overlay UI after a short delay")
-    func heldCmdTabPresentsOverlayAfterDelay() {
-        let (controller, _, keyboardService) = makeController()
+    func heldCmdTabPresentsOverlayAfterDelay() throws {
+        let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
+        let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: keyboardService,
+            overlayPresentationDelay: 0.2,
+            focusedWindowSnapshotProvider: { .unfocused },
+            overlayPresentationRecorder: overlay
+        )
         let delegate = PreviewRefreshDelegate()
         controller.delegate = delegate
-        controller.overlayPresentationDelay = 0.2
+        let context = overlay.begin(configuredDelayMilliseconds: 200)
 
-        keyboardService.simulateEvent(.cmdTabHold)
+        controller.handleKeyEvent(.cmdTabHold, overlayPresentation: context)
 
-        #expect(delegate.overlayOpened.wait(timeout: .now() + 0.1) == .timedOut)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        keyboardService.simulateEvent(.escape)
+        let trace = try #require(overlay.snapshot().active.first { $0.traceID == context.traceID })
+        let scheduled = try #require(trace.phases.first { $0.phase == .presentationScheduled })
+        let deadline = try #require(trace.phases.first { $0.phase == .presentationDeadlineFired })
+        #expect(deadline.elapsedMilliseconds - scheduled.elapsedMilliseconds >= 190)
+
+        controller.handleKeyEvent(.escape, overlayPresentation: context)
         #expect(delegate.overlayClosed.wait(timeout: .now()) == .success)
     }
 
