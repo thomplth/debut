@@ -146,7 +146,13 @@ if [[ -f "$publish_contract" ]]; then
         "the publish workflow must clean up its secrets even when a step fails"
     expect_contains "$publish_contract" 'security delete-keychain' \
         "the publish workflow must delete the keychain holding the Developer ID key"
-    for artefact in 'developer-id\.p12' 'notary-api-key\.p8' 'sparkle-eddsa\.key'; do
+    # security import -P puts the certificate password in the process argument list.
+    # Decrypt through OpenSSL's environment passphrase source, then import the PEM.
+    expect_not_contains "$publish_contract" 'security import .* -P ' \
+        "the certificate password must not be passed to security import on the command line"
+    expect_contains "$publish_contract" 'pkcs12 .* -passin env:CERTIFICATE_PASSWORD' \
+        "the certificate password must be read from the environment during PKCS#12 conversion"
+    for artefact in 'developer-id\.p12' 'developer-id\.pem' 'notary-api-key\.p8' 'sparkle-eddsa\.key'; do
         expect_contains "$publish_contract" "rm -f.*$artefact" \
             "the publish workflow must remove $artefact from the runner"
     done
