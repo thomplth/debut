@@ -96,13 +96,16 @@ runs:
       run: |
         umask 077
         certificate="$RUNNER_TEMP/developer-id.p12"
+        identity="$RUNNER_TEMP/developer-id.pem"
         keychain="$RUNNER_TEMP/debut-signing.keychain-db"
         keychain_password="$(uuidgen)$(uuidgen)"
         printf '%s' "$CERTIFICATE_BASE64" | /usr/bin/base64 -D > "$certificate"
+        openssl pkcs12 -in "$certificate" -out "$identity" -nodes -passin env:CERTIFICATE_PASSWORD
         security create-keychain -p "$keychain_password" "$keychain"
         security set-keychain-settings -lut 21600 "$keychain"
         security unlock-keychain -p "$keychain_password" "$keychain"
-        security import "$certificate" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+        security import "$identity" -k "$keychain" -t agg -f pemseq -T /usr/bin/codesign
+        rm -f "$certificate" "$identity"
         security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
         security list-keychains -d user -s "$keychain"
 
@@ -240,5 +243,6 @@ runs:
       run: |
         security delete-keychain "$RUNNER_TEMP/debut-signing.keychain-db" || true
         rm -f "$RUNNER_TEMP/developer-id.p12"
+        rm -f "$RUNNER_TEMP/developer-id.pem"
         rm -f "$RUNNER_TEMP/notary-api-key.p8"
         rm -f "$RUNNER_TEMP/sparkle-eddsa.key"
