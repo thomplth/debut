@@ -800,52 +800,115 @@ public struct SettingsView: View {
     }
 
     private var aboutSection: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 28) {
+            aboutIdentity
+
+            VStack(spacing: 0) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 20) {
+                        aboutVersion
+                        Spacer(minLength: 0)
+                        aboutUpdateButton
+                    }
+                    VStack(alignment: .leading, spacing: 12) {
+                        aboutVersion
+                        aboutUpdateButton
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(20)
+
+                Divider().padding(.horizontal, 20)
+
+                HStack(spacing: 0) {
+                    aboutLink("GitHub", subtitle: "Source code", destination: AboutLinks.github)
+                    Divider().frame(height: 32)
+                    aboutLink("Twitter", subtitle: "Follow the developer", destination: AboutLinks.twitter)
+                }
+                .padding(8)
+            }
+            .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 16))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(.primary.opacity(0.06), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(maxWidth: 440)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+    }
+
+    private var aboutIdentity: some View {
+        VStack(spacing: 12) {
             Group {
                 if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
                    let icon = NSImage(contentsOf: iconURL) {
                     Image(nsImage: icon)
                         .resizable()
-                        .frame(width: 112, height: 112)
+                        .frame(width: 96, height: 96)
                 } else {
-                    Image(nsImage: DebutGlyph.image(size: 112))
+                    Image(nsImage: DebutGlyph.image(size: 96))
                         .renderingMode(.template)
                         .foregroundStyle(.secondary)
-                        .frame(width: 112, height: 112)
+                        .frame(width: 96, height: 96)
                 }
             }
             .accessibilityHidden(true)
 
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 Text("Debut")
-                    .font(.largeTitle.bold())
+                    .font(.system(size: 30, weight: .bold))
                 Text("Space-based workspace manager for macOS")
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-
-            VStack(spacing: 16) {
-                Text("Version \(DebutCore.version)")
-                    .foregroundStyle(.secondary)
-
-                Button("Check for Updates…") {
-                    viewModel.checkForUpdates()
-                }
-
-                Divider()
-
-                VStack(spacing: 12) {
-                    Link("GitHub", destination: AboutLinks.github)
-                    Link("Twitter", destination: AboutLinks.twitter)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(20)
-            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
         }
-        .frame(maxWidth: 420)
-        .frame(maxWidth: .infinity)
-        .padding(.top, 28)
+    }
+
+    private var aboutVersion: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Version")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(DebutCore.version)
+                .font(.body.weight(.medium))
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var aboutUpdateButton: some View {
+        Button("Check for Updates…") {
+            viewModel.checkForUpdates()
+        }
+        .controlSize(.large)
+        .fixedSize()
+    }
+
+    private func aboutLink(_ title: String, subtitle: String, destination: URL) -> some View {
+        Link(destination: destination) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Helpers
