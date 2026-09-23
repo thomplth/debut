@@ -476,6 +476,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         var relocating = false
     }
     private var followingWindowMove: FollowingWindowMove?
+
+    /// Runtime desktop snapshots must defer to this controller's in-flight move until its
+    /// route completes; WindowServer can briefly report the desktop just left during a swipe.
+    var controllerOwnedMoveWindowIDs: Set<CGWindowID> {
+        followingWindowMove.map { [$0.windowID] } ?? []
+    }
+
     private enum FocusCommand: String {
         case commandTab = "command_tab"
         case commandBacktick = "command_backtick"

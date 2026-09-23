@@ -331,7 +331,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                             forWindows: windows.map(\.windowID)
                         ) ?? [:]
                     ),
-                    spaceManager: &controller.spaceManager
+                    spaceManager: &controller.spaceManager,
+                    controllerOwnedMoveWindowIDs: controller.controllerOwnedMoveWindowIDs
                 )
                 if result.didMutate || result.refusedCount > 0 {
                     self.diag.report("runtime_windows_reconciled", details: [
@@ -356,7 +357,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 let result = self.runtimeWindowReconciler.reconcile(
                     snapshot,
                     spaceManager: &controller.spaceManager,
-                    allowDormantBundleFallback: false
+                    allowDormantBundleFallback: false,
+                    controllerOwnedMoveWindowIDs: controller.controllerOwnedMoveWindowIDs
                 )
                 self.diag.report("runtime_windows_reconciled", details: [
                     "added": "\(result.addedCount)",
@@ -427,7 +429,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 let result = self.runtimeWindowReconciler.reconcile(
                     snapshot,
                     spaceManager: &controller.spaceManager,
-                    allowDormantBundleFallback: false
+                    allowDormantBundleFallback: false,
+                    controllerOwnedMoveWindowIDs: controller.controllerOwnedMoveWindowIDs
                 )
                 if result.didMutate || result.refusedCount > 0 {
                     self.diag.report("runtime_windows_reconciled", details: [
@@ -448,7 +451,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 let result = self.runtimeWindowReconciler.reconcile(
                     snapshot,
                     spaceManager: &controller.spaceManager,
-                    allowDormantBundleFallback: false
+                    allowDormantBundleFallback: false,
+                    controllerOwnedMoveWindowIDs: controller.controllerOwnedMoveWindowIDs
                 )
                 guard result.didMutate || result.refusedCount > 0 else { return }
                 self.diag.report("runtime_windows_reconciled", details: [
