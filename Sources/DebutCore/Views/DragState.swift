@@ -5,6 +5,8 @@ struct WindowDragState: Equatable {
     let windowID: CGWindowID
     let sourceSpaceIndex: Int
     let sourceWindowIndex: Int
+    var sourceSpaceID: UUID? = nil
+    let sessionID: UUID = UUID()
     var location: CGPoint
     var dropTarget: WindowDropTarget?
 }
