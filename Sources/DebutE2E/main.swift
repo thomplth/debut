@@ -1905,22 +1905,16 @@ if preparedWindowCounts.indices.contains(sourceSpaceIndex),
     }
 
     wait(0.4)
-    let topEdge = CGPoint(
-        x: overlayBounds.midX,
-        y: overlayBounds.minY + StageConstants.edgeScrollMargin / 2
-    )
     if let returnedSpacePoint = stageCenter(
         spaceIndex: sourceSpaceIndex,
         cardAspects: movedCardAspects,
         activeSpaceIndex: stageActiveSpaceIndex,
-        focusedSpaceIndex: destinationSpaceIndex,
-        edgeScrollPointerY: topEdge.y,
         inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
     ) {
-        // The first drop ends over the newly inserted card, so that exact live pointer location
-        // is a stronger hit target than a second reconstruction of SwiftUI's animated geometry.
-        info("  Reverse drag path: \(destinationPoint) -> \(topEdge) -> \(returnedSpacePoint)")
-        postMouseDrag(from: destinationPoint, through: topEdge, to: returnedSpacePoint)
+        // Return directly to the visible source stage. Edge navigation now waits for a deliberate
+        // dwell, so a route through its band would test viewport scrolling instead of this drop.
+        info("  Reverse drag path: \(destinationPoint) -> \(returnedSpacePoint)")
+        postMouseDrag(from: destinationPoint, to: returnedSpacePoint)
         for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
             if readEvents().filter({ $0["event"] == "window_move_previewed_by_drag" }).count > moveEventCount + 1 {
                 break

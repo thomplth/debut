@@ -2019,6 +2019,7 @@ public struct StageOverlayView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             windowDrag = nil
+            isFinishingWindowDrop = false
             onWindowMoved?(
                 request.windowID,
                 request.fromSpaceIndex,
@@ -2038,6 +2039,7 @@ public struct StageOverlayView: View {
         withTransaction(transaction) {
             windowDrag = nil
             self.settlingWindowDrop = nil
+            isFinishingWindowDrop = false
         }
     }
 
