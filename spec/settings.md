@@ -103,6 +103,11 @@ Setup has five pages and never requires shortcut practice:
    switcher into a workspace manager”. Accessibility is required for shortcuts
    and window control; Screen Recording is optional and enables window previews.
    Permission requests happen only when the user clicks the corresponding button.
+   The permission guide opens the matching System Settings pane and offers Debut as a
+   draggable app. Returning to Debut restores the same setup page. If Screen Recording
+   is granted, choose Quit & Reopen in the macOS prompt; setup resumes automatically.
+   If you choose Later, the guide offers Restart Debut while Screen Recording is ready
+   but unavailable to the current process. Screen Recording never blocks setup.
 2. Command-Tab introduces the desktop-grouped switcher with a real screenshot and
    its enable toggle. Only a device with exactly one desktop sees verbal Mission
    Control instructions for adding another; creation is never required.

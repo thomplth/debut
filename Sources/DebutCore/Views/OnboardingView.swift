@@ -107,20 +107,40 @@ public struct OnboardingView: View {
             }.frame(maxWidth: .infinity)
             VStack(spacing: 10) {
                 permissionRow("Accessibility", icon: "hand.raised", detail: "Lets Debut handle keyboard shortcuts and switch windows.",
-                    required: true, granted: viewModel.permissions.accessibilityGranted, action: viewModel.requestAccessibility)
+                    required: true, granted: viewModel.permissions.accessibilityGranted,
+                    action: viewModel.requestAccessibility, onRestart: {})
                 permissionRow("Screen Recording", icon: "macwindow", detail: "Adds window previews. Images stay on your Mac.",
-                    required: false, granted: viewModel.permissions.screenRecordingGranted, action: viewModel.requestScreenRecording)
+                    required: false, granted: viewModel.permissions.screenRecordingGranted,
+                    requiresRelaunch: viewModel.screenRecordingRequiresRelaunch,
+                    action: viewModel.requestScreenRecording, onRestart: viewModel.restartDebut)
             }
-            Text(viewModel.permissions.accessibilityGranted
-                 ? "You can change permissions anytime in System Settings."
-                 : "Allow Accessibility in System Settings, then return here. Reopen Debut if macOS asks you to quit.")
+            Text(welcomePermissionHint)
                 .font(.system(size: 12)).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).frame(maxWidth: 560)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func permissionRow(_ title: String, icon: String, detail: String, required: Bool, granted: Bool, action: @escaping () -> Void) -> some View {
+    private var welcomePermissionHint: String {
+        if viewModel.screenRecordingRequiresRelaunch {
+            return "Quit and reopen Debut to use Screen Recording. Setup will continue where you left off."
+        }
+        if !viewModel.permissions.accessibilityGranted {
+            return "Allow Accessibility in System Settings, then return here. If macOS asks, choose Quit & Reopen; setup will continue here."
+        }
+        return "You can change permissions anytime in System Settings. Screen Recording is optional."
+    }
+
+    private func permissionRow(
+        _ title: String,
+        icon: String,
+        detail: String,
+        required: Bool,
+        granted: Bool,
+        requiresRelaunch: Bool = false,
+        action: @escaping () -> Void,
+        onRestart: @escaping () -> Void = {}
+    ) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon).font(.system(size: 20, weight: .medium)).foregroundStyle(Color.accentColor)
                 .frame(width: 42, height: 42)
@@ -138,7 +158,9 @@ public struct OnboardingView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)
-            if granted {
+            if requiresRelaunch {
+                Button("Restart Debut", action: onRestart).controlSize(.regular)
+            } else if granted {
                 Label("Allowed", systemImage: "checkmark.circle.fill").font(.system(size: 12, weight: .medium)).foregroundStyle(.green)
             } else {
                 Button("Allow \(title)", action: action).controlSize(.regular)
