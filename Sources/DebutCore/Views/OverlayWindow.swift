@@ -19,6 +19,15 @@ final class OverlayScrollRelay {
     var latest: OverlayScrollEvent?
 }
 
+@Observable
+final class OverlayInteractionCancellationRelay {
+    private(set) var generation = 0
+
+    func cancel() {
+        generation &+= 1
+    }
+}
+
 /// Which switcher the one overlay window is currently hosting. A `switch` in the body gives each
 /// case its own structural identity, so changing switcher rebuilds the tree while an update
 /// within one preserves it — which is what keeps the card transitions running.
@@ -56,6 +65,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     private var renderedWindowIDs: Set<CGWindowID> = []
     private var renderGeneration = 0
     private let scrollRelay = OverlayScrollRelay()
+    private let interactionCancellationRelay = OverlayInteractionCancellationRelay()
     private var scrollSequence = 0
     private var scrollMonitor: Any?
     public var onSpaceScrollSelected: ((Int) -> Void)?
@@ -115,6 +125,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         view.onOverlayTapRouted = onOverlayTapRouted
         view.onOverlayPointerRegionChanged = onOverlayPointerRegionChanged
         view.scrollRelay = scrollRelay
+        view.interactionCancellationRelay = interactionCancellationRelay
         view.onSpaceScrollSelected = onSpaceScrollSelected
         view.onSpaceScrollRouted = onSpaceScrollRouted
         return present(
@@ -128,6 +139,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     /// that disappears from the global list is simply absent from the next update.
     @discardableResult
     public func update(altTab viewModel: AltTabOverlayViewModel) -> Bool {
+        interactionCancellationRelay.cancel()
         synchronizeFrameToTargetScreen(display: false)
         renderedWindowIDs = Set(viewModel.windows.map(\.windowID))
         return present(
@@ -254,10 +266,14 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
 
     private func synchronizeFrameToTargetScreen(display: Bool) {
         guard let frame = targetScreenFrame ?? NSScreen.main?.overlayFrame else { return }
+        if frame != self.frame, hostingView != nil {
+            interactionCancellationRelay.cancel()
+        }
         setFrame(frame, display: display)
     }
 
     public func hideOverlay() {
+        interactionCancellationRelay.cancel()
         stopWatchingScroll()
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.1
