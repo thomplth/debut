@@ -64,6 +64,23 @@ struct SettingsViewModelTests {
         #expect(vm.settings.stageScale == 1.25)
     }
 
+    @Test("Restore all settings resets every preference to its default")
+    func restoreDefaultSettings() {
+        var vm = SettingsViewModel()
+        vm.settings.features.windowPreviews = false
+        vm.settings.launchAtLogin = false
+        vm.settings.showsDockIcon = false
+        vm.settings.excludedBundleIDs = ["com.example.app"]
+        vm.settings.glassStyle = .regular
+        vm.settings.stageScale = 2.25
+        vm.settings.quickSwitchModifiers = ShortcutModifiers(command: true)
+        vm.settings.previewCacheTTL = 5
+
+        vm.restoreDefaultSettings()
+
+        #expect(vm.settings == AppSettings())
+    }
+
     @Test("Sections list")
     func sections() {
         let vm = SettingsViewModel()
