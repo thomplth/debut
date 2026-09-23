@@ -1266,7 +1266,6 @@ public struct StageOverlayView: View {
     var onSpaceScrollSelected: ((Int) -> Void)?
     var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     var scrollRelay: OverlayScrollRelay?
-    var interactionCancellationRelay: OverlayInteractionCancellationRelay?
     var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
 
     @State private var windowDrag: WindowDragState?
@@ -1282,11 +1281,6 @@ public struct StageOverlayView: View {
     @State private var windowFrames: [WindowFrameID: CGRect] = [:]
     @State private var hoveredSpaceIndex: Int?
     @State private var hoverPointerY: CGFloat?
-    @State private var dragScrollState: DragScrollState?
-    @State private var dragSpaceOrder: [UUID]?
-    @State private var dragViewportSize: CGSize?
-    @State private var isFinishingWindowDrop = false
-    @State private var framePreferenceStackOffset: CGFloat = 0
     @State private var scrollAccumulator = SpaceScrollAccumulator()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1440,9 +1434,6 @@ public struct StageOverlayView: View {
                 retainedDragTarget: retainedWindowDragFocusSpaceIndex,
                 spaceCount: stages.count
             )
-            let interactionFocusTransition = windowDrag == nil
-                ? focusTransition
-                : .fade(duration: reduceMotion ? 0.08 : 0.12)
             let baselineLayout = StageMotion.stackLayout(
                 stageHeights: stageHeights,
                 focusIndex: viewModel.activeSpaceIndex,
@@ -1474,9 +1465,6 @@ public struct StageOverlayView: View {
                 bottomLimit: geo.size.height - StageConstants.edgeScrollMargin
                     - visualLayout.totalHeight
             )
-            let renderedStackOffset = windowDrag == nil
-                ? yOffset
-                : (dragScrollState?.stackOffset ?? yOffset)
 
             ZStack(alignment: .topLeading) {
                 ZStack(alignment: .top) {
@@ -1516,8 +1504,6 @@ public struct StageOverlayView: View {
                             usesGuidedKeyboardMoveMotion: hasGuidedKeyboardMove,
                             stageFrames: $stageFrames,
                             windowFrames: $windowFrames,
-                            viewportScrollOffset: renderedStackOffset,
-                            measuredViewportScrollOffset: framePreferenceStackOffset,
                             spaceIndex: index,
                             onPointerSelectionChanged: { selection, isHovering, location in
                                 if isHovering && !pointerMovementGate.observe(at: location) {
@@ -1537,8 +1523,6 @@ public struct StageOverlayView: View {
                             },
                             onWindowSelected: onWindowSelected,
                             onWindowDropRequested: { request in
-                                stopDragScroll()
-                                isFinishingWindowDrop = true
                                 finishWindowDrop(
                                     request,
                                     transition: windowReorderTransition,
@@ -1577,7 +1561,7 @@ public struct StageOverlayView: View {
                     }
                 }
                 .frame(width: geo.size.width, height: tallestStageHeight, alignment: .top)
-                .offset(y: renderedStackOffset)
+                .offset(y: yOffset)
 
                 if viewModel.shouldShowDisplayStackIndicator {
                     HStack(spacing: 8) {
@@ -1610,19 +1594,6 @@ public struct StageOverlayView: View {
                             + "\(viewModel.displayStackPosition) of \(viewModel.displayStackCount)"
                     )
                     .zIndex(4)
-                }
-
-                if let dragScrollState, dragScrollState.showsEarlierSpaces {
-                    edgeScrollCue("More spaces above", symbol: "chevron.up")
-                        .position(x: geo.size.width / 2, y: 34)
-                        .zIndex(5)
-                        .accessibilityLabel("More spaces above; drag here to scroll")
-                }
-                if let dragScrollState, dragScrollState.showsLaterSpaces {
-                    edgeScrollCue("More spaces below", symbol: "chevron.down")
-                        .position(x: geo.size.width / 2, y: geo.size.height - 34)
-                        .zIndex(5)
-                        .accessibilityLabel("More spaces below; drag here to scroll")
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
@@ -1674,9 +1645,9 @@ public struct StageOverlayView: View {
             }
             .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeSpaceIndex)
             .transition(focusTransition.usesSpatialMotion ? .identity : .opacity)
-            .animation(interactionFocusTransition.animation, value: layoutAnimationKey)
-            .animation(interactionFocusTransition.animation, value: focusedSpaceIndex)
-            .animation(interactionFocusTransition.animation, value: pointerSelection)
+            .animation(focusTransition.animation, value: layoutAnimationKey)
+            .animation(focusTransition.animation, value: focusedSpaceIndex)
+            .animation(focusTransition.animation, value: pointerSelection)
             .animation(activeWindowReorderTransition?.animation, value: layoutWindowDrag?.dropTarget)
             .animation(keyboardLayoutTransition?.animation, value: windowLayoutKey)
             .coordinateSpace(name: "overlay")
@@ -1704,11 +1675,9 @@ public struct StageOverlayView: View {
             }
             .onPreferenceChange(StageFramePreferenceKey.self) { frames in
                 stageFrames = frames
-                framePreferenceStackOffset = renderedStackOffset
             }
             .onPreferenceChange(WindowFramePreferenceKey.self) { frames in
                 windowFrames = frames
-                framePreferenceStackOffset = renderedStackOffset
             }
             .onContinuousHover(coordinateSpace: .local) { phase in
                 switch phase {
@@ -1735,7 +1704,7 @@ public struct StageOverlayView: View {
                         return
                     }
                     clearParkedKeyboardWindowFlight()
-                    if settlingWindowDrop == nil, windowDrag == nil {
+                    if settlingWindowDrop == nil {
                         retainedWindowDragFocusSpaceIndex = nil
                     }
                     hoveredSpaceIndex = StageInteraction.hoveredSpaceIndex(
@@ -1763,7 +1732,6 @@ public struct StageOverlayView: View {
                 value: edgeScrollTarget
             )
             .onChange(of: viewModel.activeSpaceIndex) { _, _ in
-                if windowDrag != nil { cancelActiveWindowDrag() }
                 hoveredSpaceIndex = nil
                 hoverPointerY = nil
             }
@@ -1818,63 +1786,9 @@ public struct StageOverlayView: View {
             .onChange(of: windowLayoutKey) { _, committedLayout in
                 finishWindowDropHandoff(ifAppliedTo: committedLayout)
             }
-            .modifier(StageDragScrollLifecycleModifier(
-                windowDrag: $windowDrag,
-                scrollState: $dragScrollState,
-                spaceOrderAtDragStart: $dragSpaceOrder,
-                viewportSizeAtDragStart: $dragViewportSize,
-                isFinishingWindowDrop: $isFinishingWindowDrop,
-                retainedFocusSpaceIndex: $retainedWindowDragFocusSpaceIndex,
-                stages: stages,
-                currentSpaceOrder: stages.map(\.id),
-                viewportSize: geo.size,
-                stackOffset: renderedStackOffset,
-                stackHeight: visualLayout.totalHeight,
-                focusSpaceIndex: focusedSpaceIndex,
-                cancellationGeneration: interactionCancellationRelay?.generation,
-                onCancel: cancelActiveWindowDrag
-            ))
             .onAppear {
                 finishWindowDropHandoff(ifAppliedTo: windowLayoutKey)
             }
-            .onDisappear {
-                cancelActiveWindowDrag()
-            }
-        }
-    }
-
-    private func edgeScrollCue(_ label: String, symbol: String) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: symbol)
-                .font(.caption.weight(.semibold))
-            Text(label)
-                .font(.caption.weight(.medium))
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .modifier(OverlayGlassCapsuleModifier(glassStyle: viewModel.appearance.glassStyle))
-        .allowsHitTesting(false)
-    }
-
-    private func stopDragScroll() {
-        guard var state = dragScrollState else { return }
-        state.stop()
-        dragScrollState = state
-    }
-
-    private func cancelActiveWindowDrag() {
-        stopDragScroll()
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            windowDrag = nil
-            dragScrollState = nil
-            settlingWindowDrop = nil
-            dragSpaceOrder = nil
-            dragViewportSize = nil
-            isFinishingWindowDrop = false
-            retainedWindowDragFocusSpaceIndex = nil
         }
     }
 
@@ -1993,12 +1907,10 @@ public struct StageOverlayView: View {
         }
 
         retainedWindowDragFocusSpaceIndex = target.spaceIndex
-        let sessionID = drag.sessionID
 
         withAnimation(transition.animation) {
             windowDrag?.location = destination
         } completion: {
-            guard windowDrag?.sessionID == sessionID else { return }
             settlingWindowDrop = WindowDropSettlingState(
                 request: request,
                 window: window,
@@ -2019,7 +1931,6 @@ public struct StageOverlayView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             windowDrag = nil
-            isFinishingWindowDrop = false
             onWindowMoved?(
                 request.windowID,
                 request.fromSpaceIndex,
@@ -2039,7 +1950,6 @@ public struct StageOverlayView: View {
         withTransaction(transaction) {
             windowDrag = nil
             self.settlingWindowDrop = nil
-            isFinishingWindowDrop = false
         }
     }
 
@@ -2093,8 +2003,6 @@ struct StageSwiftUIView: View {
     let usesGuidedKeyboardMoveMotion: Bool
     @Binding var stageFrames: [Int: CGRect]
     @Binding var windowFrames: [WindowFrameID: CGRect]
-    let viewportScrollOffset: CGFloat
-    let measuredViewportScrollOffset: CGFloat
     let spaceIndex: Int
     var onPointerSelectionChanged: ((PointerSelection, Bool, CGPoint) -> Void)?
     var onWindowSelected: ((Int, Int) -> Void)?
@@ -2257,7 +2165,6 @@ struct StageSwiftUIView: View {
                         windowID: window.windowID,
                         sourceSpaceIndex: spaceIndex,
                         sourceWindowIndex: windowIndex,
-                        sourceSpaceID: stage.id,
                         location: value.location,
                         dropTarget: dropTarget(
                             at: value.location,
@@ -2279,22 +2186,12 @@ struct StageSwiftUIView: View {
                     onWindowSelected?(spaceIndex, windowIndex)
                     return
                 }
-                guard var drag = windowDrag,
-                      drag.sourceSpaceID == nil || drag.sourceSpaceID == stage.id
+                guard let drag = windowDrag,
+                      let request = StageInteraction.windowMoveRequest(for: drag)
                 else {
                     windowDrag = nil
                     return
                 }
-                drag.location = value.location
-                drag.dropTarget = dropTarget(
-                    at: value.location,
-                    sourceWindowIndex: drag.sourceWindowIndex
-                )
-                guard let request = StageInteraction.windowMoveRequest(for: drag) else {
-                    windowDrag = nil
-                    return
-                }
-                windowDrag = drag
                 onWindowDropRequested?(request)
             }
     }
@@ -2303,19 +2200,12 @@ struct StageSwiftUIView: View {
         at location: CGPoint,
         sourceWindowIndex: Int
     ) -> WindowDropTarget? {
-        let verticalCorrection = viewportScrollOffset - measuredViewportScrollOffset
-        let translatedStageFrames = stageFrames.mapValues {
-            $0.offsetBy(dx: 0, dy: verticalCorrection)
-        }
-        let translatedWindowFrames = windowFrames.mapValues {
-            $0.offsetBy(dx: 0, dy: verticalCorrection)
-        }
-        return StageInteraction.windowDropTarget(
+        StageInteraction.windowDropTarget(
             at: location,
             sourceSpaceIndex: spaceIndex,
             sourceWindowIndex: sourceWindowIndex,
-            stageFrames: translatedStageFrames,
-            windowFrames: translatedWindowFrames
+            stageFrames: stageFrames,
+            windowFrames: windowFrames
         )
     }
 }
