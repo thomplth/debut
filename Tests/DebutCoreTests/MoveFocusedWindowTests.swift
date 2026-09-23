@@ -179,6 +179,47 @@ struct MoveFocusedWindowTests {
         #expect(controller.spaceManager.spaces[2].windows.map(\.windowID) == [102])
     }
 
+    @Test("A stale desktop snapshot cannot undo the next hop in a window move")
+    func staleDesktopSnapshotDoesNotUndoFollowingMove() {
+        let (controller, _, spaces) = fixture()
+        for _ in 0..<3 { controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1)) }
+
+        spaces.current = 1
+        controller.desktopDidChange()
+        #expect(spaces.moveRequests.map(\.desktop) == [1, 2])
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 102)
+                == controller.spaceManager.spaces[2].id)
+
+        // During the transition to desktop 2, WindowServer can still report the window on
+        // desktop 1. A desktop refresh must not override the active move route with that stale
+        // observation before SpaceController processes the desktop-change notification.
+        spaces.current = 2
+        var reconciler = RuntimeWindowReconciler()
+        _ = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [WindowInfo(
+                    windowID: 102,
+                    ownerBundleID: "com.test.App",
+                    ownerName: "App",
+                    ownerPID: 42,
+                    title: "W102",
+                    bounds: .zero,
+                    isOnScreen: true
+                )],
+                allWindowIDs: [102],
+                desktopIndexes: [102: 1]
+            ),
+            spaceManager: &controller.spaceManager,
+            controllerOwnedMoveWindowIDs: controller.controllerOwnedMoveWindowIDs
+        )
+
+        controller.desktopDidChange()
+
+        #expect(spaces.moveRequests.map(\.desktop) == [1, 2, 3])
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 102)
+                == controller.spaceManager.spaces[3].id)
+    }
+
     @Test("A reverse press returns after the already-started desktop hop")
     func reversesMove() {
         let (controller, windows, spaces) = fixture()

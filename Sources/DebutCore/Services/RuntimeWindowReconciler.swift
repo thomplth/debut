@@ -140,15 +140,22 @@ public struct RuntimeWindowReconciler: Sendable {
         _ snapshot: RuntimeWindowSnapshot,
         spaceManager: inout SpaceManager,
         newWindowSpaceID: UUID? = nil,
-        allowDormantBundleFallback: Bool = true
+        allowDormantBundleFallback: Bool = true,
+        controllerOwnedMoveWindowIDs: Set<CGWindowID> = []
     ) -> RuntimeWindowReconciliationResult {
         var addedCount = 0
         var reassignedCount = 0
         var dormantCount = 0
         var events: [WindowAssignmentEvent] = []
         var consumedLiveWindowIDs = Set<CGWindowID>()
+        // A controller-owned traversal already knows the target's intended desktop. During a
+        // Space transition, WindowServer can briefly report the desktop the window just left;
+        // treating that snapshot as authoritative would undo the move before its next hop.
+        let liveWindows = snapshot.liveWindows.filter {
+            !controllerOwnedMoveWindowIDs.contains($0.windowID)
+        }
         let preferredSpaceIDs: [CGWindowID: UUID] = Dictionary(
-            uniqueKeysWithValues: snapshot.liveWindows.compactMap { info in
+            uniqueKeysWithValues: liveWindows.compactMap { info in
                 guard let spaceID = desktopSpaceID(
                     for: info.windowID,
                     snapshot: snapshot,
@@ -168,7 +175,7 @@ public struct RuntimeWindowReconciler: Sendable {
         // does. Parking here, before that check runs, lets the same pass recover the
         // assignment onto its real window by (bundleID, title) below.
         let liveWindowsByID = Dictionary(
-            snapshot.liveWindows.map { ($0.windowID, $0) },
+            liveWindows.map { ($0.windowID, $0) },
             uniquingKeysWith: { first, _ in first }
         )
         for assignment in assignments(in: spaceManager) {
@@ -194,7 +201,7 @@ public struct RuntimeWindowReconciler: Sendable {
         // process is stronger than title or bundle recovery. Restore it before a vanished
         // transient assignment from that bundle can claim the live ID and overwrite its MRU
         // timestamp and position. This is deliberately process-scoped: window IDs are reused.
-        for info in snapshot.liveWindows where
+        for info in liveWindows where
             spaceManager.spaceContainingWindow(windowID: info.windowID) == nil {
             guard let dormant = spaceManager.dormantWindowAssignments.first(where: {
                 $0.window.windowID == info.windowID
@@ -239,7 +246,7 @@ public struct RuntimeWindowReconciler: Sendable {
             // published before focus, so recreated windows are still unassigned.
             let directMatches = recoveryMatches(
                 assignments: missingAssignments,
-                liveWindows: snapshot.liveWindows,
+                liveWindows: liveWindows,
                 spaceManager: spaceManager,
                 allowedAssignedWindowIDs: provisionalWindowIDs,
                 preferredSpaceIDs: preferredSpaceIDs
@@ -292,7 +299,7 @@ public struct RuntimeWindowReconciler: Sendable {
         }
         let dormantMatches = recoveryMatches(
             assignments: dormantAssignments,
-            liveWindows: snapshot.liveWindows.filter { !consumedLiveWindowIDs.contains($0.windowID) },
+            liveWindows: liveWindows.filter { !consumedLiveWindowIDs.contains($0.windowID) },
             spaceManager: spaceManager,
             allowedAssignedWindowIDs: provisionalWindowIDs,
             preferredSpaceIDs: preferredSpaceIDs,
@@ -326,7 +333,7 @@ public struct RuntimeWindowReconciler: Sendable {
         // disagrees is stale — the user dragged the window in Mission Control — and the
         // desktop wins. Unlike CG absence this is a positive statement about where the
         // window is, so acting on it cannot erase anything.
-        for info in snapshot.liveWindows {
+        for info in liveWindows {
             guard let currentSpaceID = spaceManager.spaceContainingWindow(windowID: info.windowID),
                   let desktopSpaceID = desktopSpaceID(
                       for: info.windowID,
@@ -363,7 +370,7 @@ public struct RuntimeWindowReconciler: Sendable {
         } ?? spaceManager.activeSpaceID
         var addedWindowIDs = Set<CGWindowID>()
         var refusedCount = 0
-        for info in snapshot.liveWindows where
+        for info in liveWindows where
             !consumedLiveWindowIDs.contains(info.windowID) &&
             spaceManager.spaceContainingWindow(windowID: info.windowID) == nil {
             let desktopSpaceID = desktopSpaceID(
