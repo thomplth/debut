@@ -70,6 +70,9 @@ private let orderedInAttribute: UInt64 = 0x2
 /// Names minimizing as the reason the bit above is clear. There is a sibling tag for app-hiding,
 /// but it is not reliable — see `orderedOutGhostWindowIDs`, which asks AppKit instead.
 private let minimizedTag: UInt64 = 1 << 60
+/// A positive per-window app-hide marker. Some genuine hidden windows lack it, so absence alone
+/// cannot evict them; Accessibility identity supplies the second signal.
+private let hiddenAppTag: UInt64 = 1 << 39
 
 // Every Space remembers which process it shows as frontmost when it is revealed. Unlike
 // `_SLPSSetFrontProcessWithOptions`, this writes that memory for one Space only: it does not set
@@ -1079,10 +1082,15 @@ public struct WindowServerVerdicts: Sendable, Equatable {
     /// Surfaces the window server will not draw and does not attribute to minimizing. Hiding an
     /// app lands here too; `AccessibilityWindowService.orderedOutGhostWindowIDs` separates that.
     public var orderedOut: Set<CGWindowID> = []
+    /// The app-hide tag belongs to this window, not merely to its process. A stale popup from
+    /// the same hidden app can be ordered out without carrying this tag.
+    public var hiddenByApp: Set<CGWindowID> = []
 
-    public init(parented: Set<CGWindowID> = [], orderedOut: Set<CGWindowID> = []) {
+    public init(parented: Set<CGWindowID> = [], orderedOut: Set<CGWindowID> = [],
+                hiddenByApp: Set<CGWindowID> = []) {
         self.parented = parented
         self.orderedOut = orderedOut
+        self.hiddenByApp = hiddenByApp
     }
 }
 
@@ -1522,8 +1530,12 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             }
             // Minimizing clears the same bit, so it is filtered out here rather than by the
             // caller: the tag that names it is only reachable from this iterator.
+            let tags = slsWindowIteratorGetTags(iterator)
+            if tags & hiddenAppTag != 0 {
+                verdicts.hiddenByApp.insert(windowID)
+            }
             if slsWindowIteratorGetAttributes(iterator) & orderedInAttribute == 0,
-               slsWindowIteratorGetTags(iterator) & minimizedTag == 0 {
+               tags & minimizedTag == 0 {
                 verdicts.orderedOut.insert(windowID)
             }
         }

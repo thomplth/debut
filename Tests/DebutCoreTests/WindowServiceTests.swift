@@ -234,6 +234,45 @@ struct WindowServiceTests {
         #expect(ghosts == [12791])
     }
 
+    @Test("A hidden Chrome window and its orphan popup have different window identities")
+    func hiddenChromePopupIsNotAWindow() {
+        let ghosts = AccessibilityWindowService.orderedOutGhostWindowIDs(
+            orderedOutWindowIDs: [12789, 12791],
+            ownerPIDs: [12789: 90962, 12791: 90962],
+            hiddenPIDs: [90962],
+            hiddenTaggedWindowIDs: [12789],
+            axWindowIDsByPID: [90962: [12789]],
+            windowDesktops: [12789: 3, 12791: 3]
+        )
+        #expect(ghosts == [12791])
+    }
+
+    @Test("An inconclusive AX lookup preserves a hidden window")
+    func hiddenWindowWithNoCorroboratedPeerSurvives() {
+        let ghosts = AccessibilityWindowService.orderedOutGhostWindowIDs(
+            orderedOutWindowIDs: [17973],
+            ownerPIDs: [17973: 48584],
+            hiddenPIDs: [48584],
+            hiddenTaggedWindowIDs: [],
+            axWindowIDsByPID: [:],
+            windowDesktops: [17973: 2]
+        )
+        #expect(ghosts.isEmpty)
+    }
+
+    @Test("AX identity protects a real hidden window without an app-hide tag")
+    func axNamedHiddenWindowSurvivesWithoutHideTag() {
+        let ghosts = AccessibilityWindowService.orderedOutGhostWindowIDs(
+            orderedOutWindowIDs: [17973, 17974],
+            ownerPIDs: [17973: 48584, 17974: 48584],
+            hiddenPIDs: [48584],
+            hiddenTaggedWindowIDs: [],
+            axWindowIDsByPID: [48584: [17973, 17974]],
+            windowDesktops: [17973: 2, 17974: 2]
+        )
+        #expect(ghosts.isEmpty)
+    }
+
     // A window whose owner is not among the running apps has no hidden state to consult. Treating
     // that as "not hidden" would let an unresolved owner delete a real window, so the verdict has
     // to abstain instead.
