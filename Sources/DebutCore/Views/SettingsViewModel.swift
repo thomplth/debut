@@ -127,4 +127,8 @@ public struct SettingsViewModel: Sendable {
         )
     }
 
+    public mutating func restoreDefaultSettings() {
+        settings = AppSettings()
+    }
+
 }

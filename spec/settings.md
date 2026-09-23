@@ -81,7 +81,7 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | Switcher | Command-Tab desktop isolation, Option-Tab activation, window previews, display placement, and preview freshness. |
 | Appearance | Glass and card layout, adaptive preview sizing, inactive-stage scale, and selected-window treatment. |
 | Shortcuts | Activation/session bindings, numbered modifier sets, hold delay, repeat pace, a confirmed restore-defaults action, and reference for fixed move chords. |
-| Support | Bug reporting through a public GitHub issue form (requires a GitHub account), diagnostic export, and a confirmed window-cache reset that preserves settings. |
+| Support | Bug reporting through a public GitHub issue form (requires a GitHub account), diagnostic export, a confirmed window-cache reset that preserves settings, and a confirmed reset of all settings that preserves window assignments. |
 | About | Debut icon and version, update checks, and links to the GitHub repository and creator's Twitter profile. |
 
 Every configurable value has one destination: app-level choices and ignored apps

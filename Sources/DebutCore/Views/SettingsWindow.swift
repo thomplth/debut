@@ -36,6 +36,7 @@ public struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
     @State private var selectedSection: SettingsSection = .general
     @State private var showingResetConfirmation = false
+    @State private var showingResetAllSettingsConfirmation = false
     @State private var showingRestoreDefaultsConfirmation = false
     private let shortcutRecordingService: (any ShortcutRecordingService)?
     @State private var externallyAppliedSettings: AppSettings?
@@ -101,6 +102,18 @@ public struct SettingsView: View {
             }
         } message: {
             Text("This removes all space window assignments, including dormant windows, and rebuilds assignments from your current macOS desktops. Settings are preserved.")
+        }
+        .confirmationDialog(
+            "Reset All Settings?",
+            isPresented: $showingResetAllSettingsConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reset All Settings", role: .destructive) {
+                viewModel.restoreDefaultSettings()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This resets every Debut preference, including ignored apps, shortcuts, Dock visibility, and launch-at-login. Window assignments and system permissions are preserved.")
         }
     }
 
@@ -794,6 +807,22 @@ public struct SettingsView: View {
                 Spacer()
                 Button("Reset Window Cache…", role: .destructive) {
                     showingResetConfirmation = true
+                }
+            }
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("All settings")
+                    Text("Restore Debut preferences to their defaults. Window assignments are preserved.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button("Reset All Settings…", role: .destructive) {
+                    showingResetAllSettingsConfirmation = true
                 }
             }
         }
