@@ -1059,15 +1059,17 @@ struct ScreenshotTests {
             ),
             glassStyle: glassStyle
         )
-        let image = try #require(renderSwiftUI(
-            view,
-            size: NSSize(width: 240, height: 72),
-            background: 0.32
-        ))
-        try saveImage(
-            image,
-            name: "07_desktop_switch_indicator_\(glassStyle.rawValue.lowercased())"
-        )
+        for (backgroundName, background) in [("dark", 0.06), ("light", 0.94)] {
+            let image = try #require(renderSwiftUI(
+                view.padding(DesktopSwitchIndicatorWindow.glassRenderingInset),
+                size: NSSize(width: 264, height: 96),
+                background: background
+            ))
+            try saveImage(
+                image,
+                name: "07_desktop_switch_indicator_\(glassStyle.rawValue.lowercased())_\(backgroundName)"
+            )
+        }
     }
 
     @Test("Launch settings sections render independently", arguments: SettingsSection.allCases)

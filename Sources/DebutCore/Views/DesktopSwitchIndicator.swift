@@ -114,6 +114,7 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
     public static let visibleDuration: TimeInterval = 1.0
     public static let fadeDuration: TimeInterval = 0.15
     public static let topPadding: CGFloat = 18
+    public static let glassRenderingInset: CGFloat = 12
 
     private var presentationGeneration: UInt = 0
     private var dismissal: DispatchWorkItem?
@@ -137,13 +138,14 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
     public static func frame(
         screenFrame: CGRect,
         topContentInset: CGFloat,
-        indicatorSize: CGSize
+        panelSize: CGSize
     ) -> CGRect {
         CGRect(
-            x: screenFrame.midX - indicatorSize.width / 2,
-            y: screenFrame.maxY - topContentInset - topPadding - indicatorSize.height,
-            width: indicatorSize.width,
-            height: indicatorSize.height
+            x: screenFrame.midX - panelSize.width / 2,
+            y: screenFrame.maxY - topContentInset - topPadding - panelSize.height
+                + glassRenderingInset,
+            width: panelSize.width,
+            height: panelSize.height
         )
     }
 
@@ -166,6 +168,7 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
                 presentation: presentation,
                 glassStyle: glassStyle
             )
+            .padding(Self.glassRenderingInset)
         )
         let fittingSize = hostingView.fittingSize
         let size = CGSize(
@@ -175,7 +178,7 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
         setFrame(Self.frame(
             screenFrame: screen.frame,
             topContentInset: screen.overlayTopContentInset,
-            indicatorSize: size
+            panelSize: size
         ), display: false)
         hostingView.frame = CGRect(origin: .zero, size: size)
         contentView = hostingView

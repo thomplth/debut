@@ -329,6 +329,13 @@ suite_status=$?
 if (( suite_status != 0 )); then status="$suite_status"; fi
 set -e
 
+echo "Capturing desktop indicator and overlay glass on light and dark backgrounds..."
+grant_screen_capture "$E2E_SOURCE" 1 "$E2E_SOURCE"
+sudo killall tccd 2>/dev/null || true
+if ! as_console env HOME="$console_home" "$E2E_SOURCE" capture-desktop-indicator-glass; then
+    status=1
+fi
+
 if [[ -d /tmp/debut-e2e-screenshots ]]; then
     ditto /tmp/debut-e2e-screenshots "$RESULTS_DIR/screenshots"
 fi
