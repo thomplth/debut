@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Testing
 @testable import DebutCore
 
@@ -40,16 +41,24 @@ struct DesktopSwitchIndicatorTests {
         #expect(presentation.accessibilityLabel == "Studio Display, desktop 1 of 4")
     }
 
-    @Test("Indicator uses the overlay header position on its display")
+    @Test("Indicator panel keeps the visible pill at the overlay header position")
     func placement() {
+        let screenFrame = CGRect(x: 1200, y: -200, width: 1440, height: 900)
+        let renderingInset = DesktopSwitchIndicatorWindow.glassRenderingInset
+        let pillSize = CGSize(width: 180, height: 38)
+        let panelSize = CGSize(
+            width: pillSize.width + renderingInset * 2,
+            height: pillSize.height + renderingInset * 2
+        )
         let frame = DesktopSwitchIndicatorWindow.frame(
-            screenFrame: CGRect(x: 1200, y: -200, width: 1440, height: 900),
+            screenFrame: screenFrame,
             topContentInset: 32,
-            indicatorSize: CGSize(width: 180, height: 38)
+            panelSize: panelSize
         )
 
-        #expect(frame.midX == 1920)
-        #expect(frame.maxY == 650)
+        #expect(frame.midX == screenFrame.midX)
+        #expect(frame.maxY - renderingInset == screenFrame.maxY
+            - 32 - DesktopSwitchIndicatorWindow.topPadding)
     }
 
     @Test("Indicator shifts up when the menu bar is auto-hidden")
@@ -65,20 +74,26 @@ struct DesktopSwitchIndicatorTests {
             visibleFrame: screenFrame,
             safeAreaTopInset: 0
         )
-        let size = CGSize(width: 180, height: 38)
+        let renderingInset = DesktopSwitchIndicatorWindow.glassRenderingInset
+        let pillSize = CGSize(width: 180, height: 38)
+        let panelSize = CGSize(
+            width: pillSize.width + renderingInset * 2,
+            height: pillSize.height + renderingInset * 2
+        )
         let belowVisibleMenuBar = DesktopSwitchIndicatorWindow.frame(
             screenFrame: screenFrame,
             topContentInset: visibleMenuBarInset,
-            indicatorSize: size
+            panelSize: panelSize
         )
         let belowHiddenMenuBar = DesktopSwitchIndicatorWindow.frame(
             screenFrame: screenFrame,
             topContentInset: hiddenMenuBarInset,
-            indicatorSize: size
+            panelSize: panelSize
         )
 
         #expect(belowHiddenMenuBar.maxY - belowVisibleMenuBar.maxY == 26)
-        #expect(belowHiddenMenuBar.maxY == screenFrame.maxY - DesktopSwitchIndicatorWindow.topPadding)
+        #expect(belowHiddenMenuBar.maxY - renderingInset
+            == screenFrame.maxY - DesktopSwitchIndicatorWindow.topPadding)
     }
 
     @Test("Indicator retains the configured overlay glass style")
@@ -99,6 +114,32 @@ struct DesktopSwitchIndicatorTests {
             presentation: presentation,
             glassStyle: .regular
         ).glassStyle == .regular)
+    }
+
+    @Test("Rendering inset grows the hosted indicator by 24 points for both glass styles")
+    func renderingInsetAddsHostingSpace() {
+        let presentation = DesktopSwitchIndicatorPresentation(
+            stackID: "display-a",
+            displayID: 42,
+            displayName: "Studio Display",
+            desktopPosition: 2,
+            desktopCount: 4
+        )
+        let inset = DesktopSwitchIndicatorWindow.glassRenderingInset
+
+        for glassStyle in [GlassStyle.clear, .regular] {
+            let pillView = NSHostingView(rootView: DesktopSwitchIndicatorView(
+                presentation: presentation,
+                glassStyle: glassStyle
+            ))
+            let panelView = NSHostingView(rootView: DesktopSwitchIndicatorView(
+                presentation: presentation,
+                glassStyle: glassStyle
+            ).padding(inset))
+
+            #expect(abs(panelView.fittingSize.width - pillView.fittingSize.width - inset * 2) < 0.5)
+            #expect(abs(panelView.fittingSize.height - pillView.fittingSize.height - inset * 2) < 0.5)
+        }
     }
 
     @Test("Presentation policy honors the setting and an open overlay")

@@ -125,9 +125,12 @@ func readEvents() -> [[String: String]] {
 
 // MARK: - Screenshot
 
+let capturesGlassVariants = CommandLine.arguments.dropFirst().first
+    == "capture-desktop-indicator-glass"
+
 let screenshotDir: URL = {
     let dir = URL(fileURLWithPath: "/tmp/debut-e2e-screenshots")
-    try? FileManager.default.removeItem(at: dir)
+    if !capturesGlassVariants { try? FileManager.default.removeItem(at: dir) }
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     return dir
 }()
@@ -303,6 +306,93 @@ let displayCaptureFilter: SendableContentFilter? = {
     _ = semaphore.wait(timeout: .now() + 10)
     return box.load()
 }()
+
+@MainActor
+func captureDesktopIndicatorGlassVariants() -> Bool {
+    guard let screen = NSScreen.screens.first(where: { $0.displayID == CGMainDisplayID() })
+            ?? NSScreen.main
+    else {
+        fail("Could not find a display for desktop indicator glass captures")
+        return false
+    }
+
+    let backdrop = NSWindow(
+        contentRect: screen.frame,
+        styleMask: .borderless,
+        backing: .buffered,
+        defer: false
+    )
+    backdrop.level = .normal
+    backdrop.isOpaque = true
+    backdrop.hasShadow = false
+    backdrop.ignoresMouseEvents = true
+    backdrop.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    backdrop.setFrame(screen.frame, display: true)
+    backdrop.orderFrontRegardless()
+
+    let presentation = DesktopSwitchIndicatorPresentation(
+        stackID: "glass-capture",
+        displayID: screen.displayID,
+        displayName: "Tart Display",
+        desktopPosition: 2,
+        desktopCount: 4
+    )
+    var succeeded = true
+
+    for glassStyle in GlassStyle.allCases {
+        var settings = AppSettings()
+        settings.glassStyle = glassStyle
+        let overlayModel = StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0,
+            appearance: settings,
+            forceDisplayStackIndicator: true
+        )
+
+        for (backgroundName, whiteValue) in [("dark", CGFloat(0.06)), ("light", CGFloat(0.94))] {
+            backdrop.backgroundColor = NSColor(white: whiteValue, alpha: 1)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+
+            let indicator = DesktopSwitchIndicatorWindow()
+            indicator.present(
+                presentation,
+                on: screen,
+                glassStyle: glassStyle,
+                visibleDuration: 5
+            )
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            let indicatorName = "desktop_switch_indicator_\(glassStyle.rawValue.lowercased())_\(backgroundName)_tart"
+            _ = takeScreenshot(indicatorName)
+            succeeded = succeeded
+                && FileManager.default.fileExists(
+                    atPath: screenshotDir.appendingPathComponent("\(indicatorName).png").path
+                )
+            indicator.hideImmediately()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+
+            let overlay = OverlayWindow()
+            _ = overlay.update(viewModel: overlayModel)
+            overlay.showOverlay(revealDuration: 0)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            let overlayName = "overlay_glass_\(glassStyle.rawValue.lowercased())_\(backgroundName)_tart"
+            _ = takeScreenshot(overlayName)
+            succeeded = succeeded
+                && FileManager.default.fileExists(
+                    atPath: screenshotDir.appendingPathComponent("\(overlayName).png").path
+                )
+            overlay.orderOut(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        }
+    }
+
+    backdrop.orderOut(nil)
+    return succeeded
+}
+
+if capturesGlassVariants {
+    exit(captureDesktopIndicatorGlassVariants() ? 0 : 1)
+}
 
 /// Asking for one screenshot at a time samples an animation at whatever rate the host can answer a
 /// round trip, and a hosted runner busy compositing the very motion being measured answered four
