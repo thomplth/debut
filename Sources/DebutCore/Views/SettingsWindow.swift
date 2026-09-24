@@ -380,7 +380,7 @@ public struct SettingsView: View {
                     "Match each preview to its window",
                     isOn: $viewModel.settings.adaptiveCardSizing
                 )
-                Text("Use each window’s proportions instead of a uniform card size.")
+                Text("Use each window’s proportions up to the display-shaped card size.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

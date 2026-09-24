@@ -312,16 +312,16 @@ struct AdaptiveStageGeometryTests {
         )[0]
 
         let center = try? #require(StageConstants.windowCardCenter(
-            spaceIndex: 0, windowIndex: 0, contentAspects: aspects,
+            spaceIndex: 0, windowIndex: 1, contentAspects: aspects,
             activeSpaceIndex: 0, inactiveScale: 0.8, containerSize: container, metrics: metrics
         ))
         let uniform = StageConstants.windowCardCenter(
-            spaceIndex: 0, windowIndex: 0, windowCounts: [2],
+            spaceIndex: 0, windowIndex: 1, windowCounts: [2],
             activeSpaceIndex: 0, inactiveScale: 0.8, containerSize: container, metrics: metrics
         )
 
         #expect(layout.cardWidth(at: 0) < layout.cardWidth(at: 1))
-        #expect(center?.x == container.width / 2 + layout.cardOffsetFromCenter(at: 0).width)
+        #expect(center?.x == container.width / 2 + layout.cardOffsetFromCenter(at: 1).width)
         #expect(center?.x != uniform?.x)
     }
 
