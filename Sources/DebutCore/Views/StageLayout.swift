@@ -8,8 +8,8 @@ import CoreGraphics
 ///
 /// The card takes the shape of the display it is drawn on, since a window nearly always has
 /// roughly the shape of the screen it lives on and a card of some other shape would letterbox
-/// its preview. `adapted(toContentAspect:)` reshapes one card to its own window instead, which
-/// is the display's shape again for a window that fills its screen.
+/// its preview. `adapted(toContentAspect:)` narrows a card for a narrow window; a wider window's
+/// preview fits inside the display-shaped card.
 public struct StageMetrics: Equatable, Sendable {
     public let thumbnailWidth: CGFloat
     public let thumbnailHeight: CGFloat
@@ -86,17 +86,13 @@ public struct StageMetrics: Equatable, Sendable {
         )
     }
 
-    /// How far above the display's own shape a card may stray. One very wide window would
-    /// otherwise push its row off the display.
-    public static let maximumAdaptiveWidthRatio: CGFloat = 1.6
-
     /// The narrowest a card is drawn. A tall window's card may shrink until it can no longer say
     /// which app the window belongs to, which is the icon badged over its top-left corner. A
     /// fraction of the display's card was the earlier floor and had nothing to do with what a
     /// narrow card still has to show.
     public var minimumAdaptiveWidth: CGFloat { badgeSize + cardPadding * 2 }
 
-    /// These metrics with the card narrowed or widened to one window's shape.
+    /// These metrics with the card narrowed to one window's shape when it fits.
     ///
     /// The height is what the row shares, so only the width moves: a narrow window then takes
     /// less horizontal room than the widest one beside it. An aspect of `nil` is a window whose
@@ -104,7 +100,7 @@ public struct StageMetrics: Equatable, Sendable {
     public func adapted(toContentAspect aspect: CGFloat?) -> StageMetrics {
         guard let aspect, aspect > 0, thumbnailWidth > 0 else { return self }
         return withThumbnailWidth(max(
-            min(thumbnailHeight * aspect, thumbnailWidth * Self.maximumAdaptiveWidthRatio),
+            min(thumbnailHeight * aspect, thumbnailWidth),
             minimumAdaptiveWidth
         ))
     }
@@ -220,9 +216,9 @@ public struct StageGridSlot: Equatable, Sendable {
 /// does not expect it. Positions are unscaled and measured from the stage's centre, which is the
 /// one point that survives the focus-distance scale transform.
 public struct StageWindowLayout: Equatable, Sendable {
-    /// Every card's own thumbnail width, in model order. A card is as wide as its window is
-    /// shaped, so this is what the grid, the renderer and the drop projection all measure
-    /// against; none of them may re-derive a width of their own.
+    /// Every card's own thumbnail width, in model order. A card narrows to its window's shape
+    /// but never widens past the display-shaped card, so the grid, renderer and drop projection
+    /// all measure from this value; none of them may re-derive a width of their own.
     public let thumbnailWidths: [CGFloat]
     public let rowSizes: [Int]
     public let metrics: StageMetrics

@@ -498,7 +498,7 @@ struct AdaptiveCardSizingTests {
         metrics.padding * 2 + metrics.cardWidth * 4 + metrics.windowSpacing * 3
     }
 
-    @Test("A card takes its own window's shape, at the row's fixed height")
+    @Test("A card takes its own window's shape up to the display width")
     func cardFollowsItsOwnWindow() {
         let narrow = metrics.adapted(toContentAspect: 1.2)
         #expect(narrow.thumbnailHeight == metrics.thumbnailHeight)
@@ -507,13 +507,22 @@ struct AdaptiveCardSizingTests {
 
         let wide = metrics.adapted(toContentAspect: 2)
         #expect(wide.thumbnailHeight == metrics.thumbnailHeight)
-        #expect(wide.thumbnailWidth == metrics.thumbnailHeight * 2)
-        #expect(wide.thumbnailWidth > metrics.thumbnailWidth)
+        #expect(wide.thumbnailWidth == metrics.thumbnailWidth)
     }
 
     @Test("A window shaped like the display draws the card the display already asked for")
     func displayShapedWindowIsUnchanged() {
         #expect(metrics.adapted(toContentAspect: displayAspect) == metrics)
+    }
+
+    @Test("Wide windows keep the display-shaped card width")
+    func wideWindowsUseDisplayCardWidth() {
+        let wide = metrics.adapted(toContentAspect: displayAspect * 2)
+        let layout = layout([displayAspect * 2], availableWidth: fourColumnWidth)
+
+        #expect(wide.thumbnailWidth == metrics.thumbnailWidth)
+        #expect(wide.thumbnailHeight == metrics.thumbnailHeight)
+        #expect(layout.cardMetrics(at: 0).thumbnailWidth == metrics.thumbnailWidth)
     }
 
     /// Nothing announces a window's size before it has been discovered, and a card with no
@@ -525,16 +534,15 @@ struct AdaptiveCardSizingTests {
         #expect(metrics.adapted(toContentAspect: -2) == metrics)
     }
 
-    /// A card must always show which app the window belongs to, and one very wide window would
-    /// push its whole row off the display.
-    @Test("Card width is clamped between its app icon and a band above the display's card")
+    /// A card must always show which app the window belongs to, and a very wide window must fit
+    /// inside the display-shaped card instead of widening the overlay.
+    @Test("Card width is clamped between its app icon and the display-shaped card")
     func widthIsClamped() {
         let sliver = metrics.adapted(toContentAspect: 0.05)
         let banner = metrics.adapted(toContentAspect: 40)
 
         #expect(sliver.thumbnailWidth == metrics.minimumAdaptiveWidth)
-        #expect(banner.thumbnailWidth
-            == metrics.thumbnailWidth * StageMetrics.maximumAdaptiveWidthRatio)
+        #expect(banner.thumbnailWidth == metrics.thumbnailWidth)
     }
 
     /// The badge is drawn over the thumbnail's top-left corner, so the narrowest card is the one
