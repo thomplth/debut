@@ -67,14 +67,19 @@ final class OnboardingVideoSurface: NSView {
     private let videoLayer = AVPlayerLayer()
     var playing = true { didSet { updatePlayback() } }
 
-    init(url: URL) {
+    init(url: URL, loopTimeRange: CMTimeRange? = nil) {
         super.init(frame: .zero)
         wantsLayer = true
         videoLayer.player = player
         videoLayer.videoGravity = .resizeAspect
         layer?.addSublayer(videoLayer)
         player.isMuted = true
-        looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        let item = AVPlayerItem(url: url)
+        if let loopTimeRange {
+            looper = AVPlayerLooper(player: player, templateItem: item, timeRange: loopTimeRange)
+        } else {
+            looper = AVPlayerLooper(player: player, templateItem: item)
+        }
     }
 
     required init?(coder: NSCoder) { nil }

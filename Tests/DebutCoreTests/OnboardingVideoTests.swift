@@ -23,7 +23,13 @@ struct OnboardingVideoTests {
         #expect(try await asset.load(.duration).seconds == 5)
         #expect(try await asset.loadTracks(withMediaType: .audio).isEmpty)
 
-        let surface = OnboardingVideoSurface(url: movieURL)
+        // Loop a short range of the shipped movie: this still exercises decoding and
+        // AVPlayerLooper, without making the test wait for five seconds of playback.
+        let surface = OnboardingVideoSurface(
+            url: movieURL,
+            loopTimeRange: CMTimeRange(start: .zero,
+                duration: CMTime(seconds: 0.25, preferredTimescale: 600))
+        )
         defer { surface.stop() }
         #expect(surface.player.isMuted)
         #expect(surface.player.rate == 0) // No playback before the page has a window.
