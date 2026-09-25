@@ -40,7 +40,9 @@ public final class StateStore: Sendable {
         try ensureDirectory()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(manager)
+        var persisted = manager
+        persisted.removeTransientWindowAssignments()
+        let data = try encoder.encode(persisted)
         try data.write(to: stateFileURL, options: .atomic)
     }
 
@@ -54,7 +56,8 @@ public final class StateStore: Sendable {
         // low numbers on every relaunch, not only across a reboot. `RuntimeWindowReconciler`
         // validates each assignment against the live snapshot instead of trusting the file;
         // a legacy file's leftover `bootSessionID` key is simply ignored by the decoder.
-        if let manager = try? JSONDecoder().decode(SpaceManager.self, from: data) {
+        if var manager = try? JSONDecoder().decode(SpaceManager.self, from: data) {
+            manager.removeTransientWindowAssignments()
             return manager
         }
 

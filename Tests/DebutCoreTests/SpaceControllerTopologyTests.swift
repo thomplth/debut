@@ -1879,6 +1879,30 @@ struct SpaceControllerSpaceTests {
         #expect(controller.spaceManager.spaceContainingWindow(windowID: 101) == spaceA)
     }
 
+    @Test("A transient shielding card cannot be moved to another desktop")
+    func refusesTransientShieldingMove() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
+        let sourceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.activateSpace(id: sourceID)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101,
+                        ownerBundleID: TransientWindowIdentity.bundleID(for: 42),
+                        ownerName: "python", windowTitle: "Game", ownerPID: 42),
+            toSpaceID: sourceID
+        )
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(!controller.moveWindowByDrag(windowID: 101, fromSpaceIndex: 0,
+                                             toSpaceIndex: 1, toWindowIndex: 0))
+        keyboardService.simulateEvent(.moveWindowDown)
+        keyboardService.simulateEvent(.cmdRelease)
+
+        #expect(spaces.moveRequests.isEmpty)
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 101) == sourceID)
+    }
+
     // Reordering inside one space never touches a desktop, so it must survive the gate.
     @Test("Reordering within a space still works when the transport is unavailable")
     func reordersWithoutTransport() {

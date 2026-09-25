@@ -449,6 +449,12 @@ enum StageMotion {
         hasPreview
     }
 
+    /// Process-scoped identities have no Launch Services application icon. Leave their card
+    /// empty instead of inventing an icon from the process name.
+    static func showsAppIcon(bundleID: String) -> Bool {
+        !TransientWindowIdentity.isTransient(bundleID)
+    }
+
     static func windowSelectorFill(isDarkMode: Bool) -> WindowSelectorFill {
         // The screenshots show white at 30% over the dark desktop and black at 25% over
         // the light desktop. Keeping the overlay translucent lets the desktop material show
@@ -2341,34 +2347,37 @@ struct WindowPreviewView: View {
                                 // Rasterized at a scale-independent size and framed at the
                                 // drawn one, so moving the stage scale never invalidates the
                                 // warmed icons.
-                                AppIconImage(
-                                    bundleID: window.ownerBundleID,
-                                    name: window.ownerName,
-                                    iconSize: AppIconCache.placeholderIconRasterSize,
-                                    fallbackBaseSize: StageMetrics.standard.previewPlaceholderIconSize
-                                )
-                                .frame(
-                                    width: metrics.previewPlaceholderIconSize,
-                                    height: metrics.previewPlaceholderIconSize
-                                )
-                                .background {
-                                    // Overflow the icon's layout box with a shared bitmap. No
-                                    // alpha-derived shadow filter follows the changing cards.
-                                    let padded = metrics.previewPlaceholderIconSize
-                                        * (AppIconCache.BakedIconShadow.iconSide
-                                            + AppIconCache.BakedIconShadow.padding * 2)
-                                        / AppIconCache.BakedIconShadow.iconSide
-                                    Image(nsImage: AppIconCache.iconShadow)
-                                        .resizable()
-                                        .frame(width: padded, height: padded)
-                                        .allowsHitTesting(false)
+                                if StageMotion.showsAppIcon(bundleID: window.ownerBundleID) {
+                                    AppIconImage(
+                                        bundleID: window.ownerBundleID,
+                                        name: window.ownerName,
+                                        iconSize: AppIconCache.placeholderIconRasterSize,
+                                        fallbackBaseSize: StageMetrics.standard.previewPlaceholderIconSize
+                                    )
+                                    .frame(
+                                        width: metrics.previewPlaceholderIconSize,
+                                        height: metrics.previewPlaceholderIconSize
+                                    )
+                                    .background {
+                                        // Overflow the icon's layout box with a shared bitmap. No
+                                        // alpha-derived shadow filter follows the changing cards.
+                                        let padded = metrics.previewPlaceholderIconSize
+                                            * (AppIconCache.BakedIconShadow.iconSide
+                                                + AppIconCache.BakedIconShadow.padding * 2)
+                                            / AppIconCache.BakedIconShadow.iconSide
+                                        Image(nsImage: AppIconCache.iconShadow)
+                                            .resizable()
+                                            .frame(width: padded, height: padded)
+                                            .allowsHitTesting(false)
+                                    }
                                 }
                             }
                     }
                 }
                 .frame(width: metrics.thumbnailWidth, height: metrics.thumbnailHeight)
 
-                if StageMotion.showsAppIconBadge(hasPreview: window.previewImage != nil) {
+                if StageMotion.showsAppIcon(bundleID: window.ownerBundleID) &&
+                    StageMotion.showsAppIconBadge(hasPreview: window.previewImage != nil) {
                     // The badge's shadow is in its bitmap, which is therefore padded and draws
                     // past the badge's box on every side. Framing that padded image directly
                     // would widen the card, so the box keeps the badge's size and the picture

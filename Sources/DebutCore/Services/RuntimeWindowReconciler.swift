@@ -384,7 +384,7 @@ public struct RuntimeWindowReconciler: Sendable {
             // statement that the guess is wrong, and the guess creates a live assignment rather
             // than only misplacing one. Dia's fullscreen window sits on a Space that is not a
             // desktop, which is how each fullscreen cycle stood a second Dia card in stage 1.
-            if desktopSpaceID == nil,
+            if desktopSpaceID == nil, !info.isTransientFullscreen,
                let placedWindowIDs = snapshot.skyLightWindowIDs,
                !placedWindowIDs.contains(info.windowID) {
                 refusedCount += 1
@@ -395,7 +395,8 @@ public struct RuntimeWindowReconciler: Sendable {
                 strandedSpaceIDs: strandedSpaceIDs,
                 spaceManager: spaceManager
             )
-            let placementSpaceID = desktopSpaceID ?? strandedSpaceID ?? targetSpaceID
+            let placementSpaceID = desktopSpaceID ?? strandedSpaceID ??
+                (info.isTransientFullscreen ? spaceManager.activeSpaceID : targetSpaceID)
             spaceManager.addWindow(
                 SpaceWindow(
                     windowID: info.windowID,

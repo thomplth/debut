@@ -883,6 +883,14 @@ struct StageMotionTests {
         #expect(!StageMotion.showsAppIconBadge(hasPreview: false))
     }
 
+    @Test("A bundleless transient card does not invent an application icon")
+    func transientIconVisibility() {
+        #expect(StageMotion.showsAppIcon(bundleID: "com.apple.finder"))
+        #expect(!StageMotion.showsAppIcon(
+            bundleID: TransientWindowIdentity.bundleID(for: 42)
+        ))
+    }
+
     @Test("The fill uses screenshot-derived translucent adaptive colors")
     func filledColors() {
         let darkFill = StageMotion.windowSelectorFill(isDarkMode: true)

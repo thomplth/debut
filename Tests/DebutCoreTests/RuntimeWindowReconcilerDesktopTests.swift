@@ -53,6 +53,35 @@ struct RuntimeWindowReconcilerDesktopTests {
         #expect(manager.spaceContainingWindow(windowID: 7) == manager.spaces[2].id)
     }
 
+    @Test("A transient fullscreen window without a SkyLight desktop joins the showing desktop")
+    func shieldingWindowUsesShowingDesktop() {
+        var manager = threeSpaces()
+        manager.activateSpace(id: manager.spaces[1].id)
+        var reconciler = RuntimeWindowReconciler()
+        let window = WindowInfo(
+            windowID: 7,
+            ownerBundleID: TransientWindowIdentity.bundleID(for: 42),
+            ownerName: "python",
+            ownerPID: 42,
+            title: "Game",
+            bounds: CGRect(x: 0, y: 0, width: 2560, height: 1440),
+            isOnScreen: true,
+            isTransientFullscreen: true
+        )
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [window],
+                allWindowIDs: [7],
+                skyLightWindowIDs: []
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(result.addedCount == 1)
+        #expect(manager.spaceContainingWindow(windowID: 7) == manager.spaces[1].id)
+    }
+
     // The whole point of the Spaces architecture: the user drags a window to another desktop
     // with Mission Control, and Debut has to follow rather than fight.
     @Test("A window dragged to another desktop is reassigned to that space")

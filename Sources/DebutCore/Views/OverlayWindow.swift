@@ -208,6 +208,16 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         hostingView?.frame = contentView?.bounds ?? .zero
         startWatchingScroll()
         alphaValue = 0
+        // An exclusive display capture places its shielding surface above ordinary AppKit
+        // levels. Only raise the switcher when that surface belongs to the app receiving the
+        // Command-Tab session; a shield owned by another process must not change its level.
+        let visibleWindows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+            as? [[CFString: Any]] ?? []
+        setPresentationLevel(
+            frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+            visibleWindows: visibleWindows,
+            shieldingLevel: Int(CGShieldingWindowLevel())
+        )
         // A borderless window cannot become key, and Debut is an accessory app
         // that is inactive when the overlay opens. Asking for key status buys
         // nothing and makes the ordering conditional on app activation.
@@ -219,6 +229,23 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         }, completionHandler: {
             DispatchQueue.main.async { onRevealCompleted() }
         })
+    }
+
+    func setPresentationLevel(
+        frontmostPID: pid_t?,
+        visibleWindows: [[CFString: Any]],
+        shieldingLevel: Int
+    ) {
+        guard let frontmostPID,
+              visibleWindows.contains(where: { window in
+                  (window[kCGWindowOwnerPID] as? NSNumber)?.int32Value == frontmostPID &&
+                      (window[kCGWindowLayer] as? NSNumber)?.intValue == shieldingLevel
+              })
+        else {
+            level = .statusBar
+            return
+        }
+        level = NSWindow.Level(rawValue: shieldingLevel + 1)
     }
 
     /// SwiftUI has no scroll-wheel modifier, and a scroll delivered through the responder chain

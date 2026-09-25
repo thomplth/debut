@@ -16,6 +16,31 @@ struct OverlayWindowTests {
         #expect(window.level == .statusBar)
     }
 
+    @Test("The overlay rises above a shielding surface owned by the frontmost app")
+    func overlayLevelsForExclusiveFullscreen() {
+        let window = OverlayWindow()
+        let shieldLevel = 2_000
+        let shield: [CFString: Any] = [
+            kCGWindowOwnerPID: 42,
+            kCGWindowLayer: shieldLevel,
+            kCGWindowNumber: 100,
+        ]
+
+        window.setPresentationLevel(
+            frontmostPID: 42,
+            visibleWindows: [shield],
+            shieldingLevel: shieldLevel
+        )
+        #expect(window.level.rawValue == shieldLevel + 1)
+
+        window.setPresentationLevel(
+            frontmostPID: 77,
+            visibleWindows: [shield],
+            shieldingLevel: shieldLevel
+        )
+        #expect(window.level == .statusBar)
+    }
+
     @Test("The overlay is a nonactivating panel, which is what a regular app can order there")
     func overlayIsANonactivatingPanel() {
         // Measured in the Tart guest with a fullscreen TextEdit showing: from a regular

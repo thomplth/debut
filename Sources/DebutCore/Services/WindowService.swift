@@ -1,5 +1,14 @@
 import CoreGraphics
 
+/// A bundleless exclusive-fullscreen process has no durable application identity. Keep its
+/// window distinct during this run, then discard the assignment before persistence.
+enum TransientWindowIdentity {
+    private static let prefix = "com.thomplth.Debut.transient.bundleless."
+
+    static func bundleID(for pid: pid_t) -> String { prefix + String(pid) }
+    static func isTransient(_ bundleID: String) -> Bool { bundleID.hasPrefix(prefix) }
+}
+
 public struct WindowInfo: Sendable, Equatable {
     public let windowID: CGWindowID
     public let ownerBundleID: String
@@ -8,8 +17,9 @@ public struct WindowInfo: Sendable, Equatable {
     public let title: String
     public let bounds: CGRect
     public let isOnScreen: Bool
+    public let isTransientFullscreen: Bool
 
-    public init(windowID: CGWindowID, ownerBundleID: String, ownerName: String, ownerPID: pid_t, title: String, bounds: CGRect, isOnScreen: Bool) {
+    public init(windowID: CGWindowID, ownerBundleID: String, ownerName: String, ownerPID: pid_t, title: String, bounds: CGRect, isOnScreen: Bool, isTransientFullscreen: Bool = false) {
         self.windowID = windowID
         self.ownerBundleID = ownerBundleID
         self.ownerName = ownerName
@@ -17,6 +27,7 @@ public struct WindowInfo: Sendable, Equatable {
         self.title = title
         self.bounds = bounds
         self.isOnScreen = isOnScreen
+        self.isTransientFullscreen = isTransientFullscreen
     }
 }
 

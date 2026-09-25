@@ -475,11 +475,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         discovery.onAppTerminated = { [weak self] ownerPID in
             DispatchQueue.main.async {
                 guard let self, let controller = self.spaceController else { return }
-                let dormantCount = controller.spaceManager.makeWindowsDormant(forOwnerPID: ownerPID)
+                let isTransient = controller.spaceManager.allSpaces.lazy.flatMap(\.windows)
+                    .contains { $0.ownerPID == ownerPID &&
+                        TransientWindowIdentity.isTransient($0.ownerBundleID) }
+                let removedCount = isTransient
+                    ? controller.spaceManager.removeAllWindows(forOwnerPID: ownerPID)
+                    : controller.spaceManager.makeWindowsDormant(forOwnerPID: ownerPID)
                 controller.recordAppTermination(ownerPID: ownerPID)
-                if dormantCount > 0 {
-                    self.diag.report("terminated_app_windows_made_dormant", details: [
-                        "count": "\(dormantCount)",
+                if removedCount > 0 {
+                    self.diag.report(isTransient
+                        ? "terminated_transient_app_windows_removed"
+                        : "terminated_app_windows_made_dormant", details: [
+                        "count": "\(removedCount)",
                         "ownerPID": "\(ownerPID)",
                     ])
                     let sm = controller.spaceManager
