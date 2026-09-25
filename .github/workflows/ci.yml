@@ -40,7 +40,9 @@ jobs:
         # Several suites block the main thread waiting on semaphores, which starves main-queue
         # work in whichever suite happens to run alongside them. Serial runs are ~3s slower and
         # remove that whole class of false failure.
-        run: swift test --no-parallel
+        run: |
+          swift test --no-parallel
+          swift run DebutE2E --harness-self-check
 
       - name: Build the release bundle
         run: ./scripts/build-app.sh

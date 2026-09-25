@@ -840,7 +840,10 @@ struct WindowDiscoveryServiceTests {
     }
 
     @Test("Startup reconcile places each window on the desktop it is actually on")
-    func startupReconcilePlacesByDesktop() {
+    func startupReconcilePlacesByDesktop() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
         let windowService = MockWindowService()
         windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
         windowService.windowList = [liveWindow(1), liveWindow(2)]
@@ -849,7 +852,8 @@ struct WindowDiscoveryServiceTests {
         spaces.windowDesktops = [1: 2, 2: 1]
         let service = WindowDiscoveryService(
             windowService: windowService,
-            processExitMonitor: MockProcessExitMonitor()
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
         )
         service.spaceSwitcher = spaces
         var manager = SpaceManager()
@@ -859,6 +863,11 @@ struct WindowDiscoveryServiceTests {
 
         #expect(manager.spaceContainingWindow(windowID: 1) == manager.spaces[2].id)
         #expect(manager.spaceContainingWindow(windowID: 2) == manager.spaces[1].id)
+        reporter.flush()
+        let summary = try #require(durableDiagnosticEvents(in: directory).first {
+            $0["event"] == "windows_reconciled"
+        })
+        #expect(summary["windowIDsBySpace"] == ";2;1")
     }
 
     // The first-run path bypasses the reconciler entirely, so it needs the desktop rule

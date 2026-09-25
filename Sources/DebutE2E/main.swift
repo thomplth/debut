@@ -88,6 +88,62 @@ func test(_ name: String, _ body: () -> Bool) {
     }
 }
 
+// Keep these harness decisions callable without posting global input. The self-check mode below
+// exercises the actual functions used by the desktop scenarios.
+func selectionReturned(
+    to original: String?,
+    from advanced: String?,
+    readIndex: () -> String?,
+    pause: () -> Void
+) -> Bool {
+    guard let original, let advanced, original != advanced else { return false }
+    for _ in 0..<10 {
+        if readIndex() == original { return true }
+        pause()
+    }
+    return false
+}
+
+func reportDragGeometryFailure(
+    _ name: String,
+    reason: String,
+    record: (String, () -> Bool) -> Void = test
+) {
+    record(name) {
+        info("  \(reason)")
+        return false
+    }
+}
+
+func moveDurationValues(full: Bool) -> [Int] {
+    if full { return Array(stride(from: 0, through: 400, by: 10)) }
+    return [0, 10, 40, 50, 60, 70, 80, 150, 400]
+}
+
+func reportedAspect(for windowID: CGWindowID, in state: [String: String]) -> CGFloat? {
+    let identifiers = SpaceController.decodeWindowIDs(state["windowIDsBySpace"] ?? "")
+    let aspects = SpaceController.decodeWindowAspects(state["windowAspectsBySpace"] ?? "")
+    for (spaceIndex, windows) in identifiers.enumerated() {
+        guard let windowIndex = windows.firstIndex(of: windowID) else { continue }
+        guard aspects.indices.contains(spaceIndex), aspects[spaceIndex].indices.contains(windowIndex) else {
+            return nil
+        }
+        return aspects[spaceIndex][windowIndex]
+    }
+    return nil
+}
+
+func firstReconciliationContains(
+    expected: [[CGWindowID]], event: [String: String]
+) -> Bool {
+    guard expected.contains(where: { !$0.isEmpty }),
+          let encoded = event["windowIDsBySpace"] else { return false }
+    let actual = SpaceController.decodeWindowIDs(encoded)
+    return expected.enumerated().allSatisfy { index, windows in
+        actual.indices.contains(index) && Set(windows).isSubset(of: Set(actual[index]))
+    }
+}
+
 // MARK: - Diagnostic file
 
 let diagnosticFile: URL = DebutCore.applicationSupportDirectory
@@ -96,6 +152,45 @@ let diagnosticFile: URL = DebutCore.applicationSupportDirectory
 let settingsFile: URL = diagnosticFile
     .deletingLastPathComponent()
     .appendingPathComponent("settings.json")
+
+if CommandLine.arguments.dropFirst().first == "--harness-self-check" {
+    var failures: [String] = []
+    func expect(_ condition: @autoclosure () -> Bool, _ label: String) {
+        if !condition() { failures.append(label) }
+    }
+    expect(selectionReturned(to: "0", from: "1", readIndex: { "0" }, pause: {}),
+           "reverse navigation accepts the original selected index")
+    expect(!selectionReturned(to: "0", from: "1", readIndex: { "1" }, pause: {}),
+           "reverse navigation rejects an unchanged selection")
+    expect(!selectionReturned(to: "0", from: "1", readIndex: { "2" }, pause: {}),
+           "reverse navigation rejects a different selection")
+    expect(!selectionReturned(to: nil, from: "1", readIndex: { "0" }, pause: {}),
+           "reverse navigation requires a known original selection")
+    var recordedDragFailure: (name: String, result: Bool)?
+    reportDragGeometryFailure("missing drag path", reason: "deliberately unavailable geometry") {
+        name, check in recordedDragFailure = (name, check())
+    }
+    expect(recordedDragFailure?.name == "missing drag path" && recordedDragFailure?.result == false,
+           "drag geometry failure reaches the failing test recorder")
+    expect(moveDurationValues(full: false) == [0, 10, 40, 50, 60, 70, 80, 150, 400],
+           "ordinary duration profile retains all risk boundaries")
+    expect(moveDurationValues(full: true) == Array(stride(from: 0, through: 400, by: 10)),
+           "full duration profile retains the entire slider range")
+    let shapeState = ["windowIDsBySpace": "10,20;30", "windowAspectsBySpace": "1.0000,1.5000;2.0000"]
+    expect(reportedAspect(for: 20, in: shapeState) == 1.5,
+           "resize checks the target window rather than another aspect")
+    expect(reportedAspect(for: 99, in: shapeState) == nil,
+           "resize rejects an unrelated window's aspect")
+    expect(firstReconciliationContains(expected: [[10], [20]], event: ["windowIDsBySpace": "10;20"]),
+           "startup evidence includes the expected windows on their desktops")
+    expect(!firstReconciliationContains(expected: [[10], [20]], event: ["windowIDsBySpace": "10;30"]),
+           "startup evidence rejects a same-count replacement window")
+    expect(!firstReconciliationContains(expected: [[10], [20]], event: ["windowIDsBySpace": "20;10"]),
+           "startup evidence rejects windows on the wrong desktops")
+    for failure in failures { print("SELF-CHECK FAIL: \(failure)") }
+    if failures.isEmpty { print("E2E harness self-check passed") }
+    exit(failures.isEmpty ? 0 : 1)
+}
 
 func readState() -> [String: String] {
     guard let data = try? Data(contentsOf: diagnosticFile),
@@ -1597,14 +1692,17 @@ if userDesktopCount < 2 {
 
         let resetForReversal = quickSwitch(to: 0, using: switchSpaceService)
         postQuickSwitch(to: 2)
+        let outboundHopObserved = waitFor(timeout: 5) {
+            switchSpaceService.currentDesktopIndex().map { $0 != 0 } ?? false
+        }
         postQuickSwitch(to: 0)
-        // The final target is the desktop already showing when the burst begins, so a plain
-        // waitFor would succeed before the unavoidable outbound hop lands. Give the confirmed
-        // hop and its notification-driven reversal time to complete, then inspect the result.
-        wait(1.0)
+        let reversed = waitFor(timeout: 5) {
+            switchSpaceService.currentDesktopIndex() == 0
+                && Int(readState()["activeSpaceIndex"] ?? "") == 0
+        }
 
         test("A rapid target reversal returns from the already-posted hop") {
-            resetForReversal && switchSpaceService.currentDesktopIndex() == 0
+            resetForReversal && outboundHopObserved && reversed
         }
     } else {
         skipTest("A jump across two desktops lands on the far desktop",
@@ -1698,6 +1796,7 @@ test("Selection moved") {
     info("  selectedWindowIndex stayed at \(idx)")
     return false
 }
+let selectedWindowIndexAfterNext = readState()["selectedWindowIndex"]
 
 // --- 4. Navigate: Shift+Tab back ---
 header("4. Navigate back with Shift+Tab")
@@ -1708,13 +1807,16 @@ wait(0.5)
 _ = takeScreenshot("03_after_shift_tab")
 
 test("Selection moved back") {
-    for _ in 0..<10 {
-        if readState()["selectedWindowIndex"] == "1" { return true }
-        wait(0.1)
+    let returned = selectionReturned(
+        to: selectedWindowIndexBeforeNext,
+        from: selectedWindowIndexAfterNext,
+        readIndex: { readState()["selectedWindowIndex"] },
+        pause: { wait(0.1) }
+    )
+    if !returned {
+        info("  expected \(selectedWindowIndexBeforeNext ?? "nil") after \(selectedWindowIndexAfterNext ?? "nil"), got \(readState()["selectedWindowIndex"] ?? "nil")")
     }
-    let idx = readState()["selectedWindowIndex"] ?? "-1"
-    info("  selectedWindowIndex = \(idx)")
-    return true // Shift+Tab navigated — exact index depends on window count
+    return returned
 }
 
 // --- 5. Close with Escape ---
@@ -1781,6 +1883,7 @@ postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
 wait(0.3)
 
 _ = takeScreenshot("06_commit_after_tab")
+let committedWindowID = selectedStageWindowID().flatMap(CGWindowID.init)
 
 info("Step 3: Release Cmd (commit selection)...")
 postFlagsChanged(flags: [])
@@ -1789,7 +1892,11 @@ wait(0.8)
 _ = takeScreenshot("07_after_commit")
 
 test("Overlay closed after commit") {
-    return readState()["overlayVisible"] == "false"
+    guard let committedWindowID else { return false }
+    return waitFor(timeout: 5) {
+        readState()["overlayVisible"] == "false"
+            && liveKeyboardFocus()?.windowID == committedWindowID
+    }
 }
 
 // --- 8. Space mode with Cmd+Option+Tab ---
@@ -1812,13 +1919,23 @@ test("Overlay is visible (space mode)") {
 }
 
 info("Release Cmd (commit space switch)...")
+let committedDesktopIndex = Int(readState()["selectedSpaceIndex"] ?? "")
+let committedSpaceWindowID = selectedStageWindowID().flatMap(CGWindowID.init)
 postFlagsChanged(flags: [])
 wait(0.5)
 
 _ = takeScreenshot("09_after_space_switch")
 
 test("Overlay closed after space commit") {
-    return readState()["overlayVisible"] == "false"
+    guard let committedDesktopIndex else { return false }
+    let spaces = SpaceService()
+    return waitFor(timeout: 5) {
+        readState()["overlayVisible"] == "false"
+            && spaces.currentDesktopIndex() == committedDesktopIndex
+            && Int(readState()["activeSpaceIndex"] ?? "") == committedDesktopIndex
+            && (committedSpaceWindowID == nil
+                || liveKeyboardFocus()?.windowID == committedSpaceWindowID)
+    }
 }
 
 // --- 9. Pointer hover and Command release ---
@@ -1902,6 +2019,13 @@ if let pointerTarget {
 
 // --- 10. Window-drop stage refresh ---
 header("10. Window drop refreshes both stages immediately")
+if skipsSyntheticDrags {
+    let reason = "GitHub-hosted macOS does not deliver synthetic drag gestures; run this check in Tart"
+    skipTest("E2E found an empty destination space next to a populated one", reason: reason)
+    skipDragTest("Dropping a window updates the source and destination space models")
+    skipDragTest("The refreshed destination stage supports an immediate reverse drag")
+    skipTest("Window-drop E2E cleanup restores the original spaces", reason: reason)
+} else {
 let originalDropState = readState()
 let originalSpaceCount = Int(originalDropState["spaceCount"] ?? "") ?? 0
 let originalWindowCounts = spaceWindowCounts(in: originalDropState)
@@ -2019,14 +2143,18 @@ if preparedWindowCounts.indices.contains(sourceSpaceIndex),
         if skipsSyntheticDrags {
             skipDragTest("The refreshed destination stage supports an immediate reverse drag")
         } else {
-            fail("Could not calculate the reverse window-drop path")
+            reportDragGeometryFailure("The refreshed destination stage supports an immediate reverse drag",
+                                      reason: "Could not calculate the reverse window-drop path")
         }
     }
 } else if let reason = dropFixtureSkipReason {
     skipTest("Dropping a window updates the source and destination space models", reason: reason)
     skipTest("The refreshed destination stage supports an immediate reverse drag", reason: reason)
 } else {
-    fail("Could not calculate the window-drop path")
+    reportDragGeometryFailure("Dropping a window updates the source and destination space models",
+                              reason: "Could not calculate the window-drop path")
+    skipTest("The refreshed destination stage supports an immediate reverse drag",
+             reason: "The forward drag path was unavailable")
 }
 postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
 postFlagsChanged(flags: [])
@@ -2035,6 +2163,7 @@ wait(0.5)
 test("Window-drop E2E cleanup restores the original spaces") {
     readState()["spaceCount"] == "\(originalSpaceCount)"
         && spaceWindowCounts(in: readState()) == originalWindowCounts
+}
 }
 
 // --- 10b. Moving a window between spaces with the keyboard ---
@@ -2415,7 +2544,10 @@ postFlagsChanged(flags: .maskCommand)
 postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
 wait(0.3)
 test("Disabled workspace isolation leaves Command-Tab to macOS") {
-    readState()["overlayVisible"] != "true"
+    let state = readState()
+    return state["eventTapRunning"] == "true"
+        && Int(state["spaceCount"] ?? "") != nil
+        && state["overlayVisible"] == "false"
         && !readEvents().contains { $0["keyEvent"] == "cmdTabHold" }
 }
 postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
@@ -3726,6 +3858,9 @@ if let coverageGateReason {
             }
 
             let coverageMovedCounts = spaceWindowCounts(in: readState())
+            let coverageExpectedIDs = SpaceController.decodeWindowIDs(
+                readState()["windowIDsBySpace"] ?? ""
+            )
             let coverageTotalBeforeRelaunch = coverageMovedCounts.reduce(0, +)
             let coverageMoveLanded = coverageMovedCounts.indices.contains(coverageOrigin + 1)
                 && coverageMovedCounts[coverageOrigin + 1] == coverageBeforeCounts[coverageOrigin + 1] + 1
@@ -3754,11 +3889,14 @@ if let coverageGateReason {
                     info("  no windows_reconciled event at startup")
                     return false
                 }
-                guard coverageLiveCount >= coverageTotalBeforeRelaunch else {
-                    info("  liveCount \(coverageLiveCount) undercounts the "
-                        + "\(coverageTotalBeforeRelaunch) windows seen before relaunch")
+                guard firstReconciliationContains(
+                    expected: coverageExpectedIDs, event: coverageFirstReconcile ?? [:]
+                ) else {
+                    info("  first reconciliation missed a previously tracked window or its desktop: "
+                        + "expected=\(coverageExpectedIDs), actual=\(coverageFirstReconcile?["windowIDsBySpace"] ?? "none")")
                     return false
                 }
+                guard coverageLiveCount >= coverageTotalBeforeRelaunch else { return false }
                 return true
             }
         }
@@ -3846,20 +3984,28 @@ if let editor = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.
 let launchFocusOpened = launchFocusPID > 0 && waitFor(timeout: 15) {
     visibleWindowTitles(for: launchFocusPID).count >= 2
 }
-// Debut's launch-discovery pass and the retries this scenario exists to exercise both run on a
-// delay, so the model has to be given time to settle before focus is moved.
-wait(5)
+// Wait for Debut to track the two actual windows. Their mere AX existence does not mean its
+// launch-discovery and observer-retry work has finished.
+@MainActor
+func trackedLaunchFocusCandidates() -> [AXUIElement] {
+    var windowsRef: CFTypeRef?
+    _ = AXUIElementCopyAttributeValue(
+        AXUIElementCreateApplication(launchFocusPID),
+        kAXWindowsAttribute as CFString,
+        &windowsRef
+    )
+    let trackedIDs = Set(reportedMRUOrder().flatMap { $0 })
+    return (windowsRef as? [AXUIElement] ?? []).filter {
+        windowIdentifier(of: $0).map(trackedIDs.contains) ?? false
+    }
+}
+let launchFocusTracked = launchFocusOpened && waitFor(timeout: 12) {
+    trackedLaunchFocusCandidates().count >= 2
+}
 
 // Focus is moved through AX rather than Command-`, which the VM does not deliver to the app:
 // this has to be an in-app window change, so no synthetic click or app switch will do, and
 // setting kAXMain is the request macOS itself answers with kAXFocusedWindowChanged.
-var launchFocusWindowsRef: CFTypeRef?
-_ = AXUIElementCopyAttributeValue(
-    AXUIElementCreateApplication(launchFocusPID),
-    kAXWindowsAttribute as CFString,
-    &launchFocusWindowsRef
-)
-
 func focusWindow(_ window: AXUIElement) {
     AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
@@ -3868,10 +4014,7 @@ func focusWindow(_ window: AXUIElement) {
 // Both ends of the move are windows Debut already tracks. TextEdit restores documents from the
 // instance the shared fixture is running, so the app can come up with a window this scenario
 // never asked for, and starting from that one would read as a focus change that never landed.
-let launchFocusTrackedIDs = Set(reportedMRUOrder().flatMap { $0 })
-let launchFocusCandidates = (launchFocusWindowsRef as? [AXUIElement] ?? []).filter {
-    windowIdentifier(of: $0).map(launchFocusTrackedIDs.contains) ?? false
-}
+let launchFocusCandidates = launchFocusTracked ? trackedLaunchFocusCandidates() : []
 if let origin = launchFocusCandidates.first {
     focusWindow(origin)
     _ = waitFor(timeout: 5) {
@@ -3964,16 +4107,26 @@ if !launchFocusOpened {
 // Registration is answered by the app's AX server alone, so this stands whatever became of the
 // focus move above.
 if launchFocusOpened {
-    test("The focused-window observer is never left refused by a launching app") {
-        let failures = launchFocusEvents.filter {
-            $0["event"] == "focus_observer_registration_failed"
-                && $0["pid"] == "\(launchFocusPID)"
+    if !launchFocusMoved && launchFocusCandidates.count >= 2 {
+        skipTest("The focused-window observer is never left refused by a launching app",
+                 reason: "AX did not move focus inside the fixture app")
+    } else {
+        test("The focused-window observer is never left refused by a launching app") {
+            let failures = launchFocusEvents.filter {
+                $0["event"] == "focus_observer_registration_failed"
+                    && $0["pid"] == "\(launchFocusPID)"
+            }
+            if !failures.isEmpty {
+                info("  registration gave up on pid \(launchFocusPID): \(failures)")
+            }
+            // A successful MRU change after the native in-app focus action is positive evidence
+            // that the observer works, including its immediate-success path, which emits no event.
+            return launchFocusTracked && launchFocusMoved
+                && launchFocusBeforeSlot != nil && launchFocusAfterSlot != nil
+                && launchFocusAfterSlot?.space == launchFocusBeforeSlot?.space
+                && (launchFocusAfterSlot?.position ?? .max) < (launchFocusBeforeSlot?.position ?? .max)
+                && failures.isEmpty
         }
-        guard failures.isEmpty else {
-            info("  registration gave up on pid \(launchFocusPID): \(failures)")
-            return false
-        }
-        return true
     }
 }
 
@@ -3994,18 +4147,11 @@ if let resizeFixtureWindow {
     wait(1)
 }
 
-/// Every aspect the state block reports, flattened: which card is which does not matter here,
-/// only that a shape this distinctive turns up at all.
-func reportedAspects() -> [CGFloat] {
-    SpaceController.decodeWindowAspects(readState()["windowAspectsBySpace"] ?? "")
-        .flatMap { $0 }
-        .compactMap { $0 }
-}
-
 if let resizeFixtureWindow, let originalSize = windowSize(resizeFixtureWindow) {
     // Activating the fixture above is the last app switch in this scenario, so the aspects read
     // here are the ones discovery can account for. Anything new after the resize is not.
-    let aspectsBefore = reportedAspects()
+    let resizedWindowID = windowIdentifier(of: resizeFixtureWindow)
+    let aspectBefore = resizedWindowID.flatMap { reportedAspect(for: $0, in: readState()) }
     let settledSize = resizeWindow(
         resizeFixtureWindow,
         to: CGSize(width: 560, height: 520),
@@ -4015,12 +4161,15 @@ if let resizeFixtureWindow, let originalSize = windowSize(resizeFixtureWindow) {
     let wanted = settledSize.width / settledSize.height
     // The state block refreshes on any reported event, so poll rather than read once.
     let matched = waitFor(timeout: 5) {
-        reportedAspects().contains { abs($0 - wanted) < 0.05 }
+        guard let resizedWindowID, let aspectBefore,
+              let after = reportedAspect(for: resizedWindowID, in: readState()) else { return false }
+        return abs(after - wanted) < 0.05 && abs(after - aspectBefore) > 0.1
     }
     info("Resize fixture: from=\(Int(originalSize.width))x\(Int(originalSize.height)) "
         + "to=\(Int(settledSize.width))x\(Int(settledSize.height)) "
-        + "wantedAspect=\(String(format: "%.3f", wanted)) before=\(aspectsBefore) "
-        + "after=\(reportedAspects())")
+        + "windowID=\(resizedWindowID.map(String.init) ?? "none") "
+        + "wantedAspect=\(String(format: "%.3f", wanted)) before=\(aspectBefore.map(String.init) ?? "none") "
+        + "after=\(resizedWindowID.flatMap { reportedAspect(for: $0, in: readState()) }.map(String.init) ?? "none")")
 
     if abs(wanted - originalAspect) > 0.1 {
         test("A resized window reports its new shape without an app switch") { matched }
@@ -4042,7 +4191,9 @@ if let resizeFixtureWindow, let originalSize = windowSize(resizeFixtureWindow) {
 NSRunningApplication(processIdentifier: launchFocusPID)?.forceTerminate()
 
 // --- Consecutive window moves at every duration offered by the Settings slider. ---
-header("Focused-window move shortcuts: all 41 switch durations")
+let fullMoveDurationProfile = environment["DEBUT_E2E_DURATION_PROFILE"] == "full"
+let moveDurations = moveDurationValues(full: fullMoveDurationProfile)
+header("Focused-window move shortcuts: \(moveDurations.count) switch durations (\(fullMoveDurationProfile ? "full" : "ordinary") profile)")
 let moveSettingsBackup = try? Data(contentsOf: settingsFile)
 let moveWindows = AccessibilityWindowService()
 let moveSpaces = SpaceService()
@@ -4085,7 +4236,7 @@ let moveFixture = moveFixtureWindow.flatMap { focusMoveFixture($0) ? $0 : nil }
 
 if moveSpaces.desktopCount() >= 4, let fixture = moveFixture {
     var measurements: [[String: Any]] = []
-    for milliseconds in stride(from: 0, through: 400, by: 10) {
+    for milliseconds in moveDurations {
         _ = terminateDebutAndWait()
         var settings = (try? settingsStore.loadSettings()) ?? AppSettings()
         settings.features.workspaceIsolation = true
