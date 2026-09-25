@@ -33,6 +33,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Overlay hold delay / held cycling pace | 100 ms / 60 ms minimum between repeats |
 | Preview refresh / cache age | Only windows that may have changed / 60 seconds |
 | Numbered / same-app numbered modifiers | Control / Control-Option |
+| Overlay card selection | H left, J down, K up, L right (configurable) |
 | Launch at login / show in Dock | On / On |
 | Excluded apps | Empty |
 
@@ -80,7 +81,7 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | Desktops | Faster switching and its number-key, Control-arrow, and trackpad methods, followed by transition duration and the desktop-change indicator. |
 | Switcher | Command-Tab desktop isolation, Option-Tab activation, window previews, display placement, and preview freshness. |
 | Appearance | Glass and card layout, adaptive preview sizing, inactive-stage scale, and selected-window treatment. |
-| Shortcuts | Activation/session bindings, numbered modifier sets, hold delay, repeat pace, a confirmed restore-defaults action, and reference for fixed move chords. |
+| Shortcuts | Activation/session bindings including H/J/K/L card selection, numbered modifier sets, hold delay, repeat pace, a confirmed restore-defaults action, and reference for fixed move chords. |
 | Support | Bug reporting through a public GitHub issue form (requires a GitHub account), diagnostic export, a confirmed window-cache reset that preserves settings, and a confirmed reset of all settings that preserves window assignments. |
 | About | Debut icon and version, update checks, and links to the GitHub repository and creator's Twitter profile. |
 

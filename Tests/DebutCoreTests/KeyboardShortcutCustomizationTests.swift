@@ -59,6 +59,66 @@ struct KeyboardShortcutCustomizationTests {
         #expect(KeyAction.allCases.allSatisfy { bindings.combo(for: $0) != nil })
     }
 
+    @Test("Vim selection defaults are separate from window moves and survive saved settings")
+    func vimSelectionDefaults() throws {
+        let defaults: [(KeyAction, Int, DebutKeyEvent)] = [
+            (.selectLeft, kVK_ANSI_H, .selectLeft),
+            (.selectDown, kVK_ANSI_J, .selectDown),
+            (.selectUp, kVK_ANSI_K, .selectUp),
+            (.selectRight, kVK_ANSI_L, .selectRight),
+        ]
+        #expect(KeyAction.overlaySelectionActions == defaults.map { $0.0 })
+        var saved = KeyBindings()
+        for (action, keyCode, event) in defaults {
+            #expect(action.shortcutScope == .session)
+            #expect(saved.combo(for: action) == KeyCombo(keyCode: keyCode))
+            #expect(action.toKeyEvent() == event)
+            saved.bindings.removeValue(forKey: action)
+        }
+        saved.bindings[.moveWindowLeft] = KeyCombo(keyCode: kVK_ANSI_B)
+        let restored = try JSONDecoder().decode(KeyBindings.self, from: JSONEncoder().encode(saved))
+        for (action, keyCode, _) in defaults {
+            #expect(restored.combo(for: action) == KeyCombo(keyCode: keyCode))
+        }
+        #expect(restored.combo(for: .moveWindowLeft) == KeyCombo(keyCode: kVK_ANSI_B))
+    }
+
+    @Test("New selection defaults leave older custom bindings in control of their keys")
+    func vimDefaultsPreserveExistingBindings() throws {
+        var saved = KeyBindings()
+        saved.bindings.removeValue(forKey: .selectLeft)
+        saved.bindings[.moveWindowLeft] = KeyCombo(keyCode: kVK_ANSI_H)
+
+        let restored = try JSONDecoder().decode(KeyBindings.self, from: JSONEncoder().encode(saved))
+
+        #expect(restored.combo(for: .moveWindowLeft) == KeyCombo(keyCode: kVK_ANSI_H))
+        #expect(restored.combo(for: .selectLeft) == nil)
+        #expect(restored.action(for: KeyCombo(keyCode: kVK_ANSI_H), scope: .session)
+                == .moveWindowLeft)
+    }
+
+    @Test("Configured Vim selection shortcuts dispatch only while an overlay is visible")
+    func customVimSelectionShortcut() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        var bindings = KeyBindings()
+        bindings.bindings[.selectLeft] = KeyCombo(keyCode: kVK_ANSI_B)
+        service.keyBindings = bindings
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let commandTab = keyEvent(keyCode: kVK_Tab, flags: .maskCommand)
+        #expect(service.handleCGEvent(type: .keyDown, event: commandTab) == nil)
+        let custom = keyEvent(keyCode: kVK_ANSI_B, flags: .maskCommand)
+        #expect(service.handleCGEvent(type: .keyDown, event: custom) === custom)
+        service.overlayVisible = true
+        let oldDefault = keyEvent(keyCode: kVK_ANSI_H, flags: .maskCommand)
+        #expect(service.handleCGEvent(type: .keyDown, event: oldDefault) == nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: custom) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: custom) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .selectLeft])
+    }
+
     @Test("Focused-window move shortcuts preserve all four arrow defaults")
     func focusedWindowMoveDefaults() {
         let bindings = KeyBindings()

@@ -31,6 +31,10 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case nextWindow
     case previousWindow
     case previousWindowAlternate
+    case selectLeft
+    case selectDown
+    case selectUp
+    case selectRight
     case nextSpace
     case previousSpace
     case nextDisplayStack
@@ -73,6 +77,10 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .nextWindow: "Next window"
         case .previousWindow: "Previous window"
         case .previousWindowAlternate: "Previous window (alternate)"
+        case .selectLeft: "Select card left"
+        case .selectDown: "Select card down"
+        case .selectUp: "Select card up"
+        case .selectRight: "Select card right"
         case .nextSpace: "Next space"
         case .previousSpace: "Previous space"
         case .nextDisplayStack: "Next display stack"
@@ -124,6 +132,10 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .nextWindow: .nextWindow
         case .previousWindow: .previousWindow
         case .previousWindowAlternate: .previousWindow
+        case .selectLeft: .selectLeft
+        case .selectDown: .selectDown
+        case .selectUp: .selectUp
+        case .selectRight: .selectRight
         case .nextSpace: .nextSpace
         case .previousSpace: .previousSpace
         case .nextDisplayStack: .nextDisplayStack
@@ -242,6 +254,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
              .activateAltTabNext, .activateAltTabPrevious,
              .nextAppWindow, .previousAppWindow,
              .nextWindow, .previousWindow, .previousWindowAlternate,
+             .selectLeft, .selectDown, .selectUp, .selectRight,
              .nextSpace, .previousSpace:
             true
         case .nextDisplayStack:
@@ -275,6 +288,10 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
 
     public static let altTabActions: [KeyAction] = [
         .activateAltTabNext, .activateAltTabPrevious,
+    ]
+
+    public static let overlaySelectionActions: [KeyAction] = [
+        .selectLeft, .selectDown, .selectUp, .selectRight,
     ]
 
     public static let globalActions =
@@ -475,6 +492,10 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .nextWindow: KeyCombo(keyCode: kVK_Tab),
             .previousWindow: KeyCombo(keyCode: kVK_Tab, shift: true),
             .previousWindowAlternate: KeyCombo(keyCode: kVK_ANSI_Grave),
+            .selectLeft: KeyCombo(keyCode: kVK_ANSI_H),
+            .selectDown: KeyCombo(keyCode: kVK_ANSI_J),
+            .selectUp: KeyCombo(keyCode: kVK_ANSI_K),
+            .selectRight: KeyCombo(keyCode: kVK_ANSI_L),
             .nextSpace: KeyCombo(keyCode: kVK_Tab, option: true),
             .previousSpace: KeyCombo(keyCode: kVK_Tab, shift: true, option: true),
             .nextDisplayStack: KeyCombo(keyCode: kVK_Return),
@@ -517,7 +538,13 @@ public struct KeyBindings: Codable, Sendable, Equatable {
             DecodedKeyActionDictionary<KeyCombo>.self,
             forKey: .bindings
         )?.values ?? [:]
-        bindings = KeyCombo.defaults().merging(saved) { _, savedCombo in savedCombo }
+        var defaults = KeyCombo.defaults()
+        for action in KeyAction.overlaySelectionActions where saved[action] == nil {
+            if let combo = defaults[action], saved.contains(where: { $0.key != action && $0.value == combo }) {
+                defaults.removeValue(forKey: action)
+            }
+        }
+        bindings = defaults.merging(saved) { _, savedCombo in savedCombo }
     }
 
     public func action(for combo: KeyCombo) -> KeyAction? {

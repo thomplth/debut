@@ -264,6 +264,27 @@ struct AltTabSwitcherTests {
         #expect(controller.altTabSelection?.window.windowID == 202)
     }
 
+    @Test("Vim keys select flat switcher cards without moving their windows")
+    func vimKeysSelectFlatCards() {
+        let (controller, _) = makeTwoSpaceController()
+        let originalSpaces = controller.spaceManager.spaces.map { $0.windows.map(\.windowID) }
+
+        controller.handleKeyEvent(.altTabHold)
+        #expect(controller.altTabSelection?.window.windowID == 202)
+        controller.handleKeyEvent(.selectLeft)
+        #expect(controller.altTabSelection?.window.windowID == 101)
+        controller.handleKeyEvent(.selectDown)
+        #expect(controller.altTabSelection?.window.windowID == 202)
+        controller.handleKeyEvent(.selectUp)
+        #expect(controller.altTabSelection?.window.windowID == 101)
+        controller.handleKeyEvent(.selectRight)
+        #expect(controller.altTabSelection?.window.windowID == 202)
+
+        #expect(controller.overlaySpaceManager.spaces.map { $0.windows.map(\.windowID) } == originalSpaces)
+        controller.handleKeyEvent(.cmdRelease)
+        #expect(controller.spaceManager.spaces.map { $0.windows.map(\.windowID) } == originalSpaces)
+    }
+
     @Test("A held backward repeat clamps at the start of the flat list")
     func heldBackwardRepeatClamps() {
         let (controller, _) = makeTwoSpaceController()
