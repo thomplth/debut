@@ -177,6 +177,28 @@ struct DesktopReconfigurationObserverTests {
         #expect(eligibility.blockReason() == .dockOverviewStateUnknown)
     }
 
+    @Test("A fullscreen current Space remains eligible for accelerated navigation")
+    func fullscreenCurrentSpaceIsEligible() {
+        let eligibility = DesktopNavigationEligibility(canSwitchSpaces: { true })
+        eligibility.update(
+            stackID: "display",
+            topology: SpaceTopology(separateSpaces: true, stacks: [
+                SpaceStackDescriptor(
+                    id: "display",
+                    displayID: 1,
+                    displayName: "Display",
+                    frame: .zero,
+                    desktopIDs: [10, 12],
+                    orderedSpaceIDs: [10, 11, 12],
+                    currentDesktopID: 11
+                ),
+            ]),
+            overviewActive: false
+        )
+
+        #expect(eligibility.isAvailable())
+    }
+
     @Test("Subscribing reports the events it actually registered")
     func startReportsRegisteredEvents() {
         // The private symbol exists on every macOS this ships to, so an empty result would

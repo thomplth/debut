@@ -144,11 +144,10 @@ final class DesktopNavigationEligibility: @unchecked Sendable {
     ) {
         lock.withLock {
             let previouslyActive = self.overviewActive == true
+            let stack = stackID.flatMap { topology.stack(id: $0) }
             self.stackID = stackID
             self.overviewActive = overviewActive
-            self.currentDesktopResolved = stackID.flatMap {
-                topology.stack(id: $0)?.currentDesktopIndex
-            } != nil
+            self.currentDesktopResolved = stack?.currentSpaceIndex != nil
             if consumeOverviewRecovery && previouslyActive && !overviewActive {
                 // The candidate gesture that triggered this refresh already stayed entirely
                 // native, so it also served as Dock's one post-overview recovery gesture.

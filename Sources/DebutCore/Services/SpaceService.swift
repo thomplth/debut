@@ -387,7 +387,7 @@ enum SpaceSwitchDirection {
     var sign: Double { self == .right ? 1 : -1 }
 }
 
-/// How to get from one desktop to another: which way, and how far.
+/// How to get from one native Space to another: which way, and how far.
 ///
 /// Kept as a value type with no side effects so the arithmetic — which is where an
 /// off-by-one would strand the user on the wrong desktop — is testable without a window
@@ -397,13 +397,13 @@ struct SpaceSwitchPlan: Equatable {
     let steps: Int
 
     /// - Returns: `nil` when there is nothing to do, which includes the case where the
-    ///   target is the desktop already showing. A zero-step gesture is not harmless: it
+    ///   target is the Space already showing. A zero-step gesture is not harmless: it
     ///   opens the Dock's gesture state and the Dock resolves the unmatched Began by
     ///   rubber-banding.
-    init?(from current: Int, to target: Int, desktopCount: Int) {
-        guard desktopCount > 1,
-              (0..<desktopCount).contains(current),
-              (0..<desktopCount).contains(target),
+    init?(from current: Int, to target: Int, spaceCount: Int) {
+        guard spaceCount > 1,
+              (0..<spaceCount).contains(current),
+              (0..<spaceCount).contains(target),
               current != target
         else { return nil }
 
@@ -414,7 +414,7 @@ struct SpaceSwitchPlan: Equatable {
 
 extension SpaceSwitchDirection: Equatable {}
 
-/// One adjacent, fully addressable desktop transition. A far target remains a sequence of
+/// One adjacent, fully addressable Space transition. A far target remains a sequence of
 /// adjacent transitions even when Instant mode posts the whole sequence as one batch.
 enum SpaceSwitchAnimation: Equatable {
     case configured
@@ -446,21 +446,21 @@ enum SpaceSwitchScheduling: Equatable {
 
 struct SpaceSwitchHop: Equatable {
     let stackID: String
-    let fromDesktopID: CGSSpaceID
-    let toDesktopID: CGSSpaceID
+    let fromSpaceID: CGSSpaceID
+    let toSpaceID: CGSSpaceID
     let direction: SpaceSwitchDirection
     let animation: SpaceSwitchAnimation
 
     init(
         stackID: String,
-        fromDesktopID: CGSSpaceID,
-        toDesktopID: CGSSpaceID,
+        fromSpaceID: CGSSpaceID,
+        toSpaceID: CGSSpaceID,
         direction: SpaceSwitchDirection,
         animation: SpaceSwitchAnimation = .configured
     ) {
         self.stackID = stackID
-        self.fromDesktopID = fromDesktopID
-        self.toDesktopID = toDesktopID
+        self.fromSpaceID = fromSpaceID
+        self.toSpaceID = toSpaceID
         self.direction = direction
         self.animation = animation
     }
@@ -494,18 +494,24 @@ enum SpaceSwitchRecoveryResult: Equatable {
     case post([SpaceSwitchHop])
 }
 
+private struct SpaceNavigationTarget: Equatable {
+    let stackID: String
+    let spaceID: CGSSpaceID
+    let index: Int
+}
+
 /// Keeps at most one unconfirmed Dock route in flight for each display Space stack.
 ///
-/// WindowServer's current desktop is the only completion signal. Rapid requests replace
+/// WindowServer's current Space is the only completion signal. Rapid requests replace
 /// `desiredTarget`; they never append another route before the posted endpoint is confirmed.
 /// Animated routes post and confirm one adjacent hop at a time. Instant routes post all of
 /// their adjacent hops together, then treat intermediate notifications as acknowledgements.
 struct SpaceSwitchCoordinator {
     private struct PendingSwitch {
         var generation: UInt64
-        var desiredTarget: DesktopLocation
-        var originDesktopID: CGSSpaceID
-        var expectedDesktopIDs: [CGSSpaceID]
+        var desiredTarget: SpaceNavigationTarget
+        var originSpaceID: CGSSpaceID
+        var expectedSpaceIDs: [CGSSpaceID]
         var animation: SpaceSwitchAnimation
         var scheduling: SpaceSwitchScheduling
     }
@@ -526,8 +532,75 @@ struct SpaceSwitchCoordinator {
         guard let stack = topology.stack(id: target.stackID),
               stack.desktopIDs.indices.contains(target.index),
               stack.desktopIDs[target.index] == target.desktopID,
-              let currentDesktopID = stack.currentDesktopID,
-              let currentIndex = stack.currentDesktopIndex
+              let navigationIndex = stack.orderedSpaceIDs.firstIndex(of: target.desktopID)
+        else { return .declined }
+        return requestNavigation(
+            to: SpaceNavigationTarget(
+                stackID: target.stackID,
+                spaceID: target.desktopID,
+                index: navigationIndex
+            ),
+            in: topology,
+            animation: animation,
+            scheduling: scheduling
+        )
+    }
+
+    /// Moves one position in Mission Control order. A pending route advances from its desired
+    /// endpoint so consecutive swipes can cross a fullscreen Space before the first active-Space
+    /// notification arrives.
+    mutating func requestAdjacent(
+        offset: Int,
+        stackID: String,
+        in topology: SpaceTopology,
+        animation: SpaceSwitchAnimation = .configured,
+        scheduling: SpaceSwitchScheduling = .confirmedAdjacent
+    ) -> SpaceSwitchRequestResult {
+        guard let target = Self.adjacentTarget(
+            offset: offset,
+            stackID: stackID,
+            in: topology,
+            after: pendingByStackID[stackID]?.desiredTarget
+        )
+        else { return .noChange }
+        return requestNavigation(
+            to: target,
+            in: topology,
+            animation: animation,
+            scheduling: scheduling
+        )
+    }
+
+    private static func adjacentTarget(
+        offset: Int,
+        stackID: String,
+        in topology: SpaceTopology,
+        after pendingTarget: SpaceNavigationTarget? = nil
+    ) -> SpaceNavigationTarget? {
+        guard abs(offset) == 1,
+              let stack = topology.stack(id: stackID),
+              let originIndex = pendingTarget?.index ?? stack.currentSpaceIndex,
+              stack.orderedSpaceIDs.indices.contains(originIndex + offset)
+        else { return nil }
+        let index = originIndex + offset
+        return SpaceNavigationTarget(
+            stackID: stackID,
+            spaceID: stack.orderedSpaceIDs[index],
+            index: index
+        )
+    }
+
+    private mutating func requestNavigation(
+        to target: SpaceNavigationTarget,
+        in topology: SpaceTopology,
+        animation: SpaceSwitchAnimation,
+        scheduling: SpaceSwitchScheduling
+    ) -> SpaceSwitchRequestResult {
+        guard let stack = topology.stack(id: target.stackID),
+              stack.orderedSpaceIDs.indices.contains(target.index),
+              stack.orderedSpaceIDs[target.index] == target.spaceID,
+              let currentSpaceID = stack.currentDesktopID,
+              let currentIndex = stack.currentSpaceIndex
         else { return .declined }
 
         if var pending = pendingByStackID[target.stackID] {
@@ -538,7 +611,7 @@ struct SpaceSwitchCoordinator {
             return .coalesced
         }
 
-        guard currentDesktopID != target.desktopID else { return .noChange }
+        guard currentSpaceID != target.spaceID else { return .noChange }
         let hops = Self.hops(
             from: currentIndex,
             toward: target,
@@ -558,7 +631,7 @@ struct SpaceSwitchCoordinator {
 
     /// Confirms completed routes and returns at most one next route per Space stack.
     ///
-    /// A different current desktop is a user action or a Dock result Debut did not request.
+    /// A different current Space is a user action or a Dock result Debut did not request.
     /// Continuing from it would fight the user, so an unexpected landing stops safely.
     mutating func desktopDidChange(to topology: SpaceTopology) -> [SpaceSwitchHop] {
         var nextHops: [SpaceSwitchHop] = []
@@ -566,20 +639,20 @@ struct SpaceSwitchCoordinator {
         for stackID in Array(pendingByStackID.keys) {
             guard let pending = pendingByStackID[stackID],
                   let stack = topology.stack(id: stackID),
-                  let currentDesktopID = stack.currentDesktopID,
-                  let currentIndex = stack.currentDesktopIndex,
-                  let expectedDesktopID = pending.expectedDesktopIDs.last,
-                  pending.expectedDesktopIDs.allSatisfy({ stack.desktopIDs.contains($0) }),
-                  stack.desktopIDs.indices.contains(pending.desiredTarget.index),
-                  stack.desktopIDs[pending.desiredTarget.index]
-                    == pending.desiredTarget.desktopID
+                  let currentSpaceID = stack.currentDesktopID,
+                  let currentIndex = stack.currentSpaceIndex,
+                  let expectedSpaceID = pending.expectedSpaceIDs.last,
+                  pending.expectedSpaceIDs.allSatisfy({ stack.orderedSpaceIDs.contains($0) }),
+                  stack.orderedSpaceIDs.indices.contains(pending.desiredTarget.index),
+                  stack.orderedSpaceIDs[pending.desiredTarget.index]
+                    == pending.desiredTarget.spaceID
             else {
                 pendingByStackID.removeValue(forKey: stackID)
                 continue
             }
 
-            guard currentDesktopID == pending.originDesktopID
-                    || pending.expectedDesktopIDs.contains(currentDesktopID)
+            guard currentSpaceID == pending.originSpaceID
+                    || pending.expectedSpaceIDs.contains(currentSpaceID)
             else {
                 pendingByStackID.removeValue(forKey: stackID)
                 continue
@@ -587,9 +660,9 @@ struct SpaceSwitchCoordinator {
 
             // Every gesture in an Instant route has already been posted. Intermediate
             // notifications acknowledge the route but must neither finish it nor post again.
-            guard currentDesktopID == expectedDesktopID else { continue }
+            guard currentSpaceID == expectedSpaceID else { continue }
 
-            guard currentDesktopID != pending.desiredTarget.desktopID else {
+            guard currentSpaceID != pending.desiredTarget.spaceID else {
                 pendingByStackID.removeValue(forKey: stackID)
                 continue
             }
@@ -620,8 +693,8 @@ struct SpaceSwitchCoordinator {
         guard let first = hops.first,
               let last = hops.last,
               let pending = pendingByStackID[first.stackID],
-              pending.originDesktopID == first.fromDesktopID,
-              pending.expectedDesktopIDs.last == last.toDesktopID
+              pending.originSpaceID == first.fromSpaceID,
+              pending.expectedSpaceIDs.last == last.toSpaceID
         else { return nil }
         return SpaceSwitchRecoveryTicket(
             stackID: first.stackID,
@@ -643,19 +716,19 @@ struct SpaceSwitchCoordinator {
         else { return .stale }
 
         guard let stack = topology.stack(id: ticket.stackID),
-              let currentDesktopID = stack.currentDesktopID,
-              let currentIndex = stack.currentDesktopIndex,
-              let expectedDesktopID = pending.expectedDesktopIDs.last,
-              pending.expectedDesktopIDs.allSatisfy({ stack.desktopIDs.contains($0) }),
-              stack.desktopIDs.indices.contains(pending.desiredTarget.index),
-              stack.desktopIDs[pending.desiredTarget.index] == pending.desiredTarget.desktopID,
-              currentDesktopID == expectedDesktopID
+              let currentSpaceID = stack.currentDesktopID,
+              let currentIndex = stack.currentSpaceIndex,
+              let expectedSpaceID = pending.expectedSpaceIDs.last,
+              pending.expectedSpaceIDs.allSatisfy({ stack.orderedSpaceIDs.contains($0) }),
+              stack.orderedSpaceIDs.indices.contains(pending.desiredTarget.index),
+              stack.orderedSpaceIDs[pending.desiredTarget.index] == pending.desiredTarget.spaceID,
+              currentSpaceID == expectedSpaceID
         else {
             pendingByStackID.removeValue(forKey: ticket.stackID)
             return .abandoned
         }
 
-        guard currentDesktopID != pending.desiredTarget.desktopID else {
+        guard currentSpaceID != pending.desiredTarget.spaceID else {
             pendingByStackID.removeValue(forKey: ticket.stackID)
             return .completed
         }
@@ -696,15 +769,15 @@ struct SpaceSwitchCoordinator {
               let last = hops.last,
               let pending = pendingByStackID[first.stackID],
               ticket == nil || ticket?.generation == pending.generation,
-              pending.originDesktopID == first.fromDesktopID,
-              pending.expectedDesktopIDs.last == last.toDesktopID
+              pending.originSpaceID == first.fromSpaceID,
+              pending.expectedSpaceIDs.last == last.toSpaceID
         else { return false }
         pendingByStackID.removeValue(forKey: first.stackID)
         return true
     }
 
     private mutating func makePendingSwitch(
-        desiredTarget: DesktopLocation,
+        desiredTarget: SpaceNavigationTarget,
         hops: [SpaceSwitchHop],
         animation: SpaceSwitchAnimation,
         scheduling: SpaceSwitchScheduling
@@ -714,8 +787,8 @@ struct SpaceSwitchCoordinator {
         return PendingSwitch(
             generation: nextGeneration,
             desiredTarget: desiredTarget,
-            originDesktopID: hops[0].fromDesktopID,
-            expectedDesktopIDs: hops.map(\.toDesktopID),
+            originSpaceID: hops[0].fromSpaceID,
+            expectedSpaceIDs: hops.map(\.toSpaceID),
             animation: animation,
             scheduling: scheduling
         )
@@ -723,7 +796,7 @@ struct SpaceSwitchCoordinator {
 
     private static func hops(
         from currentIndex: Int,
-        toward target: DesktopLocation,
+        toward target: SpaceNavigationTarget,
         in stack: SpaceStackDescriptor,
         animation: SpaceSwitchAnimation,
         scheduling: SpaceSwitchScheduling
@@ -731,20 +804,20 @@ struct SpaceSwitchCoordinator {
         guard let plan = SpaceSwitchPlan(
             from: currentIndex,
             to: target.index,
-            desktopCount: stack.desktopIDs.count
+            spaceCount: stack.orderedSpaceIDs.count
         ) else { return [] }
         let delta = plan.direction == .right ? 1 : -1
         let count = scheduling == .batchedInstant ? plan.steps : 1
         return (0..<count).compactMap { offset in
             let fromIndex = currentIndex + offset * delta
             let toIndex = fromIndex + delta
-            guard stack.desktopIDs.indices.contains(fromIndex),
-                  stack.desktopIDs.indices.contains(toIndex)
+            guard stack.orderedSpaceIDs.indices.contains(fromIndex),
+                  stack.orderedSpaceIDs.indices.contains(toIndex)
             else { return nil }
             return SpaceSwitchHop(
                 stackID: stack.id,
-                fromDesktopID: stack.desktopIDs[fromIndex],
-                toDesktopID: stack.desktopIDs[toIndex],
+                fromSpaceID: stack.orderedSpaceIDs[fromIndex],
+                toSpaceID: stack.orderedSpaceIDs[toIndex],
                 direction: plan.direction,
                 animation: animation
             )
@@ -1225,11 +1298,13 @@ public protocol SpaceSwitching: AnyObject, Sendable {
     func desktopIndexes(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: Int]
     @discardableResult func switchToDesktop(index: Int) -> Bool
     @discardableResult func switchToDesktop(_ location: DesktopLocation) -> Bool
+    /// Switches one position in Mission Control order, including fullscreen and tiled Spaces.
+    @discardableResult func switchToAdjacentSpace(offset: Int, stackID: String) -> Bool
     /// Switches through Dock at macOS's standard slide duration, ignoring Debut's configured
     /// acceleration. This is used for Debut-owned selections while the speed feature is off;
     /// physical system shortcuts remain completely unhandled by Debut.
     @discardableResult func switchToDesktopWithSystemAnimation(_ location: DesktopLocation) -> Bool
-    /// True from the first posted route until WindowServer confirms the final target.
+    /// True from the first posted route until WindowServer confirms the final target Space.
     func isSwitchInFlight(stackID: String) -> Bool
     /// Confirms a route or advances an animated multi-hop switch from current topology.
     func spaceDidChange()
@@ -1319,6 +1394,20 @@ public extension SpaceSwitching {
         switchToDesktop(location)
     }
 
+    @discardableResult
+    func switchToAdjacentSpace(offset: Int, stackID: String) -> Bool {
+        guard abs(offset) == 1,
+              let stack = spaceTopology().stack(id: stackID),
+              let currentIndex = stack.currentSpaceIndex,
+              stack.orderedSpaceIDs.indices.contains(currentIndex + offset),
+              let desktopIndex = stack.desktopIDs.firstIndex(
+                  of: stack.orderedSpaceIDs[currentIndex + offset]
+              ),
+              let location = stack.location(at: desktopIndex)
+        else { return false }
+        return switchToDesktop(location)
+    }
+
     func moveWindow(windowID: CGWindowID, to location: DesktopLocation,
                     completion: (@Sendable (Bool) -> Void)?) {
         moveWindow(windowID: windowID, toDesktop: location.index, completion: completion)
@@ -1403,19 +1492,31 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     /// the id64 is what the switch machinery addresses. `uuids` comes back empty unless every
     /// desktop supplied one, because a partial list would join some spaces and silently
     /// mis-join the rest.
-    private static func desktops(
+    static func spaceIdentities(
         in display: [String: Any]
-    ) -> (ids: [CGSSpaceID], uuids: [String]) {
+    ) -> (
+        desktopIDs: [CGSSpaceID],
+        desktopUUIDs: [String],
+        orderedSpaceIDs: [CGSSpaceID]
+    ) {
         let spaces = display["Spaces"] as? [[String: Any]] ?? []
-        var ids: [CGSSpaceID] = []
-        var uuids: [String] = []
+        var desktopIDs: [CGSSpaceID] = []
+        var desktopUUIDs: [String] = []
+        var orderedSpaceIDs: [CGSSpaceID] = []
         for space in spaces {
-            guard (space["type"] as? NSNumber)?.intValue ?? 0 == 0,
-                  let id = (space["id64"] as? NSNumber)?.uint64Value else { continue }
-            ids.append(id)
-            if let uuid = space["uuid"] as? String, !uuid.isEmpty { uuids.append(uuid) }
+            guard let id = (space["id64"] as? NSNumber)?.uint64Value else { continue }
+            orderedSpaceIDs.append(id)
+            guard (space["type"] as? NSNumber)?.intValue ?? 0 == 0 else { continue }
+            desktopIDs.append(id)
+            if let uuid = space["uuid"] as? String, !uuid.isEmpty {
+                desktopUUIDs.append(uuid)
+            }
         }
-        return (ids, uuids.count == ids.count ? uuids : [])
+        return (
+            desktopIDs,
+            desktopUUIDs.count == desktopIDs.count ? desktopUUIDs : [],
+            orderedSpaceIDs
+        )
     }
 
     private static func currentDesktopID(in display: [String: Any]) -> CGSSpaceID? {
@@ -1447,15 +1548,16 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             }) ?? managed[0]
             let frames = screens.map(\.frame)
             let frame = frames.dropFirst().reduce(frames.first ?? .zero) { $0.union($1) }
-            let desktops = Self.desktops(in: display)
+            let spaces = Self.spaceIdentities(in: display)
             return cache(SpaceTopology(separateSpaces: false, stacks: [
                 SpaceStackDescriptor(
                     id: SpaceTopology.sharedStackID,
                     displayID: NSScreen.main?.displayID,
                     displayName: "All Displays",
                     frame: frame,
-                    desktopIDs: desktops.ids,
-                    desktopUUIDs: desktops.uuids,
+                    desktopIDs: spaces.desktopIDs,
+                    orderedSpaceIDs: spaces.orderedSpaceIDs,
+                    desktopUUIDs: spaces.desktopUUIDs,
                     currentDesktopID: Self.currentDesktopID(in: display),
                     currentDesktopUUID: Self.currentDesktopUUID(in: display)
                 ),
@@ -1472,28 +1574,30 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             else { continue }
             let display = remaining.remove(at: index)
             let name = screen.localizedName.isEmpty ? "Display \(descriptors.count + 1)" : screen.localizedName
-            let desktops = Self.desktops(in: display)
+            let spaces = Self.spaceIdentities(in: display)
             descriptors.append(SpaceStackDescriptor(
                 id: uuid,
                 displayID: screen.displayID,
                 displayName: name,
                 frame: screen.frame,
-                desktopIDs: desktops.ids,
-                desktopUUIDs: desktops.uuids,
+                desktopIDs: spaces.desktopIDs,
+                orderedSpaceIDs: spaces.orderedSpaceIDs,
+                desktopUUIDs: spaces.desktopUUIDs,
                 currentDesktopID: Self.currentDesktopID(in: display),
                 currentDesktopUUID: Self.currentDesktopUUID(in: display)
             ))
         }
         for display in remaining {
             guard let identifier = display["Display Identifier"] as? String else { continue }
-            let desktops = Self.desktops(in: display)
+            let spaces = Self.spaceIdentities(in: display)
             descriptors.append(SpaceStackDescriptor(
                 id: identifier,
                 displayID: nil,
                 displayName: "Display \(descriptors.count + 1)",
                 frame: .zero,
-                desktopIDs: desktops.ids,
-                desktopUUIDs: desktops.uuids,
+                desktopIDs: spaces.desktopIDs,
+                orderedSpaceIDs: spaces.orderedSpaceIDs,
+                desktopUUIDs: spaces.desktopUUIDs,
                 currentDesktopID: Self.currentDesktopID(in: display),
                 currentDesktopUUID: Self.currentDesktopUUID(in: display)
             ))
@@ -1645,11 +1749,11 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
 
     // MARK: Switching
 
-    /// Switches the visible desktop by forging a trackpad swipe.
+    /// Switches the visible Space by forging a trackpad swipe.
     ///
     /// At a zero duration this is a single high-velocity flick per hop, which the Dock
     /// resolves by cutting straight to the target. At any other duration Debut drives the
-    /// gesture's progress itself, and the switch takes `switchDuration` per desktop crossed.
+    /// gesture's progress itself, and the switch takes `switchDuration` per Space crossed.
     ///
     /// Returns whether the switch was started. A driven slide runs off the main thread, so
     /// the desktop has not changed by the time this returns — callers wanting the new desktop
@@ -1673,6 +1777,24 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         requestSwitch(to: location, animation: .system)
     }
 
+    @discardableResult
+    public func switchToAdjacentSpace(offset: Int, stackID: String) -> Bool {
+        guard canSwitchSpaces, abs(offset) == 1 else { return false }
+        let topology = spaceTopology()
+        let scheduling = SpaceSwitchAnimation.configured.scheduling(
+            configuredDuration: switchDuration
+        )
+        let request = switchCoordinatorLock.withLock {
+            switchCoordinator.requestAdjacent(
+                offset: offset,
+                stackID: stackID,
+                in: topology,
+                scheduling: scheduling
+            )
+        }
+        return handleSwitchRequest(request, in: topology)
+    }
+
     private func requestSwitch(
         to location: DesktopLocation,
         animation: SpaceSwitchAnimation
@@ -1689,6 +1811,13 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             )
         }
 
+        return handleSwitchRequest(request, in: topology)
+    }
+
+    private func handleSwitchRequest(
+        _ request: SpaceSwitchRequestResult,
+        in topology: SpaceTopology
+    ) -> Bool {
         switch request {
         case .declined, .noChange:
             return false
@@ -1789,18 +1918,18 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     ) -> Bool {
         guard let first = hops.first,
               let stack = topology.stack(id: first.stackID),
-              stack.currentDesktopID == first.fromDesktopID,
+              stack.currentDesktopID == first.fromSpaceID,
               hops.allSatisfy({ hop in
                   guard hop.stackID == first.stackID,
                         hop.animation == first.animation,
-                        let from = stack.desktopIDs.firstIndex(of: hop.fromDesktopID),
-                        let to = stack.desktopIDs.firstIndex(of: hop.toDesktopID)
+                        let from = stack.orderedSpaceIDs.firstIndex(of: hop.fromSpaceID),
+                        let to = stack.orderedSpaceIDs.firstIndex(of: hop.toSpaceID)
                   else { return false }
                   return abs(to - from) == 1
                       && (hop.direction == .right ? to > from : to < from)
               }),
               zip(hops, hops.dropFirst()).allSatisfy({ pair in
-                  pair.0.toDesktopID == pair.1.fromDesktopID
+                  pair.0.toSpaceID == pair.1.fromSpaceID
               }),
               let postingMode = DockSwipeCompatibility.currentMode
         else { return false }

@@ -7,6 +7,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     var desktops: Int
     var current: Int
     private(set) var switchRequests: [Int] = []
+    private(set) var adjacentSwitchRequests: [(offset: Int, stackID: String)] = []
     private(set) var moveRequests: [(windowID: CGWindowID, desktop: Int)] = []
     var windowDesktops: [CGWindowID: Int] = [:]
     var moveSucceeds = true
@@ -103,6 +104,11 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
         operations.append(.switchToDesktopWithSystemAnimation(location.index))
         guard (0..<desktops).contains(location.index) else { return false }
         if switchChangesDesktop { current = location.index }
+        return true
+    }
+
+    func switchToAdjacentSpace(offset: Int, stackID: String) -> Bool {
+        adjacentSwitchRequests.append((offset, stackID))
         return true
     }
 
@@ -1538,6 +1544,19 @@ struct SpaceControllerSpaceTests {
         #expect(controller.spaceManager.activeSpaceID == spaceB)
         #expect(windowService.raisedWindowIDs.isEmpty)
         #expect(windowService.activatedBundleID == nil)
+    }
+
+    @Test("Adjacent input reaches the native-order switcher at a desktop model edge")
+    func adjacentInputUsesNativeSpaceOrderAtModelEdge() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+
+        keyboardService.simulateEvent(.switchAdjacentSpace(-1))
+
+        #expect(spaces.adjacentSwitchRequests.map(\.offset) == [-1])
+        #expect(spaces.adjacentSwitchRequests.map(\.stackID) == [SpaceTopology.sharedStackID])
+        #expect(spaces.switchRequests.isEmpty)
     }
 
     // Skipping the focus is not enough on its own. A focus queued by an earlier switch that is

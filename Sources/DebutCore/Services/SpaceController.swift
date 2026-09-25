@@ -2033,9 +2033,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         case .jumpToLastSpace:
             jumpToSpace(index: spaceManager.spaces.count - 1)
         case .switchAdjacentSpace(let offset):
-            if let index = spaceManager.spaces.firstIndex(where: { $0.id == spaceManager.activeSpaceID }) {
-                quickSwitchToSpace(index: index + offset, keepingCurrentApplication: false)
-            }
+            guard abs(offset) == 1, let switcher = spaceSwitcher else { break }
+            _ = switcher.switchToAdjacentSpace(
+                offset: offset,
+                stackID: spaceManager.selectedSpaceStackID
+            )
         case .moveFocusedWindowToAdjacentSpace(let offset):
             moveFocusedWindowToAdjacentSpace(offset: offset)
         case .switchToSpace(let position):

@@ -2495,13 +2495,34 @@ if featureSpaces.userDesktops().count >= 2 {
         ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
     }.count
     let burstModelReady = waitFor { readState()["activeSpaceIndex"] == "0" }
+    let burstStack = featureSpaces.spaceTopology().stacks.first
+    let burstOriginIndex = burstStack?.currentSpaceIndex
     postPhysicalSwipeGesture(progress: 0.6)
     wait(0.03)
     postPhysicalSwipeGesture(progress: 0.6)
-    let burstReachedEndpoint = waitFor { featureSpaces.currentDesktopIndex() == 1 }
     wait(1.7)
-    postPhysicalSwipeGesture(progress: -0.6)
-    let burstReturned = waitFor { featureSpaces.currentDesktopIndex() == 0 }
+    let burstEndpointIndex = featureSpaces.spaceTopology().stacks.first?.currentSpaceIndex
+    let burstReachedEndpoint = burstOriginIndex.flatMap { origin in
+        burstEndpointIndex.map { endpoint in
+            endpoint > origin && endpoint <= origin + 2
+        }
+    } ?? false
+    var burstReverseStepsCompleted = true
+    if let origin = burstOriginIndex, let endpoint = burstEndpointIndex, endpoint > origin {
+        for expected in stride(from: endpoint - 1, through: origin, by: -1) {
+            postPhysicalSwipeGesture(progress: -0.6)
+            let completed = waitFor {
+                featureSpaces.spaceTopology().stacks.first?.currentSpaceIndex == expected
+            }
+            burstReverseStepsCompleted = burstReverseStepsCompleted && completed
+            if !completed { break }
+            wait(0.3)
+        }
+    } else {
+        burstReverseStepsCompleted = false
+    }
+    let burstReturned = burstReverseStepsCompleted
+        && featureSpaces.currentDesktop() == burstStack?.currentDesktopID
     let burstEventsAfter = readEvents().filter {
         ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
     }.count
@@ -2593,6 +2614,108 @@ if featureSpaces.userDesktops().count >= 2 {
             && readEvents().filter {
                 ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
             }.count > adjacentEventsBeforeOverview
+    }
+
+    // A fullscreen window inserts a non-desktop Space into Mission Control's order. Both
+    // physical adjacent inputs must start from that real position, and the reverse input must
+    // be able to enter it again even when Dock placed it at the first or last edge.
+    let fullscreenNavigationFixture = NSRunningApplication
+        .runningApplications(withBundleIdentifier: "com.apple.TextEdit")
+        .first
+    let fullscreenNavigationWindow = fullscreenNavigationFixture.flatMap {
+        $0.activate()
+        wait(1)
+        return focusedWindowElement(for: $0.processIdentifier)
+    }
+    let fullscreenNavigationEntered = fullscreenNavigationWindow.map {
+        setWindowFullscreen($0, true)
+    } ?? false
+    wait(fullscreenNavigationEntered ? 2 : 0)
+
+    if fullscreenNavigationEntered,
+       let stack = featureSpaces.spaceTopology().stacks.first,
+       let fullscreenSpaceID = stack.currentDesktopID,
+       let fullscreenIndex = stack.currentSpaceIndex,
+       stack.currentDesktopIndex == nil {
+        let offset = stack.orderedSpaceIDs.indices.contains(fullscreenIndex + 1) ? 1 : -1
+        let adjacentIndex = fullscreenIndex + offset
+        let adjacentSpaceID = stack.orderedSpaceIDs[adjacentIndex]
+        let arrow = offset > 0 ? kVK_RightArrow : kVK_LeftArrow
+        let reverseArrow = offset > 0 ? kVK_LeftArrow : kVK_RightArrow
+        let controlEventsBefore = readEvents().filter {
+            ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
+        }.count
+
+        postControlArrow(arrow)
+        let controlLeftFullscreen = waitFor {
+            featureSpaces.currentDesktop() == adjacentSpaceID
+        }
+        postControlArrow(reverseArrow)
+        let controlReturnedFullscreen = waitFor {
+            featureSpaces.currentDesktop() == fullscreenSpaceID
+        }
+        let controlEventsAfter = readEvents().filter {
+            ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
+        }.count
+        info(
+            "Fullscreen Control-arrow: order=\(stack.orderedSpaceIDs) "
+                + "fullscreen=\(fullscreenSpaceID) adjacent=\(adjacentSpaceID) "
+                + "left=\(controlLeftFullscreen) returned=\(controlReturnedFullscreen) "
+                + "events=\(controlEventsAfter)-\(controlEventsBefore)"
+        )
+        test("Control-arrow leaves and re-enters a fullscreen Space through Debut") {
+            controlLeftFullscreen && controlReturnedFullscreen
+                && controlEventsAfter >= controlEventsBefore + 2
+        }
+
+        wait(0.5)
+        let swipeEventUptimeBefore = readEvents().compactMap { event -> UInt64? in
+            guard (event["keyEvent"] ?? "").contains("switchAdjacentSpace") else {
+                return nil
+            }
+            return event["uptimeNanoseconds"].flatMap(UInt64.init)
+        }.max() ?? 0
+        postPhysicalSwipeGesture(progress: offset > 0 ? 0.6 : -0.6)
+        let swipeLeftFullscreen = waitFor {
+            featureSpaces.currentDesktop() == adjacentSpaceID
+        }
+        wait(0.5)
+        postPhysicalSwipeGesture(progress: offset > 0 ? -0.6 : 0.6)
+        let swipeReturnedFullscreen = waitFor {
+            featureSpaces.currentDesktop() == fullscreenSpaceID
+        }
+        let swipeEventsSettled = waitFor {
+            readEvents().filter {
+                ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
+                    && ($0["uptimeNanoseconds"].flatMap(UInt64.init) ?? 0)
+                        > swipeEventUptimeBefore
+            }.count >= 2
+        }
+        let swipeEventsAfter = readEvents().filter {
+            ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
+                && ($0["uptimeNanoseconds"].flatMap(UInt64.init) ?? 0)
+                    > swipeEventUptimeBefore
+        }.count
+        info(
+            "Fullscreen trackpad: left=\(swipeLeftFullscreen) "
+                + "returned=\(swipeReturnedFullscreen) "
+                + "newEvents=\(swipeEventsAfter)"
+        )
+        test("Trackpad swipe leaves and re-enters a fullscreen Space through Debut") {
+            swipeLeftFullscreen && swipeReturnedFullscreen
+                && swipeEventsSettled
+        }
+    } else {
+        let reason = "The TextEdit fixture did not enter a navigable fullscreen Space"
+        skipTest("Control-arrow leaves and re-enters a fullscreen Space through Debut", reason: reason)
+        skipTest("Trackpad swipe leaves and re-enters a fullscreen Space through Debut", reason: reason)
+    }
+
+    if let fullscreenNavigationWindow {
+        fullscreenNavigationFixture?.activate()
+        wait(0.5)
+        _ = setWindowFullscreen(fullscreenNavigationWindow, false)
+        wait(1)
     }
 } else {
     test("Launch input fixture has at least two desktops") { false }

@@ -9,14 +9,14 @@ struct SpaceSwitchPlanTests {
 
     @Test("A forward jump reports the distance and direction")
     func forward() {
-        let plan = SpaceSwitchPlan(from: 0, to: 3, desktopCount: 4)
+        let plan = SpaceSwitchPlan(from: 0, to: 3, spaceCount: 4)
         #expect(plan?.direction == .right)
         #expect(plan?.steps == 3)
     }
 
     @Test("A backward jump reports the distance and direction")
     func backward() {
-        let plan = SpaceSwitchPlan(from: 3, to: 1, desktopCount: 4)
+        let plan = SpaceSwitchPlan(from: 3, to: 1, spaceCount: 4)
         #expect(plan?.direction == .left)
         #expect(plan?.steps == 2)
     }
@@ -27,19 +27,19 @@ struct SpaceSwitchPlanTests {
     // is not what a zero-velocity swipe actually does.
     @Test("Switching to the current desktop plans nothing")
     func sameDesktop() {
-        #expect(SpaceSwitchPlan(from: 2, to: 2, desktopCount: 4) == nil)
+        #expect(SpaceSwitchPlan(from: 2, to: 2, spaceCount: 4) == nil)
     }
 
     @Test("Out-of-range targets plan nothing")
     func outOfRange() {
-        #expect(SpaceSwitchPlan(from: 0, to: 4, desktopCount: 4) == nil)
-        #expect(SpaceSwitchPlan(from: 0, to: -1, desktopCount: 4) == nil)
-        #expect(SpaceSwitchPlan(from: -1, to: 1, desktopCount: 4) == nil)
+        #expect(SpaceSwitchPlan(from: 0, to: 4, spaceCount: 4) == nil)
+        #expect(SpaceSwitchPlan(from: 0, to: -1, spaceCount: 4) == nil)
+        #expect(SpaceSwitchPlan(from: -1, to: 1, spaceCount: 4) == nil)
     }
 
     @Test("A single desktop plans nothing")
     func singleDesktop() {
-        #expect(SpaceSwitchPlan(from: 0, to: 0, desktopCount: 1) == nil)
+        #expect(SpaceSwitchPlan(from: 0, to: 0, spaceCount: 1) == nil)
     }
 
 }
@@ -62,6 +62,24 @@ struct SpaceSwitchCoordinatorTests {
         ])
     }
 
+    private func topology(
+        currentSpaceID: CGSSpaceID,
+        desktopIDs: [CGSSpaceID],
+        orderedSpaceIDs: [CGSSpaceID]
+    ) -> SpaceTopology {
+        SpaceTopology(separateSpaces: false, stacks: [
+            SpaceStackDescriptor(
+                id: SpaceTopology.sharedStackID,
+                displayID: nil,
+                displayName: "All Displays",
+                frame: .zero,
+                desktopIDs: desktopIDs,
+                orderedSpaceIDs: orderedSpaceIDs,
+                currentDesktopID: currentSpaceID
+            ),
+        ])
+    }
+
     private func location(_ index: Int) -> DesktopLocation {
         DesktopLocation(
             stackID: SpaceTopology.sharedStackID,
@@ -77,8 +95,8 @@ struct SpaceSwitchCoordinatorTests {
     ) -> SpaceSwitchHop {
         SpaceSwitchHop(
             stackID: SpaceTopology.sharedStackID,
-            fromDesktopID: desktopIDs[from],
-            toDesktopID: desktopIDs[to],
+            fromSpaceID: desktopIDs[from],
+            toSpaceID: desktopIDs[to],
             direction: to > from ? .right : .left,
             animation: animation
         )
@@ -125,8 +143,8 @@ struct SpaceSwitchCoordinatorTests {
         #expect(coordinator.desktopDidChange(to: topology(current: 1)) == [
             SpaceSwitchHop(
                 stackID: SpaceTopology.sharedStackID,
-                fromDesktopID: 11,
-                toDesktopID: 12,
+                fromSpaceID: 11,
+                toSpaceID: 12,
                 direction: .right
             ),
         ])
@@ -194,8 +212,8 @@ struct SpaceSwitchCoordinatorTests {
         #expect(coordinator.desktopDidChange(to: topology(current: 1)) == [
             SpaceSwitchHop(
                 stackID: SpaceTopology.sharedStackID,
-                fromDesktopID: 11,
-                toDesktopID: 10,
+                fromSpaceID: 11,
+                toSpaceID: 10,
                 direction: .left
             ),
         ])
@@ -302,6 +320,183 @@ struct SpaceSwitchCoordinatorTests {
         #expect(staleTicket != currentTicket)
         #expect(coordinator.recover(staleTicket, in: topology(current: 1)) == .stale)
         #expect(coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
+
+    @Test("A desktop route includes fullscreen Spaces in native order")
+    func desktopRouteIncludesFullscreenSpaces() {
+        var coordinator = SpaceSwitchCoordinator()
+        let initialTopology = topology(
+            currentSpaceID: 10,
+            desktopIDs: [10, 12],
+            orderedSpaceIDs: [10, 11, 12]
+        )
+
+        let request = coordinator.request(
+            to: DesktopLocation(
+                stackID: SpaceTopology.sharedStackID,
+                desktopID: 12,
+                index: 1
+            ),
+            in: initialTopology,
+            scheduling: .batchedInstant
+        )
+
+        #expect(request == .post([
+            SpaceSwitchHop(
+                stackID: SpaceTopology.sharedStackID,
+                fromSpaceID: 10,
+                toSpaceID: 11,
+                direction: .right
+            ),
+            SpaceSwitchHop(
+                stackID: SpaceTopology.sharedStackID,
+                fromSpaceID: 11,
+                toSpaceID: 12,
+                direction: .right
+            ),
+        ]))
+    }
+
+    @Test("Adjacent switching can leave a fullscreen Space in either direction")
+    func adjacentSwitchLeavesFullscreenSpace() {
+        let initialTopology = topology(
+            currentSpaceID: 11,
+            desktopIDs: [10, 12],
+            orderedSpaceIDs: [10, 11, 12]
+        )
+
+        var leftCoordinator = SpaceSwitchCoordinator()
+        let leftOffset: Int = -1
+        let left: SpaceSwitchRequestResult = leftCoordinator.requestAdjacent(
+            offset: leftOffset,
+            stackID: SpaceTopology.sharedStackID,
+            in: initialTopology,
+            animation: .configured,
+            scheduling: .confirmedAdjacent
+        )
+        #expect(left == .post([
+            SpaceSwitchHop(
+                stackID: SpaceTopology.sharedStackID,
+                fromSpaceID: 11,
+                toSpaceID: 10,
+                direction: .left
+            ),
+        ]))
+
+        var rightCoordinator = SpaceSwitchCoordinator()
+        let rightOffset: Int = 1
+        let right: SpaceSwitchRequestResult = rightCoordinator.requestAdjacent(
+            offset: rightOffset,
+            stackID: SpaceTopology.sharedStackID,
+            in: initialTopology,
+            animation: .configured,
+            scheduling: .confirmedAdjacent
+        )
+        #expect(right == .post([
+            SpaceSwitchHop(
+                stackID: SpaceTopology.sharedStackID,
+                fromSpaceID: 11,
+                toSpaceID: 12,
+                direction: .right
+            ),
+        ]))
+    }
+
+    @Test("Adjacent switching reaches fullscreen Spaces at both native edges")
+    func adjacentSwitchReachesFullscreenEdgeSpaces() {
+        let orderedSpaceIDs: [CGSSpaceID] = [9, 10, 12, 13]
+
+        var firstCoordinator = SpaceSwitchCoordinator()
+        let first = firstCoordinator.requestAdjacent(
+            offset: -1,
+            stackID: SpaceTopology.sharedStackID,
+            in: topology(
+                currentSpaceID: 10,
+                desktopIDs: [10, 12],
+                orderedSpaceIDs: orderedSpaceIDs
+            ),
+            animation: .configured,
+            scheduling: .confirmedAdjacent
+        )
+        #expect(first == .post([
+            SpaceSwitchHop(
+                stackID: SpaceTopology.sharedStackID,
+                fromSpaceID: 10,
+                toSpaceID: 9,
+                direction: .left
+            ),
+        ]))
+
+        var lastCoordinator = SpaceSwitchCoordinator()
+        let last = lastCoordinator.requestAdjacent(
+            offset: 1,
+            stackID: SpaceTopology.sharedStackID,
+            in: topology(
+                currentSpaceID: 12,
+                desktopIDs: [10, 12],
+                orderedSpaceIDs: orderedSpaceIDs
+            ),
+            animation: .configured,
+            scheduling: .confirmedAdjacent
+        )
+        #expect(last == .post([
+            SpaceSwitchHop(
+                stackID: SpaceTopology.sharedStackID,
+                fromSpaceID: 12,
+                toSpaceID: 13,
+                direction: .right
+            ),
+        ]))
+    }
+
+    @Test("Repeated adjacent requests advance from the pending fullscreen target")
+    func repeatedAdjacentRequestsAdvanceAcrossFullscreen() {
+        var coordinator = SpaceSwitchCoordinator()
+        let initialTopology = topology(
+            currentSpaceID: 10,
+            desktopIDs: [10, 12],
+            orderedSpaceIDs: [10, 11, 12]
+        )
+
+        #expect(coordinator.requestAdjacent(
+            offset: 1,
+            stackID: SpaceTopology.sharedStackID,
+            in: initialTopology,
+            animation: .configured,
+            scheduling: .confirmedAdjacent
+        ).hops.map(\.toSpaceID) == [11])
+        #expect(coordinator.requestAdjacent(
+            offset: 1,
+            stackID: SpaceTopology.sharedStackID,
+            in: initialTopology,
+            animation: .configured,
+            scheduling: .confirmedAdjacent
+        ) == .coalesced)
+        #expect(coordinator.desktopDidChange(to: topology(
+            currentSpaceID: 11,
+            desktopIDs: [10, 12],
+            orderedSpaceIDs: [10, 11, 12]
+        )).map(\.toSpaceID) == [12])
+    }
+}
+
+@Suite("Managed Space parsing")
+struct ManagedSpaceParsingTests {
+    @Test("Desktop identity stays type-zero while navigation keeps fullscreen order")
+    func fullscreenSpacesRemainNavigable() {
+        let identities = SpaceService.spaceIdentities(in: [
+            "Spaces": [
+                ["type": 4, "id64": NSNumber(value: 9), "uuid": "FULLSCREEN-FIRST"],
+                ["type": 0, "id64": NSNumber(value: 10), "uuid": "DESKTOP-A"],
+                ["type": 4, "id64": NSNumber(value: 11), "uuid": "FULLSCREEN-MIDDLE"],
+                ["type": 0, "id64": NSNumber(value: 12), "uuid": "DESKTOP-B"],
+                ["type": 4, "id64": NSNumber(value: 13), "uuid": "FULLSCREEN-LAST"],
+            ],
+        ])
+
+        #expect(identities.desktopIDs == [10, 12])
+        #expect(identities.desktopUUIDs == ["DESKTOP-A", "DESKTOP-B"])
+        #expect(identities.orderedSpaceIDs == [9, 10, 11, 12, 13])
     }
 }
 

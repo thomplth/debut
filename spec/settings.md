@@ -61,7 +61,10 @@ on another desktop. Turning it off disables the three child controls without
 changing their saved choices, disables the duration control, and lets macOS
 perform cross-desktop window activation with its original transition. Turning
 the parent back on restores the saved child choices. The duration applies only
-while the parent is enabled. A trackpad desktop gesture commits one adjacent hop.
+while the parent is enabled. A trackpad desktop gesture commits one adjacent native
+Space hop, including into or out of a fullscreen app. Fullscreen Spaces remain in
+Mission Control order, so accelerated switching neither skips an intervening fullscreen
+app nor makes one at the first or last position unreachable.
 Other gestures and unclaimed shortcuts keep their native behavior. Enabled
 numbered and Control-arrow shortcuts apply regardless of which app is frontmost.
 Mission Control, App Exposé, and Show Desktop retain their native navigation;

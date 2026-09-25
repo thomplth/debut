@@ -20,11 +20,16 @@ public struct SpaceStackDescriptor: Equatable, Sendable {
     public let displayID: CGDirectDisplayID?
     public let displayName: String
     public let frame: CGRect
+    /// Every navigable macOS Space in Mission Control order, including fullscreen and tiled
+    /// Spaces that do not correspond to one of Debut's desktop-backed stages.
+    public let orderedSpaceIDs: [CGSSpaceID]
     public let desktopIDs: [CGSSpaceID]
     /// The same desktops as `desktopIDs`, in the same order, keyed by the identity that
     /// survives a reboot. Empty when the window server withheld a uuid for any desktop, so
     /// this is all-or-nothing rather than something to index opportunistically.
     public let desktopUUIDs: [String]
+    /// WindowServer's showing Space. The historical name is retained because callers that need
+    /// a type-0 desktop distinguish it with `currentDesktopIndex`.
     public let currentDesktopID: CGSSpaceID?
     public let currentDesktopUUID: String?
 
@@ -34,6 +39,7 @@ public struct SpaceStackDescriptor: Equatable, Sendable {
         displayName: String,
         frame: CGRect,
         desktopIDs: [CGSSpaceID],
+        orderedSpaceIDs: [CGSSpaceID]? = nil,
         desktopUUIDs: [String] = [],
         currentDesktopID: CGSSpaceID?,
         currentDesktopUUID: String? = nil
@@ -43,6 +49,11 @@ public struct SpaceStackDescriptor: Equatable, Sendable {
         self.displayName = displayName
         self.frame = frame
         self.desktopIDs = desktopIDs
+        let ordered = orderedSpaceIDs ?? desktopIDs
+        self.orderedSpaceIDs = Set(ordered).count == ordered.count
+            && desktopIDs.allSatisfy(ordered.contains)
+            ? ordered
+            : desktopIDs
         self.desktopUUIDs = desktopUUIDs.count == desktopIDs.count ? desktopUUIDs : []
         self.currentDesktopID = currentDesktopID
         self.currentDesktopUUID = currentDesktopUUID
@@ -50,6 +61,12 @@ public struct SpaceStackDescriptor: Equatable, Sendable {
 
     public var currentDesktopIndex: Int? {
         currentDesktopID.flatMap(desktopIDs.firstIndex)
+    }
+
+    /// The showing position in Mission Control's complete Space order. Unlike
+    /// `currentDesktopIndex`, this remains resolved while a fullscreen app is showing.
+    public var currentSpaceIndex: Int? {
+        currentDesktopID.flatMap(orderedSpaceIDs.firstIndex)
     }
 
     public func desktopUUID(at index: Int) -> String? {
