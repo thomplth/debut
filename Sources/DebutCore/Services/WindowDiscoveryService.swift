@@ -517,6 +517,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         diag.report("windows_reconciled", details: [
             "liveCount": "\(liveWindows.count)",
+            "windowIDsBySpace": SpaceController.encode(spaceManager.spaces.map { $0.windows.map(\.windowID) }),
             "refused": "\(liveWindows.count - admittedWindows.count)",
             "added": "\(result.addedCount)",
             "reassigned": "\(result.reassignedCount)",

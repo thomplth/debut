@@ -28,6 +28,8 @@ jobs:
         run: Tests/CI/E2EWorkflowTests.sh
 
       - name: Run E2E suite
+        env:
+          DEBUT_E2E_DURATION_PROFILE: ${{ github.event_name == 'pull_request' && 'ordinary' || 'full' }}
         run: ./scripts/ci-e2e.sh
 
       - name: Upload E2E evidence
