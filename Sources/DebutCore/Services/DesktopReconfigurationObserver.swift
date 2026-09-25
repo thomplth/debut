@@ -114,9 +114,24 @@ final class DesktopNavigationEligibility: @unchecked Sendable {
     private var overviewRecoveryPending = false
     private var currentDesktopResolved = false
     private let canSwitchSpaces: @Sendable () -> Bool
+    private let needsOverviewRecovery: Bool
 
-    init(canSwitchSpaces: @escaping @Sendable () -> Bool) {
+    init(
+        canSwitchSpaces: @escaping @Sendable () -> Bool,
+        requiresOverviewRecovery: Bool = DesktopNavigationEligibility.requiresOverviewRecovery(
+            operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        )
+    ) {
         self.canSwitchSpaces = canSwitchSpaces
+        self.needsOverviewRecovery = requiresOverviewRecovery
+    }
+
+    /// macOS 26 leaves Dock's gesture carousel unable to accept Debut's first synthetic
+    /// horizontal gesture after an overview closes. macOS 27 no longer has that behavior, so
+    /// sacrificing its first physical gesture only leaks the user's input to macOS or the
+    /// foreground app without serving a recovery purpose.
+    static func requiresOverviewRecovery(operatingSystemMajor: Int) -> Bool {
+        operatingSystemMajor == 26
     }
 
     /// Publishes live WindowServer state from outside the event-tap callback. Input ownership
@@ -145,13 +160,17 @@ final class DesktopNavigationEligibility: @unchecked Sendable {
     /// The overview marker has no balanced close event, and the first synthetic horizontal
     /// gesture after dismissal is ignored on macOS 26. Remember the opening signal instead:
     /// while the marker is present every match stays native, then exactly one match after it
-    /// disappears is left to Dock to reset its carousel state before acceleration resumes.
-    func overviewWillOpen() {
+    /// disappears is left to Dock to reset its carousel state before acceleration resumes on
+    /// the one affected OS release.
+    @discardableResult
+    func overviewWillOpen(confirmed: Bool) -> Bool {
+        guard confirmed else { return false }
         lock.withLock {
             overviewActive = true
-            overviewRecoveryPending = true
+            overviewRecoveryPending = needsOverviewRecovery
             currentDesktopResolved = false
         }
+        return true
     }
 
     func blockReason() -> BlockReason? {

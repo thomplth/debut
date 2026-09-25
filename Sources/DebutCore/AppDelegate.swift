@@ -660,11 +660,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     @objc private func desktopLayoutMayHaveChanged(_ notification: Notification) {
         if let event = notification.object as? DesktopReconfigurationEvent,
            !event.desktopListIsSettled {
+            // SkyLight also emits 1327 around ordinary desktop transitions. Only the live
+            // Dock/WindowManager marker proves an overview owns input; trusting the signal by
+            // itself poisons the cache and leaks the next shortcut back to macOS.
+            guard desktopNavigationEligibility?.overviewWillOpen(
+                confirmed: DockOverviewDetector.isActive()
+            ) == true else {
+                diag.report("desktop_navigation_overview_signal_ignored", level: .transient)
+                return
+            }
             // A synthetic hop has no completion signal once Mission Control takes over.
             // Clear it now so a later request cannot coalesce behind stale state, and drain
             // a physical gesture whose Began Debut may already have claimed. Do not sample
             // topology here: 1327 arrives while the current desktop is transiently absent.
-            desktopNavigationEligibility?.overviewWillOpen()
             spaceService?.cancelPendingSwitches()
             desktopSwipeService?.cancelActiveGesture()
             diag.report("desktop_navigation_overview_will_open", level: .transient)
