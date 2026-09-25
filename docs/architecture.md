@@ -64,7 +64,9 @@ to [iss](https://github.com/joshuarli/iss).
 
 When faster desktop transitions are enabled, `DockSwipeAnimation` posts a
 high-velocity instant switch at duration zero, or a Began/Changed/Ended sequence
-over the requested duration. Each gesture crosses one desktop. Instant routes
+over the requested duration. Each gesture crosses one native Space. The topology
+keeps type-0 desktops as Debut stages while retaining fullscreen and tiled Spaces in
+a separate Mission Control order used for navigation. Instant routes
 prepare and post all adjacent gestures as one batch; nonzero and standard-duration
 routes wait for confirmation between adjacent gestures. The macOS 27 recipe
 includes the augmented IOHID payload. Capability and system-overview gates
@@ -81,7 +83,9 @@ is left to macOS, while the disabled child controls retain their saved settings.
 
 Stage commits, numbered navigation, cross-desktop Option-Tab selection, enabled
 Control-arrow/trackpad input, and move-and-follow commands use this common
-switching integration. macOS navigation that Debut does not intercept remains
+switching integration. Adjacent input starts from the WindowServer's showing Space,
+so it continues while a fullscreen app is active and can reach fullscreen Spaces at
+either end of the native order. macOS navigation that Debut does not intercept remains
 native and is observed afterwards. Window focus waits for the destination, rather
 than raising each window before the desktop has changed.
 
