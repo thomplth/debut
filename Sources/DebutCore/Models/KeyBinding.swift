@@ -523,13 +523,16 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
 
 public struct KeyBindings: Codable, Sendable, Equatable {
     public var bindings: [KeyAction: KeyCombo]
+    public private(set) var disabledActions: Set<KeyAction>
 
     public init() {
         self.bindings = KeyCombo.defaults()
+        self.disabledActions = []
     }
 
     private enum CodingKeys: String, CodingKey {
         case bindings
+        case disabledActions
     }
 
     public init(from decoder: Decoder) throws {
@@ -538,6 +541,9 @@ public struct KeyBindings: Codable, Sendable, Equatable {
             DecodedKeyActionDictionary<KeyCombo>.self,
             forKey: .bindings
         )?.values ?? [:]
+        disabledActions = try container.decodeIfPresent(
+            Set<KeyAction>.self, forKey: .disabledActions
+        ) ?? []
         var defaults = KeyCombo.defaults()
         for action in KeyAction.overlaySelectionActions where saved[action] == nil {
             if let combo = defaults[action], saved.contains(where: { $0.key != action && $0.value == combo }) {
@@ -545,24 +551,46 @@ public struct KeyBindings: Codable, Sendable, Equatable {
             }
         }
         bindings = defaults.merging(saved) { _, savedCombo in savedCombo }
+        for action in disabledActions { bindings.removeValue(forKey: action) }
+    }
+
+    public mutating func clear(_ action: KeyAction) {
+        bindings.removeValue(forKey: action)
+        disabledActions.insert(action)
+    }
+
+    public mutating func set(_ combo: KeyCombo, for action: KeyAction) {
+        disabledActions.remove(action)
+        bindings[action] = combo
+    }
+
+    public mutating func record(_ combo: KeyCombo, for action: KeyAction) {
+        if (combo.keyCode == kVK_Delete || combo.keyCode == kVK_ForwardDelete)
+            && !combo.command && !combo.control && !combo.shift && !combo.option {
+            clear(action)
+        } else {
+            set(combo, for: action)
+        }
     }
 
     public func action(for combo: KeyCombo) -> KeyAction? {
-        bindings.first(where: { $0.value == combo })?.key
+        bindings.first(where: { $0.value == combo && !disabledActions.contains($0.key) })?.key
     }
 
     public func action(for combo: KeyCombo, scope: ShortcutScope) -> KeyAction? {
         KeyAction.allCases.first { action in
-            action.shortcutScope == scope && bindings[action] == combo
+            action.shortcutScope == scope && !disabledActions.contains(action)
+                && bindings[action] == combo
         }
     }
 
     public func combo(for action: KeyAction) -> KeyCombo? {
-        bindings[action]
+        disabledActions.contains(action) ? nil : bindings[action]
     }
 
     public mutating func restoreDefaults() {
         bindings = KeyCombo.defaults()
+        disabledActions = []
     }
 }
 

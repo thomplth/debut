@@ -59,8 +59,9 @@ public struct ShortcutModifiers: Codable, Sendable, Equatable, Hashable {
     }
 
     public static let control = ShortcutModifiers(control: true)
+    public static let disabled = ShortcutModifiers()
 
-    public static let choices: [ShortcutModifiers] = (1..<16).map { bits in
+    public static let choices: [ShortcutModifiers] = (0..<16).map { bits in
         ShortcutModifiers(
             command: bits & 1 != 0,
             control: bits & 2 != 0,
@@ -70,6 +71,7 @@ public struct ShortcutModifiers: Codable, Sendable, Equatable, Hashable {
     }
 
     public var displayString: String {
+        if self == .disabled { return "Disabled" }
         var names: [String] = []
         if command { names.append("Command") }
         if control { names.append("Control") }
