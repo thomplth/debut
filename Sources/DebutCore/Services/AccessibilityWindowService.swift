@@ -12,6 +12,7 @@ private struct SendableCaptureWindow: @unchecked Sendable {
 private struct ResolvedRunningApplication {
     let application: NSRunningApplication
     let bundleID: String
+    let pid: pid_t
 }
 
 /// One window Accessibility contradicted, named together with the process that owned it. The
@@ -174,7 +175,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             return AppInfo(
                 bundleID: resolved.bundleID,
                 name: app.localizedName ?? resolved.bundleID,
-                pid: app.processIdentifier,
+                pid: resolved.pid,
                 isHidden: app.isHidden
             )
         }
@@ -192,7 +193,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     }
 
     public func frontmostApplicationPID() -> pid_t? {
-        NSWorkspace.shared.frontmostApplication?.processIdentifier
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        if app.processIdentifier > 0 { return app.processIdentifier }
+        return Self.processIdentifier(for: app, candidateOwnerPIDs: Self.cgOwnerPIDs())
     }
 
     public func frontmostWindowID(ownerPID: pid_t) -> CGWindowID? {
@@ -308,28 +311,31 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         let axFullscreens = Self.currentAXCorroboratedFullscreens(
             axWindowIDsByPID: classification.axWindowIDsByPID
         )
-        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[CFString: Any]] else {
             return []
         }
+        let ownerPIDs = Self.cgOwnerPIDs(in: infoList)
+        let frontmostPID = NSWorkspace.shared.frontmostApplication.flatMap {
+            Self.processIdentifier(for: $0, candidateOwnerPIDs: ownerPIDs)
+        }
 
         let runningApps = resolvedRunningApplications(
             transientFullscreenOwnerPIDs: Set(shieldingWindows.values)
-                .union(axFullscreens.values)
+                .union(axFullscreens.values),
+            candidateOwnerPIDs: ownerPIDs
         )
         let pidToBundleID: [pid_t: String] = Dictionary(
-            runningApps.map { ($0.application.processIdentifier, $0.bundleID) },
+            runningApps.map { ($0.pid, $0.bundleID) },
             uniquingKeysWith: { first, _ in first }
         )
         let pidToName: [pid_t: String] = Dictionary(
             runningApps.map {
-                ($0.application.processIdentifier, $0.application.localizedName ?? $0.bundleID)
+                ($0.pid, $0.application.localizedName ?? $0.bundleID)
             },
             uniquingKeysWith: { first, _ in first }
         )
-        let regularPIDs = Set(runningApps.map(\.application.processIdentifier))
+        let regularPIDs = Set(runningApps.map(\.pid))
 
         // `kAXWindows` only reports windows on the active Space. This is what lets a window on
         // another desktop resolve to exactly one desktop even though AX has never seen it.
@@ -363,7 +369,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             orderedOutWindowIDs: verdicts.orderedOut,
             ownerPIDs: Self.windowOwnerPIDs(in: infoList),
             hiddenPIDs: Set(runningApps.lazy.filter(\.application.isHidden)
-                .map(\.application.processIdentifier)),
+                .map(\.pid)),
             hiddenTaggedWindowIDs: verdicts.hiddenByApp,
             axWindowIDsByPID: classification.axWindowIDsByPID,
             windowDesktops: windowDesktops
@@ -637,7 +643,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
         let pidToBundleID: [pid_t: String] = Dictionary(
             resolvedRunningApplications().map {
-                ($0.application.processIdentifier, $0.bundleID)
+                ($0.pid, $0.bundleID)
             },
             uniquingKeysWith: { first, _ in first }
         )
@@ -706,10 +712,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         let verdicts = spaceSwitcher?.windowServerVerdicts(
             among: infoList.compactMap { $0[kCGWindowNumber] as? CGWindowID }
         ) ?? WindowServerVerdicts()
-        let hiddenPIDs = Set(
-            NSWorkspace.shared.runningApplications.lazy
-                .filter(\.isHidden).map(\.processIdentifier)
-        )
+        let hiddenPIDs = Set(resolvedRunningApplications(
+            transientFullscreenOwnerPIDs: [],
+            candidateOwnerPIDs: Self.cgOwnerPIDs(in: infoList)
+        ).filter(\.application.isHidden).map(\.pid))
         let ownerPIDs = Self.windowOwnerPIDs(in: infoList)
         let hasAmbiguousHiddenWindow = verdicts.orderedOut
             .subtracting(verdicts.hiddenByApp)
@@ -818,8 +824,14 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             .filter { $0.activationPolicy == .regular &&
                 (onlyOwnerPIDs == nil || onlyOwnerPIDs?.contains($0.processIdentifier) == true) }
 
+        let ownerPIDs = runningApps.contains(where: { $0.processIdentifier <= 0 })
+            ? Self.cgOwnerPIDs() : []
+
         for app in runningApps {
-            let axApp = AXUIElementCreateApplication(app.processIdentifier)
+            guard let pid = Self.processIdentifier(for: app, candidateOwnerPIDs: ownerPIDs) else {
+                continue
+            }
+            let axApp = AXUIElementCreateApplication(pid)
             var windowsRef: CFTypeRef?
             let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
             guard result == .success, let axWindows = windowsRef as? [AXUIElement] else { continue }
@@ -834,7 +846,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                       cgWindowID != 0
                 else { continue }
 
-                axWindowIDsByPID[app.processIdentifier, default: []].insert(cgWindowID)
+                axWindowIDsByPID[pid, default: []].insert(cgWindowID)
                 let isModal = boolAttribute(kAXModalAttribute, of: axWindow) ?? false
                 if Self.isTrackableAXWindow(role: role, subrole: subrole, isModal: isModal) {
                     trackable.insert(cgWindowID)
@@ -850,8 +862,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         let focusedWindowID: CGWindowID?
         let focusedWindowPID: pid_t?
         if onlyOwnerPIDs == nil, let frontmost = NSWorkspace.shared.frontmostApplication {
-            focusedWindowID = self.focusedWindowID(for: frontmost.processIdentifier)
-            focusedWindowPID = focusedWindowID == nil ? nil : frontmost.processIdentifier
+            let pid = Self.processIdentifier(for: frontmost, candidateOwnerPIDs: ownerPIDs)
+            focusedWindowID = pid.flatMap { self.focusedWindowID(for: $0) }
+            focusedWindowPID = focusedWindowID == nil ? nil : pid
         } else {
             focusedWindowID = nil
             focusedWindowPID = nil
@@ -997,7 +1010,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     }
 
     private func resolvedRunningApplications(
-        transientFullscreenOwnerPIDs: Set<pid_t>? = nil
+        transientFullscreenOwnerPIDs: Set<pid_t>? = nil,
+        candidateOwnerPIDs: Set<pid_t>? = nil
     ) -> [ResolvedRunningApplication] {
         let applications = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular
@@ -1013,21 +1027,63 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                     ).axWindowIDsByPID
                 ).values)
             )
+        let ownerPIDs = candidateOwnerPIDs ?? (
+            applications.contains(where: { $0.processIdentifier <= 0 }) ? Self.cgOwnerPIDs() : []
+        )
         return applications.compactMap { application in
+            guard let pid = Self.processIdentifier(
+                for: application, candidateOwnerPIDs: ownerPIDs
+            ) else { return nil }
             let directBundleID = application.bundleIdentifier
             let bundleID = Self.resolvedBundleID(
                 directBundleID: directBundleID,
                 signingIdentifier: directBundleID == nil
                     ? Self.signingIdentifier(of: application) : nil,
                 runningBundleIDs: directBundleIDs,
-                ownerPID: application.processIdentifier,
+                ownerPID: pid,
                 ownsTransientFullscreenWindow: transientFullscreenOwnerPIDs.contains(
-                    application.processIdentifier
+                    pid
                 )
             )
             guard let bundleID else { return nil }
-            return ResolvedRunningApplication(application: application, bundleID: bundleID)
+            return ResolvedRunningApplication(application: application, bundleID: bundleID, pid: pid)
         }
+    }
+
+    /// Launch Services can report -1 after a launcher script execs its app binary in place.
+    /// The window server still names the real owner PID. Accept it only when looking that PID
+    /// up yields this exact running application; a shared bundle ID is not sufficient.
+    static func canonicalPID(
+        reportedPID: pid_t,
+        candidateOwnerPIDs: Set<pid_t>,
+        matchesApplication: (pid_t) -> Bool
+    ) -> pid_t? {
+        if reportedPID > 0 { return reportedPID }
+        let matches = candidateOwnerPIDs.filter { $0 > 0 && matchesApplication($0) }
+        return matches.count == 1 ? matches.first : nil
+    }
+
+    private static func processIdentifier(
+        for application: NSRunningApplication,
+        candidateOwnerPIDs: Set<pid_t>
+    ) -> pid_t? {
+        canonicalPID(
+            reportedPID: application.processIdentifier,
+            candidateOwnerPIDs: candidateOwnerPIDs
+        ) { pid in
+            NSRunningApplication(processIdentifier: pid)?.isEqual(application) == true
+        }
+    }
+
+    private static func cgOwnerPIDs(in windows: [[CFString: Any]]) -> Set<pid_t> {
+        Set(windows.compactMap { $0[kCGWindowOwnerPID] as? pid_t })
+    }
+
+    private static func cgOwnerPIDs() -> Set<pid_t> {
+        let windows = CGWindowListCopyWindowInfo(
+            [.optionAll, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[CFString: Any]] ?? []
+        return cgOwnerPIDs(in: windows)
     }
 
     private static func signingIdentifier(of application: NSRunningApplication) -> String? {
@@ -1151,11 +1207,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     }
 
     private func axWindowElement(for targetWindowID: CGWindowID) -> AXUIElement? {
-        let runningApps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular }
+        let runningApps = resolvedRunningApplications()
 
         for app in runningApps {
-            let axApp = AXUIElementCreateApplication(app.processIdentifier)
+            let axApp = AXUIElementCreateApplication(app.pid)
             var windowsRef: CFTypeRef?
             let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
             guard result == .success, let axWindows = windowsRef as? [AXUIElement] else { continue }

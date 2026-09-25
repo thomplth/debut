@@ -261,7 +261,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             }
         }
         self.frontmostPIDProvider = frontmostPIDProvider ?? {
-            NSWorkspace.shared.frontmostApplication?.processIdentifier
+            windowService.frontmostApplicationPID()
         }
         self.launchDiscoveryDelay = launchDiscoveryDelay
         self.processExitMonitor = processExitMonitor
@@ -1479,7 +1479,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private func appInfo(for application: NSRunningApplication) -> AppInfo? {
         guard application.activationPolicy == .regular else { return nil }
         let pid = application.processIdentifier
-        if let bundleID = application.bundleIdentifier {
+        if pid > 0, let bundleID = application.bundleIdentifier {
             return AppInfo(
                 bundleID: bundleID,
                 name: application.localizedName ?? bundleID,
@@ -1487,7 +1487,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 isHidden: application.isHidden
             )
         }
-        return windowService.listRunningApps().first { $0.pid == pid }
+        return windowService.listRunningApps().first { candidate in
+            if pid > 0 { return candidate.pid == pid }
+            return NSRunningApplication(processIdentifier: candidate.pid)?.isEqual(application) == true
+        }
     }
 
     @objc private func appDidLaunch(_ notification: Notification) {
