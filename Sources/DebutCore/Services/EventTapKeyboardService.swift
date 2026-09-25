@@ -555,6 +555,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         flags: CGEventFlags,
         modifiers: ShortcutModifiers = .control
     ) -> Int? {
+        guard modifiers != .disabled else { return nil }
         let shortcutFlags = flags.intersection([
             .maskCommand, .maskControl, .maskAlternate, .maskShift,
         ])

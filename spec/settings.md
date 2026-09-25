@@ -80,16 +80,16 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | --- | --- |
 | General | Login launch, Dock visibility, Reduce Motion guidance, and a running-app picker for applications ignored by window management. The menu-bar item remains available with the Dock icon off. |
 | Desktops | Faster switching and its number-key, Control-arrow, and trackpad methods, followed by transition duration and the desktop-change indicator. |
-| Switcher | Command-Tab desktop isolation, Option-Tab activation, window previews, display placement, and preview freshness. |
+| Switcher | Command-Tab desktop isolation, Option-Tab activation, window previews, display placement, preview freshness, overlay hold delay, and held cycling pace. |
 | Appearance | Glass and card layout, adaptive preview sizing, inactive-stage scale, and selected-window treatment. |
-| Shortcuts | Activation/session bindings including H/J/K/L card selection, numbered modifier sets, hold delay, repeat pace, a confirmed restore-defaults action, and reference for fixed move chords. |
+| Shortcuts | Activation and Space Manager session bindings including H/J/K/L card selection, numbered modifier sets with a Disabled choice, a confirmed restore-defaults action, and reference for fixed move chords. Pressing Delete while recording clears a binding. |
 | Support | Bug reporting through a public GitHub issue form (requires a GitHub account), diagnostic export, a confirmed window-cache reset that preserves settings, and a confirmed reset of all settings that preserves window assignments. |
 | About | Debut icon and version, update checks, and links to the GitHub repository and creator's Twitter profile. |
 
 Every configurable value has one destination: app-level choices and ignored apps
 are in General; desktop navigation and feedback are in Desktops; overlay behavior,
-content, placement, and freshness are in Switcher; visual layout and selection are
-in Appearance; and all key assignments and held-key timing are in Shortcuts.
+content, placement, freshness, and held-key timing are in Switcher; visual layout and selection are
+in Appearance; and all key assignments are in Shortcuts.
 Support contains actions rather than preferences.
 
 The menu-bar item provides feature toggles, Settings, Setup, Tutorial, update

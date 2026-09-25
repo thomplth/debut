@@ -314,6 +314,38 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             .disabled(viewModel.settings.previewRefreshPolicy == .all)
+
+            Text("Switcher timing")
+                .font(.headline)
+                .padding(.top, 8)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Overlay hold delay")
+                    Spacer()
+                    Text("\(Int((viewModel.settings.overlayPresentationDelay * 1000).rounded())) ms")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $viewModel.settings.overlayPresentationDelay, in: 0...0.5, step: 0.025)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Held cycling pace")
+                    Spacer()
+                    Text(viewModel.settings.heldCycleMinimumInterval > 0
+                         ? "\(Int((viewModel.settings.heldCycleMinimumInterval * 1000).rounded())) ms"
+                         : "Off")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $viewModel.settings.heldCycleMinimumInterval, in: 0...0.3, step: 0.01)
+                Text("Minimum time between held-key steps. Off uses your system repeat rate.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -608,7 +640,7 @@ public struct SettingsView: View {
             Text("Shortcuts")
                 .font(.title2.bold())
 
-            Text("Click a shortcut to change it. Desktop navigation switches are in Desktops.")
+            Text("Click a shortcut to change it, or press Delete while recording to disable it. Desktop navigation switches are in Desktops.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -676,7 +708,8 @@ public struct SettingsView: View {
                 Spacer()
                 Picker("", selection: $viewModel.settings.quickSwitchModifiers) {
                     ForEach(ShortcutModifiers.choices, id: \.self) { modifiers in
-                        Text("\(modifiers.displayString)+1–9").tag(modifiers)
+                        Text(modifiers == .disabled ? "Disabled" : "\(modifiers.displayString)+1–9")
+                            .tag(modifiers)
                     }
                 }
                 .frame(width: 220)
@@ -687,55 +720,18 @@ public struct SettingsView: View {
                 Spacer()
                 Picker("", selection: $viewModel.settings.quickSwitchSameApplicationModifiers) {
                     ForEach(ShortcutModifiers.choices, id: \.self) { modifiers in
-                        Text("\(modifiers.displayString)+1–9").tag(modifiers)
+                        Text(modifiers == .disabled ? "Disabled" : "\(modifiers.displayString)+1–9")
+                            .tag(modifiers)
                     }
                 }
                 .frame(width: 220)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Overlay hold delay")
-                    Spacer()
-                    Text("\(Int((viewModel.settings.overlayPresentationDelay * 1000).rounded())) ms")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(
-                    value: $viewModel.settings.overlayPresentationDelay,
-                    in: 0...0.5,
-                    step: 0.025
-                )
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Held cycling pace")
-                    Spacer()
-                    Text(
-                        viewModel.settings.heldCycleMinimumInterval > 0
-                            ? "\(Int((viewModel.settings.heldCycleMinimumInterval * 1000).rounded())) ms"
-                            : "Off"
-                    )
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                }
-                Slider(
-                    value: $viewModel.settings.heldCycleMinimumInterval,
-                    in: 0...0.3,
-                    step: 0.01
-                )
-                Text("Minimum time between held-key steps. Off uses your system repeat rate.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Text("Overlay card selection")
+            Text("Space Manager session")
                 .font(.headline)
                 .padding(.top, 8)
 
-            Text("Move the highlight only. Hold the switcher shortcut's modifier, then press H/J/K/L. Arrow keys move windows instead.")
+            Text("These keys are pressed while the modifier from the activation shortcut remains held. H/J/K/L move the card highlight; arrow keys move windows instead.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -746,14 +742,6 @@ public struct SettingsView: View {
                     recordingService: shortcutRecordingService
                 )
             }
-
-            Text("Space Manager session")
-                .font(.headline)
-                .padding(.top, 8)
-
-            Text("These keys are pressed while the modifier from the activation shortcut remains held.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
 
             ForEach(KeyAction.sessionActions.filter { !KeyAction.overlaySelectionActions.contains($0) }, id: \.self) { action in
                 ShortcutRecorderRow(

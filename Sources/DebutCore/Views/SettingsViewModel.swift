@@ -30,6 +30,8 @@ public enum SettingsSection: String, CaseIterable, Sendable {
                 .mainDisplayOnly,
                 .previewRefreshPolicy,
                 .previewCacheTTL,
+                .overlayPresentationDelay,
+                .heldCycleMinimumInterval,
             ]
         case .appearance:
             [
@@ -50,8 +52,6 @@ public enum SettingsSection: String, CaseIterable, Sendable {
                 .keyBindings,
                 .quickSwitchModifiers,
                 .quickSwitchSameApplicationModifiers,
-                .overlayPresentationDelay,
-                .heldCycleMinimumInterval,
             ]
         case .support, .about:
             []

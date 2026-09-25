@@ -35,8 +35,11 @@ public struct ConflictDetector: Sendable {
         forAction action: KeyAction,
         in bindings: KeyBindings
     ) -> ShortcutConflict? {
-        if let existing = bindings.action(for: combo, scope: action.shortcutScope),
-           existing != action {
+        let assigned = KeyAction.allCases.filter {
+            $0 != action && bindings.combo(for: $0) == combo
+        }
+        if let existing = assigned.first(where: { $0.shortcutScope == action.shortcutScope })
+            ?? assigned.first {
             return ShortcutConflict(type: .internal(existingAction: existing), combo: combo)
         }
         return nil
@@ -46,7 +49,6 @@ public struct ConflictDetector: Sendable {
         combo: KeyCombo,
         forAction action: KeyAction
     ) -> ShortcutConflict? {
-        guard action.shortcutScope == .global else { return nil }
         if let desc = systemAdvisory[combo] {
             return ShortcutConflict(type: .system(description: desc), combo: combo)
         }

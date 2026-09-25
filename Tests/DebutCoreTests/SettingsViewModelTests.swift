@@ -111,6 +111,8 @@ struct SettingsViewModelTests {
             .mainDisplayOnly,
             .previewRefreshPolicy,
             .previewCacheTTL,
+            .overlayPresentationDelay,
+            .heldCycleMinimumInterval,
         ])
         #expect(SettingsSection.appearance.options == [
             .glassStyle,

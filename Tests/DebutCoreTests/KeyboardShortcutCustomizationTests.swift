@@ -299,7 +299,29 @@ struct KeyboardShortcutCustomizationTests {
         #expect(delegate.receivedEvents == [.switchToSpace(1)])
     }
 
-    @Test("Conflicts are limited to shortcuts in the same context")
+    @Test("Disabled quick switch modifier sets do not capture number keys")
+    func disabledQuickSwitch() {
+        #expect(EventTapKeyboardService.quickSwitchSpacePosition(
+            keyCode: Int64(kVK_ANSI_1), flags: [], modifiers: .disabled
+        ) == nil)
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        service.quickSwitchModifiers = .disabled
+        service.quickSwitchSameApplicationModifiers = .disabled
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+        let digit = keyEvent(keyCode: kVK_ANSI_1, flags: [])
+        #expect(service.handleCGEvent(type: .keyDown, event: digit) === digit)
+        #expect(delegate.receivedEvents.isEmpty)
+        var settings = AppSettings()
+        settings.quickSwitchModifiers = .disabled
+        settings.quickSwitchSameApplicationModifiers = .disabled
+        let decoded = try? JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+        #expect(decoded?.quickSwitchModifiers == .disabled)
+        #expect(decoded?.quickSwitchSameApplicationModifiers == .disabled)
+    }
+
+    @Test("Debut shortcut conflicts are reported across settings sections")
     func conflictScopes() {
         var bindings = KeyBindings()
         let commandTab = KeyCombo(keyCode: kVK_Tab, command: true)
@@ -316,6 +338,37 @@ struct KeyboardShortcutCustomizationTests {
             forAction: .previousWindow,
             in: bindings
         )?.message.contains("Next window") == true)
+        #expect(ConflictDetector.checkInternal(
+            combo: KeyCombo(keyCode: kVK_ANSI_H),
+            forAction: .activateNextWindow,
+            in: bindings
+        )?.message.contains("Select card left") == true)
+    }
+
+    @Test("Cleared shortcuts stay unbound after settings reload and defaults restore them")
+    func clearedShortcutPersists() throws {
+        var bindings = KeyBindings()
+        bindings.record(KeyCombo(keyCode: kVK_Delete), for: .selectLeft)
+        bindings.record(KeyCombo(keyCode: kVK_ForwardDelete), for: .activateNextWindow)
+        let restored = try JSONDecoder().decode(KeyBindings.self, from: JSONEncoder().encode(bindings))
+        #expect(restored.combo(for: .selectLeft) == nil)
+        #expect(restored.combo(for: .activateNextWindow) == nil)
+        #expect(restored.action(for: KeyCombo(keyCode: kVK_ANSI_H), scope: .session) == nil)
+        var reset = restored
+        reset.restoreDefaults()
+        #expect(reset.combo(for: .selectLeft) == KeyCombo(keyCode: kVK_ANSI_H))
+        reset.record(KeyCombo(keyCode: kVK_Delete, command: true), for: .selectLeft)
+        #expect(reset.combo(for: .selectLeft) == KeyCombo(keyCode: kVK_Delete, command: true))
+    }
+
+    @Test("System shortcuts warn in Space Manager sessions too")
+    func sessionSystemConflict() {
+        let conflicts = ConflictDetector.detectConflicts(
+            combo: KeyCombo(keyCode: kVK_Tab, command: true),
+            forAction: .selectLeft,
+            in: KeyBindings()
+        )
+        #expect(conflicts.contains { $0.message.contains("macOS app switcher") })
     }
 
     @Test("Modifier-free global shortcuts warn about intercepting typing")

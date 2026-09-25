@@ -21,7 +21,7 @@ struct ShortcutRecorderRow: View {
                     } onCancel: {
                         cancelRecording()
                     }
-                    .frame(width: 140, height: 28)
+                    .frame(width: 140, height: 26)
                     .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
                     .overlay(
                         Text("Press keys…")
@@ -39,6 +39,7 @@ struct ShortcutRecorderRow: View {
                             .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
+                    .frame(height: 26)
                 }
             }
 
@@ -70,11 +71,19 @@ struct ShortcutRecorderRow: View {
 
     private func onKeyRecorded(_ combo: KeyCombo) {
         isRecording = false
+        if (combo.keyCode == kVK_Delete || combo.keyCode == kVK_ForwardDelete)
+            && !combo.command && !combo.control
+            && !combo.shift && !combo.option {
+            keyBindings.record(combo, for: action)
+            pendingCombo = nil
+            conflicts = []
+            return
+        }
         let detected = ConflictDetector.detectConflicts(
             combo: combo, forAction: action, in: keyBindings
         )
         if detected.isEmpty {
-            keyBindings.bindings[action] = combo
+            keyBindings.record(combo, for: action)
             pendingCombo = nil
             conflicts = []
         } else {
@@ -85,10 +94,11 @@ struct ShortcutRecorderRow: View {
 
     private func applyBinding() {
         guard let combo = pendingCombo else { return }
-        if let existing = keyBindings.action(for: combo), existing != action {
-            keyBindings.bindings.removeValue(forKey: existing)
+        for existing in KeyAction.allCases where existing != action
+            && keyBindings.combo(for: existing) == combo {
+            keyBindings.clear(existing)
         }
-        keyBindings.bindings[action] = combo
+        keyBindings.record(combo, for: action)
         pendingCombo = nil
         conflicts = []
     }
