@@ -1385,6 +1385,69 @@ struct SpaceControllerTests {
         #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [202, 101, 303])
     }
 
+    @Test("Vim keys change the highlighted card without staging a window move")
+    func vimKeysSelectWithoutMovingWindows() {
+        let (controller, _, keyboardSvc) = makeController()
+        let firstSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        let secondSpaceID = controller.spaceManager.spaces[1].id
+        for (windowID, spaceID) in [(101, firstSpaceID), (202, firstSpaceID),
+                                     (303, secondSpaceID), (404, secondSpaceID)] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: CGWindowID(windowID), ownerBundleID: "com.test", ownerName: "Test", windowTitle: "\(windowID)"),
+                toSpaceID: spaceID
+            )
+        }
+        controller.spaceManager.activateSpace(id: firstSpaceID)
+        let originalWindows = controller.spaceManager.spaces.map { $0.windows.map(\.windowID) }
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(controller.selectedSpaceIndex == 0)
+        #expect(controller.selectedWindowIndex == 1)
+        keyboardSvc.simulateEvent(.selectLeft)
+        #expect(controller.selectedWindowIndex == 0)
+        keyboardSvc.simulateEvent(.selectRight)
+        #expect(controller.selectedWindowIndex == 1)
+        keyboardSvc.simulateEvent(.selectDown)
+        #expect(controller.selectedSpaceIndex == 1)
+        #expect(controller.selectedWindowIndex == 1)
+        keyboardSvc.simulateEvent(.selectUp)
+        #expect(controller.selectedSpaceIndex == 0)
+        #expect(controller.selectedWindowIndex == 1)
+        #expect(controller.overlaySpaceManager.spaces.map { $0.windows.map(\.windowID) } == originalWindows)
+
+        keyboardSvc.simulateEvent(.cmdRelease)
+        #expect(controller.spaceManager.spaces.map { Set($0.windows.map(\.windowID)) }
+                == originalWindows.map(Set.init))
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 202) == firstSpaceID)
+    }
+
+    @Test("Vertical card selection skips empty stages in its travel direction")
+    func vimSelectionSkipsEmptyStages() {
+        let (controller, _, keyboardSvc) = makeController()
+        let firstSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.createSpace(position: .below)
+        let lastSpaceID = controller.spaceManager.spaces[2].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.test", ownerName: "Test", windowTitle: "First"),
+            toSpaceID: firstSpaceID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 303, ownerBundleID: "com.test", ownerName: "Test", windowTitle: "Last"),
+            toSpaceID: lastSpaceID
+        )
+        controller.spaceManager.activateSpace(id: firstSpaceID)
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        controller.jumpToSpace(index: 1)
+        keyboardSvc.simulateEvent(.selectDown)
+        #expect(controller.selectedSpaceIndex == 2)
+        controller.jumpToSpace(index: 1)
+        keyboardSvc.simulateEvent(.selectUp)
+        #expect(controller.selectedSpaceIndex == 0)
+    }
+
     @Test("Escape discards pending stage-stack moves")
     func escapeDiscardsPendingStageStackMoves() {
         let (controller, _, keyboardSvc) = makeController()

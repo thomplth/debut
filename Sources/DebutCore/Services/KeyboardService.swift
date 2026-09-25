@@ -17,6 +17,10 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case nextWindowRepeat       // Held Tab auto-repeat (stops at the last window)
     case previousWindow         // Shift+Tab
     case previousWindowRepeat   // Held Shift+Tab auto-repeat (stops at the first window)
+    case selectLeft             // H — highlight the previous card
+    case selectDown             // J — highlight a card on the next stage
+    case selectUp               // K — highlight a card on the previous stage
+    case selectRight            // L — highlight the next card
     case nextSpace              // Option+Tab
     case previousSpace          // Shift+Option+Tab
     case nextDisplayStack       // Cmd+Return (Return relative to the held Cmd session)

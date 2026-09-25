@@ -711,6 +711,22 @@ public struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Text("Overlay card selection")
+                .font(.headline)
+                .padding(.top, 8)
+
+            Text("Move the highlight only. Hold the switcher shortcut's modifier, then press H/J/K/L. Arrow keys move windows instead.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(KeyAction.overlaySelectionActions, id: \.self) { action in
+                ShortcutRecorderRow(
+                    action: action,
+                    keyBindings: $viewModel.settings.keyBindings,
+                    recordingService: shortcutRecordingService
+                )
+            }
+
             Text("Space Manager session")
                 .font(.headline)
                 .padding(.top, 8)
@@ -719,7 +735,7 @@ public struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            ForEach(KeyAction.sessionActions, id: \.self) { action in
+            ForEach(KeyAction.sessionActions.filter { !KeyAction.overlaySelectionActions.contains($0) }, id: \.self) { action in
                 ShortcutRecorderRow(
                     action: action,
                     keyBindings: $viewModel.settings.keyBindings,

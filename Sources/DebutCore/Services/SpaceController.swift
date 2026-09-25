@@ -2006,6 +2006,22 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             stepWindow(forward: false)
         case .previousWindowRepeat:
             stepWindow(forward: false, wraps: false)
+        case .selectLeft:
+            stepWindow(forward: false)
+        case .selectDown:
+            if overlayMode == .altTab {
+                stepWindow(forward: true)
+            } else {
+                selectCardInAdjacentSpace(forward: true)
+            }
+        case .selectUp:
+            if overlayMode == .altTab {
+                stepWindow(forward: false)
+            } else {
+                selectCardInAdjacentSpace(forward: false)
+            }
+        case .selectRight:
+            stepWindow(forward: true)
         case .nextSpace:
             cycleSpace(forward: true)
         case .previousSpace:
@@ -2368,6 +2384,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
              .cmdOptionTabHold, .cmdOptionShiftTabHold,
              .altTabHold, .altTabShiftHold, .altTabHoldRepeat, .altTabShiftHoldRepeat,
              .nextWindow, .nextWindowRepeat, .previousWindow, .previousWindowRepeat,
+             .selectLeft, .selectDown, .selectUp, .selectRight,
              .nextSpace, .previousSpace, .nextDisplayStack,
              .jumpToSpace, .jumpToLastSpace,
              .moveWindowUp, .moveWindowDown, .moveWindowLeft, .moveWindowRight:
@@ -3070,6 +3087,28 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let current = indices.firstIndex(of: selectedSpaceIndex) ?? 0
         selectedSpaceIndex = indices[(current + (forward ? 1 : indices.count - 1)) % indices.count]
         selectedWindowIndex = 0
+        notifyOverlayUpdated()
+    }
+
+    /// Vertical card navigation leaves every window in place. Skip empty stages, which cannot
+    /// highlight a card, and keep the current card position when the destination has one.
+    private func selectCardInAdjacentSpace(forward: Bool) {
+        guard isSpaceManagerVisible else { return }
+        let indices = (activeTutorialScope?.desktopIndices ?? Array(spaceManager.spaces.indices))
+            .filter { spaceManager.spaces.indices.contains($0) }
+            .filter { !overlaySpaceManager.spaces[$0].windows.isEmpty }
+        guard !indices.isEmpty else { return }
+        let next = if forward {
+            indices.first(where: { $0 > selectedSpaceIndex }) ?? indices[0]
+        } else {
+            indices.last(where: { $0 < selectedSpaceIndex }) ?? indices[indices.count - 1]
+        }
+        guard next != selectedSpaceIndex else { return }
+        selectedSpaceIndex = next
+        selectedWindowIndex = min(
+            selectedWindowIndex,
+            overlaySpaceManager.spaces[next].windows.count - 1
+        )
         notifyOverlayUpdated()
     }
 
