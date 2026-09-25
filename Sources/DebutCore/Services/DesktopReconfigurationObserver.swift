@@ -103,29 +103,43 @@ final class DesktopNavigationEligibility: @unchecked Sendable {
         case syntheticSwitchUnsupported
         case dockOverviewActive
         case dockOverviewRecovery
+        case dockOverviewStateUnknown
         case selectedStackUnknown
         case currentDesktopUnresolved
     }
 
     private let lock = NSLock()
     private var stackID: String?
+    private var overviewActive: Bool?
     private var overviewRecoveryPending = false
+    private var currentDesktopResolved = false
     private let canSwitchSpaces: @Sendable () -> Bool
-    private let overviewActive: @Sendable () -> Bool
-    private let topology: @Sendable () -> SpaceTopology
 
-    init(
-        canSwitchSpaces: @escaping @Sendable () -> Bool,
-        overviewActive: @escaping @Sendable () -> Bool,
-        topology: @escaping @Sendable () -> SpaceTopology
-    ) {
+    init(canSwitchSpaces: @escaping @Sendable () -> Bool) {
         self.canSwitchSpaces = canSwitchSpaces
-        self.overviewActive = overviewActive
-        self.topology = topology
     }
 
-    func updateStackID(_ stackID: String?) {
-        lock.withLock { self.stackID = stackID }
+    /// Publishes live WindowServer state from outside the event-tap callback. Input ownership
+    /// reads only this cache, so a physical gesture never blocks on a cross-process query.
+    func update(
+        stackID: String?,
+        topology: SpaceTopology,
+        overviewActive: Bool,
+        consumeOverviewRecovery: Bool = false
+    ) {
+        lock.withLock {
+            let previouslyActive = self.overviewActive == true
+            self.stackID = stackID
+            self.overviewActive = overviewActive
+            self.currentDesktopResolved = stackID.flatMap {
+                topology.stack(id: $0)?.currentDesktopIndex
+            } != nil
+            if consumeOverviewRecovery && previouslyActive && !overviewActive {
+                // The candidate gesture that triggered this refresh already stayed entirely
+                // native, so it also served as Dock's one post-overview recovery gesture.
+                overviewRecoveryPending = false
+            }
+        }
     }
 
     /// The overview marker has no balanced close event, and the first synthetic horizontal
@@ -133,23 +147,26 @@ final class DesktopNavigationEligibility: @unchecked Sendable {
     /// while the marker is present every match stays native, then exactly one match after it
     /// disappears is left to Dock to reset its carousel state before acceleration resumes.
     func overviewWillOpen() {
-        lock.withLock { overviewRecoveryPending = true }
+        lock.withLock {
+            overviewActive = true
+            overviewRecoveryPending = true
+            currentDesktopResolved = false
+        }
     }
 
     func blockReason() -> BlockReason? {
         guard canSwitchSpaces() else { return .syntheticSwitchUnsupported }
-        guard !overviewActive() else { return .dockOverviewActive }
-        let needsOverviewRecovery = lock.withLock {
-            guard overviewRecoveryPending else { return false }
-            overviewRecoveryPending = false
-            return true
+        return lock.withLock {
+            guard let overviewActive else { return .dockOverviewStateUnknown }
+            guard !overviewActive else { return .dockOverviewActive }
+            if overviewRecoveryPending {
+                overviewRecoveryPending = false
+                return .dockOverviewRecovery
+            }
+            guard stackID != nil else { return .selectedStackUnknown }
+            guard currentDesktopResolved else { return .currentDesktopUnresolved }
+            return nil
         }
-        guard !needsOverviewRecovery else { return .dockOverviewRecovery }
-        guard let stackID = lock.withLock({ stackID }) else { return .selectedStackUnknown }
-        guard topology().stack(id: stackID)?.currentDesktopIndex != nil else {
-            return .currentDesktopUnresolved
-        }
-        return nil
     }
 
     func isAvailable() -> Bool {

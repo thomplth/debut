@@ -2476,23 +2476,58 @@ if featureSpaces.userDesktops().count >= 2 {
         envelope.setIntegerValueField(CGEventField(rawValue: 55)!, value: 29)
         envelope.post(tap: .cgSessionEventTap)
     }
-    postPhysicalSwipe(phase: 1, progress: 0)
-    wait(0.03)
-    postPhysicalSwipe(phase: 2, progress: -0.2)
-    wait(0.25)
-    postPhysicalSwipe(phase: 2, progress: -0.6)
-    postPhysicalSwipe(phase: 4, progress: -0.6)
+    func postPhysicalSwipeGesture(progress: Double, commitDelay: TimeInterval = 0.03) {
+        postPhysicalSwipe(phase: 1, progress: 0)
+        wait(0.03)
+        postPhysicalSwipe(phase: 2, progress: progress > 0 ? 0.2 : -0.2)
+        wait(commitDelay)
+        postPhysicalSwipe(phase: 2, progress: progress)
+        postPhysicalSwipe(phase: 4, progress: progress)
+    }
+    postPhysicalSwipeGesture(progress: -0.6, commitDelay: 0.25)
     info("Swipe result: desktop=\(String(describing: featureSpaces.currentDesktopIndex())) events=\(readEvents().filter { ($0["event"] ?? "").contains("swipe") || ($0["keyEvent"] ?? "").contains("Adjacent") })")
     test("A desktop swipe reaches the previous desktop without recapturing its replacement") {
         waitFor { featureSpaces.currentDesktopIndex() == 0 }
             && readEvents().contains { $0["keyEvent"] == "switchAdjacentSpace(-1)" }
     }
 
+    let burstEventsBefore = readEvents().filter {
+        ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
+    }.count
+    let burstModelReady = waitFor { readState()["activeSpaceIndex"] == "0" }
+    postPhysicalSwipeGesture(progress: 0.6)
+    wait(0.03)
+    postPhysicalSwipeGesture(progress: 0.6)
+    let burstReachedEndpoint = waitFor { featureSpaces.currentDesktopIndex() == 1 }
+    wait(1.7)
+    postPhysicalSwipeGesture(progress: -0.6)
+    let burstReturned = waitFor { featureSpaces.currentDesktopIndex() == 0 }
+    let burstEventsAfter = readEvents().filter {
+        ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
+    }.count
+    info(
+        "Rapid swipe recovery: modelReady=\(burstModelReady) "
+            + "endpoint=\(burstReachedEndpoint) returned=\(burstReturned) "
+            + "events=\(burstEventsAfter)-\(burstEventsBefore)"
+    )
+    test("Rapid consecutive trackpad swipes cannot leave later navigation coalesced") {
+        burstModelReady && burstReachedEndpoint && burstReturned
+            && burstEventsAfter >= burstEventsBefore + 2
+    }
+
     let adjacentEventsBeforeOverview = readEvents().filter {
         ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
     }.count
+    let swipeClaimsBeforeOverview = readEvents().filter {
+        $0["event"] == "desktop_swipe_claimed"
+    }.count
     toggleSystemWindowOverview(mode: 0)
     let yieldedToOverview = waitFor { systemWindowOverviewActive() }
+    postPhysicalSwipeGesture(progress: 0.6)
+    wait(0.3)
+    let overviewSwipeStayedNative = readEvents().filter {
+        $0["event"] == "desktop_swipe_claimed"
+    }.count == swipeClaimsBeforeOverview
     postControlArrow(kVK_RightArrow)
     wait(0.3)
     let overviewInputsStayedNative = readEvents().filter {
@@ -2504,6 +2539,9 @@ if featureSpaces.userDesktops().count >= 2 {
 
     test("Control-arrow stays native inside Mission Control") {
         yieldedToOverview && overviewInputsStayedNative
+    }
+    test("Trackpad swipes stay native inside Mission Control") {
+        yieldedToOverview && overviewSwipeStayedNative
     }
 
     // The layer-18 overview marker disappears at the start of Dock's dismissal animation.
@@ -2523,7 +2561,10 @@ if featureSpaces.userDesktops().count >= 2 {
     )
     test("The first switch after Mission Control is yielded to macOS for recovery") {
         resumedAfterOverview && resetAfterOverview
-            && yieldedNavigationEvents.contains { $0["reason"] == "dockOverviewRecovery" }
+            && yieldedNavigationEvents.contains {
+                $0["reason"] == "dockOverviewActive"
+                    || $0["reason"] == "dockOverviewRecovery"
+            }
     }
 
     wait(0.5)

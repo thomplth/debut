@@ -254,6 +254,55 @@ struct SpaceSwitchCoordinatorTests {
         #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
         #expect(coordinator.request(to: location(1), in: topology(current: 0)) != .coalesced)
     }
+
+    @Test("A missed desktop notification is recovered from the posted endpoint")
+    func missedNotificationCompletesAtEndpoint() throws {
+        var coordinator = SpaceSwitchCoordinator()
+        let request = coordinator.request(to: location(1), in: topology(current: 0))
+        let ticket = try #require(coordinator.recoveryTicket(matching: request.hops))
+
+        #expect(coordinator.recover(ticket, in: topology(current: 1)) == .completed)
+        #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
+
+    @Test("A missed notification continues a coalesced target only from the proven endpoint")
+    func missedNotificationContinuesRetargetedRoute() throws {
+        var coordinator = SpaceSwitchCoordinator()
+        let first = coordinator.request(to: location(1), in: topology(current: 0))
+        let ticket = try #require(coordinator.recoveryTicket(matching: first.hops))
+        #expect(coordinator.request(to: location(2), in: topology(current: 0)) == .coalesced)
+
+        #expect(coordinator.recover(ticket, in: topology(current: 1)) == .post([
+            hop(from: 1, to: 2),
+        ]))
+        #expect(coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
+
+    @Test("A stalled route is abandoned without reposting from an uncertain desktop")
+    func stalledRouteIsAbandoned() throws {
+        var coordinator = SpaceSwitchCoordinator()
+        let request = coordinator.request(to: location(2), in: topology(current: 0))
+        let ticket = try #require(coordinator.recoveryTicket(matching: request.hops))
+
+        #expect(coordinator.recover(ticket, in: topology(current: 0)) == .abandoned)
+        #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+        #expect(coordinator.request(to: location(1), in: topology(current: 0)) != .coalesced)
+    }
+
+    @Test("A stale watchdog cannot clear a newer route")
+    func staleRecoveryTicketIsIgnored() throws {
+        var coordinator = SpaceSwitchCoordinator()
+        let first = coordinator.request(to: location(1), in: topology(current: 0))
+        let staleTicket = try #require(coordinator.recoveryTicket(matching: first.hops))
+        _ = coordinator.desktopDidChange(to: topology(current: 1))
+
+        let second = coordinator.request(to: location(0), in: topology(current: 1))
+        let currentTicket = try #require(coordinator.recoveryTicket(matching: second.hops))
+
+        #expect(staleTicket != currentTicket)
+        #expect(coordinator.recover(staleTicket, in: topology(current: 1)) == .stale)
+        #expect(coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
+    }
 }
 
 @Suite("SpaceService switch speed")

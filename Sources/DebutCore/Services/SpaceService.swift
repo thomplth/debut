@@ -482,6 +482,18 @@ enum SpaceSwitchRequestResult: Equatable {
     }
 }
 
+struct SpaceSwitchRecoveryTicket: Equatable, Sendable {
+    let stackID: String
+    let generation: UInt64
+}
+
+enum SpaceSwitchRecoveryResult: Equatable {
+    case stale
+    case completed
+    case abandoned
+    case post([SpaceSwitchHop])
+}
+
 /// Keeps at most one unconfirmed Dock route in flight for each display Space stack.
 ///
 /// WindowServer's current desktop is the only completion signal. Rapid requests replace
@@ -490,6 +502,7 @@ enum SpaceSwitchRequestResult: Equatable {
 /// their adjacent hops together, then treat intermediate notifications as acknowledgements.
 struct SpaceSwitchCoordinator {
     private struct PendingSwitch {
+        var generation: UInt64
         var desiredTarget: DesktopLocation
         var originDesktopID: CGSSpaceID
         var expectedDesktopIDs: [CGSSpaceID]
@@ -498,6 +511,7 @@ struct SpaceSwitchCoordinator {
     }
 
     private var pendingByStackID: [String: PendingSwitch] = [:]
+    private var nextGeneration: UInt64 = 0
 
     func isInFlight(stackID: String) -> Bool {
         pendingByStackID[stackID] != nil
@@ -532,11 +546,10 @@ struct SpaceSwitchCoordinator {
             animation: animation,
             scheduling: scheduling
         )
-        guard let first = hops.first else { return .declined }
-        pendingByStackID[target.stackID] = PendingSwitch(
+        guard !hops.isEmpty else { return .declined }
+        pendingByStackID[target.stackID] = makePendingSwitch(
             desiredTarget: target,
-            originDesktopID: first.fromDesktopID,
-            expectedDesktopIDs: hops.map(\.toDesktopID),
+            hops: hops,
             animation: animation,
             scheduling: scheduling
         )
@@ -588,20 +601,83 @@ struct SpaceSwitchCoordinator {
                 animation: pending.animation,
                 scheduling: pending.scheduling
             )
-            guard let first = hops.first else {
+            guard !hops.isEmpty else {
                 pendingByStackID.removeValue(forKey: stackID)
                 continue
             }
-            pendingByStackID[stackID] = PendingSwitch(
+            pendingByStackID[stackID] = makePendingSwitch(
                 desiredTarget: pending.desiredTarget,
-                originDesktopID: first.fromDesktopID,
-                expectedDesktopIDs: hops.map(\.toDesktopID),
+                hops: hops,
                 animation: pending.animation,
                 scheduling: pending.scheduling
             )
             nextHops.append(contentsOf: hops)
         }
         return nextHops
+    }
+
+    func recoveryTicket(matching hops: [SpaceSwitchHop]) -> SpaceSwitchRecoveryTicket? {
+        guard let first = hops.first,
+              let last = hops.last,
+              let pending = pendingByStackID[first.stackID],
+              pending.originDesktopID == first.fromDesktopID,
+              pending.expectedDesktopIDs.last == last.toDesktopID
+        else { return nil }
+        return SpaceSwitchRecoveryTicket(
+            stackID: first.stackID,
+            generation: pending.generation
+        )
+    }
+
+    /// Resolves a route whose active-space notification never arrived.
+    ///
+    /// A watchdog may only continue when fresh topology proves the exact posted endpoint is
+    /// showing. Any origin, intermediate, unresolved, or unexpected state is abandoned so a
+    /// later physical gesture starts from WindowServer truth instead of replaying stale input.
+    mutating func recover(
+        _ ticket: SpaceSwitchRecoveryTicket,
+        in topology: SpaceTopology
+    ) -> SpaceSwitchRecoveryResult {
+        guard let pending = pendingByStackID[ticket.stackID],
+              pending.generation == ticket.generation
+        else { return .stale }
+
+        guard let stack = topology.stack(id: ticket.stackID),
+              let currentDesktopID = stack.currentDesktopID,
+              let currentIndex = stack.currentDesktopIndex,
+              let expectedDesktopID = pending.expectedDesktopIDs.last,
+              pending.expectedDesktopIDs.allSatisfy({ stack.desktopIDs.contains($0) }),
+              stack.desktopIDs.indices.contains(pending.desiredTarget.index),
+              stack.desktopIDs[pending.desiredTarget.index] == pending.desiredTarget.desktopID,
+              currentDesktopID == expectedDesktopID
+        else {
+            pendingByStackID.removeValue(forKey: ticket.stackID)
+            return .abandoned
+        }
+
+        guard currentDesktopID != pending.desiredTarget.desktopID else {
+            pendingByStackID.removeValue(forKey: ticket.stackID)
+            return .completed
+        }
+
+        let hops = Self.hops(
+            from: currentIndex,
+            toward: pending.desiredTarget,
+            in: stack,
+            animation: pending.animation,
+            scheduling: pending.scheduling
+        )
+        guard !hops.isEmpty else {
+            pendingByStackID.removeValue(forKey: ticket.stackID)
+            return .abandoned
+        }
+        pendingByStackID[ticket.stackID] = makePendingSwitch(
+            desiredTarget: pending.desiredTarget,
+            hops: hops,
+            animation: pending.animation,
+            scheduling: pending.scheduling
+        )
+        return .post(hops)
     }
 
     /// Drops every unconfirmed gesture. A Dock overview owns desktop navigation while it is
@@ -611,14 +687,38 @@ struct SpaceSwitchCoordinator {
         pendingByStackID.removeAll()
     }
 
-    mutating func postingFailed(_ hops: [SpaceSwitchHop]) {
+    @discardableResult
+    mutating func postingFailed(
+        _ hops: [SpaceSwitchHop],
+        ticket: SpaceSwitchRecoveryTicket? = nil
+    ) -> Bool {
         guard let first = hops.first,
               let last = hops.last,
               let pending = pendingByStackID[first.stackID],
+              ticket == nil || ticket?.generation == pending.generation,
               pending.originDesktopID == first.fromDesktopID,
               pending.expectedDesktopIDs.last == last.toDesktopID
-        else { return }
+        else { return false }
         pendingByStackID.removeValue(forKey: first.stackID)
+        return true
+    }
+
+    private mutating func makePendingSwitch(
+        desiredTarget: DesktopLocation,
+        hops: [SpaceSwitchHop],
+        animation: SpaceSwitchAnimation,
+        scheduling: SpaceSwitchScheduling
+    ) -> PendingSwitch {
+        nextGeneration &+= 1
+        if nextGeneration == 0 { nextGeneration = 1 }
+        return PendingSwitch(
+            generation: nextGeneration,
+            desiredTarget: desiredTarget,
+            originDesktopID: hops[0].fromDesktopID,
+            expectedDesktopIDs: hops.map(\.toDesktopID),
+            animation: animation,
+            scheduling: scheduling
+        )
     }
 
     private static func hops(
@@ -1246,6 +1346,7 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     )
     private let switchCoordinatorLock = NSLock()
     private var switchCoordinator = SpaceSwitchCoordinator()
+    var onSwitchRecovery: (@Sendable () -> Void)?
 
     /// Confirming a move means re-reading the assignment until the window server catches up.
     /// That settles in single-digit milliseconds, but it is still a wait, and the main thread
@@ -1594,13 +1695,7 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         case .coalesced:
             return true
         case .post(let hops):
-            guard post(hops, in: topology) else {
-                switchCoordinatorLock.withLock {
-                    switchCoordinator.postingFailed(hops)
-                }
-                return false
-            }
-            return true
+            return postRoute(hops, in: topology)
         }
     }
 
@@ -1617,11 +1712,7 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             switchCoordinator.desktopDidChange(to: topology)
         }
         let routes = Dictionary(grouping: nextHops, by: \.stackID)
-        for route in routes.values where !post(route, in: topology) {
-            switchCoordinatorLock.withLock {
-                switchCoordinator.postingFailed(route)
-            }
-        }
+        for route in routes.values { _ = postRoute(route, in: topology) }
     }
 
     public func cancelPendingSwitches() {
@@ -1630,10 +1721,72 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         }
     }
 
+    private func postRoute(_ hops: [SpaceSwitchHop], in topology: SpaceTopology) -> Bool {
+        guard let ticket = switchCoordinatorLock.withLock({
+            switchCoordinator.recoveryTicket(matching: hops)
+        }) else { return false }
+        guard post(hops, in: topology, ticket: ticket) else {
+            _ = switchCoordinatorLock.withLock {
+                switchCoordinator.postingFailed(hops, ticket: ticket)
+            }
+            return false
+        }
+        armSwitchRecovery(for: ticket, hops: hops)
+        return true
+    }
+
+    private func armSwitchRecovery(
+        for ticket: SpaceSwitchRecoveryTicket,
+        hops: [SpaceSwitchHop]
+    ) {
+        guard let first = hops.first else { return }
+        let routeDuration = first.animation.duration(configuredDuration: switchDuration)
+        let delay = max(1.5, routeDuration + 1)
+        let armedAt = ProcessInfo.processInfo.systemUptime
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.recoverSwitch(ticket, armedAt: armedAt)
+        }
+    }
+
+    private func recoverSwitch(
+        _ ticket: SpaceSwitchRecoveryTicket,
+        armedAt: TimeInterval
+    ) {
+        let topology = spaceTopology()
+        let result = switchCoordinatorLock.withLock {
+            switchCoordinator.recover(ticket, in: topology)
+        }
+        let outcome: String
+        switch result {
+        case .stale:
+            return
+        case .completed:
+            outcome = "completed"
+        case .abandoned:
+            outcome = "abandoned"
+        case .post(let hops):
+            outcome = postRoute(hops, in: topology) ? "continued" : "continuation_post_failed"
+        }
+        DiagnosticReporter.shared.report("desktop_switch_watchdog_recovered", details: [
+            "elapsedMilliseconds": String(
+                format: "%.1f",
+                (ProcessInfo.processInfo.systemUptime - armedAt) * 1_000
+            ),
+            "generation": "\(ticket.generation)",
+            "outcome": outcome,
+            "stackID": ticket.stackID,
+        ])
+        onSwitchRecovery?()
+    }
+
     /// Posts one confirmed animated hop or a complete Instant route. The coordinator never
     /// starts a second route while this one is unconfirmed, so batching the hops that belong to
     /// one requested endpoint does not restore the overlapping-request overshoot this replaced.
-    private func post(_ hops: [SpaceSwitchHop], in topology: SpaceTopology) -> Bool {
+    private func post(
+        _ hops: [SpaceSwitchHop],
+        in topology: SpaceTopology,
+        ticket: SpaceSwitchRecoveryTicket
+    ) -> Bool {
         guard let first = hops.first,
               let stack = topology.stack(id: first.stackID),
               stack.currentDesktopID == first.fromDesktopID,
@@ -1676,8 +1829,15 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
                 mode: postingMode
             )
             if !posted {
-                switchCoordinatorLock.withLock {
-                    switchCoordinator.postingFailed(hops)
+                let cleared = switchCoordinatorLock.withLock {
+                    switchCoordinator.postingFailed(hops, ticket: ticket)
+                }
+                if cleared {
+                    DiagnosticReporter.shared.report("desktop_switch_post_failed", details: [
+                        "generation": "\(ticket.generation)",
+                        "stackID": ticket.stackID,
+                    ])
+                    onSwitchRecovery?()
                 }
             }
         }

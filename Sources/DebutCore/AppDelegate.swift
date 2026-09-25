@@ -21,6 +21,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var desktopSwipeService: DesktopSwipeService?
     private var desktopNavigationStackID: String?
     private var desktopNavigationEligibility: DesktopNavigationEligibility?
+    private var desktopNavigationRefreshScheduled = false
+    private var consumeOverviewRecoveryOnRefresh = false
     private var tutorialViewModel: TutorialViewModel?
     private var coachmarkPopover: NSPopover?
     private var statusItem: NSStatusItem?
@@ -94,22 +96,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         currentSettings = (try? store.loadSettings()) ?? AppSettings()
         let spaceService = SpaceService()
         spaceService.switchDuration = currentSettings.spaceSwitchDuration
+        spaceService.onSwitchRecovery = { [weak self] in
+            DispatchQueue.main.async { self?.handleDesktopDidChange() }
+        }
         self.spaceService = spaceService
         let navigationEligibility = DesktopNavigationEligibility(
-            canSwitchSpaces: { spaceService.canSwitchSpaces },
-            overviewActive: DockOverviewDetector.isActive,
-            topology: { spaceService.spaceTopology() }
+            canSwitchSpaces: { spaceService.canSwitchSpaces }
         )
         desktopNavigationEligibility = navigationEligibility
-        let desktopNavigationBlocked: @Sendable () -> Bool = {
-            guard let reason = navigationEligibility.blockReason() else { return false }
-            DiagnosticReporter.shared.report(
-                "desktop_navigation_input_yielded",
-                level: .transient,
-                details: ["reason": reason.rawValue]
-            )
-            return true
-        }
         activationPolicy.apply(showsDockIcon: currentSettings.showsDockIcon)
         launchAtLogin.apply(enabled: currentSettings.launchAtLogin)
         // Builds that offered remote performance sharing may have left an unsent queue.
@@ -126,7 +120,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         windowService = accessibility
         keyboardService = EventTapKeyboardService(
-            desktopNavigationBlocked: desktopNavigationBlocked
+            desktopNavigationBlocked: desktopNavigationBlocker()
         )
 
         overlayWindow = OverlayWindow()
@@ -189,7 +183,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     private func setupController() {
         guard let windowService, let keyboardService, let spaceService,
-              let desktopNavigationEligibility else { return }
+              desktopNavigationEligibility != nil else { return }
         guard spaceController == nil else { return }
 
         var spaceManager = pendingSpaceManager ?? SpaceManager()
@@ -303,17 +297,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         keyboardService.quickSwitchSameApplicationModifiers =
             currentSettings.quickSwitchSameApplicationModifiers
         let swipeService = DesktopSwipeService(
-            desktopNavigationBlocked: {
-                guard let reason = desktopNavigationEligibility.blockReason() else { return false }
-                DiagnosticReporter.shared.report(
-                    "desktop_navigation_input_yielded",
-                    level: .transient,
-                    details: ["reason": reason.rawValue]
-                )
-                return true
-            },
+            desktopNavigationBlocked: desktopNavigationBlocker(),
             switchDesktop: { [weak controller] offset in
-                controller?.handleKeyEvent(.switchAdjacentSpace(offset))
+                // The event tap owns only the stream decision. Topology and controller work
+                // begins after the callback has returned to the run loop.
+                DispatchQueue.main.async {
+                    controller?.handleKeyEvent(.switchAdjacentSpace(offset))
+                }
             }
         )
         desktopSwipeService = swipeService
@@ -560,12 +550,55 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         observingAccessibilityChanges = false
     }
 
-    /// Keep only the selected display stack cached. The input services resolve overview,
-    /// topology, and OS capability live after an exact shortcut or gesture Began matches.
-    private func refreshDesktopNavigationAvailability() {
+    private func desktopNavigationBlocker() -> @Sendable () -> Bool {
+        guard let eligibility = desktopNavigationEligibility else { return { true } }
+        return { [weak self] in
+            guard let reason = eligibility.blockReason() else { return false }
+            if reason != .syntheticSwitchUnsupported {
+                DispatchQueue.main.async {
+                    self?.queueDesktopNavigationRefresh(consumingOverviewRecovery: true)
+                }
+            }
+            DiagnosticReporter.shared.report(
+                "desktop_navigation_input_yielded",
+                level: .transient,
+                details: ["reason": reason.rawValue]
+            )
+            return true
+        }
+    }
+
+    /// Cross-process state is refreshed after an input callback returns. Multiple native
+    /// gestures in the same run-loop turn collapse into one WindowServer query.
+    private func queueDesktopNavigationRefresh(consumingOverviewRecovery: Bool) {
+        consumeOverviewRecoveryOnRefresh = consumeOverviewRecoveryOnRefresh
+            || consumingOverviewRecovery
+        guard !desktopNavigationRefreshScheduled else { return }
+        desktopNavigationRefreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.desktopNavigationRefreshScheduled = false
+            let consumeRecovery = self.consumeOverviewRecoveryOnRefresh
+            self.consumeOverviewRecoveryOnRefresh = false
+            self.refreshDesktopNavigationAvailability(
+                consumingOverviewRecovery: consumeRecovery
+            )
+        }
+    }
+
+    /// Cache the selected stack, current desktop, and overview ownership before input begins.
+    private func refreshDesktopNavigationAvailability(
+        consumingOverviewRecovery: Bool = false
+    ) {
         let stackID = spaceController?.spaceManager.selectedSpaceStackID
         desktopNavigationStackID = stackID
-        desktopNavigationEligibility?.updateStackID(stackID)
+        guard let spaceService else { return }
+        desktopNavigationEligibility?.update(
+            stackID: stackID,
+            topology: spaceService.spaceTopology(),
+            overviewActive: DockOverviewDetector.isActive(),
+            consumeOverviewRecovery: consumingOverviewRecovery
+        )
     }
 
     /// Fires for Debut's own switches as well as the user's. Debut's own switches are the
@@ -573,22 +606,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     /// only needs the active space adopted.
     @objc private func activeSpaceDidChange(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let controller = self.spaceController else { return }
-            let changes = controller.desktopDidChange()
-            let presentations = DesktopSwitchIndicatorPolicy.presentations(
-                for: changes,
-                isEnabled: self.currentSettings.showsDesktopSwitchIndicator,
-                overlayVisible: controller.isSpaceManagerVisible
-            )
-            for presentation in presentations {
-                self.showDesktopSwitchIndicator(presentation)
-            }
-            self.refreshDesktopNavigationAvailability()
-            self.refreshTutorialEnvironment()
-            // Moving a window between desktops activates no app, so without this the move is
-            // only noticed the next time the user clicks the window.
-            self.windowDiscovery?.refreshDesktopAssignmentsInBackground()
+            self?.handleDesktopDidChange()
         }
+    }
+
+    private func handleDesktopDidChange() {
+        guard let controller = spaceController else { return }
+        let changes = controller.desktopDidChange()
+        let presentations = DesktopSwitchIndicatorPolicy.presentations(
+            for: changes,
+            isEnabled: currentSettings.showsDesktopSwitchIndicator,
+            overlayVisible: controller.isSpaceManagerVisible
+        )
+        for presentation in presentations { showDesktopSwitchIndicator(presentation) }
+        refreshDesktopNavigationAvailability()
+        refreshTutorialEnvironment()
+        // Moving a window between desktops activates no app, so without this the move is
+        // only noticed the next time the user clicks the window.
+        windowDiscovery?.refreshDesktopAssignmentsInBackground()
     }
 
     private func showDesktopSwitchIndicator(

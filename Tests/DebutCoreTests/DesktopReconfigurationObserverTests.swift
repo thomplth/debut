@@ -67,11 +67,13 @@ struct DesktopReconfigurationObserverTests {
     func overviewEligibilityRecovers() {
         let state = NavigationEligibilityState()
         let eligibility = DesktopNavigationEligibility(
-            canSwitchSpaces: { state.canSwitch },
-            overviewActive: { state.overviewActive },
-            topology: { state.topology }
+            canSwitchSpaces: { state.canSwitch }
         )
-        eligibility.updateStackID("display")
+        eligibility.update(
+            stackID: "display",
+            topology: state.topology,
+            overviewActive: false
+        )
         eligibility.overviewWillOpen()
 
         state.overviewActive = true
@@ -81,12 +83,48 @@ struct DesktopReconfigurationObserverTests {
 
         state.overviewActive = false
         state.hasCurrentDesktop = true
+        eligibility.update(
+            stackID: "display",
+            topology: state.topology,
+            overviewActive: false
+        )
         #expect(eligibility.blockReason() == .dockOverviewRecovery)
         #expect(eligibility.isAvailable())
 
         state.canSwitch = false
         #expect(!eligibility.isAvailable())
         #expect(eligibility.blockReason() == .syntheticSwitchUnsupported)
+    }
+
+    @Test("Every gesture stays native while cached Mission Control state is active")
+    func overviewNeverTransfersTrackpadOwnership() {
+        let state = NavigationEligibilityState()
+        let eligibility = DesktopNavigationEligibility(canSwitchSpaces: { state.canSwitch })
+        eligibility.update(
+            stackID: "display",
+            topology: state.topology,
+            overviewActive: false
+        )
+        eligibility.overviewWillOpen()
+
+        #expect(eligibility.blockReason() == .dockOverviewActive)
+        #expect(eligibility.blockReason() == .dockOverviewActive)
+        #expect(eligibility.blockReason() == .dockOverviewActive)
+
+        eligibility.update(
+            stackID: "display",
+            topology: state.topology,
+            overviewActive: false,
+            consumeOverviewRecovery: true
+        )
+        #expect(eligibility.isAvailable())
+    }
+
+    @Test("Unknown cached overview state fails native without querying live state")
+    func unknownOverviewStateYieldsInput() {
+        let eligibility = DesktopNavigationEligibility(canSwitchSpaces: { true })
+
+        #expect(eligibility.blockReason() == .dockOverviewStateUnknown)
     }
 
     @Test("Subscribing reports the events it actually registered")

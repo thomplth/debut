@@ -114,7 +114,7 @@ final class DesktopSwipeService: @unchecked Sendable {
 
         let phase = event.getIntegerValueField(kCGEventGesturePhase)
         if phase == kCGSGesturePhaseBegan {
-            // The layer check happens once per candidate gesture, never per Changed sample.
+            // Ownership is chosen once from cached state, never changed mid-stream.
             guard enabled && desktopNavigationAvailable && !desktopNavigationBlocked() else {
                 return event
             }
