@@ -115,6 +115,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let minimumStageScale: Double = 1.0
     public static let maximumStageScale: Double = 2.5
     public static let stageScaleStep: Double = 0.05
+    public static let defaultPreviewCardSpacing: Double = 12
+    public static let minimumPreviewCardSpacing: Double = 0
+    public static let maximumPreviewCardSpacing: Double = 36
 
     public static let defaultSelectorOutset: Double = 6
     public static let minimumSelectorOutset: Double = 2
@@ -135,6 +138,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var stageCornerRadius: Double
     public var inactiveStageScale: Double
     public var stageScale: Double
+    /// Space between preview card frames before the overlay's automatic scale is applied.
+    public var previewCardSpacing: Double
     /// Whether each card takes its own window's shape rather than the display's.
     public var adaptiveCardSizing: Bool
     /// Keep both overlay modes on the system primary display regardless of window focus.
@@ -173,6 +178,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.stageCornerRadius = 30
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
+        self.previewCardSpacing = Self.defaultPreviewCardSpacing
         self.adaptiveCardSizing = true
         self.overlayOnMainDisplayOnly = true
         self.showsDesktopSwitchIndicator = true
@@ -212,6 +218,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
             forKey: .stageScale
         ) ?? Self.defaultStageScale
         stageScale = min(Self.maximumStageScale, max(Self.minimumStageScale, savedStageScale))
+        let savedPreviewCardSpacing = try container.decodeIfPresent(
+            Double.self,
+            forKey: .previewCardSpacing
+        ) ?? Self.defaultPreviewCardSpacing
+        previewCardSpacing = min(
+            Self.maximumPreviewCardSpacing,
+            max(Self.minimumPreviewCardSpacing, savedPreviewCardSpacing)
+        )
         adaptiveCardSizing = try container.decodeIfPresent(
             Bool.self,
             forKey: .adaptiveCardSizing

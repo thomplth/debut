@@ -1014,10 +1014,12 @@ public struct StageConstants {
         requested: CGFloat,
         contentAspects: [[CGFloat?]],
         containerSize: CGSize,
+        cardSpacing: CGFloat? = nil,
         rowSpacing: CGFloat? = nil
     ) -> CGFloat {
         let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize)
-        let metrics = rowSpacing.map(shapedMetrics.withRowSpacing) ?? shapedMetrics
+        let cardMetrics = cardSpacing.map(shapedMetrics.withCardSpacing) ?? shapedMetrics
+        let metrics = rowSpacing.map(cardMetrics.withRowSpacing) ?? cardMetrics
         let floor = minimumFittedStageScale
         let ceiling = CGFloat(AppSettings.maximumStageScale)
         let step = CGFloat(AppSettings.stageScaleStep)
@@ -1043,12 +1045,14 @@ public struct StageConstants {
     public static func fittedStageScale(
         requested: CGFloat,
         windowCounts: [Int],
-        containerSize: CGSize
+        containerSize: CGSize,
+        cardSpacing: CGFloat? = nil
     ) -> CGFloat {
         fittedStageScale(
             requested: requested,
             contentAspects: contentAspects(forWindowCounts: windowCounts),
-            containerSize: containerSize
+            containerSize: containerSize,
+            cardSpacing: cardSpacing
         )
     }
 
@@ -1059,14 +1063,17 @@ public struct StageConstants {
         stageScale: CGFloat,
         contentAspects: [[CGFloat?]],
         containerSize: CGSize,
+        cardSpacing: CGFloat? = nil,
         rowSpacing: CGFloat? = nil
     ) -> StageMetrics {
         let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize)
-        let metrics = rowSpacing.map(shapedMetrics.withRowSpacing) ?? shapedMetrics
+        let cardMetrics = cardSpacing.map(shapedMetrics.withCardSpacing) ?? shapedMetrics
+        let metrics = rowSpacing.map(cardMetrics.withRowSpacing) ?? cardMetrics
         return metrics.scaled(by: fittedStageScale(
             requested: stageScale,
             contentAspects: contentAspects,
             containerSize: containerSize,
+            cardSpacing: cardSpacing,
             rowSpacing: rowSpacing
         ))
     }
@@ -1074,12 +1081,14 @@ public struct StageConstants {
     public static func drawnMetrics(
         stageScale: CGFloat,
         windowCounts: [Int],
-        containerSize: CGSize
+        containerSize: CGSize,
+        cardSpacing: CGFloat? = nil
     ) -> StageMetrics {
         drawnMetrics(
             stageScale: stageScale,
             contentAspects: contentAspects(forWindowCounts: windowCounts),
-            containerSize: containerSize
+            containerSize: containerSize,
+            cardSpacing: cardSpacing
         )
     }
 
@@ -1386,7 +1395,8 @@ public struct StageOverlayView: View {
             let metrics = StageConstants.drawnMetrics(
                 stageScale: CGFloat(viewModel.appearance.stageScale),
                 contentAspects: restingAspects,
-                containerSize: geo.size
+                containerSize: geo.size,
+                cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing)
             )
             // Two grids per space: the one its own cards rest in, and the one the drag would
             // give it. A card's drag offset is the delta between them.
@@ -1813,7 +1823,8 @@ public struct StageOverlayView: View {
         let sourceMetrics = StageConstants.drawnMetrics(
             stageScale: CGFloat(viewModel.appearance.stageScale),
             contentAspects: beforeAspects,
-            containerSize: containerSize
+            containerSize: containerSize,
+            cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing)
         )
         let inactiveScale = CGFloat(viewModel.appearance.inactiveStageScale)
         guard let source = StageConstants.windowCardCenter(

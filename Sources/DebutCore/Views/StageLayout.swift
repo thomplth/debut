@@ -149,6 +149,26 @@ public struct StageMetrics: Equatable, Sendable {
         )
     }
 
+    func withCardSpacing(_ spacing: CGFloat) -> StageMetrics {
+        StageMetrics(
+            thumbnailWidth: thumbnailWidth,
+            thumbnailHeight: thumbnailHeight,
+            cardPadding: cardPadding,
+            titleWidthAllowance: titleWidthAllowance,
+            titleSpacing: titleSpacing,
+            titleHeight: titleHeight,
+            badgeSize: badgeSize,
+            previewPlaceholderIconSize: previewPlaceholderIconSize,
+            windowSpacing: spacing,
+            rowSpacing: spacing,
+            padding: padding,
+            topPadding: topPadding,
+            bottomPadding: bottomPadding,
+            minStageWidth: minStageWidth,
+            scale: scale
+        )
+    }
+
     public var cardWidth: CGFloat {
         thumbnailWidth + titleWidthAllowance + cardPadding * 2
     }

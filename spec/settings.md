@@ -27,6 +27,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Overlay on main display only | On |
 | Adaptive card sizing | On |
 | Window size / inactive stage scale | 150% / 70% |
+| Preview card spacing | 12 pt; adjustable from 0 to 36 pt |
 | Glass / stage corner radius | Clear / 30 pt |
 | Selection appearance | Filled; 6 pt outset, 12 pt radius |
 | Alternative magnify appearance | 106% size, 100% shadow strength |

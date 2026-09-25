@@ -16,6 +16,7 @@ struct SettingsViewModelTests {
         #expect(vm.settings.stageCornerRadius == 30)
         #expect(vm.settings.inactiveStageScale == 0.7)
         #expect(vm.settings.stageScale == 1.5)
+        #expect(vm.settings.previewCardSpacing == 12)
         #expect(vm.settings.overlayOnMainDisplayOnly)
         #expect(vm.settings.windowSelectionStyle == .filled)
         #expect(vm.settings.selectorOutset == 6)
@@ -115,6 +116,7 @@ struct SettingsViewModelTests {
             .glassStyle,
             .stageCornerRadius,
             .stageScale,
+            .previewCardSpacing,
             .adaptiveCardSizing,
             .inactiveStageScale,
             .windowSelectionStyle,
@@ -155,6 +157,19 @@ struct SettingsViewModelTests {
             try JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any]
         )
         #expect(normalized["shareAnonymousTelemetry"] == nil)
+    }
+
+    @Test("Preview card spacing persists and old settings keep the current gap")
+    func previewCardSpacingPersistence() throws {
+        var settings = AppSettings()
+        settings.previewCardSpacing = 24
+        let saved = try JSONEncoder().encode(settings)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: saved).previewCardSpacing == 24)
+
+        var object = try #require(try JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        object.removeValue(forKey: "previewCardSpacing")
+        let oldData = try JSONSerialization.data(withJSONObject: object)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: oldData).previewCardSpacing == 12)
     }
 
     @Test("Troubleshooting actions are forwarded to the app")
