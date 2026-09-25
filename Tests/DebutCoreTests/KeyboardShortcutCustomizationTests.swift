@@ -68,6 +68,12 @@ struct KeyboardShortcutCustomizationTests {
             (.selectRight, kVK_ANSI_L, .selectRight),
         ]
         #expect(KeyAction.overlaySelectionActions == defaults.map { $0.0 })
+        let session = KeyAction.sessionActions
+        #expect(session.firstIndex(of: .selectLeft) == session.firstIndex(of: .moveWindowRight).map { $0 + 1 })
+        #expect(KeyAction.selectLeft.displayName == "Move selector left")
+        #expect(KeyAction.selectDown.displayName == "Move selector down")
+        #expect(KeyAction.selectUp.displayName == "Move selector up")
+        #expect(KeyAction.selectRight.displayName == "Move selector right")
         var saved = KeyBindings()
         for (action, keyCode, event) in defaults {
             #expect(action.shortcutScope == .session)
@@ -321,7 +327,7 @@ struct KeyboardShortcutCustomizationTests {
         #expect(decoded?.quickSwitchSameApplicationModifiers == .disabled)
     }
 
-    @Test("Debut shortcut conflicts are reported across settings sections")
+    @Test("Debut shortcut conflicts stay within their input context")
     func conflictScopes() {
         var bindings = KeyBindings()
         let commandTab = KeyCombo(keyCode: kVK_Tab, command: true)
@@ -342,7 +348,25 @@ struct KeyboardShortcutCustomizationTests {
             combo: KeyCombo(keyCode: kVK_ANSI_H),
             forAction: .activateNextWindow,
             in: bindings
-        )?.message.contains("Select card left") == true)
+        ) == nil)
+        #expect(ConflictDetector.checkInternal(
+            combo: KeyCombo(keyCode: kVK_ANSI_H),
+            forAction: .selectRight,
+            in: bindings
+        )?.message.contains("Move selector left") == true)
+        var onlyGlobal = KeyBindings()
+        onlyGlobal.clear(.nextWindow)
+        #expect(ConflictDetector.checkInternal(
+            combo: commandTab,
+            forAction: .nextWindow,
+            in: onlyGlobal
+        ) == nil)
+        onlyGlobal.bindings[.selectDown] = KeyCombo(keyCode: kVK_ANSI_H)
+        #expect(ConflictDetector.checkInternal(
+            combo: KeyCombo(keyCode: kVK_ANSI_H),
+            forAction: .selectLeft,
+            in: onlyGlobal
+        )?.message.contains("Move selector down") == true)
     }
 
     @Test("Cleared shortcuts stay unbound after settings reload and defaults restore them")
@@ -359,6 +383,97 @@ struct KeyboardShortcutCustomizationTests {
         #expect(reset.combo(for: .selectLeft) == KeyCombo(keyCode: kVK_ANSI_H))
         reset.record(KeyCombo(keyCode: kVK_Delete, command: true), for: .selectLeft)
         #expect(reset.combo(for: .selectLeft) == KeyCombo(keyCode: kVK_Delete, command: true))
+    }
+
+    @Test("Clearing every Space Manager session key prevents its command while the overlay is open")
+    func clearedSessionKeysDoNotDispatch() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        var bindings = KeyBindings()
+        let defaultCombos = Dictionary(uniqueKeysWithValues: KeyAction.sessionActions.compactMap {
+            action in bindings.combo(for: action).map { (action, $0) }
+        })
+        for action in KeyAction.sessionActions { bindings.clear(action) }
+        service.keyBindings = bindings
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let activation = keyEvent(keyCode: kVK_Tab, flags: .maskCommand)
+        #expect(service.handleCGEvent(type: .keyDown, event: activation) == nil)
+        service.overlayVisible = true
+        #expect(delegate.receivedEvents == [.cmdTabHold])
+
+        for action in KeyAction.sessionActions {
+            guard let combo = defaultCombos[action] else {
+                Issue.record("Missing default combo for \(action)")
+                continue
+            }
+            var flags: CGEventFlags = [.maskCommand]
+            if combo.control { flags.insert(.maskControl) }
+            if combo.shift { flags.insert(.maskShift) }
+            if combo.option { flags.insert(.maskAlternate) }
+            let event = keyEvent(keyCode: combo.keyCode, flags: flags)
+            let before = delegate.receivedEvents
+            _ = service.handleCGEvent(type: .keyDown, event: event)
+            #expect(delegate.receivedEvents == before, "\(action) still dispatched")
+        }
+    }
+
+    @Test("An open session owns a cleared jump key even when quick switch uses Command")
+    func clearedSessionJumpOutranksQuickSwitch() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        var bindings = KeyBindings()
+        bindings.clear(.jumpToSpace1)
+        service.keyBindings = bindings
+        service.quickSwitchModifiers = ShortcutModifiers(command: true)
+        service.quickSwitchSameApplicationModifiers = .disabled
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let activation = keyEvent(keyCode: kVK_Tab, flags: .maskCommand)
+        #expect(service.handleCGEvent(type: .keyDown, event: activation) == nil)
+        service.overlayVisible = true
+        let commandOne = keyEvent(keyCode: kVK_ANSI_1, flags: .maskCommand)
+        #expect(service.handleCGEvent(type: .keyDown, event: commandOne) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold])
+    }
+
+    @Test("An open Control session owns a cleared arrow before desktop navigation")
+    func clearedSessionArrowOutranksDesktopNavigation() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        var bindings = KeyBindings()
+        bindings.set(KeyCombo(keyCode: kVK_Space, control: true), for: .activateNextWindow)
+        bindings.clear(.moveWindowLeft)
+        service.keyBindings = bindings
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let activation = keyEvent(keyCode: kVK_Space, flags: .maskControl)
+        #expect(service.handleCGEvent(type: .keyDown, event: activation) == nil)
+        service.overlayVisible = true
+        let controlLeft = keyEvent(keyCode: kVK_LeftArrow, flags: .maskControl)
+        #expect(service.handleCGEvent(type: .keyDown, event: controlLeft) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold])
+    }
+
+    @Test("Activation chords use session bindings while open and reopen a closed overlay")
+    func activationChordContext() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        let commandTab = keyEvent(keyCode: kVK_Tab, flags: .maskCommand)
+        #expect(service.handleCGEvent(type: .keyDown, event: commandTab) == nil)
+        service.overlayVisible = true
+        #expect(service.handleCGEvent(type: .keyDown, event: commandTab) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .nextWindow])
+
+        service.overlayVisible = false
+        #expect(service.handleCGEvent(type: .keyDown, event: commandTab) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .nextWindow, .cmdTabHold])
     }
 
     @Test("System shortcuts warn in Space Manager sessions too")

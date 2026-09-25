@@ -31,10 +31,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case nextWindow
     case previousWindow
     case previousWindowAlternate
-    case selectLeft
-    case selectDown
-    case selectUp
-    case selectRight
     case nextSpace
     case previousSpace
     case nextDisplayStack
@@ -45,6 +41,10 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case moveWindowDown
     case moveWindowLeft
     case moveWindowRight
+    case selectLeft
+    case selectDown
+    case selectUp
+    case selectRight
     case quitSelectedApp
     case closeSelectedWindow
     case dismissOverlay
@@ -77,10 +77,10 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .nextWindow: "Next window"
         case .previousWindow: "Previous window"
         case .previousWindowAlternate: "Previous window (alternate)"
-        case .selectLeft: "Select card left"
-        case .selectDown: "Select card down"
-        case .selectUp: "Select card up"
-        case .selectRight: "Select card right"
+        case .selectLeft: "Move selector left"
+        case .selectDown: "Move selector down"
+        case .selectUp: "Move selector up"
+        case .selectRight: "Move selector right"
         case .nextSpace: "Next space"
         case .previousSpace: "Previous space"
         case .nextDisplayStack: "Next display stack"

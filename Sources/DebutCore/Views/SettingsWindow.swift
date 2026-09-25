@@ -731,19 +731,11 @@ public struct SettingsView: View {
                 .font(.headline)
                 .padding(.top, 8)
 
-            Text("These keys are pressed while the modifier from the activation shortcut remains held. H/J/K/L move the card highlight; arrow keys move windows instead.")
+            Text("These keys are pressed while the modifier from the activation shortcut remains held. H/J/K/L move the selector; arrow keys move windows instead.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            ForEach(KeyAction.overlaySelectionActions, id: \.self) { action in
-                ShortcutRecorderRow(
-                    action: action,
-                    keyBindings: $viewModel.settings.keyBindings,
-                    recordingService: shortcutRecordingService
-                )
-            }
-
-            ForEach(KeyAction.sessionActions.filter { !KeyAction.overlaySelectionActions.contains($0) }, id: \.self) { action in
+            ForEach(KeyAction.sessionActions, id: \.self) { action in
                 ShortcutRecorderRow(
                     action: action,
                     keyBindings: $viewModel.settings.keyBindings,
