@@ -67,14 +67,15 @@ struct DesktopReconfigurationObserverTests {
     func overviewEligibilityRecovers() {
         let state = NavigationEligibilityState()
         let eligibility = DesktopNavigationEligibility(
-            canSwitchSpaces: { state.canSwitch }
+            canSwitchSpaces: { state.canSwitch },
+            requiresOverviewRecovery: true
         )
         eligibility.update(
             stackID: "display",
             topology: state.topology,
             overviewActive: false
         )
-        eligibility.overviewWillOpen()
+        #expect(eligibility.overviewWillOpen(confirmed: true))
 
         state.overviewActive = true
         state.hasCurrentDesktop = false
@@ -96,6 +97,55 @@ struct DesktopReconfigurationObserverTests {
         #expect(eligibility.blockReason() == .syntheticSwitchUnsupported)
     }
 
+    @Test("macOS 27 does not sacrifice the first post-overview navigation input")
+    func modernOverviewEligibilityResumesImmediately() {
+        let state = NavigationEligibilityState()
+        let eligibility = DesktopNavigationEligibility(
+            canSwitchSpaces: { state.canSwitch },
+            requiresOverviewRecovery: false
+        )
+        eligibility.update(
+            stackID: "display",
+            topology: state.topology,
+            overviewActive: false
+        )
+        #expect(eligibility.overviewWillOpen(confirmed: true))
+        eligibility.update(
+            stackID: "display",
+            topology: state.topology,
+            overviewActive: false
+        )
+
+        #expect(eligibility.blockReason() == nil)
+    }
+
+    @Test("An unconfirmed reconfiguration signal cannot poison the next navigation input")
+    func unconfirmedOverviewSignalIsIgnored() {
+        let state = NavigationEligibilityState()
+        let eligibility = DesktopNavigationEligibility(
+            canSwitchSpaces: { state.canSwitch },
+            requiresOverviewRecovery: true
+        )
+        eligibility.update(
+            stackID: "display",
+            topology: state.topology,
+            overviewActive: false
+        )
+
+        #expect(!eligibility.overviewWillOpen(confirmed: false))
+        #expect(eligibility.blockReason() == nil)
+    }
+
+    @Test("Only macOS 26 needs the Dock post-overview recovery input")
+    func overviewRecoveryPolicyMatchesOperatingSystem() {
+        #expect(DesktopNavigationEligibility.requiresOverviewRecovery(
+            operatingSystemMajor: 26
+        ))
+        #expect(!DesktopNavigationEligibility.requiresOverviewRecovery(
+            operatingSystemMajor: 27
+        ))
+    }
+
     @Test("Every gesture stays native while cached Mission Control state is active")
     func overviewNeverTransfersTrackpadOwnership() {
         let state = NavigationEligibilityState()
@@ -105,7 +155,7 @@ struct DesktopReconfigurationObserverTests {
             topology: state.topology,
             overviewActive: false
         )
-        eligibility.overviewWillOpen()
+        #expect(eligibility.overviewWillOpen(confirmed: true))
 
         #expect(eligibility.blockReason() == .dockOverviewActive)
         #expect(eligibility.blockReason() == .dockOverviewActive)

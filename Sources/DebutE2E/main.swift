@@ -2549,28 +2549,44 @@ if featureSpaces.userDesktops().count >= 2 {
     // shortcut; events posted into the transition can be discarded before they reach Debut.
     wait(0.5)
     let resetAfterOverview = quickSwitch(to: 0, using: featureSpaces)
+    let yieldedNavigationCountBeforeRecovery = readEvents().filter {
+        $0["event"] == "desktop_navigation_input_yielded"
+    }.count
+    let requiresLegacyOverviewRecovery =
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 26
     postControlArrow(kVK_RightArrow)
+    let modernRecoveryReachedEndpoint = requiresLegacyOverviewRecovery
+        ? false
+        : waitFor { featureSpaces.currentDesktopIndex() == 1 }
     wait(0.3)
     let yieldedNavigationEvents = readEvents().filter {
         $0["event"] == "desktop_navigation_input_yielded"
+    }
+    let newYieldedNavigationEvents = yieldedNavigationEvents.dropFirst(
+        yieldedNavigationCountBeforeRecovery
+    )
+    let firstPostOverviewInputWasYielded = newYieldedNavigationEvents.contains {
+        $0["reason"] == "dockOverviewActive"
+            || $0["reason"] == "dockOverviewRecovery"
     }
     info(
         "Overview recovery: markerGone=\(resumedAfterOverview) reset=\(resetAfterOverview) "
             + "desktop=\(String(describing: featureSpaces.currentDesktopIndex())) "
             + "yielded=\(yieldedNavigationEvents)"
     )
-    test("The first switch after Mission Control is yielded to macOS for recovery") {
-        resumedAfterOverview && resetAfterOverview
-            && yieldedNavigationEvents.contains {
-                $0["reason"] == "dockOverviewActive"
-                    || $0["reason"] == "dockOverviewRecovery"
-            }
+    test("The first switch after Mission Control follows Dock recovery policy") {
+        guard resumedAfterOverview && resetAfterOverview else { return false }
+        if requiresLegacyOverviewRecovery {
+            return firstPostOverviewInputWasYielded
+        }
+        return modernRecoveryReachedEndpoint && !firstPostOverviewInputWasYielded
     }
 
     wait(0.5)
-    // Session-posted keyboard events do not invoke Dock's symbolic-hotkey action, so the
-    // native recovery chord above proves passthrough but cannot move the VM's desktop. The
-    // next chord proves Debut did not leave that recovery latched or its coordinator pending.
+    // On macOS 26, session-posted keyboard events do not invoke Dock's symbolic-hotkey action,
+    // so the native recovery chord above proves passthrough but cannot move the VM's desktop.
+    // On newer systems the first chord already moved; either way this next chord proves Debut
+    // did not leave recovery latched or its coordinator pending.
     postControlArrow(kVK_RightArrow)
     test("Faster desktop switching resumes after Mission Control recovery") {
         waitFor { featureSpaces.currentDesktopIndex() == 1 }
