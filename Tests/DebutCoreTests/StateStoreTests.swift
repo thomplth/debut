@@ -30,6 +30,30 @@ struct StateStoreTests {
         #expect(loaded.spaces[1].windows.count == 1)
     }
 
+    @Test("Process-scoped shielding cards do not survive a restart")
+    func transientWindowsAreNotPersisted() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = StateStore(directory: dir)
+        var manager = SpaceManager()
+        manager.addWindow(
+            SpaceWindow(windowID: 7, ownerBundleID: TransientWindowIdentity.bundleID(for: 42),
+                        ownerName: "python", windowTitle: "Game", ownerPID: 42),
+            toSpaceID: manager.activeSpaceID
+        )
+        manager.addWindow(
+            SpaceWindow(windowID: 8, ownerBundleID: "com.example.Editor", ownerName: "Editor",
+                        windowTitle: "Document", ownerPID: 43),
+            toSpaceID: manager.activeSpaceID
+        )
+
+        try store.save(manager)
+        let loaded = try store.load()
+
+        #expect(manager.activeSpace.windowIDs == [7, 8])
+        #expect(loaded.activeSpace.windowIDs == [8])
+    }
+
     // Old state.json files carry a bootSessionID key alongside the spaces, written by the
     // boot stamp this store no longer keeps. Nothing compares that key anymore, so it must
     // decode as an unknown field rather than as a reason to lose every live assignment.

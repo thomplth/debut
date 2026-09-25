@@ -3008,9 +3008,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
               preview.spaces.indices.contains(fromSpaceIndex),
               preview.spaces.indices.contains(toSpaceIndex),
               canRelocate(from: fromSpaceIndex, to: toSpaceIndex),
-              preview.spaces[fromSpaceIndex].windows.contains(where: {
+              let window = preview.spaces[fromSpaceIndex].windows.first(where: {
                   $0.windowID == windowID
-              })
+              }),
+              fromSpaceIndex == toSpaceIndex ||
+                  !TransientWindowIdentity.isTransient(window.ownerBundleID)
         else { return false }
 
         if let scope = activeTutorialScope {
@@ -3339,6 +3341,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let space = preview.spaces[selectedSpaceIndex]
         guard space.windows.indices.contains(selectedWindowIndex) else { return }
         let window = space.windows[selectedWindowIndex]
+        guard !TransientWindowIdentity.isTransient(window.ownerBundleID) else { return }
 
         let targetSpaceIndex: Int
         switch direction {

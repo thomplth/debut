@@ -423,17 +423,24 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // a separate window-server query taken at a different instant — a sheet dismissed between
         // the two calls is named by one and not the other — so the verdicts read here are what
         // make this pass self-consistent.
+        let transientWindowIDs = Set(liveWindows.filter(\.isTransientFullscreen).map(\.windowID))
+            .union(spaceManager.allSpaces.flatMap(\.windows).filter {
+                TransientWindowIdentity.isTransient($0.ownerBundleID)
+            }.map(\.windowID))
         let refusedWindowIDs = untrackableWindowIDs
             .union(disqualifiedWindowIDs)
             .union(axContradictedWindowIDs)
             .union(windowServerVerdicts.parented)
             .union(windowServerVerdicts.orderedOut)
+            .subtracting(transientWindowIDs)
 
         var parkedDormantCount = 0
         for space in spaceManager.allSpaces {
             for windowID in space.windowIDs {
                 let reason: String
-                if untrackableWindowIDs.contains(windowID) {
+                if transientWindowIDs.contains(windowID) {
+                    continue
+                } else if untrackableWindowIDs.contains(windowID) {
                     reason = "untrackable"
                 } else if disqualifiedWindowIDs.contains(windowID) {
                     reason = "disqualified"

@@ -452,6 +452,14 @@ public struct SpaceManager: Codable, Sendable {
         }
         dormantWindowAssignments.removeAll { $0.window.ownerBundleID == bundleID }
     }
+
+    mutating func removeTransientWindowAssignments() {
+        let bundleIDs = Set(allSpaces.flatMap(\.windows).map(\.ownerBundleID) +
+            dormantWindowAssignments.map(\.window.ownerBundleID))
+        for bundleID in bundleIDs where TransientWindowIdentity.isTransient(bundleID) {
+            removeAllWindows(forBundleID: bundleID)
+        }
+    }
     @discardableResult
     public mutating func removeAllWindows(forOwnerPID pid: pid_t) -> Int {
         var removed = 0

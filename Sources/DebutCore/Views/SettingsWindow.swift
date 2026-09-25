@@ -551,8 +551,10 @@ public struct SettingsView: View {
             if !viewModel.settings.excludedBundleIDs.isEmpty {
                 ForEach(viewModel.settings.excludedBundleIDs, id: \.self) { bundleID in
                     HStack {
-                        AppIconImage(bundleID: bundleID, name: bundleID, iconSize: 20)
-                            .frame(width: 20, height: 20)
+                        if StageMotion.showsAppIcon(bundleID: bundleID) {
+                            AppIconImage(bundleID: bundleID, name: bundleID, iconSize: 20)
+                                .frame(width: 20, height: 20)
+                        }
                         Text(appName(for: bundleID))
                         Spacer()
                         Text(bundleID)

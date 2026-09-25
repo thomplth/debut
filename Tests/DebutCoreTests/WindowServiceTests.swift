@@ -96,6 +96,63 @@ struct WindowServiceTests {
         ) == nil)
     }
 
+    @Test("A shielding window can use a process-scoped identity without admitting ordinary Python windows")
+    func bundlelessShieldingIdentity() {
+        let first = AccessibilityWindowService.resolvedBundleID(
+            directBundleID: nil, signingIdentifier: nil, runningBundleIDs: [],
+            ownerPID: 42, ownsTransientFullscreenWindow: true
+        )
+        let second = AccessibilityWindowService.resolvedBundleID(
+            directBundleID: nil, signingIdentifier: nil, runningBundleIDs: [],
+            ownerPID: 43, ownsTransientFullscreenWindow: true
+        )
+        #expect(first != nil)
+        #expect(first != second)
+        #expect(TransientWindowIdentity.isTransient(first ?? ""))
+        #expect(AccessibilityWindowService.resolvedBundleID(
+            directBundleID: nil, signingIdentifier: nil, runningBundleIDs: [],
+            ownerPID: 42, ownsTransientFullscreenWindow: false
+        ) == nil)
+    }
+
+    @Test("An AX-named display-sized window qualifies for transient admission")
+    func bundlelessDisplaySizedIdentity() {
+        let display = CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        #expect(AccessibilityWindowService.isAXCorroboratedFullscreenWindow(
+            layer: 0, bounds: display, isOnScreen: true,
+            axNamesWindow: true, displayBounds: [display]
+        ))
+        #expect(!AccessibilityWindowService.isAXCorroboratedFullscreenWindow(
+            layer: 0, bounds: display, isOnScreen: true,
+            axNamesWindow: false, displayBounds: [display]
+        ))
+        #expect(!AccessibilityWindowService.isAXCorroboratedFullscreenWindow(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 1000, height: 700),
+            isOnScreen: true, axNamesWindow: true, displayBounds: [display]
+        ))
+        #expect(!AccessibilityWindowService.isAXCorroboratedFullscreenWindow(
+            layer: 0, bounds: display, isOnScreen: false,
+            axNamesWindow: true, displayBounds: [display]
+        ))
+    }
+
+    @Test("Only process-scoped fullscreen windows bypass normal admission")
+    func transientFullscreenAdmissionScope() {
+        let transient = TransientWindowIdentity.bundleID(for: 42)
+        #expect(AccessibilityWindowService.isTransientFullscreenWindow(
+            bundleID: transient, isShielding: true, isAXCorroborated: false
+        ))
+        #expect(AccessibilityWindowService.isTransientFullscreenWindow(
+            bundleID: transient, isShielding: false, isAXCorroborated: true
+        ))
+        #expect(!AccessibilityWindowService.isTransientFullscreenWindow(
+            bundleID: "com.example.game", isShielding: true, isAXCorroborated: false
+        ))
+        #expect(!AccessibilityWindowService.isTransientFullscreenWindow(
+            bundleID: transient, isShielding: false, isAXCorroborated: false
+        ))
+    }
+
     // AX role/subrole is a snapshot, not a verdict: an app that hasn't answered AX yet, or a
     // window on a Space that isn't showing (kAXWindows cannot see it there at all), is neither
     // trackable nor untrackable. Only a positively-untrackable window may be dropped outright;

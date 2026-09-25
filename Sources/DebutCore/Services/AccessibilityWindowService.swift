@@ -304,13 +304,21 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
     public func listWindows() -> [WindowInfo] {
         let classification = classifyAXWindowIDs()
+        let shieldingWindows = Self.currentShieldingWindows()
+        let axFullscreens = Self.currentAXCorroboratedFullscreens(
+            axWindowIDsByPID: classification.axWindowIDsByPID
+        )
+        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[CFString: Any]] else {
             return []
         }
 
-        let runningApps = resolvedRunningApplications()
+        let runningApps = resolvedRunningApplications(
+            transientFullscreenOwnerPIDs: Set(shieldingWindows.values)
+                .union(axFullscreens.values)
+        )
         let pidToBundleID: [pid_t: String] = Dictionary(
             runningApps.map { ($0.application.processIdentifier, $0.bundleID) },
             uniquingKeysWith: { first, _ in first }
@@ -368,6 +376,13 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                   let boundsDict = dict[kCGWindowBounds] as? [String: CGFloat],
                   let bundleID = pidToBundleID[ownerPID]
             else { return nil }
+            let isShieldingFullscreen = shieldingWindows[windowID] == ownerPID &&
+                frontmostPID == ownerPID
+            let isTransientFullscreen = Self.isTransientFullscreenWindow(
+                bundleID: bundleID,
+                isShielding: isShieldingFullscreen,
+                isAXCorroborated: axFullscreens[windowID] == ownerPID
+            )
 
             guard Self.admitsWindow(
                 windowID: windowID,
@@ -378,7 +393,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
             // A positive AX verdict is a reason to exclude; the absence of one is not — an app
             // still warming up, or a window on a Space that isn't showing, reports neither.
-            guard !classification.untrackable.contains(windowID) else { return nil }
+            guard isTransientFullscreen || !classification.untrackable.contains(windowID)
+            else { return nil }
             guard seen.insert(windowID).inserted else { return nil }
 
             let bounds = CGRect(
@@ -392,14 +408,14 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             // AX-trackable window is no more exempt from them than an AX-unknown one. Refusing
             // them only in the branch below let a parented or degenerate window AX happened to
             // classify be parked and re-admitted from the same snapshot on every pass.
-            guard !Self.evictionVerdictRefusesWindow(
+            guard isTransientFullscreen || !Self.evictionVerdictRefusesWindow(
                 layer: dict[kCGWindowLayer] as? Int,
                 bounds: bounds,
                 hasParentWindow: verdicts.parented.contains(windowID),
                 isOrderedOutGhost: ghostWindowIDs.contains(windowID)
             ) else { return nil }
 
-            if !classification.trackable.contains(windowID) {
+            if !classification.trackable.contains(windowID) && !isTransientFullscreen {
                 let windowDesktop = windowDesktops[windowID]
                 guard Self.isPlausibleUntrackedWindow(
                     layer: dict[kCGWindowLayer] as? Int,
@@ -437,7 +453,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                 ownerPID: ownerPID,
                 title: title,
                 bounds: bounds,
-                isOnScreen: isOnScreen
+                isOnScreen: isOnScreen,
+                isTransientFullscreen: isTransientFullscreen
             )
         }
     }
@@ -787,7 +804,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return !isTrackableAXWindow(role: role, subrole: subrole, isModal: isModal)
     }
 
-    private func classifyAXWindowIDs() -> (
+    private func classifyAXWindowIDs(onlyOwnerPIDs: Set<pid_t>? = nil) -> (
         trackable: Set<CGWindowID>,
         untrackable: Set<CGWindowID>,
         axWindowIDsByPID: [pid_t: Set<CGWindowID>],
@@ -798,7 +815,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         var untrackable = Set<CGWindowID>()
         var axWindowIDsByPID: [pid_t: Set<CGWindowID>] = [:]
         let runningApps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular }
+            .filter { $0.activationPolicy == .regular &&
+                (onlyOwnerPIDs == nil || onlyOwnerPIDs?.contains($0.processIdentifier) == true) }
 
         for app in runningApps {
             let axApp = AXUIElementCreateApplication(app.processIdentifier)
@@ -831,7 +849,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         }
         let focusedWindowID: CGWindowID?
         let focusedWindowPID: pid_t?
-        if let frontmost = NSWorkspace.shared.frontmostApplication {
+        if onlyOwnerPIDs == nil, let frontmost = NSWorkspace.shared.frontmostApplication {
             focusedWindowID = self.focusedWindowID(for: frontmost.processIdentifier)
             focusedWindowPID = focusedWindowID == nil ? nil : frontmost.processIdentifier
         } else {
@@ -881,18 +899,131 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return value as? Bool
     }
 
-    /// Regular Launch Services applications with stable ownership. An ordinary app supplies
-    /// its bundle ID directly. A bundleless hosted child is admitted only when its signed code
-    /// identifier is namespaced beneath another regular app that is running right now.
-    private func resolvedRunningApplications() -> [ResolvedRunningApplication] {
+    /// An ordinary app supplies its bundle ID directly. A bundleless hosted child inherits a
+    /// running host identity when its signing identifier is namespaced beneath that host.
+    /// A bundleless fullscreen process instead gets a process-scoped identity for this run.
+    static func resolvedBundleID(
+        directBundleID: String?,
+        signingIdentifier: String?,
+        runningBundleIDs: Set<String>,
+        ownerPID: pid_t,
+        ownsTransientFullscreenWindow: Bool
+    ) -> String? {
+        directBundleID ?? hostBundleID(
+            forSigningIdentifier: signingIdentifier,
+            among: runningBundleIDs
+        ) ?? (ownsTransientFullscreenWindow ? TransientWindowIdentity.bundleID(for: ownerPID) : nil)
+    }
+
+    static func isTransientFullscreenWindow(
+        bundleID: String,
+        isShielding: Bool,
+        isAXCorroborated: Bool
+    ) -> Bool {
+        TransientWindowIdentity.isTransient(bundleID) &&
+            (isShielding || isAXCorroborated)
+    }
+
+    private static func currentShieldingWindows() -> [CGWindowID: pid_t] {
+        let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+            as? [[CFString: Any]] ?? []
+        let shieldingLevel = Int(CGShieldingWindowLevel())
+        return Dictionary(uniqueKeysWithValues: windows.compactMap { window in
+            guard let windowID = window[kCGWindowNumber] as? CGWindowID,
+                  let ownerPID = window[kCGWindowOwnerPID] as? pid_t,
+                  let layer = window[kCGWindowLayer] as? Int,
+                  layer == shieldingLevel
+            else { return nil }
+            return (windowID, ownerPID)
+        })
+    }
+
+    /// Some display-capturing games expose their surface at layer zero while another app is
+    /// active. AX names the same window ID, but its unknown subrole and missing SkyLight desktop
+    /// otherwise leave it without an identity or placement. Require a visible, display-sized
+    /// surface and AX agreement before assigning a bundleless process a transient identity.
+    static func isAXCorroboratedFullscreenWindow(
+        layer: Int?,
+        bounds: CGRect,
+        isOnScreen: Bool,
+        axNamesWindow: Bool,
+        displayBounds: [CGRect]
+    ) -> Bool {
+        guard layer == 0, isOnScreen, axNamesWindow else { return false }
+        return displayBounds.contains { display in
+            guard display.width > 0, display.height > 0,
+                  abs(bounds.width - display.width) <= display.width * 0.05,
+                  abs(bounds.height - display.height) <= display.height * 0.05
+            else { return false }
+            let intersection = bounds.intersection(display)
+            return !intersection.isNull &&
+                intersection.width * intersection.height >=
+                    display.width * display.height * 0.95
+        }
+    }
+
+    private static func currentAXCorroboratedFullscreens(
+        axWindowIDsByPID: [pid_t: Set<CGWindowID>]
+    ) -> [CGWindowID: pid_t] {
+        let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+            as? [[CFString: Any]] ?? []
+        var displayCount: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &displayCount) == .success,
+              displayCount > 0 else { return [:] }
+        var displayIDs = [CGDirectDisplayID](repeating: 0, count: Int(displayCount))
+        guard CGGetActiveDisplayList(displayCount, &displayIDs, &displayCount) == .success
+        else { return [:] }
+        let displayBounds = displayIDs.prefix(Int(displayCount)).map(CGDisplayBounds)
+        return Dictionary(uniqueKeysWithValues: windows.compactMap { window in
+            guard let windowID = window[kCGWindowNumber] as? CGWindowID,
+                  let ownerPID = window[kCGWindowOwnerPID] as? pid_t,
+                  let boundsDict = window[kCGWindowBounds] as? [String: CGFloat]
+            else { return nil }
+            let bounds = CGRect(
+                x: boundsDict["X"] ?? 0,
+                y: boundsDict["Y"] ?? 0,
+                width: boundsDict["Width"] ?? 0,
+                height: boundsDict["Height"] ?? 0
+            )
+            guard isAXCorroboratedFullscreenWindow(
+                layer: window[kCGWindowLayer] as? Int,
+                bounds: bounds,
+                isOnScreen: window[kCGWindowIsOnscreen] as? Bool ?? false,
+                axNamesWindow: axWindowIDsByPID[ownerPID]?.contains(windowID) == true,
+                displayBounds: displayBounds
+            ) else { return nil }
+            return (windowID, ownerPID)
+        })
+    }
+
+    private func resolvedRunningApplications(
+        transientFullscreenOwnerPIDs: Set<pid_t>? = nil
+    ) -> [ResolvedRunningApplication] {
         let applications = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular
         }
         let directBundleIDs = Set(applications.compactMap(\.bundleIdentifier))
+        let bundlelessPIDs = Set(applications.filter { $0.bundleIdentifier == nil }
+            .map(\.processIdentifier))
+        let transientFullscreenOwnerPIDs = transientFullscreenOwnerPIDs ??
+            Set(Self.currentShieldingWindows().values).union(
+                bundlelessPIDs.isEmpty ? Set<pid_t>() : Set(Self.currentAXCorroboratedFullscreens(
+                    axWindowIDsByPID: classifyAXWindowIDs(
+                        onlyOwnerPIDs: bundlelessPIDs
+                    ).axWindowIDsByPID
+                ).values)
+            )
         return applications.compactMap { application in
-            let bundleID = application.bundleIdentifier ?? Self.hostBundleID(
-                forSigningIdentifier: Self.signingIdentifier(of: application),
-                among: directBundleIDs
+            let directBundleID = application.bundleIdentifier
+            let bundleID = Self.resolvedBundleID(
+                directBundleID: directBundleID,
+                signingIdentifier: directBundleID == nil
+                    ? Self.signingIdentifier(of: application) : nil,
+                runningBundleIDs: directBundleIDs,
+                ownerPID: application.processIdentifier,
+                ownsTransientFullscreenWindow: transientFullscreenOwnerPIDs.contains(
+                    application.processIdentifier
+                )
             )
             guard let bundleID else { return nil }
             return ResolvedRunningApplication(application: application, bundleID: bundleID)
