@@ -462,8 +462,16 @@ struct FittedStageScaleTests {
 
     @Test("A display too small at every scale still returns a usable scale")
     func impossibleFitFallsBackToTheFloor() {
-        let scale = fitted(1.5, windowCounts: [200], display: CGSize(width: 600, height: 400))
+        // Height alone makes even one card impossible to fit; a 200-card fixture
+        // adds layout work without testing another branch of the fallback.
+        let display = CGSize(width: 600, height: 100)
+        let scale = fitted(1.5, windowCounts: [1], display: display)
         #expect(scale == 0.5)
+        let floorLayout = StageConstants.stageLayouts(
+            forWindowCounts: [1], screenWidth: display.width,
+            metrics: StageMetrics.shaped(forDisplay: display).scaled(by: scale)
+        )[0]
+        #expect(floorLayout.stageSize.height > StageConstants.availableStageHeight(screenHeight: display.height))
     }
 
     @Test("Fitting never leaves a stage wider than the display")

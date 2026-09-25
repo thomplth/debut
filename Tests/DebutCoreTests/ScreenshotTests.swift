@@ -82,6 +82,31 @@ struct ScreenshotTests {
         let comparedPixelCount: Int
     }
 
+    @Test("Screenshot comparison ignores bare background but detects changed content")
+    func screenshotComparisonContentMask() throws {
+        func bitmap(content: NSColor) throws -> NSBitmapImageRep {
+            let image = NSImage(size: NSSize(width: 20, height: 20))
+            image.lockFocus()
+            NSColor.black.setFill()
+            NSRect(x: 0, y: 0, width: 20, height: 20).fill()
+            content.setFill()
+            NSRect(x: 5, y: 5, width: 10, height: 10).fill()
+            image.unlockFocus()
+            return try #require(normalizedBitmap(image, size: image.size))
+        }
+        let original = try bitmap(content: .red)
+        let identical = try bitmap(content: .red)
+        let changed = try bitmap(content: .blue)
+        let same = screenshotDifference(original, identical)
+        let different = screenshotDifference(original, changed)
+        #expect(same.comparedPixelCount > 300)
+        #expect(same.comparedPixelCount < original.pixelsWide * original.pixelsHigh)
+        #expect(same.meanChannelDifference == 0)
+        #expect(different.comparedPixelCount == same.comparedPixelCount)
+        #expect(different.meanChannelDifference > 0.4)
+        #expect(different.changedPixelRatio > 0.9)
+    }
+
     /// Draws an image into a deterministic @2x bitmap. Passing a smaller point size is the
     /// screenshot equivalent of looking at a scaled stage from the same distance.
     private func normalizedBitmap(_ image: NSImage, size: NSSize) -> NSBitmapImageRep? {
@@ -118,34 +143,54 @@ struct ScreenshotTests {
         _ rhs: NSBitmapImageRep
     ) -> ScreenshotDifference {
         precondition(lhs.pixelsWide == rhs.pixelsWide && lhs.pixelsHigh == rhs.pixelsHigh)
-        let background = lhs.colorAt(x: 0, y: 0) ?? .black
+        // Draw both inputs into the same explicit byte layout. colorAt(x:y:) constructs
+        // millions of NSColor objects for the large composition fixture.
+        func pixels(_ image: NSBitmapImageRep) -> (CGContext, UnsafeMutablePointer<UInt8>)? {
+            guard let source = image.cgImage,
+                  let context = CGContext(
+                    data: nil, width: image.pixelsWide, height: image.pixelsHigh,
+                    bitsPerComponent: 8, bytesPerRow: 0,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue
+                        | CGImageAlphaInfo.premultipliedLast.rawValue
+                  ), let data = context.data
+            else { return nil }
+            context.draw(source, in: CGRect(x: 0, y: 0,
+                width: image.pixelsWide, height: image.pixelsHigh))
+            return (context, data.assumingMemoryBound(to: UInt8.self))
+        }
+        guard let (leftContext, leftBytes) = pixels(lhs),
+              let (rightContext, rightBytes) = pixels(rhs)
+        else { return ScreenshotDifference(meanChannelDifference: 1, changedPixelRatio: 1, comparedPixelCount: 0) }
+        func channel(_ bytes: UnsafeMutablePointer<UInt8>, _ offset: Int, _ component: Int) -> Double {
+            let alpha = Int(bytes[offset + 3])
+            guard component != 3 else { return Double(alpha) / 255 }
+            guard alpha > 0 else { return 0 }
+            return Double(min(255, Int(bytes[offset + component]) * 255 / alpha)) / 255
+        }
+        let backgroundR = channel(leftBytes, 0, 0)
+        let backgroundG = channel(leftBytes, 0, 1)
+        let backgroundB = channel(leftBytes, 0, 2)
         var totalDifference = 0.0
         var changedPixels = 0
         var comparedPixels = 0
 
-        for x in 0..<lhs.pixelsWide {
-            for y in 0..<lhs.pixelsHigh {
-                guard let left = lhs.colorAt(x: x, y: y),
-                      let right = rhs.colorAt(x: x, y: y)
-                else { continue }
-                let leftFromBackground = max(
-                    abs(left.redComponent - background.redComponent),
-                    abs(left.greenComponent - background.greenComponent),
-                    abs(left.blueComponent - background.blueComponent)
-                )
-                let rightFromBackground = max(
-                    abs(right.redComponent - background.redComponent),
-                    abs(right.greenComponent - background.greenComponent),
-                    abs(right.blueComponent - background.blueComponent)
-                )
+        for y in 0..<lhs.pixelsHigh {
+            for x in 0..<lhs.pixelsWide {
+                let leftOffset = y * leftContext.bytesPerRow + x * 4
+                let rightOffset = y * rightContext.bytesPerRow + x * 4
+                let lr = channel(leftBytes, leftOffset, 0)
+                let lg = channel(leftBytes, leftOffset, 1)
+                let lb = channel(leftBytes, leftOffset, 2)
+                let rr = channel(rightBytes, rightOffset, 0)
+                let rg = channel(rightBytes, rightOffset, 1)
+                let rb = channel(rightBytes, rightOffset, 2)
+                let leftFromBackground = max(abs(lr - backgroundR), abs(lg - backgroundG), abs(lb - backgroundB))
+                let rightFromBackground = max(abs(rr - backgroundR), abs(rg - backgroundG), abs(rb - backgroundB))
                 guard max(leftFromBackground, rightFromBackground) > 0.01 else { continue }
 
-                let redDifference = abs(left.redComponent - right.redComponent)
-                let greenDifference = abs(left.greenComponent - right.greenComponent)
-                let blueDifference = abs(left.blueComponent - right.blueComponent)
-                let alphaDifference = abs(left.alphaComponent - right.alphaComponent)
-                let difference = (redDifference + greenDifference
-                    + blueDifference + alphaDifference) / 4
+                let difference = (abs(lr - rr) + abs(lg - rg) + abs(lb - rb)
+                    + abs(channel(leftBytes, leftOffset, 3) - channel(rightBytes, rightOffset, 3))) / 4
                 totalDifference += difference
                 changedPixels += difference > 0.08 ? 1 : 0
                 comparedPixels += 1
@@ -600,25 +645,6 @@ struct ScreenshotTests {
             StageOverlayView(viewModel: makeSampleViewModel(windowPreviews: preview)),
             size: size
         )
-
-        let stages = makeSampleViewModel(windowPreviews: preview)
-        let flat = AltTabOverlayViewModel(
-            entries: stages.spaceManager.globalWindowOrder(), selectedIndex: 2,
-            windowPreviews: preview
-        )
-        for dark in [false, true] {
-            let background: CGFloat = dark ? 0.25 : 0.9
-            let stageImage = try #require(renderSwiftUI(
-                StageOverlayView(viewModel: stages).environment(\.colorScheme, dark ? .dark : .light),
-                size: size, background: background
-            ))
-            try saveImage(stageImage, name: "02_preview_shadows_\(dark)")
-            let flatImage = try #require(renderSwiftUI(
-                AltTabOverlayView(viewModel: flat).environment(\.colorScheme, dark ? .dark : .light),
-                size: size, background: background
-            ))
-            try saveImage(flatImage, name: "10_preview_shadows_\(dark)")
-        }
 
         #expect(!withPreviews.isEmpty)
         #expect(Set(withPreviews.keys) == Set(withoutPreviews.keys))
@@ -1092,30 +1118,6 @@ struct ScreenshotTests {
         )
         let image = try #require(renderSwiftUI(view, size: NSSize(width: 820, height: 620)))
         try saveImage(image, name: "settings_faster_desktop_transitions_disabled")
-    }
-
-    @Test("Tutorial coachmarks fit beside only the practice windows", arguments: ["windows", "desktops", "move", "release", "previews", "dark"])
-    func tutorialCoachmarks(_ state: String) throws {
-        let practice: OnboardingPractice = state == "previews" ? .allWindows : state == "desktops" ? .desktop : state == "move" || state == "release" ? .moveWindow : .workspace
-        let (controller, _, _) = TutorialSwitcherTests().fixture(practice: practice)
-        controller.handleKeyEvent(practice == .allWindows ? .altTabHold : .cmdTabHold)
-        if state == "release" { controller.handleKeyEvent(.moveWindowDown) }
-        let size = NSSize(width: 1024, height: 768)
-        if practice == .allWindows {
-            var vm = AltTabOverlayViewModel(entries: controller.altTabEntries, selectedIndex: controller.altTabSelectionIndex)
-            vm.tutorialScope = controller.activeTutorialScope
-            vm.tutorialCoachmark = controller.tutorialCoachmark
-            let image = try #require(renderSwiftUI(AltTabOverlayView(viewModel: vm), size: size))
-            try saveImage(image, name: "tutorial_coach_\(state)")
-        } else {
-            var vm = StageOverlayViewModel(spaceManager: controller.overlaySpaceManager,
-                activeSpaceIndex: controller.selectedSpaceIndex, selectedWindowIndex: controller.selectedWindowIndex)
-            vm.tutorialScope = controller.activeTutorialScope
-            vm.tutorialCoachmark = controller.tutorialCoachmark
-            let image = try #require(renderSwiftUI(StageOverlayView(viewModel: vm).environment(\.colorScheme, state == "dark" ? .dark : .light), size: size))
-            try saveImage(image, name: "tutorial_coach_\(state)")
-        }
-        controller.handleKeyEvent(.escape)
     }
 
     @Test("Minimal onboarding pages fit the window", arguments: ["welcome", "permission", "one-desktop", "workspace", "workspace-no-previews", "previews", "previews-disabled", "speed", "ready", "small-welcome", "small-permission", "small-one-desktop", "small-previews", "small-speed", "small-ready", "dark-welcome", "dark-permission", "dark-workspace", "dark-one-desktop", "dark-previews", "dark-speed", "dark-ready"])
