@@ -6,6 +6,27 @@ import ApplicationServices
 @Suite("MockWindowService")
 struct WindowServiceTests {
 
+    @Test("Window-server PID recovers a launcher whose running app reports minus one")
+    func canonicalPIDUsesVerifiedWindowOwner() {
+        let matching: Set<pid_t> = [12102]
+        #expect(AccessibilityWindowService.canonicalPID(
+            reportedPID: -1, candidateOwnerPIDs: [12102, 12118],
+            matchesApplication: { matching.contains($0) }
+        ) == 12102)
+        #expect(AccessibilityWindowService.canonicalPID(
+            reportedPID: -1, candidateOwnerPIDs: [12118],
+            matchesApplication: { matching.contains($0) }
+        ) == nil)
+        #expect(AccessibilityWindowService.canonicalPID(
+            reportedPID: -1, candidateOwnerPIDs: [12102, 12103],
+            matchesApplication: { _ in true }
+        ) == nil)
+        #expect(AccessibilityWindowService.canonicalPID(
+            reportedPID: 42, candidateOwnerPIDs: [12102],
+            matchesApplication: { _ in true }
+        ) == 42)
+    }
+
     @Test("Non-modal AX standard and dialog windows are trackable")
     func classifiesTrackableAXWindows() {
         #expect(AccessibilityWindowService.isTrackableAXWindow(

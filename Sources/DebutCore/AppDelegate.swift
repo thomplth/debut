@@ -70,10 +70,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         super.init()
     }
 
-    private static func runningBundleIDsByPID() -> [pid_t: String] {
-        NSWorkspace.shared.runningApplications.reduce(into: [:]) { table, app in
-            table[app.processIdentifier] = app.bundleIdentifier
+    private static func runningBundleIDsByPID(windowService: any WindowService) -> [pid_t: String] {
+        var table = NSWorkspace.shared.runningApplications.reduce(into: [pid_t: String]()) {
+            result, app in
+            if app.processIdentifier > 0 { result[app.processIdentifier] = app.bundleIdentifier }
         }
+        for app in windowService.listRunningApps() {
+            table[app.pid] = app.bundleID
+        }
+        return table
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
@@ -114,7 +119,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let accessibility = AccessibilityWindowService()
         accessibility.restoreContradictions(
             (try? store.loadContradictions()) ?? [],
-            runningBundleIDsByPID: Self.runningBundleIDsByPID()
+            runningBundleIDsByPID: Self.runningBundleIDsByPID(windowService: accessibility)
         )
         accessibility.onContradictionsChanged = { [verdictQueue] records in
             verdictQueue.async { try? store.saveContradictions(records) }
@@ -196,7 +201,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         // dead surface its owner still lists to a dormant assignment and resurrect the ghost.
         discovery.restoreRetiredWindows(
             (try? stateStore?.loadRetiredWindows()) ?? [],
-            runningBundleIDsByPID: Self.runningBundleIDsByPID()
+            runningBundleIDsByPID: Self.runningBundleIDsByPID(windowService: windowService)
         )
         if let stateStore {
             discovery.onRetiredWindowsChanged = { [verdictQueue] records in
@@ -251,7 +256,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let startSpaceID: UUID
         if let frontApp = NSWorkspace.shared.frontmostApplication,
            frontApp.bundleIdentifier != "com.thomplth.Debut",
-           let focusedWID = discovery.focusedWindowID(for: frontApp.processIdentifier),
+           let frontmostPID = windowService.frontmostApplicationPID(),
+           let focusedWID = discovery.focusedWindowID(for: frontmostPID),
            let owningSpace = spaceManager.spaceContainingWindow(windowID: focusedWID) {
             startSpaceID = owningSpace
             if let stackID = spaceManager.spaceStackID(containingSpaceID: owningSpace) {
