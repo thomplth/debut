@@ -18,6 +18,45 @@ expect_equal() {
     fi
 }
 
+if [[ "${1:-}" == "--artifact" ]]; then
+    bundle="${2:?usage: PackagingTests.sh --artifact <Debut.app>}"
+    [[ $# == 2 ]] || { echo "usage: PackagingTests.sh --artifact <Debut.app>" >&2; exit 2; }
+    binary="$bundle/Contents/MacOS/Debut"
+    built_plist="$bundle/Contents/Info.plist"
+    built_icon="$bundle/Contents/Resources/AppIcon.icns"
+    framework="$bundle/Contents/Frameworks/Sparkle.framework"
+    [[ -f "$binary" ]] || fail "bundle has no Debut executable"
+    [[ -f "$built_plist" ]] || fail "bundle has no Info.plist"
+    [[ -f "$built_icon" ]] || fail "bundle has no AppIcon.icns"
+    [[ -f "$framework/Versions/B/Sparkle" ]] || fail "bundle has no Sparkle binary"
+    [[ -d "$framework/Versions/B/XPCServices/Downloader.xpc" ]] || fail "bundle has no Sparkle downloader"
+    [[ -d "$framework/Versions/B/XPCServices/Installer.xpc" ]] || fail "bundle has no Sparkle installer"
+    if [[ -f "$binary" ]]; then
+        archs="$(lipo -archs "$binary" 2>/dev/null || true)"
+        expect_equal "$archs" "arm64" "the built binary must contain only the arm64 slice"
+        package_platform="$(sed -nE 's/.*\.macOS\(\.v([0-9]+)\).*/\1/p' "$repo_root/Package.swift" | head -1)"
+        minos="$(xcrun vtool -show-build "$binary" 2>/dev/null | awk '/^[[:space:]]*minos / { print $2; exit }')"
+        expect_equal "$minos" "$package_platform.0" "the built binary must target the package macOS minimum"
+    fi
+    if [[ -f "$built_plist" ]]; then
+        for key in CFBundleExecutable CFBundleIdentifier CFBundleIconFile LSMinimumSystemVersion; do
+            actual="$(/usr/bin/plutil -extract "$key" raw -o - "$built_plist" 2>/dev/null || true)"
+            expected="$(/usr/bin/plutil -extract "$key" raw -o - "$repo_root/Resources/Info.plist" 2>/dev/null || true)"
+            expect_equal "$actual" "$expected" "built $key must match the committed Info.plist"
+        done
+        [[ "$(/usr/bin/plutil -extract CFBundlePackageType raw -o - "$built_plist" 2>/dev/null || true)" == "APPL" ]] \
+            || fail "bundle has no APPL package type"
+    fi
+    if [[ -f "$built_icon" ]]; then
+        cmp -s "$built_icon" "$repo_root/Resources/AppIcon.icns" \
+            || fail "the built bundle's icon differs from Resources/AppIcon.icns"
+    fi
+    (( failures == 0 )) || exit 1
+    echo "PASS: built packaging artifact ($bundle)"
+    exit 0
+fi
+[[ $# == 0 ]] || { echo "usage: PackagingTests.sh [--artifact <Debut.app>]" >&2; exit 2; }
+
 # The deployment target is declared twice — once for the compiler, once for Launch Services — and
 # only the compiler's copy is enforced by anything. A plist that claims a lower floor than the
 # package builds against installs happily on a system the binary cannot run on, so the failure
@@ -36,13 +75,6 @@ expect_equal "$plist_minimum" "$package_platform.0" \
 # Rosetta — would silently produce an x86_64 bundle that no gate would catch.
 grep -q -- "--arch arm64" "$repo_root/scripts/build-app.sh" \
     || fail "build-app.sh must pin the architecture to arm64 rather than inheriting the host's"
-
-# If a bundle is lying around from a local build, hold it to the same rule.
-binary="$repo_root/.build/Debut.app/Contents/MacOS/Debut"
-if [[ -f "$binary" ]]; then
-    archs="$(lipo -archs "$binary" 2>/dev/null || true)"
-    expect_equal "$archs" "arm64" "the built binary must contain only the arm64 slice"
-fi
 
 # The bundle shipped the generic macOS application icon: build-app.sh rasterized
 # GenericApplicationIcon.icns behind `|| true`, and Info.plist named no icon at all. Both halves
@@ -77,13 +109,6 @@ fi
 
 ! grep -q "GenericApplicationIcon" "$repo_root/scripts/build-app.sh" \
     || fail "build-app.sh must ship Debut's own icon rather than the generic system one"
-
-# The icon in a local bundle has to be the one under review, not a stale artifact.
-built_icon="$repo_root/.build/Debut.app/Contents/Resources/AppIcon.icns"
-if [[ -f "$built_icon" && -n "$icon_file" && -f "$repo_root/Resources/$icon_file.icns" ]]; then
-    cmp -s "$built_icon" "$repo_root/Resources/$icon_file.icns" \
-        || fail "the built bundle's icon differs from Resources/$icon_file.icns"
-fi
 
 if (( failures > 0 )); then
     exit 1
