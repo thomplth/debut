@@ -22,7 +22,7 @@ private struct Result: Codable {
 }
 
 private func measure(
-    operation: PerformanceOperation,
+    operation: String,
     iterations: Int = 100,
     workload: PerformanceWorkload,
     body: () -> Void
@@ -45,7 +45,7 @@ private func measure(
         cpu = 0
     }
     return Result(
-        operation: operation.rawValue, iterations: iterations, workload: workload,
+        operation: operation, iterations: iterations, workload: workload,
         medianMilliseconds: summary.medianMilliseconds, p95Milliseconds: summary.p95Milliseconds,
         p99Milliseconds: summary.p99Milliseconds, maximumMilliseconds: summary.maximumMilliseconds,
         cpuNanoseconds: cpu, footprintBytes: after?.physicalFootprintBytes
@@ -67,10 +67,10 @@ private func manager(spaces: Int, windows: Int) -> SpaceManager {
 
 private let workload = PerformanceWorkload(spaces: 10, windows: 50, dormantWindows: 50, processes: 10)
 private let results = [
-    measure(operation: .overlayPreparation, workload: workload) {
+    measure(operation: PerformanceOperation.overlayPreparation.rawValue, workload: workload) {
         _ = StageOverlayViewModel(spaceManager: manager(spaces: 10, windows: 50), activeSpaceIndex: 5, selectedWindowIndex: 0).stages
     },
-    measure(operation: .windowReconciliation, workload: workload) {
+    measure(operation: PerformanceOperation.windowReconciliation.rawValue, workload: workload) {
         var state = manager(spaces: 10, windows: 50)
         var reconciler = RuntimeWindowReconciler()
         let infos = (0..<50).map { index in
@@ -78,8 +78,15 @@ private let results = [
         }
         _ = reconciler.reconcile(RuntimeWindowSnapshot(liveWindows: infos, allWindowIDs: Set(infos.map(\.windowID))), spaceManager: &state)
     },
-    measure(operation: .statePersistence, workload: workload) {
+    measure(operation: PerformanceOperation.statePersistence.rawValue, workload: workload) {
         _ = try? JSONEncoder().encode(manager(spaces: 10, windows: 50))
+    },
+    measure(operation: "stage_scale_fit_200_windows", iterations: 10,
+        workload: PerformanceWorkload(spaces: 1, windows: 200)) {
+        _ = StageConstants.fittedStageScale(
+            requested: 1.5, windowCounts: [200],
+            containerSize: CGSize(width: 600, height: 400)
+        )
     },
 ]
 
