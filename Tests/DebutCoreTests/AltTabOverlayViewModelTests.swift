@@ -168,6 +168,19 @@ struct AltTabOverlayViewModelTests {
         )
     }
 
+    @Test("Configured preview card spacing changes the flat grid")
+    func configuredPreviewCardSpacing() {
+        let space = UUID()
+        let entries = (1...5).map { entry(space, CGWindowID($0), "W\($0)") }
+        var appearance = AppSettings()
+        appearance.previewCardSpacing = 24
+        let model = AltTabOverlayViewModel(entries: entries, selectedIndex: 0, appearance: appearance)
+        let layout = model.layout(containerSize: CGSize(width: 900, height: 600))
+
+        #expect(layout.metrics.windowSpacing == 24 * layout.metrics.scaleFactor)
+        #expect(layout.metrics.rowSpacing == 12 * layout.metrics.scaleFactor)
+    }
+
     /// A global list is far longer than any one space's, so it is the first thing in the app that
     /// routinely overflows the display. It must give scale back rather than draw off-screen.
     @Test("A list too large for the display gives scale back until it fits")

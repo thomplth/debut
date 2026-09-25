@@ -388,6 +388,24 @@ public struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
+                    Text("Preview card spacing")
+                    Spacer()
+                    Text("\(Int(viewModel.settings.previewCardSpacing)) pt")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: $viewModel.settings.previewCardSpacing,
+                    in: AppSettings.minimumPreviewCardSpacing...AppSettings.maximumPreviewCardSpacing,
+                    step: 2
+                )
+                Text("Space between cards in the switcher overlays.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
                     Text("Inactive stage scale")
                     Spacer()
                     Text("\(Int((viewModel.settings.inactiveStageScale * 100).rounded()))%")

@@ -52,9 +52,14 @@ public struct AltTabOverlayViewModel: Sendable {
             stageScale: CGFloat(appearance.stageScale),
             contentAspects: [windows.map(\.contentAspect)],
             containerSize: containerSize,
+            cardSpacing: CGFloat(appearance.previewCardSpacing),
             // Each card already supplies an inset on both sides of a row boundary. The flat
-            // switcher needs no third gap between those insets.
-            rowSpacing: 0
+            // switcher needs no third gap at the default. Changes above the default add the
+            // same amount to row spacing while keeping existing saved settings visually stable.
+            rowSpacing: CGFloat(max(
+                0,
+                appearance.previewCardSpacing - AppSettings.defaultPreviewCardSpacing
+            ))
         )
     }
 

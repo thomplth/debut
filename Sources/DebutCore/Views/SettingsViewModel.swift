@@ -36,6 +36,7 @@ public enum SettingsSection: String, CaseIterable, Sendable {
                 .glassStyle,
                 .stageCornerRadius,
                 .stageScale,
+                .previewCardSpacing,
                 .adaptiveCardSizing,
                 .inactiveStageScale,
                 .windowSelectionStyle,
@@ -76,6 +77,7 @@ enum SettingsOption: String, CaseIterable, Sendable {
     case glassStyle
     case stageCornerRadius
     case stageScale
+    case previewCardSpacing
     case adaptiveCardSizing
     case inactiveStageScale
     case previewRefreshPolicy

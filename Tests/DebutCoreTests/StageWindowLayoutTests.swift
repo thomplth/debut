@@ -374,6 +374,26 @@ struct DisplayShapedMetricsTests {
         )
         #expect(abs(widescreen.thumbnailWidth / widescreen.thumbnailHeight - 16.0 / 9.0) < 0.0001)
     }
+
+    @Test("Configured card spacing changes both stage grid axes before fitting")
+    func configuredCardSpacing() {
+        let container = CGSize(width: 1_920, height: 1_080)
+        let metrics = StageConstants.drawnMetrics(
+            stageScale: 1,
+            windowCounts: [5],
+            containerSize: container,
+            cardSpacing: 24
+        )
+        let layout = StageWindowLayout(
+            windowCount: 5,
+            availableWidth: StageConstants.availableStageWidth(screenWidth: container.width),
+            metrics: metrics
+        )
+
+        #expect(metrics.windowSpacing == 24 * metrics.scaleFactor)
+        #expect(metrics.rowSpacing == 24 * metrics.scaleFactor)
+        #expect(layout.rowWidth(0) == layout.cardWidth(at: 0) * 5 + metrics.windowSpacing * 4)
+    }
 }
 
 @Suite("Fitted stage scale")
