@@ -46,3 +46,6 @@ jobs:
 
       - name: Build the release bundle
         run: ./scripts/build-app.sh
+
+      - name: Verify the built bundle
+        run: bash Tests/CI/PackagingTests.sh --artifact .build/Debut.app
