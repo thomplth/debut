@@ -68,7 +68,11 @@ over the requested duration. Each gesture crosses one desktop. Instant routes
 prepare and post all adjacent gestures as one batch; nonzero and standard-duration
 routes wait for confirmation between adjacent gestures. The macOS 27 recipe
 includes the augmented IOHID payload. Capability and system-overview gates
-preserve native input when Debut cannot safely own the navigation. When the
+preserve native input when Debut cannot safely own the navigation. Input taps
+decide ownership from cached topology and overview state; they do not query
+WindowServer. Mission Control keeps every physical trackpad stream native from
+Began through Ended, including the first stream that observes its dismissal.
+When the
 parent feature is disabled, Debut-owned cross-desktop window selection still sends
 an addressed gesture to Dock, but uses a fixed standard 400 ms slide instead of the
 configured faster duration. It waits for the active-Space notification before
@@ -80,6 +84,13 @@ Control-arrow/trackpad input, and move-and-follow commands use this common
 switching integration. macOS navigation that Debut does not intercept remains
 native and is observed afterwards. Window focus waits for the destination, rather
 than raising each window before the desktop has changed.
+
+Each posted route carries a generation-specific recovery ticket. A bounded
+watchdog re-reads fresh topology if the active-Space notification is lost. It may
+confirm or continue only from the exact posted endpoint; an origin, intermediate,
+unresolved, or unexpected desktop abandons that route so later input cannot remain
+coalesced behind stale state. Recovery then runs the same desktop reconciliation
+used by the normal notification path.
 
 Relocating a window is a separate operation. `BridgedWindowManagement` uses
 `SLSBridgedMoveWindowsToManagedSpaceOperation`; direct legacy private writes do

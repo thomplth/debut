@@ -65,6 +65,8 @@ while the parent is enabled. A trackpad desktop gesture commits one adjacent hop
 Other gestures and unclaimed shortcuts keep their native behavior. Enabled
 numbered and Control-arrow shortcuts apply regardless of which app is frontmost.
 Mission Control, App Exposé, and Show Desktop retain their native navigation;
+Debut never takes over a trackpad gesture while one of those overviews is active,
+and the complete gesture stream remains native rather than changing ownership mid-swipe.
 unsupported synthetic switching is passed through rather than swallowed.
 
 The desktop indicator reports confirmed changes, including native navigation,
