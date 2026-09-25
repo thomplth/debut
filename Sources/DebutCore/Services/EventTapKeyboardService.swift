@@ -307,6 +307,18 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             return event
         }
 
+        // The open overlay owns its keyboard context. Global quick switch, desktop
+        // navigation, and activation chords must not bypass a cleared session key.
+        if spaceManagerActive && overlayVisible {
+            return handleVisibleSessionKey(
+                type: type,
+                event: event,
+                keyCode: keyCode,
+                flags: flags,
+                deliverAsynchronously: deliverAsynchronously
+            )
+        }
+
         if type == .keyDown,
            let action = configuredAction(keyCode: keyCode, flags: flags, scope: .global),
            action.movesFocusedWindowBetweenSpaces {
@@ -417,46 +429,9 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             }
         }
 
-        guard spaceManagerActive else {
-            return event
-        }
-
-        // Session active but overlay closed (after Esc): configured global activation
-        // shortcuts above can reopen it; everything else passes through.
-        guard overlayVisible else {
-            return event
-        }
-
-        let sessionAction = configuredSessionAction(keyCode: keyCode, flags: flags)
-
-        // Keep the standard app quit/close shortcuts available unless the user explicitly
-        // assigns that physical key combination to a Space Manager command.
-        let shortcutFlags = flags.intersection([
-            .maskCommand, .maskAlternate, .maskControl, .maskShift,
-        ])
-        if (keyCode == Int64(kVK_ANSI_Q) || keyCode == Int64(kVK_ANSI_W)),
-           shortcutFlags == .maskCommand,
-           sessionAction == nil {
-            return event
-        }
-
-        // Overlay visible — consume both key-down and key-up, dispatching configured
-        // commands only for key-down.
-        guard type == .keyDown else {
-            return nil
-        }
-
-        if let sessionAction {
-            let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-            if shouldPaceHeldCycle(sessionAction, isAutoRepeat: isAutoRepeat) { return nil }
-            deliver(
-                sessionAction.toKeyEvent(autoRepeat: isAutoRepeat),
-                asynchronously: deliverAsynchronously
-            )
-        }
-
-        // Always consume — never let keyboard events leak to the active app
-        return nil
+        // A session can remain active after Esc closes its overlay. Global activation
+        // chords above can reopen it; otherwise leave input with the foreground app.
+        return event
     }
 
     private func beginSession(using action: KeyAction) {
@@ -493,6 +468,38 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             relativeFlags.remove(primaryModifier)
         }
         return configuredAction(keyCode: keyCode, flags: relativeFlags, scope: .session)
+    }
+
+    private func handleVisibleSessionKey(
+        type: CGEventType,
+        event: CGEvent,
+        keyCode: Int64,
+        flags: CGEventFlags,
+        deliverAsynchronously: Bool
+    ) -> CGEvent? {
+        let sessionAction = configuredSessionAction(keyCode: keyCode, flags: flags)
+
+        // Keep native quit and close shortcuts available unless assigned in this session.
+        let shortcutFlags = flags.intersection([
+            .maskCommand, .maskAlternate, .maskControl, .maskShift,
+        ])
+        if (keyCode == Int64(kVK_ANSI_Q) || keyCode == Int64(kVK_ANSI_W)),
+           shortcutFlags == .maskCommand,
+           sessionAction == nil {
+            return event
+        }
+
+        // Consume both halves; dispatch only the configured key-down command.
+        guard type == .keyDown else { return nil }
+        if let sessionAction {
+            let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            if shouldPaceHeldCycle(sessionAction, isAutoRepeat: isAutoRepeat) { return nil }
+            deliver(
+                sessionAction.toKeyEvent(autoRepeat: isAutoRepeat),
+                asynchronously: deliverAsynchronously
+            )
+        }
+        return nil
     }
 
     private static func keyCombo(keyCode: Int64, flags: CGEventFlags) -> KeyCombo {

@@ -15,31 +15,25 @@ struct ShortcutRecorderRow: View {
             HStack {
                 Text(action.displayName)
                 Spacer()
-                if isRecording {
-                    KeyRecorderRepresentable(recordingService: recordingService) { combo in
-                        onKeyRecorded(combo)
-                    } onCancel: {
-                        cancelRecording()
-                    }
-                    .frame(width: 140, height: 26)
-                    .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(
-                        Text("Press keys…")
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundStyle(.orange)
+                Button {
+                    if !isRecording { isRecording = true }
+                } label: {
+                    ShortcutKeyBox(
+                        text: isRecording
+                            ? "Press keys…"
+                            : keyBindings.combo(for: action)?.displayString ?? "None",
+                        recording: isRecording
                     )
-                } else {
-                    Button {
-                        isRecording = true
-                    } label: {
-                        Text(keyBindings.combo(for: action)?.displayString ?? "None")
-                            .font(.system(.body, design: .monospaced))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .background {
+                    if isRecording {
+                        KeyRecorderRepresentable(recordingService: recordingService) { combo in
+                            onKeyRecorded(combo)
+                        } onCancel: {
+                            cancelRecording()
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .frame(height: 26)
                 }
             }
 
@@ -95,6 +89,7 @@ struct ShortcutRecorderRow: View {
     private func applyBinding() {
         guard let combo = pendingCombo else { return }
         for existing in KeyAction.allCases where existing != action
+            && existing.shortcutScope == action.shortcutScope
             && keyBindings.combo(for: existing) == combo {
             keyBindings.clear(existing)
         }
@@ -107,6 +102,25 @@ struct ShortcutRecorderRow: View {
         isRecording = false
         pendingCombo = nil
         conflicts = []
+    }
+}
+
+private struct ShortcutKeyBox: View {
+    let text: String
+    let recording: Bool
+
+    var body: some View {
+        Text(text)
+            .font(.system(.body, design: .monospaced))
+            .foregroundStyle(recording ? Color.orange : Color.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                recording
+                    ? AnyShapeStyle(Color.orange.opacity(0.1))
+                    : AnyShapeStyle(.quaternary),
+                in: RoundedRectangle(cornerRadius: 6)
+            )
     }
 }
 
