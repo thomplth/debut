@@ -324,7 +324,7 @@ wait_for_debut_ready
 echo "Running the full suite, including the synthetic drag gestures..."
 unset GITHUB_ACTIONS
 set +e
-as_console env HOME="$console_home" GITHUB_ACTIONS= "$E2E_SOURCE"
+as_console env HOME="$console_home" GITHUB_ACTIONS= DEBUT_E2E_DURATION_PROFILE=full "$E2E_SOURCE"
 suite_status=$?
 if (( suite_status != 0 )); then status="$suite_status"; fi
 set -e

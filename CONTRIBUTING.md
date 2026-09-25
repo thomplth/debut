@@ -26,6 +26,10 @@ it; run it only when you want to replace your installed copy.
 
 The global-input E2E harness runs in a disposable headless Tart VM with
 `./scripts/tart-e2e.sh run`. Do not run it against an active desktop session.
+Pull requests exercise nine focused window-move durations, including every value
+from 40 through 80 ms. Release and manual E2E workflows and the Tart VM exercise
+the full 41-value matrix. The E2E executable's `--harness-self-check` mode checks
+its assertion logic without injecting input.
 
 ## Project map
 
