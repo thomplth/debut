@@ -999,7 +999,9 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents.isEmpty)
     }
 
-    @Test("Plain Q remains consumed while the overlay is visible")
+    // Command is still held, since a keystroke without it ends the session (KHA-787), but
+    // the chord is not the native quit shortcut.
+    @Test("Q other than Command-Q remains consumed while the overlay is visible")
     func plainQRemainsConsumedVisibleOverlay() {
         let service = EventTapKeyboardService()
         let tabDown = CGEvent(
@@ -1016,7 +1018,7 @@ struct KeyboardServiceTests {
             virtualKey: CGKeyCode(kVK_ANSI_Q),
             keyDown: true
         )!
-        qDown.flags = []
+        qDown.flags = [.maskCommand, .maskShift]
 
         #expect(service.handleCGEvent(type: .keyDown, event: qDown) == nil)
     }
@@ -1040,5 +1042,124 @@ struct KeyboardServiceTests {
         #expect(DebutKeyEvent.jumpToSpace(5) == .jumpToSpace(5))
         #expect(DebutKeyEvent.jumpToSpace(5) != .jumpToSpace(3))
         #expect(DebutKeyEvent.nextWindow != .previousWindow)
+    }
+
+    // MARK: - Missed key-up recovery (KHA-787)
+
+    private static func key(
+        _ keyCode: Int,
+        down: Bool,
+        flags: CGEventFlags = [],
+        autoRepeat: Bool = false
+    ) -> CGEvent {
+        let event = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: CGKeyCode(keyCode),
+            keyDown: down
+        )!
+        event.flags = flags
+        if autoRepeat { event.setIntegerValueField(.keyboardEventAutorepeat, value: 1) }
+        return event
+    }
+
+    @Test("A recorded key whose release was missed is not suppressed forever")
+    func recordedKeyRecoversAfterMissedKeyUp() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        service.beginShortcutRecording { _ in }
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) == nil)
+        service.endShortcutRecording()
+
+        // Still held: repeats of the claimed press stay consumed.
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_ANSI_D, down: true, autoRepeat: true)
+        ) == nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_A, down: true)) != nil)
+
+        // The release never arrived. A fresh press is a new physical press and must reach
+        // the foreground app, and so must its own release.
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) != nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: Self.key(kVK_ANSI_D, down: false)) != nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) != nil)
+        #expect(delegate.receivedEvents.isEmpty)
+    }
+
+    @Test("An uninterrupted recorded press still consumes both halves")
+    func recordedKeyConsumesBothHalves() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        service.beginShortcutRecording { _ in }
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) == nil)
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_ANSI_D, down: true, autoRepeat: true)
+        ) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: Self.key(kVK_ANSI_D, down: false)) == nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) != nil)
+    }
+
+    @Test("A quick-switch press whose release was missed dispatches again on the next press")
+    func quickSwitchKeyRecoversAfterMissedKeyUp() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_ANSI_2, down: true, flags: .maskControl)
+        ) == nil)
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_ANSI_2, down: true, flags: .maskControl, autoRepeat: true)
+        ) == nil)
+        // Release missed; the next physical press is a new shortcut, not a repeat.
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_ANSI_2, down: true, flags: .maskControl)
+        ) == nil)
+        #expect(delegate.receivedEvents == [.switchToSpace(2), .switchToSpace(2)])
+        // With the feature off, the same missed release must not keep the key captured.
+        service.features.numberShortcuts = false
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_ANSI_2, down: true, flags: .maskControl)
+        ) != nil)
+    }
+
+    @Test("A missed modifier release cannot leave the overlay owning the keyboard")
+    func sessionEndsWhenModifierReleaseWasMissed() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_Tab, down: true, flags: .maskCommand)
+        ) == nil)
+        service.overlayVisible = true
+
+        // Command went up while the tap was disabled; this keystroke carries no Command.
+        let typed = service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true))
+        #expect(typed != nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .cmdRelease])
+
+        // A session whose modifier is still held keeps owning its keys.
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_Tab, down: true, flags: .maskCommand)
+        ) == nil)
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_ANSI_D, down: true, flags: .maskCommand)
+        ) == nil)
     }
 }
