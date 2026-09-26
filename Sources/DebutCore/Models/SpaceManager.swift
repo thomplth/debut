@@ -431,10 +431,15 @@ public struct SpaceManager: Codable, Sendable {
 
     // MARK: Window management
 
-    public mutating func resetWindowCache() {
-        let stack = SpaceStack(id: SpaceTopology.sharedStackID, displayName: "All Displays")
-        spaceStacks = [stack]
-        selectedSpaceStackID = stack.id
+    /// Forgets every live and dormant window assignment and nothing else. Stacks, desktops,
+    /// their joins, the selected stack and each stack's showing desktop are macOS's answers,
+    /// not cache, so a reset keeps them (KHA-784).
+    public mutating func clearWindowAssignments() {
+        for stackIndex in spaceStacks.indices {
+            for spaceIndex in spaceStacks[stackIndex].spaces.indices {
+                spaceStacks[stackIndex].spaces[spaceIndex].removeAllWindows()
+            }
+        }
         dormantWindowAssignments.removeAll()
     }
     public mutating func addWindow(_ window: SpaceWindow, toSpaceID id: UUID) {

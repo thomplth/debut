@@ -1583,13 +1583,16 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// Rebuilds assignments in a local value so discovery diagnostics can read
     /// the controller's current state without overlapping an inout access to
     /// `spaceManager`. Assign only after discovery has completed successfully.
+    /// Rebuilds assignments from what macOS reports now, through the same desktop-qualified
+    /// reconciliation launch uses. Desktops, the one showing and focus are left alone.
     func rebuildWindowCache(using discovery: WindowDiscoveryService) {
         discovery.resetWindowTracking()
+        reconcileSpacesWithDesktops()
         var rebuiltManager = spaceManager
-        rebuiltManager.resetWindowCache()
-        discovery.populateInitialWindows(&rebuiltManager)
+        rebuiltManager.clearWindowAssignments()
+        discovery.reconcileWindows(&rebuiltManager)
         spaceManager = rebuiltManager
-        selectedSpaceIndex = 0
+        selectedSpaceIndex = spaceManager.spaceIndex(id: spaceManager.activeSpaceID) ?? 0
         selectedWindowIndex = 0
     }
 
