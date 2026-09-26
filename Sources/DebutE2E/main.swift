@@ -3398,6 +3398,98 @@ func scenario_prepared_arrival() {
 }
 
 @MainActor
+func scenario_native_retarget() {
+    // --- A second faster-off switch while the first transition is still running. ---
+    header("A switch requested during a faster-off transition still lands")
+    let settingsBackup = try? Data(contentsOf: settingsFile)
+    let spaces = SpaceService()
+    let windows = AccessibilityWindowService()
+    func goTo(_ desktop: Int) -> Bool {
+        spaces.currentDesktopIndex() == desktop
+            || (spaces.switchToDesktop(index: desktop) && waitFor { spaces.currentDesktopIndex() == desktop })
+    }
+    let atOrigin = goTo(0)
+    let firstURL = writeFixtureFile(named: "retarget-first.txt", contents: "First target\n")
+    let secondURL = writeFixtureFile(named: "retarget-second.txt", contents: "Second target\n")
+    let firstPID = launchNewTextEditInstance(opening: [firstURL])
+    let secondPID = launchNewTextEditInstance(opening: [secondURL])
+    func window(_ pid: pid_t) -> WindowInfo? { windows.listWindows().first { $0.ownerPID == pid } }
+    _ = waitFor(timeout: 15) { window(firstPID) != nil && window(secondPID) != nil }
+
+    if atOrigin, spaces.desktopCount() >= 3, let first = window(firstPID), let second = window(secondPID),
+       let origin = windows.listWindows().first(where: {
+           $0.ownerPID != firstPID && $0.ownerPID != secondPID
+               && spaces.desktopIndex(forWindow: $0.windowID) == 0
+       }) {
+        spaces.moveWindow(windowID: first.windowID, toDesktop: 1)
+        spaces.moveWindow(windowID: second.windowID, toDesktop: 2)
+        let placed = waitFor {
+            spaces.desktopIndex(forWindow: first.windowID) == 1
+                && spaces.desktopIndex(forWindow: second.windowID) == 2
+        }
+        var settings = (try? settingsStore.loadSettings()) ?? AppSettings()
+        settings.features.workspaceIsolation = true
+        settings.features.optionTab = true
+        settings.features.setFasterDesktopSwitching(false)
+        try? settingsStore.saveSettings(settings)
+        clearDiagnosticFile()
+        let ready = waitForDebutReady(launchDebut())
+        // Most recent last: the second target, then the first, then a window on the origin, so one
+        // Tab selects the first target and two select the second. The recent-window order does
+        // not change until a switch lands, so the second selection still counts from the origin.
+        let ordered = goTo(2) && frontUntilHeld(second, using: windows)
+            && goTo(1) && frontUntilHeld(first, using: windows)
+            && goTo(0) && frontUntilHeld(origin, using: windows)
+        wait(0.5)
+
+        func select(tabs: Int) {
+            postFlagsChanged(flags: .maskAlternate)
+            for _ in 0..<tabs {
+                postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskAlternate)
+                postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskAlternate)
+            }
+            postFlagsChanged(flags: [])
+        }
+        let start = Date()
+        select(tabs: 1)
+        wait(0.06)
+        select(tabs: 2)
+        var observed: [String] = []
+        while Date().timeIntervalSince(start) < 5 {
+            if let current = spaces.currentDesktopIndex(), observed.last?.hasPrefix("\(current)@") != true {
+                observed.append("\(current)@\(Int(Date().timeIntervalSince(start) * 1000))")
+            }
+            if spaces.currentDesktopIndex() == 2, liveKeyboardFocus()?.windowID == second.windowID { break }
+            wait(0.005)
+        }
+        let landed = spaces.currentDesktopIndex() == 2
+        let focused = liveKeyboardFocus()?.windowID == second.windowID
+        let committed = readEvents().filter { $0["event"] == "overlay_committed" }
+            .compactMap { $0["targetSpace"] }
+        let commits = committed.joined(separator: ",")
+        let committedBothTargets = committed.count == 2
+            && committed[0].hasSuffix("Space 2") && committed[1].hasSuffix("Space 3")
+        info("  Native retarget: placed=\(placed) ready=\(ready) ordered=\(ordered) commits=\(commits) "
+            + "observed=\(observed.joined(separator: ">")) landed=\(landed) focused=\(focused)")
+        test("A faster-off switch requested mid-transition lands on its own desktop") {
+            placed && ready && ordered && committedBothTargets && landed && focused
+        }
+        _ = terminateDebutAndWait()
+        _ = goTo(0)
+    } else {
+        info("  Native retarget fixture: atOrigin=\(atOrigin) desktops=\(spaces.desktopCount())")
+        test("A faster-off switch requested mid-transition lands on its own desktop") { false }
+    }
+    NSRunningApplication(processIdentifier: firstPID)?.terminate()
+    NSRunningApplication(processIdentifier: secondPID)?.terminate()
+    if let settingsBackup {
+        try? settingsBackup.write(to: settingsFile, options: .atomic)
+    } else {
+        try? FileManager.default.removeItem(at: settingsFile)
+    }
+}
+
+@MainActor
 func currentOnboardingTarget() -> [String: String]? {
     readEvents().last { $0["event"] == "onboarding_target_created" }
 }
@@ -5381,6 +5473,7 @@ let scenarioBodies: [String: @MainActor () -> Void] = [
     "fullscreen-navigation": scenario_fullscreen_navigation,
     "system-duration-transition": scenario_system_duration_transition,
     "prepared-arrival": scenario_prepared_arrival,
+    "native-retarget": scenario_native_retarget,
     "onboarding-journey": scenario_onboarding_journey,
     "settings-chrome": scenario_settings_chrome,
     "selected-window-dismissal": scenario_selected_window_dismissal,

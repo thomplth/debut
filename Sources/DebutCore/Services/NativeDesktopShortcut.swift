@@ -169,3 +169,93 @@ struct NativeDesktopShortcutSwitch {
         }
     }
 }
+
+/// Keeps at most one native-shortcut route in flight per Space stack.
+///
+/// The Dock drops a Switch to Desktop N that arrives while its transition is running — measured
+/// in Tart, desktop 2 then desktop 3 sixty milliseconds apart ended on desktop 2 — so a request
+/// made during a route replaces its desired endpoint instead of posting, and the route re-issues
+/// that endpoint once the active-Space notification confirms where the Dock landed.
+struct NativeShortcutRouteTracker {
+    struct Route: Equatable {
+        let originID: CGSSpaceID
+        let postedTarget: DesktopLocation
+        var desiredTarget: DesktopLocation
+        let generation: UInt64
+    }
+
+    enum Request: Equatable {
+        /// Post the shortcut for this route; later results name it by generation.
+        case start(generation: UInt64)
+        /// A route is already in flight; its endpoint now follows this request.
+        case coalesced
+    }
+
+    enum Arrival: Equatable {
+        /// The requested endpoint is showing.
+        case completed
+        /// The posted desktop is showing but a later request wants another; request it now.
+        case continueTo(DesktopLocation)
+        /// Somewhere else is showing — the user or the Dock went elsewhere. Do not fight it.
+        case abandoned
+    }
+
+    private var routes: [String: Route] = [:]
+    private var nextGeneration: UInt64 = 0
+
+    func isInFlight(stackID: String) -> Bool { routes[stackID] != nil }
+
+    func route(stackID: String) -> Route? { routes[stackID] }
+
+    mutating func request(_ target: DesktopLocation, originID: CGSSpaceID) -> Request {
+        if var route = routes[target.stackID] {
+            route.desiredTarget = target
+            routes[target.stackID] = route
+            return .coalesced
+        }
+        nextGeneration &+= 1
+        routes[target.stackID] = Route(originID: originID, postedTarget: target,
+                                       desiredTarget: target, generation: nextGeneration)
+        return .start(generation: nextGeneration)
+    }
+
+    /// Resolves each route against the desktop now showing on its stack. A stack still showing
+    /// its origin is still in transition and is left alone.
+    mutating func desktopDidChange(
+        currentDesktopIDs: [String: CGSSpaceID]
+    ) -> [String: Arrival] {
+        var arrivals: [String: Arrival] = [:]
+        for (stackID, route) in routes {
+            guard let current = currentDesktopIDs[stackID], current != route.originID else { continue }
+            routes.removeValue(forKey: stackID)
+            if current == route.desiredTarget.desktopID {
+                arrivals[stackID] = .completed
+            } else if current == route.postedTarget.desktopID {
+                arrivals[stackID] = .continueTo(route.desiredTarget)
+            } else {
+                arrivals[stackID] = .abandoned
+            }
+        }
+        return arrivals
+    }
+
+    /// The route's endpoint when the Dock never acted on its shortcut, so the caller can take
+    /// another route there; nil when that route has since finished or been replaced.
+    mutating func missed(generation: UInt64, stackID: String,
+                         currentDesktopID: CGSSpaceID?) -> DesktopLocation? {
+        guard let route = routes[stackID], route.generation == generation,
+              currentDesktopID == route.originID
+        else { return nil }
+        routes.removeValue(forKey: stackID)
+        return route.desiredTarget
+    }
+
+    /// Forgets a route whose shortcut could not be posted, so the caller can take another route.
+    mutating func postingFailed(generation: UInt64, stackID: String) -> DesktopLocation? {
+        guard let route = routes[stackID], route.generation == generation else { return nil }
+        routes.removeValue(forKey: stackID)
+        return route.desiredTarget
+    }
+
+    mutating func cancelAll() { routes.removeAll() }
+}
