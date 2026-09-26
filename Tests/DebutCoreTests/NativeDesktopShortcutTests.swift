@@ -182,3 +182,71 @@ struct NativeDesktopShortcutTests {
         #expect(delegate.receivedEvents.isEmpty)
     }
 }
+
+@Suite("Native shortcut routes")
+struct NativeShortcutRouteTrackerTests {
+    private let stackID = SpaceTopology.sharedStackID
+
+    private func location(_ index: Int) -> DesktopLocation {
+        DesktopLocation(stackID: stackID, desktopID: CGSSpaceID(100 + index), index: index)
+    }
+
+    private func current(_ index: Int) -> [String: CGSSpaceID] { [stackID: CGSSpaceID(100 + index)] }
+
+    @Test("A route completes when its endpoint shows")
+    func completes() {
+        var tracker = NativeShortcutRouteTracker()
+        #expect(tracker.request(location(2), originID: 100) == .start(generation: 1))
+        #expect(tracker.isInFlight(stackID: stackID))
+        #expect(tracker.desktopDidChange(currentDesktopIDs: current(2)) == [stackID: .completed])
+        #expect(!tracker.isInFlight(stackID: stackID))
+    }
+
+    @Test("A request during a route replaces its endpoint instead of posting")
+    func coalescesAndContinues() {
+        var tracker = NativeShortcutRouteTracker()
+        _ = tracker.request(location(1), originID: 100)
+        #expect(tracker.request(location(2), originID: 100) == .coalesced)
+        // The origin still showing is the transition in progress, not a result.
+        #expect(tracker.desktopDidChange(currentDesktopIDs: current(0)).isEmpty)
+        #expect(tracker.isInFlight(stackID: stackID))
+        #expect(tracker.desktopDidChange(currentDesktopIDs: current(1))
+            == [stackID: .continueTo(location(2))])
+        #expect(!tracker.isInFlight(stackID: stackID))
+    }
+
+    @Test("Landing somewhere unrequested abandons the route")
+    func abandons() {
+        var tracker = NativeShortcutRouteTracker()
+        _ = tracker.request(location(1), originID: 100)
+        #expect(tracker.desktopDidChange(currentDesktopIDs: current(3)) == [stackID: .abandoned])
+        #expect(!tracker.isInFlight(stackID: stackID))
+    }
+
+    @Test("A missed shortcut hands back the latest endpoint only while the origin shows")
+    func missed() {
+        var tracker = NativeShortcutRouteTracker()
+        guard case .start(let generation) = tracker.request(location(1), originID: 100) else {
+            Issue.record("expected a new route"); return
+        }
+        _ = tracker.request(location(2), originID: 100)
+        #expect(tracker.missed(generation: generation, stackID: stackID,
+                               currentDesktopID: 101) == nil)
+        #expect(tracker.missed(generation: generation, stackID: stackID,
+                               currentDesktopID: 100) == location(2))
+        #expect(!tracker.isInFlight(stackID: stackID))
+        #expect(tracker.missed(generation: generation, stackID: stackID,
+                               currentDesktopID: 100) == nil)
+    }
+
+    @Test("A stale generation cannot clear a newer route")
+    func staleGeneration() {
+        var tracker = NativeShortcutRouteTracker()
+        _ = tracker.request(location(1), originID: 100)
+        _ = tracker.desktopDidChange(currentDesktopIDs: current(1))
+        _ = tracker.request(location(2), originID: 101)
+        #expect(tracker.postingFailed(generation: 1, stackID: stackID) == nil)
+        #expect(tracker.isInFlight(stackID: stackID))
+        #expect(tracker.postingFailed(generation: 2, stackID: stackID) == location(2))
+    }
+}

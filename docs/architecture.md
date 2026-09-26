@@ -82,8 +82,11 @@ left disabled is enabled for the session only around Debut's keystroke; one that
 unbound or has no modifier is never posted, because a keystroke Dock does not claim
 reaches the frontmost app. Separate display stacks, desktops past 16, and a shortcut
 Dock did not act on within 1.5 s fall back to an addressed gesture with a fixed
-standard 400 ms slide per desktop. Either route waits for the active-Space
-notification before focusing the selected window.
+standard 400 ms slide per desktop. Dock drops a Switch to Desktop N that arrives
+while its own transition is running, so a request made during a native route only
+replaces that route's endpoint, and the route requests the endpoint again when the
+active-Space notification confirms the posted desktop. Either route waits for the
+active-Space notification before focusing the selected window.
 
 Before any cross-desktop switch that will focus a window, the destination is
 prepared while it is still hidden, because a transition reveals the destination's
