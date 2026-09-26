@@ -20,7 +20,7 @@ struct StateStoreTests {
 
         let store = StateStore(directory: dir)
         var sm = SpaceManager()
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toSpaceID: sm.spaces[1].id)
 
         try store.save(sm)
@@ -90,7 +90,7 @@ struct StateStoreTests {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         var before = SpaceManager()
-        before.createSpace(position: .below)
+        before.addFixtureDesktop()
         let terminalSpaceID = before.spaces[0].id
         before.addWindow(
             SpaceWindow(
@@ -180,7 +180,7 @@ struct StateStoreTests {
 
         let store = StateStore(directory: dir)
         var sm = SpaceManager()
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         try store.save(sm)
         let loaded = try store.load()
         #expect(loaded.spaces.count == 2)

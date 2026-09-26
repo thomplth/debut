@@ -92,6 +92,9 @@ public struct SpaceTopology: Equatable, Sendable {
         self.stacks = stacks
     }
 
+    /// Whether any stack reports a desktop. The window server can answer with none.
+    public var hasDesktops: Bool { stacks.contains { !$0.desktopIDs.isEmpty } }
+
     public func stack(id: String) -> SpaceStackDescriptor? {
         stacks.first { $0.id == id }
     }
@@ -107,5 +110,34 @@ public struct SpaceTopology: Equatable, Sendable {
             }
         }
         return nil
+    }
+}
+
+public extension SpaceTopology {
+    /// One shared stack of synthetic desktops, for tests and benchmarks that need desktops
+    /// without a window server. A model only ever gains or loses stages by reconciling a
+    /// topology like this one: Debut cannot create or delete a macOS desktop (KHA-783).
+    static func synthetic(desktopUUIDs: [String], currentIndex: Int = 0) -> SpaceTopology {
+        let desktopIDs = desktopUUIDs.indices.map { CGSSpaceID(1_000 + $0) }
+        let current = desktopUUIDs.indices.contains(currentIndex) ? currentIndex : nil
+        return SpaceTopology(separateSpaces: false, stacks: [
+            SpaceStackDescriptor(
+                id: sharedStackID,
+                displayID: nil,
+                displayName: "All Displays",
+                frame: .zero,
+                desktopIDs: desktopIDs,
+                desktopUUIDs: desktopUUIDs,
+                currentDesktopID: current.map { desktopIDs[$0] },
+                currentDesktopUUID: current.map { desktopUUIDs[$0] }
+            ),
+        ])
+    }
+
+    static func synthetic(desktopCount: Int, currentIndex: Int = 0) -> SpaceTopology {
+        synthetic(
+            desktopUUIDs: (0..<max(0, desktopCount)).map { "SYNTHETIC-DESKTOP-\($0 + 1)" },
+            currentIndex: currentIndex
+        )
     }
 }

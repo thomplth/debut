@@ -10,7 +10,7 @@ struct TutorialSwitcherTests {
         let controller = SpaceController(windowService: service, keyboardService: MockKeyboardService(),
             overlayPresentationDelay: 10,
             focusedWindowSnapshotProvider: { .init(windowID: focused, frame: nil, isFullscreen: false) })
-        for _ in 0..<4 { controller.spaceManager.createSpace(position: .below) }
+        for _ in 0..<4 { controller.spaceManager.addFixtureDesktop() }
         let spaces = controller.spaceManager.spaces
         for i in 0..<50 {
             controller.spaceManager.addWindow(.init(windowID: UInt32(100 + i), ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Real \(i)"), toSpaceID: spaces[i % 5].id)

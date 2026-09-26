@@ -27,7 +27,7 @@ struct RuntimeWindowReconcilerTests {
     func addsMissingLiveWindows() {
         var manager = SpaceManager()
         let space1 = manager.spaces[0].id
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let space2 = manager.spaces[1].id
         manager.activateSpace(id: space2)
         manager.addWindow(SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toSpaceID: space1)
@@ -195,7 +195,7 @@ struct RuntimeWindowReconcilerTests {
     func recoveryPreservesOriginalSpaceOwnership() {
         var manager = SpaceManager()
         let space1 = manager.spaces[0].id
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let space2 = manager.spaces[1].id
         manager.activateSpace(id: space2)
         manager.addWindow(SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "One", ownerPID: 10), toSpaceID: space1)
@@ -244,7 +244,7 @@ struct RuntimeWindowReconcilerTests {
     func recreatedWindowKeepsSpaceByStableIdentity() {
         var manager = SpaceManager()
         let originalSpaceID = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let activeSpaceID = manager.activeSpaceID
         manager.addWindow(
             SpaceWindow(
@@ -283,7 +283,7 @@ struct RuntimeWindowReconcilerTests {
     func assignedDuplicateTitleIsNotReclaimed() {
         var manager = SpaceManager()
         let originalSpaceID = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let activeSpaceID = manager.activeSpaceID
         manager.addWindow(
             SpaceWindow(
@@ -333,7 +333,7 @@ struct RuntimeWindowReconcilerTests {
     func laterReplacementReclaimsRetainedAssignment() {
         var manager = SpaceManager()
         let originalSpaceID = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let activeSpaceID = manager.activeSpaceID
         manager.addWindow(
             SpaceWindow(
@@ -379,9 +379,9 @@ struct RuntimeWindowReconcilerTests {
     func recreatedWindowsKeepSpacesByBundleFallback() {
         var manager = SpaceManager()
         let space1 = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let space2 = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let activeSpace = manager.activeSpaceID
         manager.addWindow(
             SpaceWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old A", ownerPID: 10),
@@ -414,7 +414,7 @@ struct RuntimeWindowReconcilerTests {
     func relaunchedWindowReclaimsDormantAssignment() {
         var manager = SpaceManager()
         let originalSpaceID = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let activeSpaceID = manager.activeSpaceID
         manager.addWindow(
             SpaceWindow(
@@ -456,9 +456,9 @@ struct RuntimeWindowReconcilerTests {
     func relaunchedBundleRestoresDormantWindows() {
         var manager = SpaceManager()
         let space1 = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let space2 = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let activeSpace = manager.activeSpaceID
         manager.addWindow(
             SpaceWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old A", ownerPID: 10),
@@ -494,9 +494,9 @@ struct RuntimeWindowReconcilerTests {
     func completeLaunchBatchReclaimsPartiallyDiscoveredWindow() {
         var manager = SpaceManager()
         let space1 = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let space2 = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let activeSpace = manager.activeSpaceID
         manager.addWindow(
             SpaceWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Old A", ownerPID: 10),
@@ -543,7 +543,7 @@ struct RuntimeWindowReconcilerTests {
     func dormantRecoveryDoesNotStealEstablishedWindow() {
         var manager = SpaceManager()
         let originalSpace = manager.activeSpaceID
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let activeSpace = manager.activeSpaceID
         manager.addWindow(
             SpaceWindow(windowID: 1, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Work", ownerPID: 10),
@@ -651,7 +651,7 @@ struct RuntimeWindowReconcilerTests {
     @Test("Adding a new window reports which window landed in which space")
     func reportsAddedWindowEvent() {
         var manager = SpaceManager()
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         manager.activateSpace(id: manager.spaces[1].id)
         var reconciler = RuntimeWindowReconciler()
 
@@ -677,7 +677,7 @@ struct RuntimeWindowReconcilerTests {
     @Test("Recovering a replaced window reports the space it was restored into")
     func reportsRecoveredWindowEvent() {
         var manager = SpaceManager()
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let secondSpace = manager.spaces[1].id
         manager.addWindow(
             SpaceWindow(windowID: 22359, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Develop: repo", ownerPID: 10),
@@ -749,8 +749,8 @@ struct RuntimeWindowReconcilerTests {
     /// Three spaces holding the incident's assignments, active space 0.
     private func makeDiaIncidentState() -> (SpaceManager, [UUID]) {
         var manager = SpaceManager()
-        manager.createSpace(position: .below)
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
+        manager.addFixtureDesktop()
         let ids = manager.spaces.map(\.id)
 
         manager.addWindow(diaAssignment(22358, "Goodnotes: Goodnotes"), toSpaceID: ids[1])
@@ -883,7 +883,7 @@ struct RuntimeWindowReconcilerTests {
     func recycledIDIsParkedThenRecoveredInOnePass() {
         var manager = SpaceManager()
         let space1 = manager.spaces[0].id
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         manager.addWindow(
             SpaceWindow(windowID: 42, ownerBundleID: "com.old", ownerName: "Old", windowTitle: "Old Window", ownerPID: 10),
             toSpaceID: space1
@@ -1120,7 +1120,7 @@ struct RuntimeWindowReconcilerTests {
     @Test("A new window SkyLight places on every desktop still lands on the showing one")
     func allDesktopsNewWindowIsAdmitted() {
         var manager = SpaceManager()
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let secondSpace = manager.spaces[1].id
         manager.activateSpace(id: secondSpace)
         var reconciler = RuntimeWindowReconciler()
