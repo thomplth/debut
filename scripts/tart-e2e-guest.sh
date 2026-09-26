@@ -7,6 +7,18 @@ E2E_SOURCE="$SHARE_DIR/${2:?missing E2E executable name}"
 RESULTS_DIR="$SHARE_DIR/results"
 SYSTEM_TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
 FIXTURE_DIR="/tmp/debut-e2e-fixtures"
+DURATION_PROFILE="${3:-full}"
+GALLERY_CAPTURE="${4:-on}"
+
+# Checked before anything else, including the artifacts, so a bad request mutates nothing.
+if [[ "$DURATION_PROFILE" != ordinary && "$DURATION_PROFILE" != full ]]; then
+    echo "The duration profile must be ordinary or full, not '$DURATION_PROFILE'." >&2
+    exit 2
+fi
+if [[ "$GALLERY_CAPTURE" != on && "$GALLERY_CAPTURE" != off ]]; then
+    echo "Gallery capture must be on or off, not '$GALLERY_CAPTURE'." >&2
+    exit 2
+fi
 
 # This script replaces the installed app and rewrites TCC, so refuse to run
 # anywhere the host has not staged artifacts through VirtioFS.
@@ -321,19 +333,25 @@ as_console launchctl setenv DEBUT_FORCE_DISPLAY_STACK_INDICATOR 1
 as_console env DEBUT_FORCE_DISPLAY_STACK_INDICATOR=1 "$APP_PATH/Contents/MacOS/Debut" --force-display-stack-indicator >/tmp/debut-e2e-debut.log 2>&1 </dev/null &
 wait_for_debut_ready
 
-echo "Running the full suite, including the synthetic drag gestures..."
+echo "Running the full suite with the $DURATION_PROFILE duration profile, including the synthetic drag gestures..."
 unset GITHUB_ACTIONS
 set +e
-as_console env HOME="$console_home" GITHUB_ACTIONS= DEBUT_E2E_DURATION_PROFILE=full "$E2E_SOURCE"
+as_console env HOME="$console_home" GITHUB_ACTIONS= DEBUT_E2E_DURATION_PROFILE="$DURATION_PROFILE" "$E2E_SOURCE"
 suite_status=$?
 if (( suite_status != 0 )); then status="$suite_status"; fi
 set -e
 
-echo "Capturing desktop indicator and overlay glass on light and dark backgrounds..."
-grant_screen_capture "$E2E_SOURCE" 1 "$E2E_SOURCE"
-sudo killall tccd 2>/dev/null || true
-if ! as_console env HOME="$console_home" "$E2E_SOURCE" capture-desktop-indicator-glass; then
-    status=1
+# The gallery is review evidence: it asserts only that each screenshot was written. Rendering
+# assertions live in the suite above and run either way.
+if [[ "$GALLERY_CAPTURE" == on ]]; then
+    echo "Capturing desktop indicator and overlay glass on light and dark backgrounds..."
+    grant_screen_capture "$E2E_SOURCE" 1 "$E2E_SOURCE"
+    sudo killall tccd 2>/dev/null || true
+    if ! as_console env HOME="$console_home" "$E2E_SOURCE" capture-desktop-indicator-glass; then
+        status=1
+    fi
+else
+    echo "Skipping the glass gallery capture (--no-gallery)."
 fi
 
 if [[ -d /tmp/debut-e2e-screenshots ]]; then

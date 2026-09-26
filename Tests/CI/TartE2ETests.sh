@@ -64,7 +64,7 @@ if [[ -f "$host_runner" ]]; then
         "the app must cross VirtioFS as one cache-safe archive"
     expect_contains "$host_runner" 'e2e-latest\.log' \
         "the host must retain guest output when E2E fails"
-    expect_contains "$host_runner" 'run\) run_e2e' \
+    expect_contains "$host_runner" 'run\).*run_e2e' \
         "the Tart loop must expose a run mode"
     expect_not_contains "$host_runner" 'run-all' \
         "a diagnostic mode that only re-enables virtualized drags has nothing left to enable"
@@ -128,6 +128,97 @@ if [[ -f "$guest_runner" ]]; then
     fi
     grep -Eq -- 'staged E2E artifacts are missing' <<< "$missing_output" \
         || fail "guest did not report missing staged artifacts: $missing_output"
+
+    # The host's profile used to be overwritten with `full` in the guest, so a focused run
+    # still paid for all 41 durations. The guest must run what it is handed.
+    expect_not_contains "$guest_runner" 'DEBUT_E2E_DURATION_PROFILE=full' \
+        "the guest must forward the host's duration profile instead of forcing full"
+    expect_contains "$guest_runner" 'DEBUT_E2E_DURATION_PROFILE="\$DURATION_PROFILE"' \
+        "the guest must run the E2E suite with the forwarded duration profile"
+    expect_contains "$guest_runner" 'GALLERY_CAPTURE.*==.*on' \
+        "gallery capture must be conditional on the forwarded setting"
+
+    # Bad options are rejected before the artifact check, and so before any guest mutation.
+    for bad_arguments in "ordinary-ish on" "full maybe"; do
+        set +e
+        # shellcheck disable=SC2086
+        bad_output="$("$guest_runner" missing-app.zip missing-e2e $bad_arguments 2>&1)"
+        bad_status=$?
+        set -e
+        if (( bad_status != 2 )); then
+            fail "guest exited $bad_status for '$bad_arguments', expected 2: $bad_output"
+        fi
+        grep -Eq -- 'staged E2E artifacts are missing' <<< "$bad_output" \
+            && fail "guest checked artifacts before rejecting '$bad_arguments'"
+    done
+fi
+
+if [[ -f "$host_runner" ]]; then
+    stub_dir="$(mktemp -d)"
+    trap 'rm -rf "$stub_dir"' EXIT
+    # A stub tart records every call; a rejected invocation must never reach it.
+    cat > "$stub_dir/tart" <<'EOF'
+#!/bin/bash
+echo "$*" >> "$(dirname "$0")/tart-calls"
+exit 1
+EOF
+    chmod +x "$stub_dir/tart"
+
+    run_host() {
+        PATH="$stub_dir:$PATH" DEBUT_TART_SHARE="$stub_dir/share" "$host_runner" "$@" 2>&1
+    }
+
+    for bad_arguments in "run --duration-profile quick" "run --duration-profile" "run --gallery-maybe"; do
+        rm -f "$stub_dir/tart-calls"
+        set +e
+        # shellcheck disable=SC2086
+        bad_output="$(run_host $bad_arguments)"
+        bad_status=$?
+        set -e
+        if (( bad_status != 2 )); then
+            fail "host exited $bad_status for '$bad_arguments', expected 2: $bad_output"
+        fi
+        [[ -e "$stub_dir/tart-calls" ]] \
+            && fail "host invoked tart before rejecting '$bad_arguments': $(<"$stub_dir/tart-calls")"
+    done
+
+    rm -f "$stub_dir/tart-calls"
+    set +e
+    bad_output="$(DEBUT_E2E_DURATION_PROFILE=quick run_host run)"
+    bad_status=$?
+    set -e
+    if (( bad_status != 2 )) || [[ -e "$stub_dir/tart-calls" ]]; then
+        fail "host must reject an invalid DEBUT_E2E_DURATION_PROFILE before tart (exit $bad_status): $bad_output"
+    fi
+
+    # The guest command is what crosses the VM boundary, so check it rather than the flags.
+    guest_command_for() {
+        (
+            unset DEBUT_E2E_DURATION_PROFILE
+            [[ -n "${1:-}" ]] && export DEBUT_E2E_DURATION_PROFILE="$1"
+            shift
+            # shellcheck source=/dev/null
+            source "$host_runner"
+            APP_ARTIFACT=app.zip E2E_ARTIFACT=e2e GUEST_ARTIFACT=guest.sh
+            parse_run_options "$@"
+            guest_command
+        )
+    }
+    expect_guest_command() {
+        local expected="$1" env_profile="$2"
+        shift 2
+        local actual
+        actual="$(guest_command_for "$env_profile" "$@" 2>&1)" \
+            || { fail "could not build guest command for '$*': $actual"; return; }
+        [[ "$actual" == *"$expected" ]] \
+            || fail "guest command for env='$env_profile' args='$*' ended '${actual: -40}', expected '$expected'"
+    }
+    expect_guest_command "app.zip e2e full on" ""
+    expect_guest_command "app.zip e2e ordinary on" "" --duration-profile ordinary
+    expect_guest_command "app.zip e2e ordinary off" "" --duration-profile ordinary --no-gallery
+    expect_guest_command "app.zip e2e ordinary on" "ordinary"
+    expect_guest_command "app.zip e2e full on" "ordinary" --duration-profile full
+    expect_guest_command "app.zip e2e full off" "" --no-gallery
 fi
 
 if [[ -f "$e2e_source" ]]; then
@@ -153,6 +244,14 @@ if [[ -f "$e2e_source" ]]; then
         "reverse-drag geometry must include the focused stack's live edge-scroll position"
     expect_contains "$e2e_source" 'nativeTransitionSpaces\.switchToDesktop\(index: 0\)' \
         "the native Command-Tab fixture must return to the desktop where AX can enumerate it"
+
+    # An unknown profile used to read as ordinary. Rejecting it only counts if it happens before
+    # the harness clears its screenshots and starts driving the session.
+    profile_guard_line="$(grep -n 'guard let fullMoveDurationProfile = isFullMoveDurationProfile' "$e2e_source" | cut -d: -f1)"
+    screenshot_line="$(grep -n '^// MARK: - Screenshot' "$e2e_source" | cut -d: -f1)"
+    if [[ -z "$profile_guard_line" || -z "$screenshot_line" ]] || (( profile_guard_line > screenshot_line )); then
+        fail "DebutE2E must reject an unknown duration profile before any side effect"
+    fi
 fi
 
 if (( failures > 0 )); then
