@@ -1,8 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=scripts/tart-queue.sh
+source "$SCRIPT_DIR/tart-queue.sh"
 VM_NAME="${DEBUT_TART_VM:-debut-e2e-tahoe}"
 VM_IMAGE="ghcr.io/cirruslabs/macos-tahoe-base:latest"
 SHARE_DIR="${DEBUT_TART_SHARE:-$HOME/Library/Caches/Debut/TartE2E}"
@@ -12,6 +14,7 @@ KNOWN_HOSTS="$SHARE_DIR/known_hosts"
 RUN_LOCK="$SHARE_DIR/tart-e2e.lock"
 RUN_LOCK_HELD=false
 APP_ARTIFACT=""
+APP_BUNDLE=""
 E2E_ARTIFACT=""
 GUEST_ARTIFACT=""
 DURATION_PROFILE=""
@@ -24,8 +27,9 @@ Usage: scripts/tart-e2e.sh <prepare|run|stop|status>
 
   prepare  Clone and configure the free Tahoe VM (one-time, about 27 GB download)
   run      Run every check in the headless guest
-  stop     Stop the warm guest VM
-  status   Show the VM configuration and guest-agent readiness
+  stop     Stop the warm guest VM (refused while another task's run holds the queue;
+           --force overrides)
+  status   Show the VM configuration, guest-agent readiness and the run queue
 
 Run options:
   --duration-profile ordinary|full
@@ -35,7 +39,11 @@ Run options:
   --no-gallery
            Skip the glass screenshot gallery. Rendering assertions still run.
 
-Overrides: DEBUT_TART_VM, DEBUT_TART_SHARE, DEBUT_E2E_DURATION_PROFILE
+Runs wait in arrival order for the one local guest, across every checkout and
+override. Interrupting a waiting run leaves the queue without touching the VM.
+
+Overrides: DEBUT_TART_VM, DEBUT_TART_SHARE, DEBUT_E2E_DURATION_PROFILE,
+           DEBUT_TART_QUEUE_DIR
 EOF
 }
 
@@ -92,6 +100,22 @@ release_run_lock() {
         rm -f "$RUN_LOCK"
         RUN_LOCK_HELD=false
     fi
+    tart_queue_leave
+}
+
+# A run from a checkout that predates the queue still takes only this share lock. Wait it out
+# rather than failing or touching its guest; shlock itself discards a dead holder's lock.
+acquire_share_lock() {
+    local reported=false
+    mkdir -p "$SHARE_DIR"
+    until /usr/bin/shlock -f "$RUN_LOCK" -p "$$"; do
+        if [[ "$reported" == false ]]; then
+            echo "Another Tart E2E run already owns $SHARE_DIR (PID $(<"$RUN_LOCK")) outside the queue; waiting for it."
+            reported=true
+        fi
+        sleep 2
+    done
+    RUN_LOCK_HELD=true
 }
 
 prepare_vm() {
@@ -106,22 +130,27 @@ prepare_vm() {
     tart get "$VM_NAME"
 }
 
-space_build() {
-    local ARTIFACT_ID
-    local old_artifacts=()
-    local build_log app_bundle
+# Builds in this checkout only, so it runs before the queue: a waiting task compiles while it
+# waits, and never holds the guest while compiling.
+build_products() {
+    local build_log
     echo "Building Debut and the E2E executable on the host..."
     # The bundle name belongs to build-app.sh; naming it again here is how a rename last
     # slipped through, staging a path that no longer existed.
     build_log="$(mktemp)"
     "$PROJECT_DIR/scripts/build-app.sh" | tee "$build_log"
-    app_bundle="$(awk '/^Built: /{ sub(/^Built: /, ""); print }' "$build_log")"
+    APP_BUNDLE="$(awk '/^Built: /{ sub(/^Built: /, ""); print }' "$build_log")"
     rm -f "$build_log"
-    if [[ -z "$app_bundle" || ! -d "$app_bundle" ]]; then
+    if [[ -z "$APP_BUNDLE" || ! -d "$APP_BUNDLE" ]]; then
         echo "build-app.sh did not report a built app bundle." >&2
         exit 1
     fi
+}
 
+# Replaces the previous run's artifacts in the shared directory, so it needs the queue.
+space_build() {
+    local ARTIFACT_ID
+    local old_artifacts=()
     mkdir -p "$SHARE_DIR"
     rm -rf "$SHARE_DIR/results"
     shopt -s nullglob
@@ -138,7 +167,7 @@ space_build() {
     APP_ARTIFACT="Debut-$ARTIFACT_ID.app.zip"
     E2E_ARTIFACT="DebutE2E-$ARTIFACT_ID"
     GUEST_ARTIFACT="tart-e2e-guest-$ARTIFACT_ID.sh"
-    /usr/bin/ditto -c -k --keepParent "$app_bundle" "$SHARE_DIR/$APP_ARTIFACT"
+    /usr/bin/ditto -c -k --keepParent "$APP_BUNDLE" "$SHARE_DIR/$APP_ARTIFACT"
     /usr/bin/install -m 755 "$PROJECT_DIR/.build/release/DebutE2E" "$SHARE_DIR/$E2E_ARTIFACT"
     /usr/bin/install -m 755 "$PROJECT_DIR/scripts/tart-e2e-guest.sh" "$SHARE_DIR/$GUEST_ARTIFACT"
 }
@@ -191,14 +220,12 @@ run_e2e() {
         echo "Tart VM $VM_NAME does not exist. Run scripts/tart-e2e.sh prepare first." >&2
         exit 1
     fi
-    mkdir -p "$SHARE_DIR"
-    if ! /usr/bin/shlock -f "$RUN_LOCK" -p "$$"; then
-        echo "Another Tart E2E run already owns $SHARE_DIR (PID $(<"$RUN_LOCK"))." >&2
-        exit 1
-    fi
-    RUN_LOCK_HELD=true
     trap release_run_lock EXIT
+    trap 'exit 130' INT TERM
 
+    build_products
+    tart_queue_enter "tart-e2e $(basename "$PROJECT_DIR") $DURATION_PROFILE"
+    acquire_share_lock
     space_build
     # First-use permission and desktop setup must start with a fresh compositor.
     # A warm guest after the desktop stress scenarios can retain a partial swipe
@@ -238,6 +265,7 @@ run_e2e() {
 }
 
 show_status() {
+    tart_queue_status
     if ! vm_exists; then
         echo "Tart VM not prepared: $VM_NAME"
         return
@@ -250,6 +278,17 @@ show_status() {
     fi
 }
 
+stop_vm() {
+    local holder
+    holder="$(tart_queue_holder)"
+    if [[ -n "$holder" && "${1:-}" != --force ]]; then
+        echo "Not stopping $VM_NAME: a queued run holds it: $holder" >&2
+        echo "Wait for it, or pass --force to stop the guest anyway." >&2
+        exit 1
+    fi
+    tart stop "$VM_NAME"
+}
+
 # Sourcing defines the functions without running a command, which is how the contract checks
 # exactly what crosses the VM boundary.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -259,7 +298,7 @@ fi
 case "${1:-}" in
     prepare) require_tart; prepare_vm ;;
     run) shift; parse_run_options "$@"; require_tart; run_e2e ;;
-    stop) require_tart; tart stop "$VM_NAME" ;;
+    stop) require_tart; stop_vm "${2:-}" ;;
     status) require_tart; show_status ;;
     -h|--help|help) usage ;;
     *) usage >&2; exit 2 ;;
