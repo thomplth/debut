@@ -1181,6 +1181,11 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString) == .success
     }
 
+    public func raiseTrackedWindow(windowID: CGWindowID) -> Bool {
+        guard let axWindow = windowElementResolver?(windowID) else { return false }
+        return AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString) == .success
+    }
+
     /// Presses the window's native close button without terminating its owning app. Apps may not
     /// expose a close button (or may reject the press), so the result is reported to the caller
     /// rather than changing Debut's assignment until lifecycle reconciliation confirms the close.

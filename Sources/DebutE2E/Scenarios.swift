@@ -58,6 +58,8 @@ let e2eScenarioCatalog: [E2EScenarioDescriptor] = [
           summary: "Control-arrow and swipes leave and re-enter a fullscreen Space"),
     .init(id: "system-duration-transition", group: .desktopNavigation, debut: .stopped,
           summary: "Command-Tab uses the system transition with faster switching off"),
+    .init(id: "prepared-arrival", group: .desktopNavigation, debut: .stopped,
+          summary: "A faster-off switch reveals the chosen window already on top"),
     .init(id: "onboarding-journey", group: .onboarding, debut: .stopped,
           summary: "First-launch onboarding and its guided exercises"),
     .init(id: "settings-chrome", group: .rendering, debut: .stopped,

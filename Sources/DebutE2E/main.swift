@@ -3123,6 +3123,280 @@ func scenario_system_duration_transition() {
     }
 }
 
+/// Front-to-back order of `windowIDs` in the window server's list. Checked against a hit test
+/// before it is trusted: the list is what stays readable while Debut's own panels cover a point.
+func windowStackOrder(of windowIDs: Set<CGWindowID>, onScreenOnly: Bool) -> [CGWindowID] {
+    let options: CGWindowListOption = onScreenOnly ? [.optionOnScreenOnly] : [.optionAll]
+    guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]]
+    else { return [] }
+    return list.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value }
+        .filter(windowIDs.contains)
+}
+
+/// The window drawn on top at `point`, by the window server's own hit test. Only the showing
+/// desktop can be tested this way, which is why callers arrange frames to overlap first.
+func windowDrawnOnTop(at point: CGPoint) -> CGWindowID? {
+    let system = AXUIElementCreateSystemWide()
+    AXUIElementSetMessagingTimeout(system, 0.2)
+    var hit: AXUIElement?
+    guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &hit) == .success,
+          let hit else { return nil }
+    if let id = windowIdentifier(of: hit) { return id }
+    var windowRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(hit, kAXWindowAttribute as CFString, &windowRef) == .success,
+          let windowRef, CFGetTypeID(windowRef) == AXUIElementGetTypeID() else { return nil }
+    return windowIdentifier(of: windowRef as! AXUIElement)
+}
+
+/// Seeding a destination's front process activates asynchronously, so one observed focus is
+/// not an arrangement: front until it holds.
+@MainActor
+func frontUntilHeld(_ window: WindowInfo, using windows: AccessibilityWindowService) -> Bool {
+    for _ in 0..<3 {
+        _ = windows.frontWindow(windowID: window.windowID, ownerPID: window.ownerPID)
+        if waitFor(timeout: 2, { liveKeyboardFocus()?.windowID == window.windowID }) {
+            wait(0.3)
+            if liveKeyboardFocus()?.windowID == window.windowID { return true }
+        }
+    }
+    return false
+}
+
+func accessibilityElement(of window: WindowInfo) -> AXUIElement? {
+    let application = AXUIElementCreateApplication(window.ownerPID)
+    var windowsRef: CFTypeRef?
+    AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &windowsRef)
+    return (windowsRef as? [AXUIElement])?.first { windowIdentifier(of: $0) == window.windowID }
+}
+
+func setFrame(of element: AXUIElement, to frame: CGRect) {
+    var origin = frame.origin
+    var size = frame.size
+    if let value = AXValueCreate(.cgPoint, &origin) {
+        AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, value)
+    }
+    if let value = AXValueCreate(.cgSize, &size) {
+        AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, value)
+    }
+}
+
+func writeFixtureImage(named name: String) -> URL {
+    let url = URL(fileURLWithPath: "/tmp/debut-e2e-fixtures/\(name)")
+    try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                             withIntermediateDirectories: true)
+    let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 640, pixelsHigh: 480,
+                                  bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                  isPlanar: false, colorSpaceName: .deviceRGB,
+                                  bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    NSColor.systemTeal.setFill()
+    NSRect(x: 0, y: 0, width: 640, height: 480).fill()
+    NSGraphicsContext.restoreGraphicsState()
+    try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
+    return url
+}
+
+@MainActor
+func scenario_prepared_arrival() {
+    // --- A faster-off switch reveals the chosen window already on top. ---
+    header("Faster-off arrival shows the chosen window already on top")
+    let settingsBackup = try? Data(contentsOf: settingsFile)
+    let spaces = SpaceService()
+    let windows = AccessibilityWindowService()
+    let originDesktop = 0
+    let targetDesktop = 2
+    let atOrigin = spaces.currentDesktopIndex() == originDesktop
+        || (spaces.switchToDesktop(index: originDesktop)
+            && waitFor { spaces.currentDesktopIndex() == originDesktop })
+    let chosenURL = writeFixtureFile(named: "prepared-chosen.txt", contents: "Chosen\n")
+    let siblingURL = writeFixtureFile(named: "prepared-sibling.txt", contents: "Sibling\n")
+    let otherURL = writeFixtureImage(named: "prepared-other.png")
+    let ownerPID = launchNewTextEditInstance(opening: [chosenURL, siblingURL])
+    NSWorkspace.shared.open([otherURL],
+                            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Preview.app"),
+                            configuration: NSWorkspace.OpenConfiguration())
+    func fixture(_ matches: (WindowInfo) -> Bool) -> WindowInfo? {
+        windows.listWindows().first(where: matches)
+    }
+    func chosenWindow() -> WindowInfo? {
+        fixture { $0.ownerPID == ownerPID && $0.title.hasPrefix("prepared-chosen") }
+    }
+    func siblingWindow() -> WindowInfo? {
+        fixture { $0.ownerPID == ownerPID && $0.title.hasPrefix("prepared-sibling") }
+    }
+    func otherWindow() -> WindowInfo? {
+        fixture { $0.ownerBundleID == "com.apple.Preview" && $0.title.hasPrefix("prepared-other") }
+    }
+    _ = waitFor(timeout: 15) {
+        chosenWindow() != nil && siblingWindow() != nil && otherWindow() != nil
+    }
+    var otherPID: pid_t?
+
+    if atOrigin, spaces.desktopCount() > targetDesktop,
+       let chosen = chosenWindow(), let sibling = siblingWindow(), let other = otherWindow() {
+        otherPID = other.ownerPID
+        let ids: Set<CGWindowID> = [chosen.windowID, sibling.windowID, other.windowID]
+        // Identical frames, so one hit test answers which of the three is drawn on top.
+        let frame = CGRect(x: 120, y: 120, width: 700, height: 480)
+        let probePoint = CGPoint(x: 400, y: 360)
+        for window in [chosen, sibling, other] {
+            if let element = accessibilityElement(of: window) { setFrame(of: element, to: frame) }
+        }
+        for window in [chosen, sibling, other] {
+            spaces.moveWindow(windowID: window.windowID, toDesktop: targetDesktop)
+        }
+        let placed = waitFor {
+            ids.allSatisfy { spaces.desktopIndex(forWindow: $0) == targetDesktop }
+        }
+        let originWindow = windows.listWindows().first {
+            !ids.contains($0.windowID) && spaces.desktopIndex(forWindow: $0.windowID) == originDesktop
+        }
+        func label(_ id: CGWindowID?) -> String {
+            switch id {
+            case chosen.windowID?: "chosen"
+            case sibling.windowID?: "sibling"
+            case other.windowID?: "other"
+            case let id?:
+                {
+                    let entry = (CGWindowListCopyWindowInfo([.optionIncludingWindow], id)
+                        as? [[String: Any]])?.first ?? [:]
+                    let bounds = entry[kCGWindowBounds as String] as? [String: Any] ?? [:]
+                    return "foreign(\(id):\(entry[kCGWindowOwnerName as String] ?? "?")"
+                        + "/L\(entry[kCGWindowLayer as String] ?? "?")"
+                        + "/a\(entry[kCGWindowAlpha as String] ?? "?")"
+                        + "/\(bounds["Width"] ?? 0)x\(bounds["Height"] ?? 0))"
+                }()
+            case nil: "none"
+            }
+        }
+        func goTo(_ desktop: Int) -> Bool {
+            spaces.currentDesktopIndex() == desktop
+                || (spaces.switchToDesktop(index: desktop)
+                    && waitFor { spaces.currentDesktopIndex() == desktop })
+        }
+
+        // Stacks the hidden target desktop: the chosen window under its sibling inside their app,
+        // and another app in front of both, so an unprepared reveal shows the wrong app and the
+        // wrong window. The hit test is the arrangement's only proof.
+        func arrangeHiddenDesktop() -> String? {
+            guard goTo(targetDesktop) else { return "visit" }
+            guard frontUntilHeld(chosen, using: windows) else { return "chosen" }
+            guard let siblingElement = accessibilityElement(of: sibling),
+                  AXUIElementPerformAction(siblingElement, kAXRaiseAction as CFString) == .success
+            else { return "sibling" }
+            AXUIElementSetAttributeValue(siblingElement, kAXMainAttribute as CFString, kCFBooleanTrue)
+            wait(0.3)
+            // Fronting another app moves the keyboard without always reordering its window.
+            guard frontUntilHeld(other, using: windows),
+                  let otherElement = accessibilityElement(of: other),
+                  AXUIElementPerformAction(otherElement, kAXRaiseAction as CFString) == .success
+            else { return "other" }
+            wait(0.3)
+            // The trace below reads the window list, which Debut's own invisible panels cannot
+            // cover; the hit test is what the list has to agree with here first.
+            let drawn = windowDrawnOnTop(at: probePoint)
+            guard drawn == other.windowID else { return "drawn:\(label(drawn))" }
+            let listed = windowStackOrder(of: ids, onScreenOnly: true)
+            guard listed == [other.windowID, sibling.windowID, chosen.windowID] else {
+                return "listed:" + listed.map { label($0) }.joined(separator: ">")
+            }
+            guard goTo(originDesktop) else { return "return" }
+            if let originWindow, !frontUntilHeld(originWindow, using: windows) { return "origin" }
+            return nil
+        }
+
+        var settings = (try? settingsStore.loadSettings()) ?? AppSettings()
+        settings.features.workspaceIsolation = true
+        settings.features.setFasterDesktopSwitching(false)
+        // The indicator is Debut's own panel over the arrival, not a window of the desktop.
+        settings.showsDesktopSwitchIndicator = false
+        try? settingsStore.saveSettings(settings)
+        clearDiagnosticFile()
+        let ready = waitForDebutReady(launchDebut())
+        let tracked = waitFor(timeout: 8) {
+            let tokens = (readState()["windowIDsBySpace"] ?? "").split { $0 == ";" || $0 == "," }
+            return ids.allSatisfy { tokens.contains(Substring(String($0))) }
+        }
+        // Arranged with Debut running, as in any session where the user has already been on
+        // that desktop: that visit is when Debut can hold the windows' Accessibility elements.
+        let arrangeFailure = arrangeHiddenDesktop()
+
+        postFlagsChanged(flags: .maskCommand)
+        postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+        postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+        let overlayOpened = waitFor(timeout: 8) { readState()["overlayVisible"] == "true" }
+        if overlayOpened {
+            for _ in 0..<spaces.desktopCount() {
+                if readState()["selectedSpaceIndex"] == String(targetDesktop) { break }
+                let before = readState()["selectedSpaceIndex"]
+                let chord: CGEventFlags = [.maskCommand, .maskAlternate]
+                postFlagsChanged(flags: chord)
+                postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: chord)
+                postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: chord)
+                _ = waitFor { readState()["selectedSpaceIndex"] != before }
+                postFlagsChanged(flags: .maskCommand)
+            }
+            for _ in 0..<60 {
+                if selectedStageWindowID() == String(chosen.windowID) { break }
+                let before = selectedStageWindowID()
+                postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+                postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+                guard waitFor(timeout: 2, { selectedStageWindowID() != before }) else { break }
+            }
+        }
+        let selected = selectedStageWindowID() == String(chosen.windowID)
+        postFlagsChanged(flags: [])
+
+        // Every change in which fixture window is on top on screen, from release until a second
+        // after arrival. Anything raised only after arrival leaves the window it replaced at the
+        // head of this trace.
+        var topTrace: [String] = []
+        var landedAt: Date?
+        let releasedAt = Date()
+        while Date().timeIntervalSince(releasedAt) < 8 {
+            if landedAt == nil, spaces.currentDesktopIndex() == targetDesktop { landedAt = Date() }
+            if let top = windowStackOrder(of: ids, onScreenOnly: true).first {
+                let name = label(top)
+                if topTrace.last?.hasPrefix(name + "@") != true {
+                    topTrace.append(name + "@\(Int(Date().timeIntervalSince(releasedAt) * 1000))ms")
+                }
+            }
+            if let landedAt, Date().timeIntervalSince(landedAt) > 1 { break }
+            wait(0.002)
+        }
+        let focusHeld = waitFor(timeout: 3) {
+            liveKeyboardFocus()?.windowID == chosen.windowID
+        } && { wait(0.3); return liveKeyboardFocus()?.windowID == chosen.windowID }()
+        let seeded = readEvents().last { $0["event"] == "space_front_process_seeded" }
+        let raisedEarly = readEvents().last { $0["event"] == "space_window_raised_before_reveal" }
+        info("  Prepared arrival: placed=\(placed) arrangeFailed=\(arrangeFailure ?? "none") "
+            + "ready=\(ready) tracked=\(tracked) overlay=\(overlayOpened) selected=\(selected) "
+            + "landed=\(landedAt != nil) topTrace=\(topTrace.joined(separator: ">")) "
+            + "focusHeld=\(focusHeld) seeded=\(seeded?["accepted"] ?? "none") "
+            + "raisedEarly=\(raisedEarly?["accepted"] ?? "none")")
+        test("A faster-off Command-Tab reveals the chosen window already on top") {
+            placed && arrangeFailure == nil && ready && tracked && overlayOpened && selected
+                && landedAt != nil && topTrace.count == 1 && topTrace[0].hasPrefix("chosen@")
+                && focusHeld
+        }
+
+        _ = terminateDebutAndWait()
+        _ = goTo(originDesktop)
+    } else {
+        info("  Prepared arrival fixture: atOrigin=\(atOrigin) desktops=\(spaces.desktopCount()) "
+            + "owner=\(ownerPID) other=\(otherWindow().map { "\($0.windowID)" } ?? "none")")
+        test("A faster-off Command-Tab reveals the chosen window already on top") { false }
+    }
+    NSRunningApplication(processIdentifier: ownerPID)?.terminate()
+    if let otherPID { NSRunningApplication(processIdentifier: otherPID)?.terminate() }
+    if let settingsBackup {
+        try? settingsBackup.write(to: settingsFile, options: .atomic)
+    } else {
+        try? FileManager.default.removeItem(at: settingsFile)
+    }
+}
+
 @MainActor
 func currentOnboardingTarget() -> [String: String]? {
     readEvents().last { $0["event"] == "onboarding_target_created" }
@@ -5106,6 +5380,7 @@ let scenarioBodies: [String: @MainActor () -> Void] = [
     "navigation-controls": scenario_navigation_controls,
     "fullscreen-navigation": scenario_fullscreen_navigation,
     "system-duration-transition": scenario_system_duration_transition,
+    "prepared-arrival": scenario_prepared_arrival,
     "onboarding-journey": scenario_onboarding_journey,
     "settings-chrome": scenario_settings_chrome,
     "selected-window-dismissal": scenario_selected_window_dismissal,

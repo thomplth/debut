@@ -115,31 +115,47 @@ struct WindowServerSymbolicHotKeys: SymbolicHotKeyControlling {
 }
 
 /// Requests a desktop through its native shortcut.
+///
+/// Resolving and posting are separate so the caller can decide synchronously whether this route
+/// applies, then post a moment later.
 struct NativeDesktopShortcutSwitch {
     /// Long enough for the WindowServer to have matched the posted keystroke; the Dock's
     /// transition itself does not depend on the hotkey staying enabled.
     static let temporaryEnableDuration: TimeInterval = 0.5
 
-    struct Posted: Equatable {
+    struct Resolved: Equatable {
         let hotKeyID: Int32
-        let temporarilyEnabled: Bool
+        let delivery: NativeDesktopShortcut.Delivery
+
+        var temporarilyEnabled: Bool {
+            if case .postTemporarilyEnabled = delivery { return true }
+            return false
+        }
     }
 
     let hotKeys: any SymbolicHotKeyControlling
     /// Runs the restore of a temporarily enabled shortcut. Injected so tests can run it inline.
     let scheduleRestore: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
-    /// Posts the shortcut for `location`, or returns nil without posting anything when the
-    /// desktop is not addressable that way and the caller must use another route.
-    func request(_ location: DesktopLocation, in topology: SpaceTopology) -> Posted? {
+    /// The shortcut for `location`, or nil when the desktop is not addressable that way and the
+    /// caller must use another route. Posts nothing.
+    func resolve(_ location: DesktopLocation, in topology: SpaceTopology) -> Resolved? {
         guard let id = NativeDesktopShortcut.hotKeyID(for: location, in: topology),
               let delivery = NativeDesktopShortcut.delivery(for: hotKeys.binding(forHotKey: id))
         else { return nil }
-        switch delivery {
+        return Resolved(hotKeyID: id, delivery: delivery)
+    }
+
+    /// Posts a resolved shortcut. A shortcut that cannot be enabled posts nothing, so no
+    /// keystroke reaches an app.
+    @discardableResult
+    func post(_ resolved: Resolved) -> Bool {
+        let id = resolved.hotKeyID
+        switch resolved.delivery {
         case .post(let binding):
-            return hotKeys.post(binding) ? Posted(hotKeyID: id, temporarilyEnabled: false) : nil
+            return hotKeys.post(binding)
         case .postTemporarilyEnabled(let binding):
-            guard hotKeys.setEnabled(true, hotKey: id) else { return nil }
+            guard hotKeys.setEnabled(true, hotKey: id) else { return false }
             let posted = hotKeys.post(binding)
             let hotKeys = hotKeys
             if posted {
@@ -149,7 +165,7 @@ struct NativeDesktopShortcutSwitch {
             } else {
                 hotKeys.setEnabled(false, hotKey: id)
             }
-            return posted ? Posted(hotKeyID: id, temporarilyEnabled: true) : nil
+            return posted
         }
     }
 }
