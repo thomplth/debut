@@ -364,6 +364,49 @@ struct SpaceControllerSpaceTests {
         #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [182, 104_661])
     }
 
+    /// Raise-before-reveal hands the target focus while its desktop is still hidden, so the app's
+    /// focus report lands before the deferred focus step runs. A request armed by that late step
+    /// has already been answered; left armed, it read the next switch's report — the same app's
+    /// other window, on the other desktop — as a sibling misreport and credited the window the
+    /// user had just left (KHA-801, two Ghostty windows flipped with Option-Tab).
+    @Test("A cross-desktop switch's early focus report is not credited to the window just left")
+    func earlyFocusReportIsNotRecreditedToPreviousSwitchTarget() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+        let firstSpaceID = controller.spaceManager.spaces[0].id
+        let secondSpaceID = controller.spaceManager.spaces[1].id
+        for (windowID, spaceID) in [(CGWindowID(1001), firstSpaceID), (2002, secondSpaceID)] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.mitchellh.ghostty",
+                    ownerName: "Ghostty",
+                    windowTitle: "Terminal \(windowID)",
+                    ownerPID: 1989
+                ),
+                toSpaceID: spaceID
+            )
+        }
+        spaces.windowDesktops = [1001: 0, 2002: 1]
+        controller.recordWindowActivation(windowID: 1001)
+
+        // Option-Tab to the second desktop: its report arrives, then the desktop settles.
+        keyboardService.simulateEvent(.altTabHold)
+        keyboardService.simulateEvent(.cmdRelease)
+        controller.recordWindowActivation(windowID: 2002)
+        controller.desktopDidChange()
+        #expect(controller.focusedWindowID == 2002)
+
+        // And straight back: the report naming 1001 again precedes the settle.
+        keyboardService.simulateEvent(.altTabHold)
+        keyboardService.simulateEvent(.cmdRelease)
+        controller.recordWindowActivation(windowID: 1001)
+
+        #expect(controller.focusedWindowID == 1001)
+        #expect(controller.spaceManager.globalWindowOrder().map(\.window.windowID) == [1001, 2002])
+    }
+
     @Test("Confirmation switches to its desktop before taking focus")
     @MainActor
     func confirmationAttentionSwitchesDesktopBeforeFocus() {
