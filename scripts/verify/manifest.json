@@ -1,0 +1,84 @@
+{
+  "comment": "Maps changed paths to verification. Rules are ordered and the first match wins; a path no rule matches selects full coverage. 'e2e' is a list of groups or \"full\". Shared input, discovery, focus, desktop topology and movement have too many dynamic dependents (AX, notifications, persisted state, cross-process input) to narrow, so they select full.",
+  "groups": [
+    "smoke",
+    "overlay-input",
+    "drag-drop",
+    "desktop-navigation",
+    "fullscreen",
+    "window-moves",
+    "window-lifecycle",
+    "onboarding",
+    "permissions",
+    "rendering"
+  ],
+  "rules": [
+    {"pattern": "Sources/DebutE2E/*", "e2e": "full", "swift": true, "reason": "the E2E harness itself"},
+    {"pattern": "Sources/DebutInputDriver/*", "e2e": "full", "swift": true, "reason": "synthetic input used by every group"},
+    {"pattern": "Sources/AXPrivate/*", "e2e": "full", "swift": true, "reason": "private window-server bindings used by discovery and movement"},
+
+    {"pattern": "Sources/DebutCore/Views/SettingsWindow.swift", "e2e": ["smoke", "rendering"], "swift": true, "reason": "settings presentation"},
+    {"pattern": "Sources/DebutCore/Views/SettingsViewModel.swift", "e2e": ["smoke", "rendering"], "swift": true, "reason": "settings presentation"},
+    {"pattern": "Sources/DebutCore/Views/ShortcutRecorderView.swift", "e2e": ["smoke", "rendering"], "swift": true, "reason": "settings presentation"},
+    {"pattern": "Sources/DebutCore/Views/SwitchDurationControl.swift", "e2e": ["smoke", "rendering"], "swift": true, "reason": "settings presentation"},
+    {"pattern": "Sources/DebutCore/Views/DebutGlyph.swift", "e2e": ["smoke", "rendering"], "swift": true, "reason": "brand glyph rendering"},
+
+    {"pattern": "Sources/DebutCore/Views/Onboarding*.swift", "e2e": ["smoke", "onboarding", "permissions"], "swift": true, "reason": "onboarding presentation"},
+    {"pattern": "Sources/DebutCore/Models/Onboarding.swift", "e2e": ["smoke", "onboarding", "permissions"], "swift": true, "reason": "onboarding model"},
+    {"pattern": "Sources/DebutCore/Models/Tutorial*.swift", "e2e": ["smoke", "onboarding"], "swift": true, "reason": "tutorial model"},
+    {"pattern": "Sources/DebutCore/Services/OnboardingPermissionGuide.swift", "e2e": ["smoke", "onboarding", "permissions"], "swift": true, "reason": "permission onboarding"},
+    {"pattern": "Sources/DebutCore/Services/SystemOnboardingPermissionClient.swift", "e2e": ["smoke", "onboarding", "permissions"], "swift": true, "reason": "live permission probing"},
+
+    {"pattern": "Sources/DebutCore/Views/StageView.swift", "e2e": ["smoke", "overlay-input", "drag-drop", "fullscreen", "rendering"], "swift": true, "reason": "overlay presentation"},
+    {"pattern": "Sources/DebutCore/Views/StageLayout.swift", "e2e": ["smoke", "overlay-input", "drag-drop", "fullscreen", "rendering"], "swift": true, "reason": "overlay layout, which drop targets are computed from"},
+    {"pattern": "Sources/DebutCore/Views/StageOverlayViewModel.swift", "e2e": ["smoke", "overlay-input", "drag-drop", "fullscreen", "rendering"], "swift": true, "reason": "overlay view model"},
+    {"pattern": "Sources/DebutCore/Views/AltTab*.swift", "e2e": ["smoke", "overlay-input", "drag-drop", "fullscreen", "rendering"], "swift": true, "reason": "overlay presentation"},
+    {"pattern": "Sources/DebutCore/Views/OverlayWindow.swift", "e2e": ["smoke", "overlay-input", "drag-drop", "fullscreen", "rendering"], "swift": true, "reason": "overlay window, including fullscreen presentation"},
+    {"pattern": "Sources/DebutCore/Views/OverlayGlass.swift", "e2e": ["smoke", "overlay-input", "fullscreen", "rendering"], "swift": true, "reason": "overlay glass rendering"},
+    {"pattern": "Sources/DebutCore/Views/DragState.swift", "e2e": ["smoke", "overlay-input", "drag-drop"], "swift": true, "reason": "drag interaction state"},
+    {"pattern": "Sources/DebutCore/Views/DesktopSwitchIndicator.swift", "e2e": ["smoke", "desktop-navigation", "rendering"], "swift": true, "reason": "desktop switch indicator"},
+    {"pattern": "Sources/DebutCore/Services/AppIconCache.swift", "e2e": ["smoke", "overlay-input", "rendering"], "swift": true, "reason": "overlay icons"},
+    {"pattern": "Sources/DebutCore/Services/PreviewShadowCache.swift", "e2e": ["smoke", "overlay-input", "rendering"], "swift": true, "reason": "overlay preview rendering"},
+    {"pattern": "Sources/DebutCore/Services/ShareableContent.swift", "e2e": ["smoke", "overlay-input", "rendering"], "swift": true, "reason": "window preview capture"},
+
+    {"pattern": "Sources/DebutCore/Services/ApplicationUpdater.swift", "e2e": ["smoke"], "swift": true, "reason": "updater wiring; the update flow has its own Tart check"},
+    {"pattern": "Sources/DebutCore/Services/LaunchAtLoginCoordinator.swift", "e2e": ["smoke"], "swift": true, "reason": "login item registration"},
+    {"pattern": "Sources/DebutCore/Services/LegacyDataCleanup.swift", "e2e": ["smoke"], "swift": true, "reason": "startup cleanup"},
+
+    {"pattern": "Sources/DebutCore/*", "e2e": "full", "swift": true, "reason": "shared runtime: input, discovery, focus, topology, movement, persistence or diagnostics the harness reads"},
+    {"pattern": "Sources/DebutApp/*", "e2e": ["smoke"], "swift": true, "reason": "application entry point"},
+
+    {"pattern": "Sources/DebutDemo/*", "e2e": [], "swift": true, "reason": "demo driver; not part of the E2E suite"},
+    {"pattern": "Sources/DebutBenchmarks/*", "e2e": [], "swift": true, "reason": "benchmarks; not part of the E2E suite"},
+    {"pattern": "Sources/DebutPerformanceFixture/*", "e2e": [], "swift": true, "reason": "performance fixture; not part of the E2E suite"},
+
+    {"pattern": "Tests/CI/*", "e2e": [], "swift": false, "reason": "shell contract; contracts always run"},
+    {"pattern": "Tests/Release/*", "e2e": [], "swift": false, "reason": "release contract fixture"},
+    {"pattern": "Tests/*", "e2e": [], "swift": true, "reason": "unit tests or their fixtures"},
+
+    {"pattern": "Package.swift", "e2e": "full", "swift": true, "reason": "package graph"},
+    {"pattern": "Package.resolved", "e2e": "full", "swift": true, "reason": "dependency versions"},
+    {"pattern": ".swift-version", "e2e": "full", "swift": true, "reason": "toolchain"},
+    {"pattern": "Resources/AppIcon.icns", "e2e": ["smoke"], "swift": false, "reason": "bundled icon"},
+    {"pattern": "Resources/*", "e2e": "full", "swift": false, "reason": "bundle identity, entitlements or privacy manifest"},
+    {"pattern": "docs/media/*", "e2e": ["smoke", "onboarding", "rendering"], "swift": false, "reason": "media bundled into onboarding"},
+
+    {"pattern": "scripts/tart-*", "e2e": "full", "swift": false, "reason": "Tart harness plumbing"},
+    {"pattern": "scripts/e2e-test.sh", "e2e": "full", "swift": false, "reason": "E2E harness plumbing"},
+    {"pattern": "scripts/ci-e2e.sh", "e2e": "full", "swift": false, "reason": "E2E harness plumbing"},
+    {"pattern": "scripts/build-app.sh", "e2e": "full", "swift": false, "reason": "the build every group runs"},
+    {"pattern": "scripts/rebuild.sh", "e2e": [], "swift": false, "reason": "local install helper"},
+    {"pattern": "scripts/verify*", "e2e": [], "swift": false, "reason": "verification planner; its contract always runs"},
+    {"pattern": "scripts/*", "e2e": [], "swift": false, "reason": "release, packaging or capture tooling covered by its contracts"},
+    {"pattern": ".github/*", "e2e": "full", "swift": false, "reason": "CI workflow"},
+
+    {"pattern": "docs/*", "e2e": [], "swift": false, "reason": "documentation"},
+    {"pattern": "spec/*", "e2e": [], "swift": false, "reason": "specification prose"},
+    {"pattern": "website/*", "e2e": [], "swift": false, "reason": "website, verified separately"},
+    {"pattern": "debut.website/*", "e2e": [], "swift": false, "reason": "website, verified separately"},
+    {"pattern": "*.md", "e2e": [], "swift": false, "reason": "documentation"},
+    {"pattern": "LICENSE", "e2e": [], "swift": false, "reason": "license text"},
+    {"pattern": ".gitignore", "e2e": [], "swift": false, "reason": "repository hygiene; its contract always runs"},
+    {"pattern": "PerformanceBudgets.json", "e2e": [], "swift": false, "reason": "performance gate budgets"}
+  ]
+}
