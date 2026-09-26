@@ -530,7 +530,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         self.spaceManager = spaceManager
         self.overlayPresentationDelay = overlayPresentationDelay
         self.focusedWindowSnapshotProvider = focusedWindowSnapshotProvider
+        // An injected probe stands in for every live focus read, AppKit's key window included.
         self.ownKeyWindowProvider = ownKeyWindowProvider
+            ?? focusedWindowSnapshotProvider.map { _ in { nil } }
         self.focusDeliveryProbe = focusDeliveryProbe
         self.focusDeliveryVerificationDelay = focusDeliveryVerificationDelay
         self.overlayPresentationRecorder = overlayPresentationRecorder
@@ -988,7 +990,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 targetWindowID: windowID
             )
         }
-        spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: spaceID)
+        // The MRU head is a claim that the window took focus. A refused activation produces no
+        // report to correct that claim, so it leaves the order alone.
+        if outcome != .refused {
+            spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: spaceID)
+        }
         diag.report("window_focused", details: [
             "windowID": "\(windowID)",
             "via": outcome.rawValue,
@@ -2456,16 +2462,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         setupOverlay(mode: .altTab)
         overlayPractice = .allWindows
 
-        // Focus notifications and the shortcut arrive on independent paths. Make the focused
-        // window authoritative at the moment the switcher opens, before relying on entry zero
-        // as the window the user is leaving. This also seeds a launch whose first activation
-        // predated observer registration.
-        if let focusedWindowID,
-           let focusedSpaceID = spaceManager.spaceContainingWindow(windowID: focusedWindowID) {
-            spaceManager.bringWindowToFront(
-                windowID: focusedWindowID,
-                inSpaceID: focusedSpaceID
-            )
+        // Only a live read may reorder the MRU here. The cached focus is the last report already
+        // applied to it, so re-promoting that could only undo fresher writes — a fast second
+        // Option-Tab put the window being left back on top and landed on the current window.
+        // Debut's own windows never produce a report, so their key window is read directly.
+        if let ownWindowID = ownSwitcherKeyWindow()?.windowID,
+           let ownSpaceID = spaceManager.spaceContainingWindow(windowID: ownWindowID) {
+            spaceManager.bringWindowToFront(windowID: ownWindowID, inSpaceID: ownSpaceID)
             delegate?.spaceControllerDidMutateState(self)
         }
         altTabEntries = overlaySpaceManager.globalWindowOrder()
@@ -2646,19 +2649,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         if let focusedWindowSnapshotProvider {
             return focusedWindowSnapshotProvider()
         }
-        // Debut's own windows never produce a focus report: discovery drops this process's
-        // activations so the switcher is never named the app the user switched to. Settings is
-        // admitted as a switcher entry all the same, so while it is key the cached focus still
-        // names the window the user left for it, and promoting that one made Settings entry one
-        // — every release landed back on Settings. Reading AppKit's own key window is local and
-        // bounded, so this adds no AX or WindowServer round trip. Only a window the switchers
-        // offer counts; the overlay or onboarding being key says nothing about the user's place.
-        if let ownKeyWindow = ownKeyWindowProvider.map({ $0() }) ?? Self.localKeyWindowSnapshot(),
-           let windowID = ownKeyWindow.windowID,
-           tutorialScope?.windowIDs.contains(windowID) == true
-               || spaceManager.spaceContainingWindow(windowID: windowID) != nil {
-            return ownKeyWindow
-        }
+        if let ownKeyWindow = ownSwitcherKeyWindow() { return ownKeyWindow }
         let windowID = focusedWindowID ?? spaceManager.activeSpace.windows.first?.windowID
         let frame = windowID.flatMap { windowFrames[$0] }
         return FocusedWindowSnapshot(
@@ -2666,6 +2657,21 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             frame: frame,
             isFullscreen: frame.map(Self.frameFillsScreen) ?? false
         )
+    }
+
+    /// Debut's own windows never produce a focus report: discovery drops this process's
+    /// activations so the switcher is never named the app the user switched to. Settings is
+    /// admitted as a switcher entry all the same, so while it is key the cached focus still names
+    /// the window the user left for it. Reading AppKit's own key window is local and bounded, so
+    /// this adds no AX or WindowServer round trip. Only a window the switchers offer counts; the
+    /// overlay or onboarding being key says nothing about the user's place.
+    private func ownSwitcherKeyWindow() -> FocusedWindowSnapshot? {
+        guard let ownKeyWindow = ownKeyWindowProvider.map({ $0() }) ?? Self.localKeyWindowSnapshot(),
+              let windowID = ownKeyWindow.windowID,
+              tutorialScope?.windowIDs.contains(windowID) == true
+                  || spaceManager.spaceContainingWindow(windowID: windowID) != nil
+        else { return nil }
+        return ownKeyWindow
     }
 
     private static func localKeyWindowSnapshot() -> FocusedWindowSnapshot? {

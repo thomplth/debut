@@ -63,38 +63,62 @@ struct AltTabSwitcherTests {
         #expect(controller.altTabSelection?.window.windowID == 202)
     }
 
-    /// The activation observer and the shortcut are delivered independently. If the shortcut
-    /// wins that race, the stored timestamp still names the window used before the focused one.
-    /// Entry zero must describe what the user is actually leaving or the switcher skips an
-    /// unrelated window and every subsequent flip appears to change the order arbitrarily.
-    @Test("Opening repairs stale MRU from the focused window")
-    func openingRepairsStaleFocusedWindow() {
+    /// The cached focus is the last report Debut accepted, and that report already moved the
+    /// MRU. Re-promoting it at open could only undo fresher writes — here the previous switch's
+    /// own commit — so a second Option-Tab pressed before that switch's report arrived put the
+    /// window being left back on top and selected the window the user was already on (KHA-803).
+    @Test("A fast second Option-Tab trusts the order the first switch wrote")
+    func fastSecondOpenTrustsCommittedOrder() {
         let now = Date()
         let controller = SpaceController(
             windowService: MockWindowService(),
             keyboardService: MockKeyboardService(),
-            focusedWindowSnapshotProvider: {
-                FocusedWindowSnapshot(windowID: 303, frame: nil, isFullscreen: false)
-            }
+            ownKeyWindowProvider: { nil }
         )
         let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(window(101, pid: 11, activatedAt: now), toSpaceID: spaceID)
         controller.spaceManager.addWindow(
-            window(101, activatedAt: now),
+            window(202, pid: 22, activatedAt: now.addingTimeInterval(-1)),
             toSpaceID: spaceID
         )
         controller.spaceManager.addWindow(
-            window(202, activatedAt: now.addingTimeInterval(-1)),
+            window(303, pid: 33, activatedAt: now.addingTimeInterval(-2)),
             toSpaceID: spaceID
         )
+        controller.recordWindowActivation(windowID: 101)
+
+        controller.handleKeyEvent(.altTabHold)
+        controller.handleKeyEvent(.cmdRelease)
+        controller.handleKeyEvent(.altTabHold)
+
+        #expect(controller.altTabEntries.map(\.window.windowID) == [202, 101, 303])
+        #expect(controller.altTabSelection?.window.windowID == 101)
+    }
+
+    /// Moving a window to the MRU head is a claim that it took focus. An activation macOS
+    /// refused outright never produces a report to correct that claim.
+    @Test("A refused switch leaves the MRU head where it was")
+    func refusedSwitchKeepsMRUHead() {
+        let now = Date()
+        let windowService = MockWindowService()
+        windowService.frontWindowResult = false
+        windowService.activateAppResult = false
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: MockKeyboardService(),
+            ownKeyWindowProvider: { nil }
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(window(101, pid: 11, activatedAt: now), toSpaceID: spaceID)
         controller.spaceManager.addWindow(
-            window(303, activatedAt: now.addingTimeInterval(-2)),
+            window(202, pid: 22, activatedAt: now.addingTimeInterval(-1)),
             toSpaceID: spaceID
         )
 
         controller.handleKeyEvent(.altTabHold)
+        controller.handleKeyEvent(.cmdRelease)
 
-        #expect(controller.altTabEntries.map(\.window.windowID) == [303, 101, 202])
-        #expect(controller.altTabSelection?.window.windowID == 101)
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [101, 202])
     }
 
     /// Focus reports never name Debut's own windows, so while Settings is key the cached focus
