@@ -187,6 +187,8 @@ artifact_digests() {
 finish_run() {
     local status=$? reached suite_started=false result cpu
     trap - EXIT INT TERM
+    # A cancelled run leaves the sampler looping in the background otherwise.
+    stop_vm_cpu_sampler
     if [[ -n "$RUN_DIR" && -d "$RUN_DIR" ]]; then
         reached="$(run_report_reached)"
         run_report_close_phase "$status"
@@ -194,7 +196,9 @@ finish_run() {
         grep -Eq $'^(suite|permission-journeys)\t' "$RUN_DIR/results/guest-phases.tsv" 2>/dev/null \
             && suite_started=true
         result="$(run_report_classify "$status" "$reached" "$suite_started" "$RUN_CANCELED")"
-        cpu="{\"buildCpuSeconds\": ${BUILD_CPU_SECONDS:-null}, \"suiteVmCpuSeconds\": ${SUITE_VM_CPU_SECONDS:-null}}"
+        local utilization
+        utilization="$(run_report_cpu_utilization "$RUN_DIR/vm-cpu-samples")"
+        cpu="{\"buildCpuSeconds\": ${BUILD_CPU_SECONDS:-null}, \"suiteVmCpuSeconds\": ${SUITE_VM_CPU_SECONDS:-null}, \"suiteVmCpuPercent\": $utilization}"
         run_report_write "$RUN_DIR" "$result" "$SOURCE_IDENTITY" \
             "{\"groups\": \"$SELECTED_GROUPS\", \"durationProfile\": \"$DURATION_PROFILE\", \"gallery\": \"$GALLERY_CAPTURE\", \"vm\": \"$VM_NAME\", \"reachedPhase\": \"$reached\"}" \
             "$(artifact_digests)" "$cpu" || echo "Could not write $RUN_DIR/report.json" >&2
@@ -258,6 +262,15 @@ guest_session() {
     return "${PIPESTATUS[0]}"
 }
 
+VM_CPU_SAMPLER=""
+stop_vm_cpu_sampler() {
+    if [[ -n "$VM_CPU_SAMPLER" ]]; then
+        kill "$VM_CPU_SAMPLER" 2>/dev/null || true
+        wait "$VM_CPU_SAMPLER" 2>/dev/null || true
+        VM_CPU_SAMPLER=""
+    fi
+}
+
 # Always succeeds as a phase; the suite's own verdict is kept in GUEST_STATUS so the collect
 # phase still runs and is timed after a failing suite.
 GUEST_STATUS=0
@@ -265,8 +278,11 @@ run_guest() {
     local vm_cpu_before
     echo "Running E2E groups $SELECTED_GROUPS inside $VM_NAME (duration profile: $DURATION_PROFILE, gallery: $GALLERY_CAPTURE)..."
     vm_cpu_before="$(run_report_vm_cpu_seconds)"
+    run_report_sample_vm_cpu "$RUN_DIR/vm-cpu-samples" 2 &
+    VM_CPU_SAMPLER=$!
     GUEST_STATUS=0
     run_report_interruptibly guest_session || GUEST_STATUS=$?
+    stop_vm_cpu_sampler
     SUITE_VM_CPU_SECONDS="$(awk -v a="$vm_cpu_before" -v b="$(run_report_vm_cpu_seconds)" 'BEGIN { printf "%.1f", b - a }')"
 }
 
