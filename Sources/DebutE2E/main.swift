@@ -16,6 +16,8 @@ nonisolated(unsafe) var passCount = 0
 nonisolated(unsafe) var failCount = 0
 nonisolated(unsafe) var skipCount = 0
 nonisolated(unsafe) var totalCount = 0
+nonisolated(unsafe) var currentSection = ""
+nonisolated(unsafe) var recordedChecks: [[String: String]] = []
 let environment = ProcessInfo.processInfo.environment
 let isGitHubHosted = environment["GITHUB_ACTIONS"] == "true"
 let skipsSyntheticDrags = isGitHubHosted
@@ -51,13 +53,43 @@ func pass(_ msg: String) { print(color("  PASS", 32) + "  \(msg)") }
 func fail(_ msg: String) { print(color("  FAIL", 31) + "  \(msg)") }
 func skip(_ msg: String) { print(color("  SKIP", 33) + "  \(msg)") }
 func info(_ msg: String) { print(color("  INFO", 36) + "  \(msg)") }
-func header(_ msg: String) { print("\n" + color("=== \(msg) ===", 1)) }
+func header(_ msg: String) {
+    currentSection = msg
+    print("\n" + color("=== \(msg) ===", 1))
+}
+
+/// Each invocation (the suite, or one onboarding probe) writes its own file, so the run report can
+/// name every check and its section rather than parse colored log lines. Rewritten after every
+/// check, so a crash still leaves the results up to it.
+let checkResultsFile: URL = {
+    let arguments = CommandLine.arguments.dropFirst()
+    let invocation = arguments.isEmpty ? "suite" : arguments.joined(separator: "-")
+    return URL(fileURLWithPath: "/tmp/debut-e2e-results")
+        .appendingPathComponent("\(invocation).json")
+}()
+
+func recordCheck(_ name: String, status: String, reason: String? = nil) {
+    var check = ["section": currentSection, "name": name, "status": status]
+    if let reason { check["reason"] = reason }
+    recordedChecks.append(check)
+    let invocation = checkResultsFile.deletingPathExtension().lastPathComponent
+    guard let data = try? JSONSerialization.data(
+        withJSONObject: ["invocation": invocation, "checks": recordedChecks],
+        options: [.prettyPrinted, .sortedKeys]
+    ) else { return }
+    try? FileManager.default.createDirectory(
+        at: checkResultsFile.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try? data.write(to: checkResultsFile)
+}
 
 func skipTest(_ name: String, reason: String) {
     totalCount += 1
     skipCount += 1
     skip(name)
     info("  \(reason)")
+    recordCheck(name, status: "skipped", reason: reason)
 }
 
 func skipDragTest(_ name: String) {
@@ -80,9 +112,9 @@ func test(_ name: String, _ body: () -> Bool) {
         return
     }
     totalCount += 1
-    if body() { passCount += 1; pass(name) }
+    if body() { passCount += 1; pass(name); recordCheck(name, status: "passed") }
     else {
-        failCount += 1; fail(name)
+        failCount += 1; fail(name); recordCheck(name, status: "failed")
         let failureURL = URL(fileURLWithPath: "/tmp/debut-e2e-screenshots/failure-\(totalCount).json")
         if let data = try? Data(contentsOf: diagnosticFile) { try? data.write(to: failureURL) }
     }

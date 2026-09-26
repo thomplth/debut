@@ -50,7 +50,31 @@ as_console() {
     sudo launchctl asuser "$console_uid" sudo -u "$console_user" -- "$@"
 }
 
+# Guest phases use the guest's own monotonic clock; the host never subtracts across machines.
+# They are kept outside the results directory, which is recreated partway through the run.
+GUEST_PHASES="/tmp/debut-e2e-guest-phases.tsv"
+GUEST_PHASE=""
+GUEST_PHASE_START=""
+rm -f "$GUEST_PHASES"
+rm -rf /tmp/debut-e2e-results
+guest_phase() {
+    local now
+    now="$(/usr/bin/perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%.0f", clock_gettime(CLOCK_MONOTONIC) * 1000')"
+    if [[ -n "$GUEST_PHASE" ]]; then
+        printf '%s\t%s\t%s\n' "$GUEST_PHASE" "$GUEST_PHASE_START" "$now" >> "$GUEST_PHASES"
+    fi
+    GUEST_PHASE="${1:-}"
+    GUEST_PHASE_START="$now"
+}
+
 cleanup() {
+    guest_phase ""
+    mkdir -p "$RESULTS_DIR"
+    cp "$GUEST_PHASES" "$RESULTS_DIR/guest-phases.tsv" 2>/dev/null || true
+    # Every DebutE2E invocation writes its own per-check results file.
+    if [[ -d /tmp/debut-e2e-results ]]; then
+        ditto /tmp/debut-e2e-results "$RESULTS_DIR/checks"
+    fi
     as_console pkill -f "$APP_PATH" 2>/dev/null || true
     as_console pkill -x TextEdit 2>/dev/null || true
     as_console launchctl unsetenv DEBUT_DISABLE_WINDOW_PREVIEWS 2>/dev/null || true
@@ -183,6 +207,7 @@ provision_desktops() {
     return 1
 }
 
+guest_phase install
 echo "Installing the host build in the isolated guest..."
 sudo rm -rf "$APP_PATH"
 sudo ditto -x -k "$APP_ARCHIVE" /Applications
@@ -195,6 +220,7 @@ bundle_id="$(/usr/bin/defaults read "$APP_PATH/Contents/Info" CFBundleIdentifier
 # holds the two together so this stays a derivation rather than a guess.
 support_dir="$console_home/Library/Application Support/${bundle_id##*.}"
 
+guest_phase permissions
 echo "Granting Screen Recording and Accessibility to Debut and the E2E input driver..."
 grant_accessibility "$bundle_id" 0 "$APP_PATH"
 grant_screen_capture "$bundle_id" 0 "$APP_PATH"
@@ -228,6 +254,7 @@ reset_capture_reminders() {
 }
 reset_capture_reminders
 
+guest_phase fixtures
 # Under Reduce Motion the removal transition is a 0.12s fade rather than a 0.36s spring, which is
 # correct behaviour but too brief to sample as motion. The fade branch is covered by unit tests, so
 # the disposable guest is pinned to the spring instead of the E2E check guessing which one it drew.
@@ -272,6 +299,7 @@ rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 status=0
 
+guest_phase onboarding
 # First-run permissions must be tested as real TCC denials, not simulated model flags.
 # Only this disposable host rewrites TCC; the normal suite never changes the developer's grants.
 as_console pkill -f "$APP_PATH" 2>/dev/null || true
@@ -316,6 +344,7 @@ grant_accessibility "$bundle_id" 0 "$APP_PATH"
 grant_screen_capture "$bundle_id" 0 "$APP_PATH"
 sudo killall tccd 2>/dev/null || true
 
+guest_phase relaunch
 # Revoking capture during first-use probes can recreate a pending reminder. Clear that
 # fixture state before the full suite so its screenshots observe the actual app.
 reset_capture_reminders
@@ -333,6 +362,7 @@ as_console launchctl setenv DEBUT_FORCE_DISPLAY_STACK_INDICATOR 1
 as_console env DEBUT_FORCE_DISPLAY_STACK_INDICATOR=1 "$APP_PATH/Contents/MacOS/Debut" --force-display-stack-indicator >/tmp/debut-e2e-debut.log 2>&1 </dev/null &
 wait_for_debut_ready
 
+guest_phase suite
 echo "Running the full suite with the $DURATION_PROFILE duration profile, including the synthetic drag gestures..."
 unset GITHUB_ACTIONS
 set +e
@@ -343,6 +373,7 @@ set -e
 
 # The gallery is review evidence: it asserts only that each screenshot was written. Rendering
 # assertions live in the suite above and run either way.
+guest_phase gallery
 if [[ "$GALLERY_CAPTURE" == on ]]; then
     echo "Capturing desktop indicator and overlay glass on light and dark backgrounds..."
     grant_screen_capture "$E2E_SOURCE" 1 "$E2E_SOURCE"
