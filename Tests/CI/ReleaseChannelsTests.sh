@@ -32,6 +32,13 @@ with tempfile.TemporaryDirectory() as d:
     assert p['should_release'] == 'false', p
     assert p['previous_update_tag'] == 'v0.5.0-nightly.20260908', p
     assert p['version'] == '0.5.0-nightly.20260908.2' and p['build_version'] == '10001', p
+    # Releases published before the channel was passed to the tag step recorded "-v1". Those
+    # immutable tags still used the isolated nightly key and remain valid update baselines.
+    commit()
+    git('tag', '-a', 'v0.6.0-nightly.20260914', '-m',
+        'Debut v0.6.0-nightly.20260914\n\nDebut-build: 10002\n\nDebut-update-channel: -v1')
+    p = plan('nightly', '--require-changes')
+    assert p['previous_update_tag'] == 'v0.6.0-nightly.20260914', p
     commit(); git('tag', '-a', 'v0.4.4', '-m', 'Debut v0.4.4\n\nDebut-build: 10001')
     p = plan('patch')
     assert p['version'] == '0.4.5' and p['previous_tag'] == 'v0.4.4', p

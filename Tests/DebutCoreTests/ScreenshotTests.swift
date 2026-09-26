@@ -189,8 +189,14 @@ struct ScreenshotTests {
                 let rightFromBackground = max(abs(rr - backgroundR), abs(rg - backgroundG), abs(rb - backgroundB))
                 guard max(leftFromBackground, rightFromBackground) > 0.01 else { continue }
 
-                let difference = (abs(lr - rr) + abs(lg - rg) + abs(lb - rb)
-                    + abs(channel(leftBytes, leftOffset, 3) - channel(rightBytes, rightOffset, 3))) / 4
+                let redDifference = abs(lr - rr)
+                let greenDifference = abs(lg - rg)
+                let blueDifference = abs(lb - rb)
+                let leftAlpha = channel(leftBytes, leftOffset, 3)
+                let rightAlpha = channel(rightBytes, rightOffset, 3)
+                let alphaDifference = abs(leftAlpha - rightAlpha)
+                let difference = (redDifference + greenDifference
+                    + blueDifference + alphaDifference) / 4
                 totalDifference += difference
                 changedPixels += difference > 0.08 ? 1 : 0
                 comparedPixels += 1
