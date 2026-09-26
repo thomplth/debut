@@ -1320,17 +1320,23 @@ struct SpaceControllerTests {
         #expect(controller.spaceManager.activeSpaceID == originalSpaceID)
     }
 
-    @Test("Desktop selection closes the overlay and requests the real desktop")
-    func desktopSelectionRevealsDesktop() {
-        let (controller, _, keyboardSvc) = makeController()
-        var revealCount = 0
-        controller.onDesktopReveal = { revealCount += 1 }
+    // KHA-780: the transparent backdrop used to reveal the desktop by hiding every other app.
+    @Test("Clicking away from the stages dismisses like Escape and commits nothing")
+    func pointerDismissalDiscardsLikeEscape() {
+        let (controller, windowSvc, keyboardSvc) = makeController()
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceID)
+        let order = controller.spaceManager.spaces[0].windows.map(\.windowID)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
-        controller.revealDesktop()
-
+        controller.dismissOverlayFromPointer()
         #expect(!controller.isSpaceManagerVisible)
-        #expect(revealCount == 1)
+
+        keyboardSvc.simulateEvent(.cmdRelease)
+        #expect(windowSvc.raisedWindowIDs.isEmpty)
+        #expect(controller.spaceManager.activeSpaceID == spaceID)
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == order)
     }
 
     @Test("Held Tab stops at the last window and a fresh press wraps")

@@ -249,7 +249,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public let windowService: any WindowService
     public let keyboardService: any KeyboardService
     public weak var delegate: SpaceControllerDelegate?
-    public var onDesktopReveal: (() -> Void)?
     public var onPracticeVerified: ((OnboardingPractice) -> Void)?
     public var onTutorialSelectionVerified: ((CGWindowID, OnboardingPractice) -> Void)?
     public var tutorialScope: TutorialSwitcherScope?
@@ -3040,18 +3039,16 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         commitSelection()
     }
 
-    /// Close the switcher and expose Finder's real desktop surface.
-    public func revealDesktop() {
-        guard activeTutorialScope == nil else { return }
-        guard isSpaceManagerVisible, !isStageStackCommitInFlight else { return }
-        stageStackTransaction.discard()
-        isSpaceManagerVisible = false
-        if let tapService = keyboardService as? EventTapKeyboardService {
-            tapService.overlayVisible = false
-        }
-        dismissOverlayPresentation()
-        onDesktopReveal?()
-        diag.report("desktop_revealed_from_overlay")
+    /// A click on the blank backdrop cancels the switcher the way Escape does. It must not
+    /// change what is shown: this used to hide every other application (KHA-780). The tutorial
+    /// keeps its overlay, as before, since a stray click should not abandon a practice step.
+    public func dismissOverlayFromPointer() {
+        guard activeTutorialScope == nil,
+              isSpaceManagerVisible,
+              !isStageStackCommitInFlight
+        else { return }
+        discardOverlay()
+        diag.report("overlay_dismissed_by_pointer")
     }
 
     @discardableResult
