@@ -246,22 +246,31 @@ PYEND
 }
 
 # run_report_prune <runs dir> <keep> <active run dir>
-# Keeps the newest <keep> runs and the newest <keep> unsuccessful ones. A directory without a
-# report is either active or was killed mid-run; only the named active one is exempt.
+# Keeps the newest <keep> finished runs and the newest <keep> unsuccessful ones. A directory
+# without a report belongs to a run that is still going or waiting in the queue (runs create it
+# before queueing), so it is never pruned unless it is a day old and so certainly abandoned.
+# Must not fail: it runs in the exit handler, where an error would skip releasing the queue.
 run_report_prune() {
     local runs="$1" keep="$2" active="$3" run result index=0 failed_index=0
     [[ -d "$runs" ]] || return 0
     for run in $(ls -1 "$runs" | sort -r); do
         run="$runs/$run"
-        [[ -d "$run" ]] || continue
-        [[ "$run" == "$active" ]] && continue
+        [[ -d "$run" && "$run" != "$active" ]] || continue
+        if [[ ! -f "$run/report.json" ]]; then
+            if [[ -n "$(find "$run" -maxdepth 0 -mmin +1440 2>/dev/null || true)" ]]; then
+                rm -rf "$run"
+            fi
+            continue
+        fi
         index=$(( index + 1 ))
-        result="$(sed -n 's/.*"result": *"\([a-z_]*\)".*/\1/p' "$run/report.json" 2>/dev/null | head -1)"
+        result="$(sed -n 's/.*"result": *"\([a-z_]*\)".*/\1/p' "$run/report.json" 2>/dev/null || true)"
+        result="${result%%$'\n'*}"
         if [[ "$result" != passed ]]; then
             failed_index=$(( failed_index + 1 ))
-            (( failed_index <= keep )) && continue
+            if (( failed_index <= keep )); then continue; fi
         fi
-        (( index <= keep )) && continue
+        if (( index <= keep )); then continue; fi
         rm -rf "$run"
     done
+    return 0
 }

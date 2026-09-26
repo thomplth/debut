@@ -193,6 +193,22 @@ set -e
 (( interrupt_status == 1 )) || fail "an interruptible phase must return its command's status, got $interrupt_status"
 grep -q 'kept going' "$work/errexit2.out" && fail "errexit must still apply inside an interruptible phase"
 
+# A run without a report is still running or waiting in the queue: its directory is created before
+# it queues. Pruning must leave it alone, and must not fail the finishing run under errexit.
+runs="$work/prune-live"
+for n in 1 2 3 4 5 6 7 8; do
+    mkdir -p "$runs/20260102T00000$n-1"
+    printf '{\n  "schemaVersion": 1,\n  "result": "passed"\n}\n' > "$runs/20260102T00000$n-1/report.json"
+done
+mkdir -p "$runs/20260102T000009-2"   # another run, still going
+set +e
+( set -euo pipefail; run_report_prune "$runs" 2 "$runs/20260102T000008-1" )
+prune_status=$?
+set -e
+(( prune_status == 0 )) || fail "pruning must not fail the run that finishes (exit $prune_status)"
+[[ -d "$runs/20260102T000009-2" ]] || fail "pruning deleted another run's live directory"
+[[ ! -d "$runs/20260102T000001-1" ]] || fail "pruning must still remove old finished runs read from pretty-printed reports"
+
 # --- ps CPU times parse in every format ps prints. ---
 [[ "$(run_report_ps_seconds '0:01.50')" == 1.5 ]] || fail "M:SS.ss CPU time parsed wrong"
 [[ "$(run_report_ps_seconds '1:02:03')" == 3723.0 ]] || fail "H:MM:SS CPU time parsed wrong"
