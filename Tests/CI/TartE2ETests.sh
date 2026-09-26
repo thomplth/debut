@@ -218,16 +218,21 @@ EOF
         [[ "$actual" == *"$expected" ]] \
             || fail "guest command for env='$env_profile' args='$*' ended '${actual: -40}', expected '$expected'"
     }
-    expect_guest_command "app.zip e2e full on all" ""
-    expect_guest_command "app.zip e2e ordinary on all" "" --duration-profile ordinary
-    expect_guest_command "app.zip e2e ordinary off all" "" --duration-profile ordinary --no-gallery
-    expect_guest_command "app.zip e2e ordinary on all" "ordinary"
-    expect_guest_command "app.zip e2e full on all" "ordinary" --duration-profile full
-    expect_guest_command "app.zip e2e full off all" "" --no-gallery
-    expect_guest_command "app.zip e2e full on drag-drop,smoke" "" --groups drag-drop,smoke
-    expect_guest_command "app.zip e2e ordinary on permissions" "" --groups permissions --duration-profile ordinary
+    expect_guest_command "app.zip e2e full on all none" ""
+    expect_guest_command "app.zip e2e ordinary on all none" "" --duration-profile ordinary
+    expect_guest_command "app.zip e2e ordinary off all none" "" --duration-profile ordinary --no-gallery
+    expect_guest_command "app.zip e2e ordinary on all none" "ordinary"
+    expect_guest_command "app.zip e2e full on all none" "ordinary" --duration-profile full
+    expect_guest_command "app.zip e2e full off all none" "" --no-gallery
+    expect_guest_command "app.zip e2e full on drag-drop,smoke none" "" --groups drag-drop,smoke
+    expect_guest_command "app.zip e2e ordinary on permissions none" "" --groups permissions --duration-profile ordinary
+    # A scenario alone runs only that scenario: no other group, and no permission journeys.
+    expect_guest_command "app.zip e2e full on none prepared-arrival" "" --scenarios prepared-arrival
+    expect_guest_command "app.zip e2e full on smoke window-drop,baseline" "" \
+        --groups smoke --scenarios window-drop,baseline
 
-    for bad_arguments in "run --groups" "run --groups nonsense" "run --groups ,"; do
+    for bad_arguments in "run --groups" "run --groups nonsense" "run --groups ," \
+        "run --scenarios" "run --scenarios nonsense" "run --scenarios ,"; do
         rm -f "$stub_dir/tart-calls"
         set +e
         # shellcheck disable=SC2086
@@ -246,6 +251,19 @@ EOF
     guest_groups="$(sed -n 's/^SUITE_GROUP_NAMES="\(.*\)"$/\1/p' "$guest_runner" | tr ' ' '\n' | sort | tr '\n' ' ')"
     [[ -n "$swift_groups" && "$swift_groups" == "$host_groups" && "$swift_groups" == "$guest_groups" ]] \
         || fail "group names disagree: swift='$swift_groups' host='$host_groups' guest='$guest_groups'"
+
+    # The host validates scenario IDs from the catalog source, before anything is built; it must
+    # read exactly the IDs DebutE2E --list prints.
+    catalog_scenarios="$(sed -n 's/^ *\.init(id: "\([a-z0-9-]*\)".*/\1/p' Sources/DebutE2E/Scenarios.swift | sort | tr '\n' ' ')"
+    host_scenarios="$(
+        # shellcheck source=/dev/null
+        source "$host_runner"
+        known_scenarios | tr ' ' '\n' | sort | tr '\n' ' '
+    )"
+    [[ -n "$catalog_scenarios" && "$catalog_scenarios" == "$host_scenarios" ]] \
+        || fail "scenario IDs disagree: catalog='$catalog_scenarios' host='$host_scenarios'"
+    (( $(wc -w <<<"$catalog_scenarios") == $(grep -c '^    \.init(id: ' Sources/DebutE2E/Scenarios.swift) )) \
+        || fail "every catalog entry must yield one scenario ID"
 fi
 
 if [[ -f "$e2e_source" ]]; then

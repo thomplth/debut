@@ -29,13 +29,21 @@ GUEST_ARTIFACT=""
 DURATION_PROFILE=""
 GALLERY_CAPTURE=on
 SELECTED_GROUPS=all
+SELECTED_SCENARIOS=none
 # DebutE2E's suite groups (Sources/DebutE2E/Scenarios.swift) plus the guest's permission journeys.
 KNOWN_GROUPS="smoke overlay-input drag-drop desktop-navigation fullscreen window-moves window-lifecycle onboarding rendering permissions"
+
+# Scenario IDs come from the catalog source rather than `DebutE2E --list`, so a mistyped ID is
+# refused before anything is built. The contract checks the two agree.
+known_scenarios() {
+    sed -n 's/^ *\.init(id: "\([a-z0-9-]*\)".*/\1/p' "$PROJECT_DIR/Sources/DebutE2E/Scenarios.swift" | tr '\n' ' '
+}
 
 usage() {
     cat <<EOF
 Usage: scripts/tart-e2e.sh <prepare|run|stop|status>
-       scripts/tart-e2e.sh run [--groups <group,...>] [--duration-profile ordinary|full] [--no-gallery]
+       scripts/tart-e2e.sh run [--groups <group,...>] [--scenarios <id,...>]
+                               [--duration-profile ordinary|full] [--no-gallery]
 
   prepare  Clone and configure the free Tahoe VM (one-time, about 27 GB download)
   run      Run every check in the headless guest
@@ -55,6 +63,10 @@ Run options:
            $KNOWN_GROUPS.
            Defaults to every group. Iterate on the smallest relevant group; finish
            with the full suite before delivering a change to shared behavior.
+  --scenarios <id,...>
+           Run these scenarios (see DebutE2E --list), plus any --groups, in catalog
+           order. Without --groups nothing else runs, including the permission
+           journeys. Reproduce a failure this way before rerunning its group.
 
 Runs wait in arrival order for the one local guest, across every checkout and
 override. Interrupting a waiting run leaves the queue without touching the VM.
@@ -72,6 +84,7 @@ EOF
 parse_run_options() {
     DURATION_PROFILE="${DEBUT_E2E_DURATION_PROFILE:-full}"
     GALLERY_CAPTURE=on
+    local groups_given=false
     while (( $# > 0 )); do
         case "$1" in
             --duration-profile)
@@ -89,6 +102,15 @@ parse_run_options() {
                     exit 2
                 fi
                 SELECTED_GROUPS="$2"
+                groups_given=true
+                shift 2
+                ;;
+            --scenarios)
+                if (( $# < 2 )); then
+                    echo "--scenarios needs a comma-separated list of scenario IDs." >&2
+                    exit 2
+                fi
+                SELECTED_SCENARIOS="$2"
                 shift 2
                 ;;
             *)
@@ -116,13 +138,29 @@ parse_run_options() {
             exit 2
         fi
     fi
+    if [[ "$SELECTED_SCENARIOS" != none ]]; then
+        local scenario known chosen=false
+        known=" $(known_scenarios)"
+        for scenario in ${SELECTED_SCENARIOS//,/ }; do
+            if [[ "$known" != *" $scenario "* ]]; then
+                echo "Unknown scenario '$scenario'. Known scenarios:$known" >&2
+                exit 2
+            fi
+            chosen=true
+        done
+        if [[ "$chosen" == false ]]; then
+            echo "--scenarios '$SELECTED_SCENARIOS' selects nothing." >&2
+            exit 2
+        fi
+        [[ "$groups_given" == true ]] || SELECTED_GROUPS=none
+    fi
 }
 
 guest_command() {
     local command
-    printf -v command '/bin/bash %q %q %q %q %q %q' \
+    printf -v command '/bin/bash %q %q %q %q %q %q %q' \
         "/Volumes/My Shared Files/$GUEST_ARTIFACT" "$APP_ARTIFACT" "$E2E_ARTIFACT" \
-        "$DURATION_PROFILE" "$GALLERY_CAPTURE" "$SELECTED_GROUPS"
+        "$DURATION_PROFILE" "$GALLERY_CAPTURE" "$SELECTED_GROUPS" "$SELECTED_SCENARIOS"
     printf '%s\n' "$command"
 }
 
@@ -200,7 +238,7 @@ finish_run() {
         utilization="$(run_report_cpu_utilization "$RUN_DIR/vm-cpu-samples")"
         cpu="{\"buildCpuSeconds\": ${BUILD_CPU_SECONDS:-null}, \"suiteVmCpuSeconds\": ${SUITE_VM_CPU_SECONDS:-null}, \"suiteVmCpuPercent\": $utilization}"
         run_report_write "$RUN_DIR" "$result" "$SOURCE_IDENTITY" \
-            "{\"groups\": \"$SELECTED_GROUPS\", \"durationProfile\": \"$DURATION_PROFILE\", \"gallery\": \"$GALLERY_CAPTURE\", \"vm\": \"$VM_NAME\", \"reachedPhase\": \"$reached\"}" \
+            "{\"groups\": \"$SELECTED_GROUPS\", \"scenarios\": \"$SELECTED_SCENARIOS\", \"durationProfile\": \"$DURATION_PROFILE\", \"gallery\": \"$GALLERY_CAPTURE\", \"vm\": \"$VM_NAME\", \"reachedPhase\": \"$reached\"}" \
             "$(artifact_digests)" "$cpu" || echo "Could not write $RUN_DIR/report.json" >&2
         echo
         run_report_summary "$RUN_DIR" 2>/dev/null || echo "Tart E2E run: $result ($RUN_DIR)"
@@ -223,7 +261,7 @@ timed_build() {
 }
 
 enter_queue() {
-    tart_queue_enter "tart-e2e $(basename "$PROJECT_DIR") $SELECTED_GROUPS $DURATION_PROFILE"
+    tart_queue_enter "tart-e2e $(basename "$PROJECT_DIR") $SELECTED_GROUPS $SELECTED_SCENARIOS $DURATION_PROFILE"
     acquire_share_lock
 }
 
@@ -276,7 +314,7 @@ stop_vm_cpu_sampler() {
 GUEST_STATUS=0
 run_guest() {
     local vm_cpu_before
-    echo "Running E2E groups $SELECTED_GROUPS inside $VM_NAME (duration profile: $DURATION_PROFILE, gallery: $GALLERY_CAPTURE)..."
+    echo "Running E2E groups $SELECTED_GROUPS, scenarios $SELECTED_SCENARIOS inside $VM_NAME (duration profile: $DURATION_PROFILE, gallery: $GALLERY_CAPTURE)..."
     vm_cpu_before="$(run_report_vm_cpu_seconds)"
     run_report_sample_vm_cpu "$RUN_DIR/vm-cpu-samples" 2 &
     VM_CPU_SAMPLER=$!

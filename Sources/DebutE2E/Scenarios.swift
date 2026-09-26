@@ -79,10 +79,11 @@ let e2eScenarioCatalog: [E2EScenarioDescriptor] = [
 ]
 
 enum E2EInvocation: Equatable, Sendable {
-    /// `nil` runs every group in catalog order.
-    case suite(groups: [E2EGroup]?)
+    /// `nil` for both runs every group in catalog order. Scenarios add single scenarios to any
+    /// groups asked for, so a failure can be reproduced without rerunning its whole group.
+    case suite(groups: [E2EGroup]?, scenarios: [String]? = nil)
     case list
-    case plan(groups: [E2EGroup]?)
+    case plan(groups: [E2EGroup]?, scenarios: [String]? = nil)
 }
 
 struct E2EArgumentError: Error, Equatable {
@@ -98,6 +99,7 @@ func parseE2EInvocation(_ arguments: [String]) -> Result<E2EInvocation, E2EArgum
     var listing = false
     var planning = false
     var groups: [E2EGroup]?
+    var scenarios: [String]?
     var remaining = arguments[...]
     while let option = remaining.popFirst() {
         switch option {
@@ -122,25 +124,50 @@ func parseE2EInvocation(_ arguments: [String]) -> Result<E2EInvocation, E2EArgum
                 return .failure(.init(message: "--groups selects nothing"))
             }
             groups = selected
+        case "--scenarios":
+            guard let value = remaining.popFirst() else {
+                return .failure(.init(message: "--scenarios needs a comma-separated list of scenario IDs"))
+            }
+            var selected: [String] = []
+            for name in value.split(separator: ",", omittingEmptySubsequences: true) {
+                let name = name.trimmingCharacters(in: .whitespaces)
+                guard e2eScenarioCatalog.contains(where: { $0.id == name }) else {
+                    return .failure(.init(message: "Unknown scenario '\(name)'. Run --list for the catalog."))
+                }
+                if !selected.contains(name) { selected.append(name) }
+            }
+            guard !selected.isEmpty else {
+                return .failure(.init(message: "--scenarios selects nothing"))
+            }
+            scenarios = selected
         default:
             return .failure(.init(message: "Unknown option '\(option)'. "
-                + "Use --list, --plan, or --groups <group,...>"))
+                + "Use --list, --plan, --groups <group,...> or --scenarios <id,...>"))
         }
     }
     if listing {
-        guard !planning, groups == nil else {
+        guard !planning, groups == nil, scenarios == nil else {
             return .failure(.init(message: "--list takes no other options"))
         }
         return .success(.list)
     }
-    return .success(planning ? .plan(groups: groups) : .suite(groups: groups))
+    return .success(planning
+        ? .plan(groups: groups, scenarios: scenarios)
+        : .suite(groups: groups, scenarios: scenarios))
 }
 
 /// The scenarios a selection runs, in run order: groups in the order asked for, and each group's
-/// scenarios in catalog order.
-func plannedScenarios(groups: [E2EGroup]?) -> [E2EScenarioDescriptor] {
-    guard let groups else { return e2eScenarioCatalog }
-    return groups.flatMap { group in e2eScenarioCatalog.filter { $0.group == group } }
+/// scenarios in catalog order. Selected scenarios join them; with scenarios in the mix, the
+/// whole selection runs in catalog order, so each still gets its usual predecessor's setup.
+func plannedScenarios(groups: [E2EGroup]?, scenarios: [String]? = nil) -> [E2EScenarioDescriptor] {
+    guard let scenarios else {
+        guard let groups else { return e2eScenarioCatalog }
+        return groups.flatMap { group in e2eScenarioCatalog.filter { $0.group == group } }
+    }
+    let selectedGroups = Set(groups ?? [])
+    return e2eScenarioCatalog.filter {
+        scenarios.contains($0.id) || selectedGroups.contains($0.group)
+    }
 }
 
 func printScenarioCatalog() {
@@ -152,8 +179,8 @@ func printScenarioCatalog() {
     }
 }
 
-func printScenarioPlan(groups: [E2EGroup]?) {
-    let planned = plannedScenarios(groups: groups)
+func printScenarioPlan(groups: [E2EGroup]?, scenarios: [String]? = nil) {
+    let planned = plannedScenarios(groups: groups, scenarios: scenarios)
     print("Runs \(planned.count) of \(e2eScenarioCatalog.count) scenarios:")
     for scenario in planned {
         print("  \(scenario.group.rawValue)/\(scenario.id)")
