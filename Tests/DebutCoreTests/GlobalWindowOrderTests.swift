@@ -99,7 +99,7 @@ struct GlobalWindowOrderTests {
     func neverActivatedSortLast() {
         var manager = SpaceManager()
         let first = manager.spaces[0].id
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         let second = manager.activeSpaceID
 
         manager.addWindow(window(101), toSpaceID: first)

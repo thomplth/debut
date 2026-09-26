@@ -472,7 +472,7 @@ struct SpaceControllerTests {
     func switchSpace() {
         let (controller, windowSvc, _) = makeController()
         let spaceAID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let spaceBID = controller.spaceManager.spaces[1].id
 
         controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceAID)
@@ -598,7 +598,7 @@ struct SpaceControllerTests {
     func mouseSelectionCommitsImmediately() {
         let (controller, windowSvc, keyboardSvc) = makeController()
         let firstSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let secondSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
@@ -867,7 +867,7 @@ struct SpaceControllerTests {
         controller.overlayPresentationDelay = 0
 
         let sourceSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.addWindow(
             SpaceWindow(
                 windowID: 101,
@@ -1032,7 +1032,7 @@ struct SpaceControllerTests {
     func hiddenStartupPrewarmFillsColdCache() throws {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
         let firstSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let secondSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
@@ -1095,7 +1095,7 @@ struct SpaceControllerTests {
     func fullyCachedActivationIssuesNoCapture() {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
         let activeSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let otherSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
@@ -1129,7 +1129,7 @@ struct SpaceControllerTests {
     func titleChangeForcesRecapture() {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
         let activeSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let otherSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
@@ -1161,7 +1161,7 @@ struct SpaceControllerTests {
         let clock = TestClock()
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(ttl: 60, clock: clock)
         let activeSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let otherSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
@@ -1199,7 +1199,7 @@ struct SpaceControllerTests {
         let clock = TestClock()
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(ttl: 60, clock: clock)
         let activeSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let otherSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
@@ -1289,7 +1289,7 @@ struct SpaceControllerTests {
     @Test("Cmd+Option+Tab hold opens overlay in space mode")
     func cmdOptionTabHold() {
         let (controller, _, keyboardSvc) = makeController()
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
         keyboardSvc.simulateEvent(.cmdOptionTabHold)
         #expect(controller.isSpaceManagerVisible)
@@ -1300,7 +1300,7 @@ struct SpaceControllerTests {
     func overlayLastSpaceShortcut() {
         let (controller, _, keyboardSvc) = makeController()
         for _ in 0..<3 {
-            controller.spaceManager.createSpace(position: .below)
+            controller.spaceManager.addFixtureDesktop()
         }
 
         keyboardSvc.simulateEvent(.cmdOptionTabHold)
@@ -1395,7 +1395,7 @@ struct SpaceControllerTests {
     func vimKeysSelectWithoutMovingWindows() {
         let (controller, _, keyboardSvc) = makeController()
         let firstSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let secondSpaceID = controller.spaceManager.spaces[1].id
         for (windowID, spaceID) in [(101, firstSpaceID), (202, firstSpaceID),
                                      (303, secondSpaceID), (404, secondSpaceID)] {
@@ -1432,8 +1432,8 @@ struct SpaceControllerTests {
     func vimSelectionSkipsEmptyStages() {
         let (controller, _, keyboardSvc) = makeController()
         let firstSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
         let lastSpaceID = controller.spaceManager.spaces[2].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.test", ownerName: "Test", windowTitle: "First"),
@@ -1458,7 +1458,7 @@ struct SpaceControllerTests {
     func escapeDiscardsPendingStageStackMoves() {
         let (controller, _, keyboardSvc) = makeController()
         let firstSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
             toSpaceID: firstSpaceID
@@ -1888,7 +1888,7 @@ struct SpaceControllerTests {
     func confirmationYieldPreservesStagedTransaction() {
         let (controller, windowService, keyboardService) = makeController()
         let sourceSpaceID = controller.spaceManager.activeSpaceID
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let destinationSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.activateSpace(id: sourceSpaceID)
         controller.spaceManager.addWindow(
@@ -2691,7 +2691,7 @@ struct SpaceControllerTests {
             clock: { clock.now }
         )
         let spaceAID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let spaceBID = controller.spaceManager.spaces[1].id
 
         controller.spaceManager.addWindow(
@@ -2817,7 +2817,7 @@ struct SpaceControllerTests {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         controller.spaceSwitcher = spaces
         let spaceAID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let spaceBID = controller.spaceManager.spaces[1].id
 
         controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceAID)
@@ -2943,7 +2943,7 @@ struct SpaceControllerTests {
             toSpaceID: sourceSpaceID
         )
 
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let targetSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
@@ -2975,7 +2975,7 @@ struct SpaceControllerTests {
             SpaceWindow(windowID: 101, ownerBundleID: "com.current", ownerName: "Current", windowTitle: "Source"),
             toSpaceID: sourceSpaceID
         )
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let targetSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),
@@ -3002,7 +3002,7 @@ struct SpaceControllerTests {
             toSpaceID: sourceSpaceID
         )
 
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let targetSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 202, ownerBundleID: "com.other", ownerName: "Other", windowTitle: "Target MRU"),

@@ -17,7 +17,7 @@ struct SpaceManagerTests {
     func liveWindowCount() {
         var sm = SpaceManager()
         let firstSpaceID = sm.activeSpaceID
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         let secondSpaceID = sm.activeSpaceID
         sm.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One"),
@@ -37,7 +37,7 @@ struct SpaceManagerTests {
     func allWindowOwnerBundleIDs() {
         var sm = SpaceManager()
         let firstSpaceID = sm.activeSpaceID
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         let secondSpaceID = sm.activeSpaceID
         sm.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One"),
@@ -59,48 +59,10 @@ struct SpaceManagerTests {
         #expect(Set(sm.allWindowOwnerBundleIDs) == ["com.a", "com.b"])
     }
 
-    @Test("Create space below active")
-    func createBelow() {
-        var sm = SpaceManager()
-        let originalID = sm.activeSpaceID
-        sm.createSpace(position: .below)
-        #expect(sm.spaces.count == 2)
-        #expect(sm.spaces[0].id == originalID)
-        #expect(sm.activeSpaceID == sm.spaces[1].id)
-    }
-
-    @Test("Create space above active")
-    func createAbove() {
-        var sm = SpaceManager()
-        let originalID = sm.activeSpaceID
-        sm.createSpace(position: .above)
-        #expect(sm.spaces.count == 2)
-        #expect(sm.spaces[1].id == originalID)
-    }
-
-    @Test("Delete overflows windows up")
-    func deleteOverflowUp() {
-        var sm = SpaceManager()
-        sm.createSpace(position: .below)
-        let secondID = sm.spaces[1].id
-        sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toSpaceID: secondID)
-        sm.activateSpace(id: secondID)
-        sm.deleteSpace(id: secondID)
-        #expect(sm.spaces.count == 1)
-        #expect(sm.spaces[0].windows.count == 1)
-    }
-
-    @Test("Delete last space creates new default")
-    func deleteLastSpace() {
-        var sm = SpaceManager()
-        sm.deleteSpace(id: sm.spaces[0].id)
-        #expect(sm.spaces.count == 1)
-    }
-
     @Test("Add and move window")
     func moveWindow() {
         var sm = SpaceManager()
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         let aID = sm.spaces[0].id
         let bID = sm.spaces[1].id
         sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.x", ownerName: "X", windowTitle: "T"), toSpaceID: aID)
@@ -130,7 +92,7 @@ struct SpaceManagerTests {
     @Test("Insert a window at any position in another space")
     func insertWindowAcrossSpaces() {
         var sm = SpaceManager()
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         let sourceID = sm.spaces[0].id
         let destinationID = sm.spaces[1].id
         sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: sourceID)
@@ -174,7 +136,7 @@ struct SpaceManagerTests {
     @Test("Remove windows for owner PID across spaces")
     func removeAllForOwnerPIDAcrossSpaces() {
         var sm = SpaceManager()
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1", ownerPID: 10), toSpaceID: sm.spaces[0].id)
         sm.addWindow(SpaceWindow(windowID: 102, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T2", ownerPID: 10), toSpaceID: sm.spaces[1].id)
         sm.addWindow(SpaceWindow(windowID: 201, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T3", ownerPID: 20), toSpaceID: sm.spaces[1].id)
@@ -233,28 +195,6 @@ struct SpaceManagerTests {
         #expect(sm.dormantWindowAssignments.isEmpty)
     }
 
-    @Test("Remove empty spaces preserves non-empty ones")
-    func removeEmpty() {
-        var sm = SpaceManager()
-        sm.createSpace(position: .below)
-        sm.createSpace(position: .below)
-        // Add a window only to the middle space (index 1)
-        let bID = sm.spaces[1].id
-        sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toSpaceID: bID)
-        sm.removeEmptySpaces()
-        #expect(sm.spaces.count == 1)
-        #expect(sm.spaces[0].id == bID)
-        #expect(sm.activeSpaceID == bID)
-    }
-
-    @Test("Remove empty spaces keeps all when all empty")
-    func removeEmptyKeepsAll() {
-        var sm = SpaceManager()
-        sm.createSpace(position: .below)
-        sm.removeEmptySpaces()
-        #expect(sm.spaces.count == 2) // all empty, keep all
-    }
-
     @Test("Update window title")
     func updateTitle() {
         var sm = SpaceManager()
@@ -274,7 +214,7 @@ struct SpaceManagerTests {
     @Test("SpaceManager is Codable")
     func codable() throws {
         var sm = SpaceManager()
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"), toSpaceID: sm.spaces[1].id)
         let data = try JSONEncoder().encode(sm)
         let decoded = try JSONDecoder().decode(SpaceManager.self, from: data)
@@ -286,7 +226,7 @@ struct SpaceManagerTests {
     func makeWindowsDormantPreservesAssignments() {
         var sm = SpaceManager()
         let space1 = sm.activeSpaceID
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         let space2 = sm.activeSpaceID
         sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toSpaceID: space1)
         sm.addWindow(SpaceWindow(windowID: 102, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Two", ownerPID: 10), toSpaceID: space2)
@@ -305,7 +245,7 @@ struct SpaceManagerTests {
     func makeWindowDormantPreservesPlacement() {
         var sm = SpaceManager()
         let space1 = sm.activeSpaceID
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         let space2 = sm.activeSpaceID
         sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toSpaceID: space2)
         sm.addWindow(SpaceWindow(windowID: 102, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Two", ownerPID: 10), toSpaceID: space2)
@@ -508,30 +448,19 @@ struct SpaceManagerTests {
         #expect(sm.dormantWindowAssignments.isEmpty)
     }
 
-    @Test("Deleting a space purges its dormant assignments")
-    func spaceDeletionPurgesDormantAssignments() {
+    @Test("A desktop that leaves the topology purges its dormant assignments")
+    func departedDesktopPurgesDormantAssignments() {
         var sm = SpaceManager()
-        let spaceID = sm.activeSpaceID
-        sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toSpaceID: spaceID)
+        sm.reconcileSpaceStacks(with: .synthetic(desktopCount: 2, currentIndex: 1))
+        let departingID = sm.spaces[1].id
+        sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toSpaceID: departingID)
         _ = sm.makeWindowsDormant(forOwnerPID: 10)
 
-        sm.deleteSpace(id: spaceID)
+        sm.reconcileSpaceStacks(with: .synthetic(desktopCount: 1))
 
+        #expect(sm.spaces.count == 1)
+        #expect(!sm.spaces.contains { $0.id == departingID })
         #expect(sm.dormantWindowAssignments.isEmpty)
     }
 
-    @Test("Automatic empty-space pruning retains spaces with dormant assignments")
-    func emptySpacePruningRetainsDormantAssignments() {
-        var sm = SpaceManager()
-        let dormantSpaceID = sm.activeSpaceID
-        sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "One", ownerPID: 10), toSpaceID: dormantSpaceID)
-        _ = sm.makeWindowsDormant(forOwnerPID: 10)
-        sm.createSpace(position: .below)
-        sm.addWindow(SpaceWindow(windowID: 201, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Live", ownerPID: 20), toSpaceID: sm.activeSpaceID)
-
-        sm.removeEmptySpaces()
-
-        #expect(sm.spaces.contains(where: { $0.id == dormantSpaceID }))
-        #expect(sm.dormantWindowAssignments.first?.spaceID == dormantSpaceID)
-    }
 }

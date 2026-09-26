@@ -623,7 +623,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func reconcileSpaces(with topology: SpaceTopology) {
-        guard !topology.stacks.isEmpty else {
+        guard topology.hasDesktops else {
             diag.report("spaces_reconcile_refused", details: ["reason": "noDesktopsReported"])
             return
         }
@@ -646,57 +646,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             ])
             delegate?.spaceControllerDidMutateState(self)
         }
-    }
-
-    /// What a reconcile saw and did.
-    ///
-    /// Refusing to act on a zero desktop count is right — an empty answer from the window
-    /// server is not evidence the desktops are gone — but a silent refusal is indistinguishable
-    /// from a host that really has one desktop, and that ambiguity hid a launch where Debut
-    /// built one space against three real desktops.
-    public struct SpaceReconciliation: Equatable {
-        public let desktopCount: Int
-        public let spacesBefore: Int
-        public let spacesAfter: Int
-
-        public var refused: Bool { desktopCount <= 0 }
-
-        public var didChange: Bool { spacesBefore != spacesAfter }
-
-        var diagnosticEvent: String { refused ? "spaces_reconcile_refused" : "spaces_reconciled" }
-
-        var diagnosticDetails: [String: String] {
-            var details = [
-                "desktopCount": "\(desktopCount)",
-                "spacesBefore": "\(spacesBefore)",
-                "spacesAfter": "\(spacesAfter)",
-            ]
-            if refused { details["reason"] = "noDesktopsReported" }
-            return details
-        }
-    }
-
-    /// Exposed separately because startup has to grow the space list before windows are
-    /// reconciled, which happens before any controller exists.
-    @discardableResult
-    public static func reconcileSpaces(_ spaceManager: inout SpaceManager,
-                                       desktopCount: Int) -> SpaceReconciliation {
-        let before = spaceManager.spaces.count
-        guard desktopCount > 0 else {
-            return SpaceReconciliation(desktopCount: desktopCount,
-                                       spacesBefore: before,
-                                       spacesAfter: before)
-        }
-
-        while spaceManager.spaces.count > desktopCount {
-            spaceManager.deleteSpace(id: spaceManager.spaces[spaceManager.spaces.count - 1].id)
-        }
-        while spaceManager.spaces.count < desktopCount {
-            spaceManager.createSpace(position: .below)
-        }
-        return SpaceReconciliation(desktopCount: desktopCount,
-                                   spacesBefore: before,
-                                   spacesAfter: spaceManager.spaces.count)
     }
 
     /// Call whenever macOS reports the active Space changed.
