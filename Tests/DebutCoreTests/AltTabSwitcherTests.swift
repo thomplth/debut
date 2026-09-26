@@ -179,6 +179,55 @@ struct AltTabSwitcherTests {
         #expect(controller.altTabSelection?.window.windowID == 101)
     }
 
+    /// Clicking into Settings produces no focus report — discovery never observes Debut's own
+    /// process — so the MRU kept naming the window the user left, and a Cmd+Tab tap from Settings
+    /// chose from an order that predated it (KHA-802). AppKit's key-window change is the in-process
+    /// report for Debut's own windows, and both switchers then read the same order.
+    @Test("Debut's own window becoming key moves it to the MRU head for both switchers")
+    func ownWindowBecomingKeyLeadsBothSwitchers() {
+        let now = Date()
+        let windowService = MockWindowService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: MockKeyboardService(),
+            ownKeyWindowProvider: { nil }
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(window(101, pid: 11, activatedAt: now), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(
+            window(202, pid: 22, activatedAt: now.addingTimeInterval(-1)),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            window(303, pid: 33, activatedAt: now.addingTimeInterval(-2)),
+            toSpaceID: spaceID
+        )
+        controller.recordWindowActivation(windowID: 101)
+
+        controller.recordOwnWindowBecameKey(windowID: 303)
+
+        controller.handleKeyEvent(.altTabHold)
+        #expect(controller.altTabSelection?.window.windowID == 101)
+        controller.handleKeyEvent(.escape)
+
+        controller.handleKeyEvent(.cmdTabTap)
+        #expect(windowService.raisedWindowIDs.last == 101)
+    }
+
+    /// The overlay and onboarding are Debut windows too, but not switcher entries.
+    @Test("An unadmitted Debut window becoming key leaves the MRU alone")
+    func unadmittedOwnWindowBecomingKeyIsIgnored() {
+        let (controller, windowService) = makeTwoSpaceController()
+        windowService.windowList = [WindowInfo(
+            windowID: 999, ownerBundleID: "com.thomplth.Debut", ownerName: "Debut", ownerPID: 1,
+            title: "Overlay", bounds: .zero, isOnScreen: true
+        )]
+
+        controller.recordOwnWindowBecameKey(windowID: 999)
+
+        #expect(controller.spaceManager.globalWindowOrder().map(\.window.windowID) == [101, 202])
+    }
+
     @Test("Opening backward selects the last window in global order")
     func opensOnLastWindow() {
         let (controller, _) = makeTwoSpaceController()

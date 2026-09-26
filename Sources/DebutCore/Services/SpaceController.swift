@@ -1803,6 +1803,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         delegate?.spaceControllerDidMutateState(self)
     }
 
+    /// Discovery never observes Debut's own process, so a click into Settings produced no focus
+    /// report and the MRU kept naming the window the user had left. AppKit's key-window change is
+    /// that report for Debut's own windows. Only a window the switchers already offer counts: the
+    /// overlay or onboarding taking key must not be admitted through the activation path.
+    public func recordOwnWindowBecameKey(windowID: CGWindowID) {
+        guard spaceOwningWindow(windowID: windowID) != nil else { return }
+        recordWindowActivation(windowID: windowID)
+    }
+
     /// Only cache focus after the callback survives the stale-switch, cycle, retired-window,
     /// and exclusion checks above. Those callbacks can name a window that is no longer focused.
     private func cacheAcceptedFocus(windowID: CGWindowID) {
