@@ -109,6 +109,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         retiredWindowOwners[windowID]?.ownerPID == ownerPID
     }
 
+    /// Whether a path that takes no snapshot of its own, such as activation, must refuse this
+    /// window: it is retired, or a creation probe holds it back from admission.
+    public func isAdmissionRefused(windowID: CGWindowID, ownerPID: pid_t) -> Bool {
+        isRetired(windowID: windowID, ownerPID: ownerPID) ||
+            creationAdmissionHolds.contains(WindowOwnerIdentity(windowID: windowID, ownerPID: ownerPID))
+    }
+
     /// The tombstones worth carrying to the next launch. The leaked surface outlives Debut, not
     /// just the window, so a verdict scoped to one run lets the startup reconcile bind the dead
     /// surface to a dormant assignment and the ghost returns on every launch.
@@ -192,16 +199,30 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     private struct PendingWindowCreation {
-        let element: AXUIElement?
-        let fixedMetadata: AXWindowCreationMetadata?
+        let resolveMetadata: () -> AXWindowCreationMetadata?
         let startedAt: UInt64
         var identity: WindowOwnerIdentity?
         var systemAttentionRequested: Bool
+        /// The latest AX answer was AXUnknown: not yet a window, not yet ruled out.
+        var awaitingClassification = false
     }
 
     private var pendingWindowCreations: [UUID: PendingWindowCreation] = [:]
     private var creationNotificationsSeen: Set<WindowOwnerIdentity> = []
     private var creationDetectionFailures: [WindowOwnerIdentity: (reason: String, attempts: Int)] = [:]
+    /// Creations whose AX element reported AXUnknown and then stopped resolving: the object
+    /// died in AX while Core Graphics still listed its surface (KHA-789). Held in memory only,
+    /// since an unresolvable element can also be an AX timeout; a new creation event, process
+    /// exit or a restart's fresh scan gives the window another chance.
+    private var refusedCreations: Set<WindowOwnerIdentity> = []
+
+    /// Windows no full scan may admit yet: a creation probe is still waiting on AX to classify
+    /// them, or it saw them die. Scans that race the probe used to publish them regardless.
+    private var creationAdmissionHolds: Set<WindowOwnerIdentity> {
+        refusedCreations.union(pendingWindowCreations.values.compactMap {
+            $0.awaitingClassification ? $0.identity : nil
+        })
+    }
 
     // Per-app AXObservers for window lifecycle (destroyed, title changed)
     private var perAppObservers: [pid_t: AXObserver] = [:]
@@ -272,9 +293,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// the destruction — otherwise the CG-only heuristic re-admits the leftover surface on the
     /// very next snapshot, and the window returns as new.
     private func excludingRetired(_ windows: [WindowInfo]) -> [WindowInfo] {
-        retiredWindowOwners.isEmpty
-            ? windows
-            : windows.filter { retiredWindowOwners[$0.windowID]?.ownerPID != $0.ownerPID }
+        let holds = creationAdmissionHolds
+        guard !retiredWindowOwners.isEmpty || !holds.isEmpty else { return windows }
+        return windows.filter {
+            retiredWindowOwners[$0.windowID]?.ownerPID != $0.ownerPID &&
+                !holds.contains(WindowOwnerIdentity(windowID: $0.windowID, ownerPID: $0.ownerPID))
+        }
     }
 
     private func reportEviction(
@@ -1039,27 +1063,39 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     fileprivate func handleWindowCreated(element: AXUIElement, notification: String) {
-        beginWindowCreationProbe(element: element, fixedMetadata: nil, notification: notification)
+        beginWindowCreationProbe(
+            resolveMetadata: { Self.windowCreationMetadata(for: element) },
+            fixedMetadata: nil,
+            notification: notification
+        )
+    }
+
+    /// Test entry point for an AX element whose answers change between probe attempts.
+    func handleWindowCreated(resolvingMetadata: @escaping () -> AXWindowCreationMetadata?) {
+        beginWindowCreationProbe(
+            resolveMetadata: resolvingMetadata,
+            fixedMetadata: nil,
+            notification: kAXWindowCreatedNotification
+        )
     }
 
     /// Test entry point for the part after AX has supplied the new window identity.
     func handleWindowCreated(_ metadata: AXWindowCreationMetadata) {
         beginWindowCreationProbe(
-            element: nil,
+            resolveMetadata: { metadata },
             fixedMetadata: metadata,
             notification: kAXWindowCreatedNotification
         )
     }
 
     private func beginWindowCreationProbe(
-        element: AXUIElement?,
+        resolveMetadata: @escaping () -> AXWindowCreationMetadata?,
         fixedMetadata: AXWindowCreationMetadata?,
         notification: String
     ) {
         let probeID = UUID()
         pendingWindowCreations[probeID] = PendingWindowCreation(
-            element: element,
-            fixedMetadata: fixedMetadata,
+            resolveMetadata: resolveMetadata,
             startedAt: DispatchTime.now().uptimeNanoseconds,
             identity: nil,
             systemAttentionRequested: false
@@ -1078,8 +1114,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     private func attemptWindowCreationDetection(probeID: UUID, attempt: Int) {
         guard var pending = pendingWindowCreations[probeID] else { return }
-        let metadata = pending.fixedMetadata ?? pending.element.flatMap(Self.windowCreationMetadata(for:))
-        guard let metadata else {
+        guard let metadata = pending.resolveMetadata() else {
             retryWindowCreationDetection(
                 probeID: probeID,
                 attempt: attempt,
@@ -1094,8 +1129,15 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             ownerPID: metadata.ownerPID
         )
         pending.identity = identity
+        pending.awaitingClassification = Self.isPendingStandardAXWindowClassification(
+            role: metadata.role,
+            subrole: metadata.subrole,
+            isModal: metadata.isModal
+        )
         pendingWindowCreations[probeID] = pending
         creationNotificationsSeen.insert(identity)
+        // A creation event starts a new lifetime; an earlier refusal described the old one.
+        refusedCreations.remove(identity)
 
         if Self.isSystemAttentionAXWindow(
             role: metadata.role,
@@ -1297,8 +1339,19 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
 
         guard attempt <= Self.windowCreationRetryDelays.count else {
-            if let identity = pendingWindowCreations[probeID]?.identity {
+            if let pending = pendingWindowCreations[probeID], let identity = pending.identity {
                 creationDetectionFailures[identity] = (reason, attempt)
+                // AXUnknown and then no element at all: the object died in AX. A persistent
+                // AXUnknown window keeps resolving and is left to the scans' own evidence.
+                if pending.awaitingClassification, metadata == nil {
+                    refusedCreations.insert(identity)
+                    diag.report("window_creation_refused", details: [
+                        "ownerPID": "\(identity.ownerPID)",
+                        "probeID": probeID.uuidString,
+                        "reason": "ax_unknown_then_unresolved",
+                        "windowID": "\(identity.windowID)",
+                    ])
+                }
             }
             diag.report("window_creation_detection_failed", details: [
                 "attempts": "\(attempt)",
@@ -1640,31 +1693,37 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         desktopRefreshGeneration += 1
         let generation = desktopRefreshGeneration
         let excludedBundleIDs = excludedBundleIDs
-        let retiredWindowOwners = retiredWindowOwners
         let unarmedWindowIDs = unarmedWindowIDs
         let windowService = windowService
         let spaceSwitcher = spaceSwitcher
 
         ExternalCallScheduler.shared.schedule(on: .windowServer) { [weak self] in
-            let liveWindows = windowService.listWindows().filter { window in
-                !excludedBundleIDs.contains(window.ownerBundleID) &&
-                    retiredWindowOwners[window.windowID]?.ownerPID != window.ownerPID
+            let listedWindows = windowService.listWindows().filter { window in
+                !excludedBundleIDs.contains(window.ownerBundleID)
             }
-            let liveIDs = Set(liveWindows.map(\.windowID))
-            let locations = spaceSwitcher?.windowLocations().filter {
-                liveIDs.contains($0.key)
+            let listedIDs = Set(listedWindows.map(\.windowID))
+            let listedLocations = spaceSwitcher?.windowLocations().filter {
+                listedIDs.contains($0.key)
             } ?? [:]
-            let snapshot = RuntimeWindowSnapshot(
-                liveWindows: liveWindows,
-                allWindowIDs: windowService.listAllWindowIDs(),
-                unarmedWindowIDs: unarmedWindowIDs,
-                desktopIndexes: locations.mapValues(\.index),
-                desktopLocations: locations,
-                axContradictedWindowIDs: windowService.listAXContradictedWindowIDs(),
-                skyLightWindowIDs: spaceSwitcher.map { $0.placedWindowIDs() }
-            )
+            let allWindowIDs = windowService.listAllWindowIDs()
+            let axContradictedWindowIDs = windowService.listAXContradictedWindowIDs()
+            let skyLightWindowIDs = spaceSwitcher.map { $0.placedWindowIDs() }
             DispatchQueue.main.async(qos: .userInitiated, flags: .enforceQoS) {
                 guard let self, self.desktopRefreshGeneration == generation else { return }
+                // Retirement and creation holds are read at publication, not capture: a creation
+                // notification can arrive while this snapshot was being taken (KHA-789).
+                let liveWindows = self.excludingRetired(listedWindows)
+                let liveIDs = Set(liveWindows.map(\.windowID))
+                let locations = listedLocations.filter { liveIDs.contains($0.key) }
+                let snapshot = RuntimeWindowSnapshot(
+                    liveWindows: liveWindows,
+                    allWindowIDs: allWindowIDs,
+                    unarmedWindowIDs: unarmedWindowIDs,
+                    desktopIndexes: locations.mapValues(\.index),
+                    desktopLocations: locations,
+                    axContradictedWindowIDs: axContradictedWindowIDs,
+                    skyLightWindowIDs: skyLightWindowIDs
+                )
                 self.reportWindowsDetectedByLaterScan(liveWindows, trigger: "desktop_changed")
                 for window in liveWindows where
                     self.windowOwnerPIDs[window.windowID] != window.ownerPID {
@@ -1821,6 +1880,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         pendingWindowCreations = pendingWindowCreations.filter { $0.value.identity?.ownerPID != pid }
         creationNotificationsSeen = creationNotificationsSeen.filter { $0.ownerPID != pid }
         creationDetectionFailures = creationDetectionFailures.filter { $0.key.ownerPID != pid }
+        refusedCreations = refusedCreations.filter { $0.ownerPID != pid }
 
         onAppTerminated?(pid)
     }

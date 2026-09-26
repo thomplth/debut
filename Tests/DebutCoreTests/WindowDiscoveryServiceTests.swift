@@ -365,6 +365,159 @@ struct WindowDiscoveryServiceTests {
         ))
     }
 
+    // KHA-789: the creation probe held a transient Dia surface back, but a desktop-change scan
+    // running during the probe admitted the same window to Desktop 1 regardless. It could be
+    // focused for 19 s before it vanished and left a dormant assignment behind.
+    private func pendingDiaFixture() -> (
+        WindowDiscoveryService, MockWindowService, DeferredWindowCreationRetryScheduler
+    ) {
+        let retry = DeferredWindowCreationRetryScheduler()
+        let windowService = MockWindowService()
+        windowService.windowList = [
+            WindowInfo(
+                windowID: 82_256,
+                ownerBundleID: "company.thebrowser.dia",
+                ownerName: "Dia",
+                ownerPID: 69_928,
+                title: "",
+                bounds: CGRect(x: 0, y: 0, width: 2469, height: 1440),
+                isOnScreen: true
+            ),
+            liveWindow(7, ownerPID: 69_928),
+        ]
+        windowService.allWindowIDList = [82_256, 7]
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.windowDesktops = [82_256: 0, 7: 0]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        service.windowCreationRetryScheduler = retry.schedule
+        return (service, windowService, retry)
+    }
+
+    private static let unknownDiaSurface = AXWindowCreationMetadata(
+        windowID: 82_256,
+        ownerPID: 69_928,
+        role: kAXWindowRole as String,
+        subrole: kAXUnknownSubrole as String,
+        isModal: false
+    )
+
+    @Test("Scans during a pending AX-unknown creation probe do not admit the window")
+    func scansDuringPendingProbeRefuseWindow() {
+        let (service, _, _) = pendingDiaFixture()
+        var refreshed: [CGWindowID] = []
+        var activated: [CGWindowID] = []
+        service.onDesktopsChanged = { refreshed = $0.liveWindows.map(\.windowID) }
+        service.onAppActivated = { activated = $0.liveWindows.map(\.windowID) }
+
+        service.handleWindowCreated(Self.unknownDiaSurface)
+        service.refreshDesktopAssignments()
+        service.handleAppActivation(
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 69_928, isHidden: false)
+        )
+        var manager = SpaceManager()
+        SpaceController.reconcileSpaces(&manager, desktopCount: 2)
+        service.reconcileWindows(&manager)
+
+        #expect(refreshed == [7])
+        #expect(activated == [7])
+        #expect(manager.spaceContainingWindow(windowID: 82_256) == nil)
+        #expect(!manager.dormantWindowAssignments.contains { $0.window.windowID == 82_256 })
+        #expect(manager.spaceContainingWindow(windowID: 7) != nil)
+    }
+
+    @Test("An AX-unknown creation whose element dies stays refused after the probe")
+    func creationWhoseElementDiesStaysRefused() {
+        let (service, _, retry) = pendingDiaFixture()
+        var reads = 0
+        service.handleWindowCreated(resolvingMetadata: {
+            reads += 1
+            return reads < 5 ? Self.unknownDiaSurface : nil
+        })
+        retry.runAll()
+        var refreshed: [CGWindowID] = []
+        service.onDesktopsChanged = { refreshed = $0.liveWindows.map(\.windowID) }
+
+        service.refreshDesktopAssignments()
+
+        #expect(refreshed == [7])
+        #expect(service.isAdmissionRefused(windowID: 82_256, ownerPID: 69_928))
+        #expect(!service.isRetired(windowID: 82_256, ownerPID: 69_928))
+
+        // A new creation event for the same identity is a new lifetime and is probed afresh.
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 82_256,
+            ownerPID: 69_928,
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            isModal: false
+        ))
+        #expect(!service.isAdmissionRefused(windowID: 82_256, ownerPID: 69_928))
+    }
+
+    // Phoenix Slides' borderless viewer is a real window that stays AXUnknown for life. Its AX
+    // element keeps resolving, which is what separates it from a surface that died.
+    @Test("A persistent AX-unknown window is admitted by later scans once its probe ends")
+    func persistentUnknownWindowAdmittedAfterProbe() {
+        let (service, _, retry) = pendingDiaFixture()
+        service.handleWindowCreated(Self.unknownDiaSurface)
+        retry.runAll()
+        var refreshed: [CGWindowID] = []
+        service.onDesktopsChanged = { refreshed = $0.liveWindows.map(\.windowID) }
+
+        service.refreshDesktopAssignments()
+
+        #expect(Set(refreshed) == [82_256, 7])
+        #expect(!service.isAdmissionRefused(windowID: 82_256, ownerPID: 69_928))
+    }
+
+    @Test("A background refresh captured before a creation event cannot publish the window")
+    func backgroundRefreshHonoursLaterCreationHold() async {
+        let (service, _, _) = pendingDiaFixture()
+
+        await confirmation("desktop snapshot published") { published in
+            await withCheckedContinuation { continuation in
+                service.onDesktopsChanged = { snapshot in
+                    #expect(snapshot.liveWindows.map(\.windowID) == [7])
+                    #expect(snapshot.desktopLocations.keys.sorted() == [7])
+                    published()
+                    continuation.resume()
+                }
+                service.refreshDesktopAssignmentsInBackground()
+                // Delivered on this turn, so before the background answer is published.
+                service.handleWindowCreated(Self.unknownDiaSurface)
+            }
+        }
+    }
+
+    @Test("A creation that becomes a standard window is admitted once")
+    func unknownCreationPromotedWhenClassified() {
+        let (service, _, retry) = pendingDiaFixture()
+        var reads = 0
+        var created: [CGWindowID] = []
+        service.onWindowCreated = { created += $0.liveWindows.map(\.windowID) }
+        service.handleWindowCreated(resolvingMetadata: {
+            reads += 1
+            return reads < 3 ? Self.unknownDiaSurface : AXWindowCreationMetadata(
+                windowID: 82_256,
+                ownerPID: 69_928,
+                role: kAXWindowRole as String,
+                subrole: kAXStandardWindowSubrole as String,
+                isModal: false
+            )
+        })
+        retry.runAll()
+        var refreshed: [CGWindowID] = []
+        service.onDesktopsChanged = { refreshed = $0.liveWindows.map(\.windowID) }
+        service.refreshDesktopAssignments()
+
+        #expect(created == [82_256])
+        #expect(Set(refreshed) == [82_256, 7])
+    }
+
     @Test("A listed standard window waits for its desktop assignment")
     func standardWindowCreationRetriesUntilDesktopIsReady() throws {
         let directory = try makeTempDirectory()
