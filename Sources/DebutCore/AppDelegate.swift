@@ -244,24 +244,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         if spaceManager.allSpaces.allSatisfy({ $0.windows.isEmpty }) &&
             spaceManager.dormantWindowAssignments.isEmpty {
-            discovery.populateDefaultSpace(&spaceManager)
+            discovery.populateInitialWindows(&spaceManager)
         }
 
-        // Activate the space containing the currently focused window, or fall back to first space
-        let startSpaceID: UUID
+        // Start on the focused window's desktop, or keep the one topology reports as showing.
+        var focusedWindowID: CGWindowID?
         if let frontApp = NSWorkspace.shared.frontmostApplication,
            frontApp.bundleIdentifier != "com.thomplth.Debut",
-           let frontmostPID = windowService.frontmostApplicationPID(),
-           let focusedWID = discovery.focusedWindowID(for: frontmostPID),
-           let owningSpace = spaceManager.spaceContainingWindow(windowID: focusedWID) {
-            startSpaceID = owningSpace
-            if let stackID = spaceManager.spaceStackID(containingSpaceID: owningSpace) {
-                spaceManager.selectSpaceStack(id: stackID)
-            }
-        } else {
-            startSpaceID = spaceManager.spaces[0].id
+           let frontmostPID = windowService.frontmostApplicationPID() {
+            focusedWindowID = discovery.focusedWindowID(for: frontmostPID)
         }
-        spaceManager.activateSpace(id: startSpaceID)
+        spaceManager.activateLaunchSpace(focusedWindowID: focusedWindowID)
 
         AppIconCache.shared.warm(
             bundleIDs: spaceManager.allWindowOwnerBundleIDs,
@@ -520,7 +513,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         diag.report("controller_setup", details: [
             "eventTapStarted": "\(controller.keyboardServiceStarted)",
             "eventTapRunning": "\(keyboardService.isRunning)",
-            "windowsInDefaultSpace": "\(spaceManager.spaces[0].windows.count)",
+            "activeSpaceIndex": "\(spaceManager.spaceIndex(id: spaceManager.activeSpaceID).map(String.init) ?? "none")",
+            "windowsInActiveSpace": "\(spaceManager.activeSpace.windows.count)",
+            "windowCount": "\(spaceManager.liveWindowCount)",
         ])
     }
 
