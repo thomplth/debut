@@ -780,7 +780,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         ownerPID: pid_t
     ) -> Bool {
         MainActor.assumeIsolated {
-            windowDiscovery?.isRetired(windowID: windowID, ownerPID: ownerPID) ?? false
+            windowDiscovery?.isAdmissionRefused(windowID: windowID, ownerPID: ownerPID) ?? false
         }
     }
 
