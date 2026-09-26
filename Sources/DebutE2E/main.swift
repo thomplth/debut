@@ -1138,6 +1138,28 @@ func stageCenter(
     )
 }
 
+/// Where a drop into `destinationSpaceIndex` lands once picking up the given card has switched
+/// the overlay to its drag view, which draws every stage at one fitted scale (KHA-553).
+func dragViewDropPoint(
+    cardAspects: [[CGFloat?]],
+    sourceSpaceIndex: Int,
+    sourceWindowIndex: Int,
+    destinationSpaceIndex: Int
+) -> CGPoint? {
+    let reservesIndicator = ProcessInfo.processInfo.environment["DEBUT_FORCE_DISPLAY_STACK_INDICATOR"] == "1"
+        || NSScreen.screens.count > 1
+    return StageConstants.dragViewDropPoint(
+        contentAspects: cardAspects,
+        stageScale: CGFloat(interactionSettings.stageScale),
+        cardSpacing: CGFloat(interactionSettings.previewCardSpacing),
+        containerSize: overlayBounds.size,
+        reservesDisplayIndicator: reservesIndicator,
+        sourceSpaceIndex: sourceSpaceIndex,
+        sourceWindowIndex: sourceWindowIndex,
+        destinationSpaceIndex: destinationSpaceIndex
+    ).map { CGPoint(x: overlayBounds.minX + $0.x, y: overlayBounds.minY + $0.y) }
+}
+
 func windowCenter(
     spaceIndex: Int,
     windowIndex: Int,
@@ -1163,7 +1185,6 @@ func stageCenter(
     cardAspects: [[CGFloat?]],
     activeSpaceIndex: Int,
     focusedSpaceIndex: Int,
-    edgeScrollPointerY: CGFloat,
     inactiveScale: CGFloat
 ) -> CGPoint? {
     guard let centered = stageCenter(
@@ -1175,20 +1196,17 @@ func stageCenter(
         cardAspects: cardAspects,
         activeSpaceIndex: activeSpaceIndex,
         focusedSpaceIndex: focusedSpaceIndex,
-        edgeScrollPointerY: edgeScrollPointerY,
         inactiveScale: inactiveScale
     ) else { return nil }
     return CGPoint(x: centered.x, y: centered.y + offset)
 }
 
-/// The focused stack remains anchored to its baseline slot, then edge-scrolls when the pointer
-/// that caused focus is near the top or bottom. A second drag must use the resulting rendered
+/// The focused stack remains anchored to its baseline slot. A second drag must use that rendered
 /// position, not merely the focused layout's centered position.
 func focusedStackOffset(
     cardAspects: [[CGFloat?]],
     activeSpaceIndex: Int,
     focusedSpaceIndex: Int,
-    edgeScrollPointerY: CGFloat,
     inactiveScale: CGFloat
 ) -> CGFloat? {
     guard cardAspects.indices.contains(activeSpaceIndex),
@@ -1203,7 +1221,6 @@ func focusedStackOffset(
         focusedSpaceIndex: focusedSpaceIndex,
         inactiveScale: inactiveScale,
         containerHeight: overlayBounds.height,
-        pointerY: edgeScrollPointerY - overlayBounds.minY,
         metrics: metrics
     )
 }
@@ -2379,14 +2396,21 @@ func scenario_window_drop() {
             activeSpaceIndex: stageActiveSpaceIndex,
             inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
        ),
+       // Where the dropped card rests once the overlay is back to normal, focused on it.
        let destinationPoint = stageCenter(
             spaceIndex: destinationSpaceIndex,
             cardAspects: preparedCardAspects,
             activeSpaceIndex: stageActiveSpaceIndex,
             inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
+       ),
+       let dropPoint = dragViewDropPoint(
+            cardAspects: preparedCardAspects,
+            sourceSpaceIndex: sourceSpaceIndex,
+            sourceWindowIndex: dragWindowIndex ?? 0,
+            destinationSpaceIndex: destinationSpaceIndex
        ) {
-        info("  Drag path: \(sourcePoint) -> \(destinationPoint)")
-        postMouseDrag(from: sourcePoint, to: destinationPoint)
+        info("  Drag path: \(sourcePoint) -> \(dropPoint)")
+        postMouseDrag(from: sourcePoint, to: dropPoint)
         for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
             if dragMovesSinceDropStarted() > 0 {
                 break
@@ -2408,14 +2432,14 @@ func scenario_window_drop() {
         }
 
         wait(0.4)
-        if let returnedSpacePoint = stageCenter(
-            spaceIndex: sourceSpaceIndex,
+        if let returnedSpacePoint = dragViewDropPoint(
             cardAspects: movedCardAspects,
-            activeSpaceIndex: stageActiveSpaceIndex,
-            inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
+            sourceSpaceIndex: destinationSpaceIndex,
+            sourceWindowIndex: 0,
+            destinationSpaceIndex: sourceSpaceIndex
         ) {
-            // Return directly to the visible source stage. Edge navigation now waits for a deliberate
-            // dwell, so a route through its band would test viewport scrolling instead of this drop.
+            // Pick the card up where the normal overlay rests it, then drop it on the source
+            // stage as the drag view draws it.
             info("  Reverse drag path: \(destinationPoint) -> \(returnedSpacePoint)")
             postMouseDrag(from: destinationPoint, to: returnedSpacePoint)
             for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {

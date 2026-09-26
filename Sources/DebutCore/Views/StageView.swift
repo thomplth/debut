@@ -61,12 +61,6 @@ struct StageLayoutAnimationKey: Equatable {
     let activeSpaceID: UUID?
 }
 
-enum StageEdgeScrollTarget: Equatable {
-    case resting
-    case top
-    case bottom
-}
-
 enum StageMotion {
     static let minimumStageScale: CGFloat = 0.08
     static let minimumStageOpacity: Double = 0.12
@@ -375,51 +369,6 @@ enum StageMotion {
     ) -> CGFloat {
         guard layout.centers.indices.contains(anchorIndex) else { return 0 }
         return anchorY - layout.centers[anchorIndex]
-    }
-
-    static func edgeScrollDestination(
-        pointerY: CGFloat?,
-        containerHeight: CGFloat,
-        restingOffset: CGFloat,
-        topLimit: CGFloat,
-        bottomLimit: CGFloat,
-        edgeRegion: CGFloat = StageConstants.edgeHoverRegion
-    ) -> CGFloat {
-        edgeScrollDestination(
-            target: edgeScrollTarget(
-                pointerY: pointerY,
-                containerHeight: containerHeight,
-                edgeRegion: edgeRegion
-            ),
-            restingOffset: restingOffset,
-            topLimit: topLimit,
-            bottomLimit: bottomLimit
-        )
-    }
-
-    static func edgeScrollTarget(
-        pointerY: CGFloat?,
-        containerHeight: CGFloat,
-        edgeRegion: CGFloat = StageConstants.edgeHoverRegion
-    ) -> StageEdgeScrollTarget {
-        guard let pointerY else { return .resting }
-        if pointerY <= edgeRegion { return .top }
-        if pointerY >= containerHeight - edgeRegion { return .bottom }
-        return .resting
-    }
-
-    static func edgeScrollDestination(
-        target: StageEdgeScrollTarget,
-        restingOffset: CGFloat,
-        topLimit: CGFloat,
-        bottomLimit: CGFloat
-    ) -> CGFloat {
-        guard topLimit > bottomLimit else { return restingOffset }
-        switch target {
-        case .resting: return restingOffset
-        case .top: return topLimit
-        case .bottom: return bottomLimit
-        }
     }
 
     static func windowScale(
@@ -995,8 +944,6 @@ struct PointerMovementGate {
 public struct StageConstants {
     public static let screenMargin: CGFloat = 80
     public static let compactStageSpacing: CGFloat = 14
-    public static let edgeHoverRegion: CGFloat = 56
-    public static let edgeScrollMargin: CGFloat = 28
     public static let spaceScrollTravelPerSpace: CGFloat = 30
 
     /// The width a stage may occupy before its windows wrap onto another row.
@@ -1156,7 +1103,7 @@ public struct StageConstants {
     }
 
     /// Translation from a stack centered on `focusedSpaceIndex` to the position the overlay
-    /// actually renders after preserving the active layout's anchor and applying edge scroll.
+    /// actually renders after preserving the active layout's anchor.
     /// Consumers that drive real pointer input use this to hit the post-focus geometry exactly.
     public static func focusedStackTranslation(
         contentAspects: [[CGFloat?]],
@@ -1165,7 +1112,6 @@ public struct StageConstants {
         focusedSpaceIndex: Int,
         inactiveScale: CGFloat,
         containerHeight: CGFloat,
-        pointerY: CGFloat,
         metrics: StageMetrics = .standard
     ) -> CGFloat? {
         guard contentAspects.indices.contains(activeSpaceIndex),
@@ -1202,14 +1148,58 @@ public struct StageConstants {
             anchorIndex: focusedSpaceIndex,
             anchorY: anchorY
         )
-        let stackOffset = StageMotion.edgeScrollDestination(
-            pointerY: pointerY,
-            containerHeight: containerHeight,
-            restingOffset: restingOffset,
-            topLimit: edgeScrollMargin,
-            bottomLimit: containerHeight - edgeScrollMargin - focused.totalHeight
+        return restingOffset + focused.centers[focusedSpaceIndex] - containerHeight / 2
+    }
+
+    /// A point on `destinationSpaceIndex`'s first row in the drag view that picking up the given
+    /// card would show, in overlay coordinates. E2E aims its drops here: it is the same snapshot
+    /// the overlay draws and hit-tests, so the two cannot drift apart.
+    public static func dragViewDropPoint(
+        contentAspects: [[CGFloat?]],
+        stageScale: CGFloat,
+        cardSpacing: CGFloat,
+        containerSize: CGSize,
+        reservesDisplayIndicator: Bool,
+        sourceSpaceIndex: Int,
+        sourceWindowIndex: Int,
+        destinationSpaceIndex: Int
+    ) -> CGPoint? {
+        var nextWindowID: CGWindowID = 1
+        let fingerprint = StageStructureFingerprint(stages: contentAspects.map { aspects in
+            StageStructureFingerprint.Stage(spaceID: UUID(), windows: aspects.map { _ in
+                defer { nextWindowID += 1 }
+                return .init(windowID: nextWindowID, modelID: UUID())
+            })
+        })
+        let metrics = drawnMetrics(
+            stageScale: stageScale,
+            contentAspects: contentAspects,
+            containerSize: containerSize,
+            cardSpacing: cardSpacing
         )
-        return stackOffset + focused.centers[focusedSpaceIndex] - containerHeight / 2
+        guard let snapshot = CompactDragSnapshot.make(
+            sessionID: UUID(),
+            generation: 1,
+            fingerprint: fingerprint,
+            layouts: stageLayouts(
+                forContentAspects: contentAspects,
+                screenWidth: containerSize.width,
+                metrics: metrics
+            ),
+            contentAspects: contentAspects,
+            sourceStageIndex: sourceSpaceIndex,
+            sourceWindowIndex: sourceWindowIndex,
+            containerSize: containerSize,
+            usableBounds: CompactDragSnapshot.usableBounds(
+                containerSize: containerSize,
+                reservesDisplayIndicator: reservesDisplayIndicator
+            )
+        ), let stage = snapshot.stages[safe: destinationSpaceIndex]
+        else { return nil }
+        return CGPoint(
+            x: snapshot.centerX,
+            y: stage.centerY + (stage.rowOffsets.first ?? 0) * snapshot.scale
+        )
     }
 
     /// Where a window card is drawn, for callers outside the view hierarchy. E2E clicks and drags
@@ -1276,7 +1266,6 @@ public struct StageConstants {
 public struct StageOverlayView: View {
     public let viewModel: StageOverlayViewModel
     public var onWindowSelected: ((Int, Int) -> Void)?
-    public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onBackdropDismissed: (() -> Void)?
     var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
@@ -1284,9 +1273,11 @@ public struct StageOverlayView: View {
     var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     var scrollRelay: OverlayScrollRelay?
     var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
+    /// Owned by the overlay window in the app; a standalone view falls back to its own.
+    var compactDragSession: CompactDragSession?
+    var onPointerWindowDrop: ((PointerWindowDropRequest) -> PointerWindowDropResult)?
 
-    @State private var windowDrag: WindowDragState?
-    @State private var settlingWindowDrop: WindowDropSettlingState?
+    @State private var ownedCompactDragSession = CompactDragSession()
     @State private var keyboardWindowFlight: KeyboardWindowFlightState?
     @State private var lastHandledKeyboardMoveSequence: Int
     @State private var lastHandledKeyboardInteractionSequence: Int
@@ -1297,59 +1288,19 @@ public struct StageOverlayView: View {
     @State private var stageFrames: [Int: CGRect] = [:]
     @State private var windowFrames: [WindowFrameID: CGRect] = [:]
     @State private var hoveredSpaceIndex: Int?
-    @State private var hoverPointerY: CGFloat?
     @State private var scrollAccumulator = SpaceScrollAccumulator()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
         viewModel: StageOverlayViewModel,
         onWindowSelected: ((Int, Int) -> Void)? = nil,
-        onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
         onBackdropDismissed: (() -> Void)? = nil
-    ) {
-        self.init(
-            viewModel: viewModel,
-            initialWindowDrag: nil,
-            onWindowSelected: onWindowSelected,
-            onWindowMoved: onWindowMoved,
-            onPointerSelectionChanged: onPointerSelectionChanged,
-            onBackdropDismissed: onBackdropDismissed
-        )
-    }
-
-    init(
-        viewModel: StageOverlayViewModel,
-        initialWindowDrag: WindowDragState,
-        onWindowSelected: ((Int, Int) -> Void)? = nil,
-        onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
-        onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
-        onBackdropDismissed: (() -> Void)? = nil
-    ) {
-        self.init(
-            viewModel: viewModel,
-            initialWindowDrag: WindowDragState?(initialWindowDrag),
-            onWindowSelected: onWindowSelected,
-            onWindowMoved: onWindowMoved,
-            onPointerSelectionChanged: onPointerSelectionChanged,
-            onBackdropDismissed: onBackdropDismissed
-        )
-    }
-
-    private init(
-        viewModel: StageOverlayViewModel,
-        initialWindowDrag: WindowDragState?,
-        onWindowSelected: ((Int, Int) -> Void)?,
-        onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?,
-        onPointerSelectionChanged: ((Int?, Int?) -> Void)?,
-        onBackdropDismissed: (() -> Void)?
     ) {
         self.viewModel = viewModel
         self.onWindowSelected = onWindowSelected
-        self.onWindowMoved = onWindowMoved
         self.onPointerSelectionChanged = onPointerSelectionChanged
         self.onBackdropDismissed = onBackdropDismissed
-        _windowDrag = State(initialValue: initialWindowDrag)
         _lastHandledKeyboardMoveSequence = State(
             initialValue: viewModel.keyboardWindowMoveAnimation?.sequence ?? 0
         )
@@ -1386,15 +1337,13 @@ public struct StageOverlayView: View {
             }
         }
         let hasGuidedKeyboardMove = guidedKeyboardWindowID != nil
-        let hasCommittedSettlingDrop = settlingWindowDrop.map {
-            StageMotion.isWindowDropApplied($0.request, to: windowLayoutKey)
-        } ?? false
-        let layoutWindowDrag = hasCommittedSettlingDrop ? nil : windowDrag
+        let dragSession = self.dragSession
+        let compact = dragSession.snapshot
+        let compactProjection = compact?.projection(for: dragSession.intent)
+        let isSettlingDrop = dragSession.phase == .settling
+        let settlingWindowID = isSettlingDrop ? compact?.sourceWindowID : nil
+        let fingerprint = StageStructureFingerprint(spaces: viewModel.spaceManager.spaces)
         let restingAspects = stages.map { $0.windows.map(\.contentAspect) }
-        let displayedAspects = StageMotion.displayedWindowAspects(
-            actual: restingAspects,
-            drag: layoutWindowDrag
-        )
 
         GeometryReader { geo in
             // Fitted against the resting window shapes, not the displaced ones: a drag that
@@ -1406,10 +1355,10 @@ public struct StageOverlayView: View {
                 containerSize: geo.size,
                 cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing)
             )
-            // Two grids per space: the one its own cards rest in, and the one the drag would
-            // give it. A card's drag offset is the delta between them.
+            // The resting grids. A compact drag freezes their rows at pickup rather than
+            // rewrapping them while the pointer moves.
             let displayedLayouts = StageConstants.stageLayouts(
-                forContentAspects: displayedAspects,
+                forContentAspects: restingAspects,
                 screenWidth: geo.size.width,
                 metrics: metrics
             )
@@ -1424,31 +1373,24 @@ public struct StageOverlayView: View {
                 spaceIDs: stages.map(\.id),
                 activeIndex: viewModel.activeSpaceIndex
             )
-            let windowReorderTransition = StageMotion.windowReorderTransition(
-                reduceMotion: reduceMotion
-            )
-            let activeWindowReorderTransition = StageMotion.windowReorderTransition(
-                reduceMotion: reduceMotion,
-                hasActiveDrag: layoutWindowDrag != nil,
-                isAwaitingCommittedLayout: settlingWindowDrop != nil
-            )
             let keyboardWindowReorderTransition = StageMotion.keyboardWindowReorderTransition(
                 reduceMotion: reduceMotion,
-                hasActiveDrag: layoutWindowDrag != nil,
-                isAwaitingCommittedLayout: settlingWindowDrop != nil
+                hasActiveDrag: dragSession.isActive,
+                isAwaitingCommittedLayout: isSettlingDrop
             )
             let keyboardLayoutTransition = hasGuidedKeyboardMove
                 ? StageMotion.guidedKeyboardMoveTransition(reduceMotion: reduceMotion)
                 : keyboardWindowReorderTransition
-            let dragTargetIndex = layoutWindowDrag?.dropTarget?.spaceIndex
+            // A compact drag has no focus: holding it still keeps the ordinary stack from
+            // animating underneath the compact one.
             let pointerFocusedSpaceIndex = StageMotion.pointerFocusedSpaceIndex(
-                hovered: hoveredSpaceIndex,
+                hovered: dragSession.suppressesNavigation ? nil : hoveredSpaceIndex,
                 hasGuidedKeyboardMove: hasGuidedKeyboardMove
             )
             let focusedSpaceIndex = StageMotion.focusedSpaceIndex(
                 active: viewModel.activeSpaceIndex,
                 hovered: pointerFocusedSpaceIndex,
-                dragTarget: dragTargetIndex,
+                dragTarget: nil,
                 retainedDragTarget: retainedWindowDragFocusSpaceIndex,
                 spaceCount: stages.count
             )
@@ -1472,34 +1414,41 @@ public struct StageOverlayView: View {
                 anchorIndex: focusedSpaceIndex,
                 anchorY: anchorY
             )
-            let edgeScrollTarget = StageMotion.edgeScrollTarget(
-                pointerY: pointerFocusedSpaceIndex == nil ? nil : hoverPointerY,
-                containerHeight: geo.size.height
-            )
-            let yOffset = StageMotion.edgeScrollDestination(
-                target: edgeScrollTarget,
-                restingOffset: restingOffset,
-                topLimit: StageConstants.edgeScrollMargin,
-                bottomLimit: geo.size.height - StageConstants.edgeScrollMargin
-                    - visualLayout.totalHeight
-            )
+            let yOffset = compact == nil ? restingOffset : 0
 
             ZStack(alignment: .topLeading) {
                 ZStack(alignment: .top) {
                     ForEach(Array(stages.enumerated()), id: \.element.id) { index, stage in
-                        let stageWidth = stageWidths[index]
-                        let stageHeight = stageHeights[index]
+                        // Compact stages are found by identity: the model can already hold the
+                        // accepted drop while the snapshot it was aimed at is still drawn.
+                        let compactIndex = compact?.stages.firstIndex { $0.spaceID == stage.id }
+                        let compactStage = compactIndex.flatMap { compact?.stages[$0] }
+                        // The drag view's scale goes into the metrics rather than a render
+                        // transform, so a stage magnified past its resting size stays sharp.
+                        let dragScale = compact?.scale ?? 1
+                        let stageWidth = compactIndex.flatMap {
+                            compactProjection?.plateWidths[safe: $0].map { $0 * dragScale }
+                        } ?? stageWidths[index]
+                        let stageHeight = compactStage.map { $0.baseHeight * dragScale }
+                            ?? stageHeights[index]
                         let isActive = index == viewModel.activeSpaceIndex
-                        let isInteractionTarget = index == focusedSpaceIndex
-                        let scale = visualLayout.scales[index]
-                        let slotOffset = StageMotion.stageSlotOffset(
-                            layout: visualLayout,
-                            index: index
-                        )
-                        let stageOpacity = StageMotion.stageOpacity(scale: scale)
+                        let isInteractionTarget = compact == nil && index == focusedSpaceIndex
+                        let scale = compact == nil ? visualLayout.scales[index] : 1
+                        let slotOffset = compactStage.map { $0.centerY - stageHeight / 2 }
+                            ?? StageMotion.stageSlotOffset(layout: visualLayout, index: index)
+                        let stageOpacity = compact == nil
+                            ? StageMotion.stageOpacity(scale: scale)
+                            : 1
                         let lift = StageMotion.lift(isActive: isInteractionTarget)
-                        let visualScale = metrics.scaleFactor
-                        let selectedWindowIndex = StageMotion.selectedWindowIndex(
+                        let visualScale = metrics.scaleFactor * dragScale
+                        let stageLayout = compact.map {
+                            StageWindowLayout(
+                                contentAspects: stage.windows.map(\.contentAspect),
+                                availableWidth: .greatestFiniteMagnitude,
+                                metrics: $0.metrics.scaled(by: dragScale)
+                            )
+                        } ?? displayedLayouts[index]
+                        let selectedWindowIndex = compact != nil ? nil : StageMotion.selectedWindowIndex(
                             windows: stage.windows,
                             spaceIndex: index,
                             activeSpaceIndex: viewModel.activeSpaceIndex,
@@ -1511,11 +1460,18 @@ public struct StageOverlayView: View {
                         StageSwiftUIView(
                             stage: stage,
                             selectedWindowIndex: selectedWindowIndex,
-                            layout: displayedLayouts[index],
+                            layout: stageLayout,
                             appearance: viewModel.appearance,
-                            windowDrag: $windowDrag,
-                            layoutWindowDrag: layoutWindowDrag,
-                            settlingWindowID: settlingWindowDrop?.request.windowID,
+                            draggingWindowID: dragSession.phase == .dragging
+                                ? compact?.sourceWindowID : nil,
+                            compactOffsets: compactIndex.flatMap {
+                                compactProjection?.cardOffsets[safe: $0]?.mapValues {
+                                    CGPoint(x: $0.x * dragScale, y: $0.y * dragScale)
+                                }
+                            },
+                            isDropTarget: compactIndex != nil
+                                && compactProjection?.placeholder?.stageIndex == compactIndex,
+                            settlingWindowID: settlingWindowID,
                             guidedKeyboardWindowID: guidedKeyboardWindowID,
                             guidedKeyboardDeparture: guidedKeyboardDeparture,
                             usesGuidedKeyboardMoveMotion: hasGuidedKeyboardMove,
@@ -1523,6 +1479,7 @@ public struct StageOverlayView: View {
                             windowFrames: $windowFrames,
                             spaceIndex: index,
                             onPointerSelectionChanged: { selection, isHovering, location in
+                                guard !dragSession.suppressesNavigation else { return }
                                 if isHovering && !pointerMovementGate.observe(at: location) {
                                     return
                                 }
@@ -1539,12 +1496,23 @@ public struct StageOverlayView: View {
                                 )
                             },
                             onWindowSelected: onWindowSelected,
-                            onWindowDropRequested: { request in
-                                finishWindowDrop(
-                                    request,
-                                    transition: windowReorderTransition,
+                            onWindowDragChanged: { window, windowIndex, value in
+                                windowDragChanged(
+                                    window: window,
+                                    spaceIndex: index,
+                                    windowIndex: windowIndex,
+                                    value: value,
                                     layouts: displayedLayouts,
-                                    scales: visualLayout.scales
+                                    fingerprint: fingerprint,
+                                    containerSize: geo.size
+                                )
+                            },
+                            onWindowDragEnded: { window, windowIndex, value in
+                                windowDragEnded(
+                                    window: window,
+                                    spaceIndex: index,
+                                    windowIndex: windowIndex,
+                                    value: value
                                 )
                             }
                         )
@@ -1574,7 +1542,17 @@ public struct StageOverlayView: View {
                         .scaleEffect(scale)
                         .opacity(stageOpacity)
                         .offset(y: slotOffset)
-                        .zIndex(isActive || isInteractionTarget ? 2 : 0)
+                        .zIndex(compact == nil && (isActive || isInteractionTarget) ? 2 : 0)
+                    }
+                }
+                .background {
+                    if let compact {
+                        // Published from layout, so a release can only accept a compact
+                        // generation that has actually been laid out.
+                        Color.clear.preference(
+                            key: CompactDragGenerationPreferenceKey.self,
+                            value: compact.generation
+                        )
                     }
                 }
                 .frame(width: geo.size.width, height: tallestStageHeight, alignment: .top)
@@ -1620,32 +1598,22 @@ public struct StageOverlayView: View {
             // fall-through — so without a content shape none of it can be hovered or clicked.
             .contentShape(Rectangle())
             .overlay(alignment: .topLeading) {
-                if let settlingWindowDrop {
-                    WindowPreviewView(
-                        window: settlingWindowDrop.window,
-                        isWindowSelected: true,
-                        isDragging: true,
-                        metrics: metrics.adapted(
-                            toContentAspect: settlingWindowDrop.window.contentAspect
-                        ),
-                        appearance: viewModel.appearance
-                    )
-                    .opacity(StageMotion.cursorPreviewOpacity)
-                    .position(settlingWindowDrop.destination)
-                    .allowsHitTesting(false)
-                } else if let drag = windowDrag,
-                   let stage = stages[safe: drag.sourceSpaceIndex],
-                   let window = stage.windows[safe: drag.sourceWindowIndex] {
+                if let compact, let window = dragSession.window {
                     WindowPreviewView(
                         window: window,
                         isWindowSelected: true,
                         isDragging: true,
-                        metrics: metrics.adapted(toContentAspect: window.contentAspect),
+                        metrics: compact.metrics
+                            .adapted(toContentAspect: window.contentAspect)
+                            .scaled(by: compact.scale),
                         appearance: viewModel.appearance
                     )
                     .opacity(StageMotion.cursorPreviewOpacity)
-                    .position(drag.location)
+                    .position(dragSession.proxyLocation)
                     .allowsHitTesting(false)
+                    // The proxy hands to or from the real card at the same point, so it must
+                    // not fade in or out over a card that is animating away from it.
+                    .transition(.identity)
                 } else if let flight = keyboardWindowFlight {
                     WindowPreviewView(
                         window: flight.window,
@@ -1665,7 +1633,6 @@ public struct StageOverlayView: View {
             .animation(focusTransition.animation, value: layoutAnimationKey)
             .animation(focusTransition.animation, value: focusedSpaceIndex)
             .animation(focusTransition.animation, value: pointerSelection)
-            .animation(activeWindowReorderTransition?.animation, value: layoutWindowDrag?.dropTarget)
             .animation(keyboardLayoutTransition?.animation, value: windowLayoutKey)
             .coordinateSpace(name: "overlay")
             .simultaneousGesture(
@@ -1696,10 +1663,15 @@ public struct StageOverlayView: View {
             .onPreferenceChange(WindowFramePreferenceKey.self) { frames in
                 windowFrames = frames
             }
+            .onPreferenceChange(CompactDragGenerationPreferenceKey.self) { generation in
+                if let generation {
+                    dragSession.acknowledgePresented(generation: generation)
+                }
+            }
             .onContinuousHover(coordinateSpace: .local) { phase in
                 switch phase {
                 case let .active(location):
-                    hoverPointerY = location.y
+                    guard !dragSession.suppressesNavigation else { return }
                     let region = StageInteraction.pointerRegion(
                         at: location,
                         stageFrames: stageFrames
@@ -1721,9 +1693,7 @@ public struct StageOverlayView: View {
                         return
                     }
                     clearParkedKeyboardWindowFlight()
-                    if settlingWindowDrop == nil {
-                        retainedWindowDragFocusSpaceIndex = nil
-                    }
+                    retainedWindowDragFocusSpaceIndex = nil
                     hoveredSpaceIndex = StageInteraction.hoveredSpaceIndex(
                         previous: hoveredSpaceIndex,
                         at: location,
@@ -1733,7 +1703,6 @@ public struct StageOverlayView: View {
                         currentLayout: visualLayout
                     )
                 case .ended:
-                    hoverPointerY = nil
                     hoveredSpaceIndex = nil
                     if reportedPointerRegion != "ended" {
                         reportedPointerRegion = "ended"
@@ -1744,20 +1713,17 @@ public struct StageOverlayView: View {
                     }
                 }
             }
-            .animation(
-                reduceMotion ? .easeOut(duration: 0.12) : .easeInOut(duration: 1.15),
-                value: edgeScrollTarget
-            )
             .onChange(of: viewModel.activeSpaceIndex) { _, _ in
                 hoveredSpaceIndex = nil
-                hoverPointerY = nil
             }
             .onChange(of: viewModel.overlayKeyboardInteractionSequence) { _, sequence in
                 guard sequence > lastHandledKeyboardInteractionSequence else { return }
                 lastHandledKeyboardInteractionSequence = sequence
+                // A keyboard command supersedes a held pointer drag: restore normal geometry
+                // first, so the two never edit the same snapshot.
+                cancelCompactDrag(reason: "keyboard command")
                 pointerSelection = nil
                 hoveredSpaceIndex = nil
-                hoverPointerY = nil
                 pointerMovementGate.reset(at: NSEvent.mouseLocation)
             }
             .onChange(of: viewModel.keyboardWindowMoveAnimation?.sequence) { _, _ in
@@ -1800,11 +1766,18 @@ public struct StageOverlayView: View {
                 else { return }
                 clearKeyboardWindowFlight(sequence: flight.sequence)
             }
-            .onChange(of: windowLayoutKey) { _, committedLayout in
-                finishWindowDropHandoff(ifAppliedTo: committedLayout)
+            .onChange(of: fingerprint) { _, _ in
+                // An accepted drop's own model update arrives while it settles and is expected;
+                // any structural change under a held drag invalidates what it is aimed at.
+                if dragSession.phase == .dragging {
+                    cancelCompactDrag(reason: "stage structure changed")
+                }
             }
-            .onAppear {
-                finishWindowDropHandoff(ifAppliedTo: windowLayoutKey)
+            .onChange(of: geo.size) { _, _ in
+                cancelCompactDrag(reason: "overlay resized")
+            }
+            .onDisappear {
+                dragSession.cancel(reason: "overlay disappeared")
             }
         }
     }
@@ -1903,79 +1876,186 @@ public struct StageOverlayView: View {
         }
     }
 
-    private func finishWindowDrop(
-        _ request: WindowMoveRequest,
-        transition: StageFocusTransition,
+    private var dragSession: CompactDragSession {
+        compactDragSession ?? ownedCompactDragSession
+    }
+
+    private func withoutAnimation(_ body: () -> Void) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction, body)
+    }
+
+    /// Entering and leaving the drag view is the same stage motion as a focus change. Reduce
+    /// Motion gets the same geometry with no spatial motion at all.
+    private func withDragViewMotion(_ body: () -> Void) {
+        guard !reduceMotion else { return withoutAnimation(body) }
+        withAnimation(StageMotion.focusTransition(reduceMotion: false).animation, body)
+    }
+
+    /// The layout a compact drag would take if picked up from this card now. Exposed for tests,
+    /// which measure the same snapshot the gesture would use.
+    static func compactDragSnapshot(
+        viewModel: StageOverlayViewModel,
+        spaceIndex: Int,
+        windowIndex: Int,
+        containerSize: CGSize,
+        sessionID: UUID = UUID(),
+        generation: UInt64 = 1
+    ) -> CompactDragSnapshot? {
+        let aspects = viewModel.stages.map { $0.windows.map(\.contentAspect) }
+        let metrics = StageConstants.drawnMetrics(
+            stageScale: CGFloat(viewModel.appearance.stageScale),
+            contentAspects: aspects,
+            containerSize: containerSize,
+            cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing)
+        )
+        return CompactDragSnapshot.make(
+            sessionID: sessionID,
+            generation: generation,
+            fingerprint: StageStructureFingerprint(spaces: viewModel.spaceManager.spaces),
+            layouts: StageConstants.stageLayouts(
+                forContentAspects: aspects,
+                screenWidth: containerSize.width,
+                metrics: metrics
+            ),
+            contentAspects: aspects,
+            sourceStageIndex: spaceIndex,
+            sourceWindowIndex: windowIndex,
+            containerSize: containerSize,
+            usableBounds: CompactDragSnapshot.usableBounds(
+                containerSize: containerSize,
+                reservesDisplayIndicator: viewModel.shouldShowDisplayStackIndicator
+            )
+        )
+    }
+
+    private func windowDragChanged(
+        window: StageWindowData,
+        spaceIndex: Int,
+        windowIndex: Int,
+        value: DragGesture.Value,
         layouts: [StageWindowLayout],
-        scales: [CGFloat]
+        fingerprint: StageStructureFingerprint,
+        containerSize: CGSize
     ) {
-        guard let drag = windowDrag,
-              let target = drag.dropTarget,
-              let stage = viewModel.stages[safe: drag.sourceSpaceIndex],
-              let window = stage.windows[safe: drag.sourceWindowIndex],
-              let destination = StageMotion.windowDropDestination(
-                  target: target,
-                  stageFrames: stageFrames,
+        let session = dragSession
+        if session.phase == .dragging {
+            // Only the gesture that started the drag drives it; it stays a drag for good, even
+            // if the pointer comes back to where it went down.
+            guard session.snapshot?.sourceWindowID == window.windowID else { return }
+            // The proxy tracks the pointer exactly; the gap it opens moves like a reorder.
+            withoutAnimation { session.proxyLocation = value.location }
+            if reduceMotion {
+                withoutAnimation { session.move(to: value.location) }
+            } else {
+                withAnimation(StageMotion.windowReorderTransition(reduceMotion: false).animation) {
+                    session.move(to: value.location)
+                }
+            }
+            return
+        }
+        guard !StageInteraction.isWindowClick(translation: value.translation) else { return }
+        if session.phase == .settling {
+            // A new pickup exposes the accepted resting layout before it measures anything.
+            withoutAnimation { session.cancel(reason: nil) }
+        }
+        guard session.phase == .idle,
+              viewModel.stages[safe: spaceIndex]?.windows[safe: windowIndex]?.windowID
+                == window.windowID,
+              let snapshot = CompactDragSnapshot.make(
+                  sessionID: UUID(),
+                  generation: session.makeGeneration(),
+                  fingerprint: fingerprint,
                   layouts: layouts,
-                  scales: scales
+                  contentAspects: viewModel.stages.map { $0.windows.map(\.contentAspect) },
+                  sourceStageIndex: spaceIndex,
+                  sourceWindowIndex: windowIndex,
+                  containerSize: containerSize,
+                  usableBounds: CompactDragSnapshot.usableBounds(
+                      containerSize: containerSize,
+                      reservesDisplayIndicator: viewModel.shouldShowDisplayStackIndicator
+                  )
               )
+        else { return }
+
+        withDragViewMotion {
+            if pointerSelection != nil {
+                pointerSelection = nil
+                onPointerSelectionChanged?(nil, nil)
+            }
+            hoveredSpaceIndex = nil
+            retainedWindowDragFocusSpaceIndex = nil
+            clearParkedKeyboardWindowFlight()
+            session.begin(snapshot: snapshot, window: window, at: value.location)
+        }
+    }
+
+    private func windowDragEnded(
+        window: StageWindowData,
+        spaceIndex: Int,
+        windowIndex: Int,
+        value: DragGesture.Value
+    ) {
+        let session = dragSession
+        guard session.phase == .dragging,
+              session.snapshot?.sourceWindowID == window.windowID
         else {
-            commitWindowDrop(request)
+            if session.phase == .idle,
+               StageInteraction.isWindowClick(translation: value.translation) {
+                onWindowSelected?(spaceIndex, windowIndex)
+            }
             return
         }
 
-        retainedWindowDragFocusSpaceIndex = target.spaceIndex
-
-        withAnimation(transition.animation) {
-            windowDrag?.location = destination
-        } completion: {
-            settlingWindowDrop = WindowDropSettlingState(
-                request: request,
-                window: window,
-                destination: destination
-            )
-            onWindowMoved?(
-                request.windowID,
-                request.fromSpaceIndex,
-                request.fromWindowIndex,
-                request.toSpaceIndex,
-                request.toWindowIndex
-            )
+        var outcome = CompactDragSession.Outcome.noChange
+        withDragViewMotion {
+            outcome = session.release(at: value.location) { request in
+                onPointerWindowDrop?(request) ?? .rejected("no drop handler")
+            }
         }
-    }
-
-    private func commitWindowDrop(_ request: WindowMoveRequest) {
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            windowDrag = nil
-            onWindowMoved?(
-                request.windowID,
-                request.fromSpaceIndex,
-                request.fromWindowIndex,
-                request.toSpaceIndex,
-                request.toWindowIndex
-            )
-        }
-    }
-
-    private func finishWindowDropHandoff(ifAppliedTo layout: WindowLayoutKey) {
-        guard let settlingWindowDrop,
-              StageMotion.isWindowDropApplied(settlingWindowDrop.request, to: layout)
+        guard case let .accepted(intent) = outcome,
+              let snapshot = session.snapshot,
+              let placeholder = snapshot.projection(for: intent).placeholder,
+              let destination = snapshot.overlayPoint(
+                  stageIndex: placeholder.stageIndex,
+                  offset: placeholder.offset
+              )
         else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            windowDrag = nil
-            self.settlingWindowDrop = nil
+
+        let sessionID = snapshot.sessionID
+        let destinationIndex = snapshot.stages.firstIndex { $0.spaceID == intent.spaceID }
+        // Every drop leaves the drag view as soon as the card has landed. The next drag starts
+        // it again from a fresh snapshot of whatever the overlay then shows.
+        let settle = {
+            guard session.sessionID == sessionID else { return }
+            withDragViewMotion {
+                retainedWindowDragFocusSpaceIndex = destinationIndex
+                session.finishSettling(sessionID: sessionID)
+            }
         }
+        if reduceMotion {
+            withoutAnimation { session.proxyLocation = destination }
+            settle()
+        } else {
+            withAnimation(StageMotion.windowReorderTransition(reduceMotion: false).animation) {
+                session.proxyLocation = destination
+            } completion: {
+                settle()
+            }
+        }
+    }
+
+    private func cancelCompactDrag(reason: String) {
+        guard dragSession.isActive else { return }
+        withDragViewMotion { dragSession.cancel(reason: reason) }
     }
 
     /// Reported at every space, because a scroll that changes nothing is otherwise
     /// indistinguishable from a scroll the window never received.
     private func handleSpaceScroll(_ event: OverlayScrollEvent, containerSize: CGSize) {
         if event.isGestureStart { scrollAccumulator.reset() }
-        let inArea = windowDrag == nil
+        let inArea = !dragSession.suppressesNavigation
             && StageInteraction.isInSpaceScrollArea(
                 event.location,
                 containerSize: containerSize
@@ -2012,8 +2092,13 @@ struct StageSwiftUIView: View {
     let selectedWindowIndex: Int?
     let layout: StageWindowLayout
     let appearance: AppSettings
-    @Binding var windowDrag: WindowDragState?
-    let layoutWindowDrag: WindowDragState?
+    /// The hidden source of a held compact drag. Its node stays in place so the gesture it owns
+    /// keeps running.
+    let draggingWindowID: CGWindowID?
+    /// Card centres from the compact projection, as drawn and relative to the stage centre.
+    let compactOffsets: [CGWindowID: CGPoint]?
+    /// The stage a held drag would drop into; it has opened a gap, so it is not "Empty".
+    let isDropTarget: Bool
     let settlingWindowID: CGWindowID?
     let guidedKeyboardWindowID: CGWindowID?
     let guidedKeyboardDeparture: KeyboardWindowDeparture?
@@ -2023,7 +2108,8 @@ struct StageSwiftUIView: View {
     let spaceIndex: Int
     var onPointerSelectionChanged: ((PointerSelection, Bool, CGPoint) -> Void)?
     var onWindowSelected: ((Int, Int) -> Void)?
-    var onWindowDropRequested: ((WindowMoveRequest) -> Void)?
+    var onWindowDragChanged: ((StageWindowData, Int, DragGesture.Value) -> Void)?
+    var onWindowDragEnded: ((StageWindowData, Int, DragGesture.Value) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var lifecycleTransition: StageFocusTransition? {
@@ -2050,7 +2136,7 @@ struct StageSwiftUIView: View {
                 y: stageGeo.size.height / 2
             )
             ZStack(alignment: .topLeading) {
-                if stage.windows.isEmpty {
+                if stage.windows.isEmpty && !isDropTarget {
                     Text("Empty")
                         .font(.system(size: 13 * visualScale))
                         .foregroundStyle(.secondary.opacity(0.5))
@@ -2063,23 +2149,12 @@ struct StageSwiftUIView: View {
                             ?? 0
                         let isKeyboardDeparture = item.layoutIndex == nil
                         let isDragging = item.layoutIndex != nil
-                            && layoutWindowDrag?.sourceSpaceIndex == spaceIndex
-                            && layoutWindowDrag?.sourceWindowIndex == windowIndex
+                            && draggingWindowID == window.windowID
                         let isDropSettling = settlingWindowID == window.windowID
                         let isGuidedWindow = guidedKeyboardWindowID == window.windowID
-                        let anchorOffset = layout.cardOffsetFromCenter(
-                            at: StageMotion.windowAnchorIndex(
-                                spaceIndex: spaceIndex,
-                                windowIndex: windowIndex,
-                                drag: layoutWindowDrag
-                            )
-                        )
-                        let dragOffset = StageMotion.windowSlotOffset(
-                            spaceIndex: spaceIndex,
-                            windowIndex: windowIndex,
-                            drag: layoutWindowDrag,
-                            layout: layout
-                        )
+                        let anchorOffset = compactOffsets?[window.windowID].map {
+                            CGSize(width: $0.x, height: $0.y)
+                        } ?? layout.cardOffsetFromCenter(at: windowIndex)
                         // Shaped from the window rather than from its slot: a drag in flight
                         // displaces which slot a card is drawn in, and a card that changed
                         // width on the way past its neighbours would be the wrong size for
@@ -2091,25 +2166,25 @@ struct StageSwiftUIView: View {
                             metrics: layout.metrics.adapted(toContentAspect: window.contentAspect),
                             appearance: appearance
                         )
-                        .opacity(
-                            StageMotion.sourceWindowOpacity(
+                        // The hand-off between the proxy and the real card is a swap, never a
+                        // fade, while the card's size and position still ride the drag view's
+                        // animation.
+                        .animation(nil) {
+                            $0.opacity(StageMotion.sourceWindowOpacity(
                                 isDragging: isDragging || isDropSettling
-                            ) * StageMotion.guidedKeyboardCardOpacity(
-                                isDeparture: isKeyboardDeparture,
-                                isGuidedWindow: isGuidedWindow
-                            )
-                        )
+                            ))
+                        }
+                        .opacity(StageMotion.guidedKeyboardCardOpacity(
+                            isDeparture: isKeyboardDeparture,
+                            isGuidedWindow: isGuidedWindow
+                        ))
                         .transaction { transaction in
                             if StageMotion.sourceWindowDisablesAnimation(
-                                isDragging: isDragging || isDropSettling || isKeyboardDeparture
+                                isDragging: isKeyboardDeparture
                             ) {
                                 transaction.animation = nil
                             }
                         }
-                        // The drag reflow stays a render transform on purpose, and the frame
-                        // anchor is read outside it: the reported frames are the resting slots
-                        // the drop target is resolved against.
-                        .offset(dragOffset)
                         .background(
                             GeometryReader { windowGeo in
                                 let frame = windowGeo.frame(in: .named("overlay"))
@@ -2174,56 +2249,18 @@ struct StageSwiftUIView: View {
             coordinateSpace: .named("overlay")
         )
             .onChanged { value in
-                guard !StageInteraction.isWindowClick(translation: value.translation) else {
-                    return
-                }
-                if windowDrag == nil {
-                    windowDrag = WindowDragState(
-                        windowID: window.windowID,
-                        sourceSpaceIndex: spaceIndex,
-                        sourceWindowIndex: windowIndex,
-                        location: value.location,
-                        dropTarget: dropTarget(
-                            at: value.location,
-                            sourceWindowIndex: windowIndex
-                        )
-                    )
-                } else {
-                    windowDrag?.location = value.location
-                    if let drag = windowDrag {
-                        windowDrag?.dropTarget = dropTarget(
-                            at: value.location,
-                            sourceWindowIndex: drag.sourceWindowIndex
-                        )
-                    }
-                }
+                onWindowDragChanged?(window, windowIndex, value)
             }
             .onEnded { value in
-                if StageInteraction.isWindowClick(translation: value.translation) {
-                    onWindowSelected?(spaceIndex, windowIndex)
-                    return
-                }
-                guard let drag = windowDrag,
-                      let request = StageInteraction.windowMoveRequest(for: drag)
-                else {
-                    windowDrag = nil
-                    return
-                }
-                onWindowDropRequested?(request)
+                onWindowDragEnded?(window, windowIndex, value)
             }
     }
+}
 
-    private func dropTarget(
-        at location: CGPoint,
-        sourceWindowIndex: Int
-    ) -> WindowDropTarget? {
-        StageInteraction.windowDropTarget(
-            at: location,
-            sourceSpaceIndex: spaceIndex,
-            sourceWindowIndex: sourceWindowIndex,
-            stageFrames: stageFrames,
-            windowFrames: windowFrames
-        )
+struct CompactDragGenerationPreferenceKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: UInt64?
+    static func reduce(value: inout UInt64?, nextValue: () -> UInt64?) {
+        value = nextValue() ?? value
     }
 }
 
