@@ -112,6 +112,30 @@ run_report_vm_cpu_seconds() {
     echo "$total"
 }
 
+# Instantaneous CPU percent of the guest's host processes (100 = one core).
+run_report_vm_cpu_percent() {
+    ps -axo %cpu=,comm= | awk '/com\.apple\.Virtualization\.VirtualMachine|ParavirtualizedGraphicsGPUTask/ { total += $1 }
+        END { printf "%.1f\n", total }'
+}
+
+# run_report_sample_vm_cpu <file> <interval seconds>: appends a sample until killed. Started in
+# the background around the guest session; CPU-seconds say how much, samples say how hard.
+run_report_sample_vm_cpu() {
+    while true; do
+        run_report_vm_cpu_percent >> "$1"
+        sleep "$2"
+    done
+}
+
+# run_report_cpu_utilization <samples file>: peak and mean percent, or nulls without samples.
+run_report_cpu_utilization() {
+    awk 'NF { n++; total += $1; if ($1 > peak) peak = $1 }
+        END {
+            if (n == 0) { print "{\"peakPercent\": null, \"meanPercent\": null, \"samples\": 0}"; exit }
+            printf "{\"peakPercent\": %.1f, \"meanPercent\": %.1f, \"samples\": %d}\n", peak, total / n, n
+        }' "$1" 2>/dev/null || echo '{"peakPercent": null, "meanPercent": null, "samples": 0}'
+}
+
 # Cumulative user+system CPU of this shell's finished children, from `times`, into
 # RUN_REPORT_CPU. It must run in this shell: `times` inside $( ) reports the subshell's own
 # children, which is none.
@@ -231,9 +255,15 @@ if report["guestPhases"]:
     print("  guest: " + "  ".join(f'{p["name"]} {p["seconds"]:.1f}s' for p in report["guestPhases"]))
 cpu = report.get("cpu", {})
 if cpu:
-    print("  cpu:   " + "  ".join(
-        f"{k} {v if v is not None else 'unavailable'}" for k, v in cpu.items()
-    ))
+    def show(value):
+        if value is None:
+            return "unavailable"
+        if isinstance(value, dict):
+            if value.get("peakPercent") is None:
+                return "unavailable"
+            return f'peak {value["peakPercent"]}% mean {value["meanPercent"]}%'
+        return str(value)
+    print("  cpu:   " + "  ".join(f"{k} {show(v)}" for k, v in cpu.items()))
 scenarios = report.get("scenarios", {})
 if scenarios.get("ran") and scenarios.get("not_selected"):
     print(f'  scenarios: {len(scenarios["ran"])} ran, {len(scenarios["not_selected"])} not selected')

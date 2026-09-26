@@ -209,6 +209,17 @@ set -e
 [[ -d "$runs/20260102T000009-2" ]] || fail "pruning deleted another run's live directory"
 [[ ! -d "$runs/20260102T000001-1" ]] || fail "pruning must still remove old finished runs read from pretty-printed reports"
 
+# --- Peak and mean VM CPU come from periodic samples, reported next to CPU-seconds. ---
+printf '10.0\n250.5\n40.0\n\n' > "$work/cpu-samples"
+peak_output="$(run_report_cpu_utilization "$work/cpu-samples")"
+[[ "$peak_output" == '{"peakPercent": 250.5, "meanPercent": 100.2, "samples": 3}' ]] \
+    || fail "CPU utilization summary was wrong: $peak_output"
+[[ "$(run_report_cpu_utilization "$work/no-such-file")" == '{"peakPercent": null, "meanPercent": null, "samples": 0}' ]] \
+    || fail "missing CPU samples must report unavailable, not zero"
+grep -q 'run_report_sample_vm_cpu' scripts/tart-e2e.sh || fail "tart-e2e.sh must sample VM CPU during the guest session"
+awk '/^finish_run\(\)/,/^}/' scripts/tart-e2e.sh | grep -q 'stop_vm_cpu_sampler' \
+    || fail "the exit handler must stop the VM CPU sampler, or a cancelled run leaves it looping"
+
 # --- ps CPU times parse in every format ps prints. ---
 [[ "$(run_report_ps_seconds '0:01.50')" == 1.5 ]] || fail "M:SS.ss CPU time parsed wrong"
 [[ "$(run_report_ps_seconds '1:02:03')" == 3723.0 ]] || fail "H:MM:SS CPU time parsed wrong"
