@@ -95,6 +95,22 @@ public struct SpaceManager: Codable, Sendable {
     /// Compatibility view used by the controller: spaces in the selected display stack.
     public var spaces: [Space] { selectedStack?.spaces ?? [] }
     public var activeSpaceID: UUID { selectedStack?.activeSpaceID ?? spaces[0].id }
+
+    /// Topology has already recorded the desktop macOS is showing on every stack. Only
+    /// positive evidence — a focused window Debut has placed — may select another; a missing
+    /// answer keeps what topology reported rather than falling back to stage 1 (KHA-782).
+    public mutating func activateLaunchSpace(focusedWindowID: CGWindowID?) {
+        guard let focusedWindowID,
+              let owningSpace = spaceContainingWindow(windowID: focusedWindowID)
+        else {
+            activateSpace(id: activeSpaceID)
+            return
+        }
+        if let stackID = spaceStackID(containingSpaceID: owningSpace) {
+            selectSpaceStack(id: stackID)
+        }
+        activateSpace(id: owningSpace)
+    }
     public var activeSpace: Space {
         spaces.first(where: { $0.id == activeSpaceID }) ?? spaces[0]
     }

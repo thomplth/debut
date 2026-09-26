@@ -10,6 +10,8 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     private(set) var adjacentSwitchRequests: [(offset: Int, stackID: String)] = []
     private(set) var moveRequests: [(windowID: CGWindowID, desktop: Int)] = []
     var windowDesktops: [CGWindowID: Int] = [:]
+    /// Windows SkyLight places on every desktop, so they have no single desktop answer.
+    var allDesktopWindowIDs: Set<CGWindowID> = []
     var moveSucceeds = true
     var switchChangesDesktop = true
     var canMoveWindows = true
@@ -80,6 +82,10 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     /// Built from `windowDesktops` rather than tracked separately, so a test that plants a
     /// window's desktop one way sees it consistently through both the per-window and the
     /// bulk lookup — a caller migrating from one to the other should see no behavior change.
+    func placedWindowIDs() -> Set<CGWindowID> {
+        Set(windowLocations().keys).union(allDesktopWindowIDs)
+    }
+
     func windowLocations() -> [CGWindowID: DesktopLocation] {
         guard let stack = spaceTopology().stacks.first else { return [:] }
         return windowDesktops.reduce(into: [:]) { result, entry in
