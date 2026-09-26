@@ -10,6 +10,7 @@ FIXTURE_DIR="/tmp/debut-e2e-fixtures"
 DURATION_PROFILE="${3:-full}"
 GALLERY_CAPTURE="${4:-on}"
 SELECTED_GROUPS="${5:-all}"
+SELECTED_SCENARIOS="${6:-none}"
 # Suite groups run inside DebutE2E; permissions are the first-use TCC journeys this script runs.
 SUITE_GROUP_NAMES="smoke overlay-input drag-drop desktop-navigation fullscreen window-moves window-lifecycle onboarding rendering"
 
@@ -27,6 +28,8 @@ SUITE_GROUPS=""
 if [[ "$SELECTED_GROUPS" == all ]]; then
     RUN_PERMISSIONS=true
     SUITE_GROUPS=all
+elif [[ "$SELECTED_GROUPS" == none ]]; then
+    : # Scenarios alone; DebutE2E validates their IDs.
 else
     for group in ${SELECTED_GROUPS//,/ }; do
         if [[ "$group" == permissions ]]; then
@@ -38,11 +41,13 @@ else
             exit 2
         fi
     done
-    if [[ "$RUN_PERMISSIONS" == false && -z "$SUITE_GROUPS" ]]; then
-        echo "The group selection '$SELECTED_GROUPS' selects nothing." >&2
-        exit 2
-    fi
 fi
+if [[ "$RUN_PERMISSIONS" == false && -z "$SUITE_GROUPS" && "$SELECTED_SCENARIOS" == none ]]; then
+    echo "The group selection '$SELECTED_GROUPS' selects nothing." >&2
+    exit 2
+fi
+RUN_SUITE=false
+if [[ -n "$SUITE_GROUPS" || "$SELECTED_SCENARIOS" != none ]]; then RUN_SUITE=true; fi
 
 # This script replaces the installed app and rewrites TCC, so refuse to run
 # anywhere the host has not staged artifacts through VirtioFS.
@@ -390,7 +395,7 @@ as_console open -na TextEdit "$FIXTURE_DIR/two.txt" --args -ApplePersistenceIgno
 wait_for_fixture_apps
 fi
 
-if [[ -n "$SUITE_GROUPS" ]]; then
+if [[ "$RUN_SUITE" == true ]]; then
 guest_phase launch
 echo "Launching Debut in the guest Aqua session..."
 as_console launchctl setenv DEBUT_FORCE_DISPLAY_STACK_INDICATOR 1
@@ -399,8 +404,9 @@ wait_for_debut_ready
 
 guest_phase suite
 suite_arguments=()
-if [[ "$SUITE_GROUPS" != all ]]; then suite_arguments=(--groups "$SUITE_GROUPS"); fi
-echo "Running suite groups $SUITE_GROUPS with the $DURATION_PROFILE duration profile, including the synthetic drag gestures..."
+if [[ -n "$SUITE_GROUPS" && "$SUITE_GROUPS" != all ]]; then suite_arguments+=(--groups "$SUITE_GROUPS"); fi
+if [[ "$SELECTED_SCENARIOS" != none ]]; then suite_arguments+=(--scenarios "$SELECTED_SCENARIOS"); fi
+echo "Running suite groups ${SUITE_GROUPS:-none}, scenarios $SELECTED_SCENARIOS with the $DURATION_PROFILE duration profile, including the synthetic drag gestures..."
 unset GITHUB_ACTIONS
 set +e
 as_console env HOME="$console_home" GITHUB_ACTIONS= DEBUT_E2E_DISPOSABLE_SESSION=1 \

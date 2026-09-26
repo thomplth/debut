@@ -295,6 +295,24 @@ if CommandLine.arguments.dropFirst().first == "--harness-self-check" {
            "an unknown option is an error")
     expect(parseE2EInvocation(["switch-to-desktop", "0"]) == nil,
            "subcommands are left to their own handlers")
+    expect(parseE2EInvocation(["--scenarios", "prepared-arrival"])
+               == .success(.suite(groups: nil, scenarios: ["prepared-arrival"])),
+           "--scenarios selects single scenarios")
+    expect((try? parseE2EInvocation(["--scenarios", "no-such-scenario"])?.get()) == nil,
+           "an unknown scenario is an error, not an empty run")
+    expect((try? parseE2EInvocation(["--scenarios"])?.get()) == nil,
+           "--scenarios needs a value")
+    expect((try? parseE2EInvocation(["--scenarios", ","])?.get()) == nil,
+           "a scenario selection of nothing is an error")
+    expect(plannedScenarios(groups: nil, scenarios: ["prepared-arrival"]).map(\.id)
+               == ["prepared-arrival"],
+           "a scenario selection runs only those scenarios")
+    expect(plannedScenarios(groups: nil, scenarios: ["window-drop", "baseline"]).map(\.id)
+               == ["baseline", "window-drop"],
+           "selected scenarios run in catalog order")
+    expect(plannedScenarios(groups: [.smoke], scenarios: ["window-drop"]).map(\.id)
+               == ["baseline", "window-drop"],
+           "groups and scenarios combine")
     expect(plannedScenarios(groups: [.windowMoves, .smoke]).map(\.group)
                == plannedScenarios(groups: [.windowMoves]).map(\.group)
                + plannedScenarios(groups: [.smoke]).map(\.group),
@@ -375,8 +393,8 @@ switch e2eInvocation {
 case .list?:
     printScenarioCatalog()
     exit(0)
-case .plan(let groups)?:
-    printScenarioPlan(groups: groups)
+case .plan(let groups, let scenarios)?:
+    printScenarioPlan(groups: groups, scenarios: scenarios)
     exit(0)
 case .suite?:
     // The suite posts global input, launches and quits apps and rewrites Debut's settings. Only a
@@ -5476,9 +5494,13 @@ func runSelectedScenarios(bodies: [String: @MainActor () -> Void]) {
             + "body-only \(bodyIDs.subtracting(catalogIDs).sorted())")
         exit(1)
     }
-    let groups: [E2EGroup]?
-    if case .suite(let selected)? = e2eInvocation { groups = selected } else { groups = nil }
-    let planned = plannedScenarios(groups: groups)
+    var groups: [E2EGroup]?
+    var scenarios: [String]?
+    if case .suite(let selectedGroups, let selectedScenarios)? = e2eInvocation {
+        groups = selectedGroups
+        scenarios = selectedScenarios
+    }
+    let planned = plannedScenarios(groups: groups, scenarios: scenarios)
     var previousGroup: E2EGroup?
     for scenario in planned {
         currentScenario = scenario.id
