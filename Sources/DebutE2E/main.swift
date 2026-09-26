@@ -194,6 +194,21 @@ if CommandLine.arguments.dropFirst().first == "--harness-self-check" {
            "the full duration profile runs the full sweep")
     expect(isFullMoveDurationProfile("quick") == nil && isFullMoveDurationProfile("") == nil,
            "an unknown duration profile is rejected rather than read as ordinary")
+    var overviewOpen = true
+    var overviewToggles = 0
+    expect(dismissSystemWindowOverview(
+        isActive: { overviewOpen }, pressEscape: { overviewOpen = false },
+        toggle: { overviewToggles += 1 }, waitUntil: { $0() }
+    ) && overviewToggles == 0, "an overview that Escape closes is not toggled again")
+    overviewOpen = true
+    expect(dismissSystemWindowOverview(
+        isActive: { overviewOpen }, pressEscape: {},
+        toggle: { overviewToggles += 1; overviewOpen = false }, waitUntil: { $0() }
+    ) && overviewToggles == 1, "an overview that ignores Escape is toggled closed")
+    overviewOpen = true
+    expect(!dismissSystemWindowOverview(
+        isActive: { overviewOpen }, pressEscape: {}, toggle: {}, waitUntil: { $0() }
+    ), "an overview that never closes is reported rather than assumed gone")
     let shapeState = ["windowIDsBySpace": "10,20;30", "windowAspectsBySpace": "1.0000,1.5000;2.0000"]
     expect(reportedAspect(for: 20, in: shapeState) == 1.5,
            "resize checks the target window rather than another aspect")
@@ -226,6 +241,23 @@ func selectedStageWindowID(in state: [String: String]? = nil) -> String? {
           let column = Int(state["selectedWindowIndex"] ?? "") else { return nil }
     let windows = rows[row].split(separator: ",")
     return windows.indices.contains(column) ? String(windows[column]) : nil
+}
+
+/// diagnostic.json keeps only its newest 100 events, so counting matches before and after an
+/// action is not monotonic: each new event can evict an old match and leave the count unchanged.
+/// A fullscreen Control-arrow round trip read "7-7" after both switches had landed. Mark a point
+/// in time instead and ask for events after it; every event carries the shared uptime clock.
+func eventCursor() -> UInt64 {
+    readEvents().compactMap { $0["uptimeNanoseconds"].flatMap(UInt64.init) }.max() ?? 0
+}
+
+func events(
+    since cursor: UInt64,
+    where matches: ([String: String]) -> Bool = { _ in true }
+) -> [[String: String]] {
+    readEvents().filter {
+        ($0["uptimeNanoseconds"].flatMap(UInt64.init) ?? 0) > cursor && matches($0)
+    }
 }
 
 func readEvents() -> [[String: String]] {
@@ -700,7 +732,7 @@ func digitKeyCode(_ digit: Int) -> CGKeyCode {
 func quickSwitch(to index: Int, using service: SpaceService) -> Bool {
     let from = service.currentDesktopIndex()
     let modelBefore = readState()["activeSpaceIndex"] ?? "none"
-    let switchesBefore = readEvents().filter { $0["event"] == "space_switched" }.count
+    let switchesBefore = eventCursor()
     // The key-up is not symmetry for its own sake. Without it the digit stays logically held, so a
     // later press of the *same* digit arrives as an auto-repeat and never reaches the handler —
     // which is why each desktop could be reached exactly once per run, and why every switch back
@@ -711,11 +743,11 @@ func quickSwitch(to index: Int, using service: SpaceService) -> Bool {
     if !landed {
         // Whether Debut reported a switch separates a chord that never arrived from a gesture
         // the Dock did not honour, and those have nothing in common but the symptom.
-        let switchesAfter = readEvents().filter { $0["event"] == "space_switched" }
+        let switchesAfter = events(since: switchesBefore) { $0["event"] == "space_switched" }
         info("  Switch \(from.map(String.init) ?? "none") -> \(index) did not land; "
             + "Debut's active space was \(modelBefore) when asked, now "
             + "\(readState()["activeSpaceIndex"] ?? "none"); "
-            + "reported \(switchesAfter.count - switchesBefore) switch(es), "
+            + "reported \(switchesAfter.count) switch(es), "
             + "last: \(switchesAfter.last ?? [:]), now on "
             + "\(service.currentDesktopIndex().map(String.init) ?? "none")")
     }
@@ -1328,6 +1360,26 @@ func toggleSystemWindowOverview(mode: Int) {
     wait(1.5)
 }
 
+/// Closes a system overview whatever state it reached. Mission Control can open well after its
+/// launcher returns when a desktop transition is still settling, so an Escape posted on schedule
+/// can land before it exists; the overview then stays up and every later check reads it as the
+/// user's. Escape first, then the launcher's own toggle, and report whether it actually went.
+func dismissSystemWindowOverview(
+    isActive: @escaping () -> Bool = systemWindowOverviewActive,
+    pressEscape: () -> Void = {
+        postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [])
+        postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: [])
+    },
+    toggle: () -> Void = { toggleSystemWindowOverview(mode: 0) },
+    waitUntil: (() -> Bool) -> Bool = { waitFor($0) }
+) -> Bool {
+    if !isActive() { return true }
+    pressEscape()
+    if waitUntil({ !isActive() }) { return true }
+    toggle()
+    return waitUntil { !isActive() }
+}
+
 func systemWindowOverviewActive() -> Bool {
     guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
         as? [[String: Any]]
@@ -1578,6 +1630,7 @@ info("Opening Mission Control with Control-Up...")
 toggleSystemWindowOverview(mode: 0)
 _ = takeScreenshot("00_mission_control")
 toggleSystemWindowOverview(mode: 0)
+if !dismissSystemWindowOverview() { info("  Mission Control was still open after its second toggle") }
 
 test("The space list survives Mission Control") {
     waitForSpaceCount(userDesktopCount)
@@ -1592,6 +1645,9 @@ info("Opening App Exposé with Control-Down...")
 toggleSystemWindowOverview(mode: 2)
 _ = takeScreenshot("00_app_expose")
 toggleSystemWindowOverview(mode: 2)
+if !dismissSystemWindowOverview(toggle: { toggleSystemWindowOverview(mode: 2) }) {
+    info("  App Exposé was still open after its second toggle")
+}
 
 test("The space list survives App Exposé") {
     waitForSpaceCount(userDesktopCount)
@@ -1966,12 +2022,7 @@ test("Overlay closed after space commit") {
 
 // --- 9. Pointer hover and Command release ---
 header("9. Hover a window card and release Command")
-let pointerCommitCount = readEvents().filter {
-    $0["event"] == "overlay_committed"
-}.count
-let pointerHoverCount = readEvents().filter {
-    $0["event"] == "overlay_pointer_selection_changed"
-}.count
+let pointerEventsBefore = eventCursor()
 
 // Section 8 commits a space switch, and which space that lands on follows the MRU order the
 // earlier sections happened to build — on a host with an empty last space it can be the one
@@ -2000,9 +2051,9 @@ if let pointerTarget {
     wait(0.8)
 
     test("A stationary pointer does not select or magnify a window") {
-        readEvents().filter {
+        events(since: pointerEventsBefore) {
             $0["event"] == "overlay_pointer_selection_changed"
-        }.count == pointerHoverCount
+        }.isEmpty
     }
     let keyboardSelectionBeforeHover = readState()["selectedWindowIndex"]
 
@@ -2012,10 +2063,10 @@ if let pointerTarget {
     wait(0.5)
     let _ = takeScreenshot("10_pointer_hover")
     test("Moving the pointer enables hover selection") {
-        let hoverEvents = readEvents().filter {
+        let hoverEvents = events(since: pointerEventsBefore) {
             $0["event"] == "overlay_pointer_selection_changed"
         }
-        return hoverEvents.count > pointerHoverCount
+        return !hoverEvents.isEmpty
             && hoverEvents.last?["windowIndex"] == "0"
             && readState()["selectedWindowIndex"] == keyboardSelectionBeforeHover
     }
@@ -2024,10 +2075,10 @@ if let pointerTarget {
 
     test("Releasing Command commits the pointer hover selection") {
         for _ in 0..<20 {
-            let commitEvents = readEvents().filter {
+            let commitEvents = events(since: pointerEventsBefore) {
                 $0["event"] == "overlay_committed"
             }
-            if commitEvents.count > pointerCommitCount,
+            if !commitEvents.isEmpty,
                commitEvents.last?["windowIndex"] == "0",
                readState()["overlayVisible"] == "false" {
                 return true
@@ -2084,7 +2135,10 @@ let preparedCardAspects = spaceCardAspects(in: preparedDropState)
 // Stage geometry scales around whichever space is selected, and nothing selects the
 // destination for us now that it is not freshly created.
 let stageActiveSpaceIndex = Int(preparedDropState["selectedSpaceIndex"] ?? "") ?? 0
-let moveEventCount = readEvents().filter { $0["event"] == "window_move_previewed_by_drag" }.count
+let moveEventsBefore = eventCursor()
+func dragMovesSinceDropStarted() -> Int {
+    events(since: moveEventsBefore) { $0["event"] == "window_move_previewed_by_drag" }.count
+}
 info("  Original drop state: spaces=\(originalSpaceCount), windows=\(originalWindowCounts)")
 info("  Drop fixture: source=\(sourceSpaceIndex), destination=\(destinationSpaceIndex), windows=\(preparedWindowCounts)")
 
@@ -2125,7 +2179,7 @@ if preparedWindowCounts.indices.contains(sourceSpaceIndex),
     info("  Drag path: \(sourcePoint) -> \(destinationPoint)")
     postMouseDrag(from: sourcePoint, to: destinationPoint)
     for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
-        if readEvents().filter({ $0["event"] == "window_move_previewed_by_drag" }).count > moveEventCount {
+        if dragMovesSinceDropStarted() > 0 {
             break
         }
         wait(0.1)
@@ -2137,7 +2191,7 @@ if preparedWindowCounts.indices.contains(sourceSpaceIndex),
     info("  State after drop: windows=\(movedWindowCounts)")
     let _ = takeScreenshot("11_window_drop_refreshed")
     test("Dropping a window updates the source and destination space models") {
-        readEvents().filter { $0["event"] == "window_move_previewed_by_drag" }.count > moveEventCount
+        dragMovesSinceDropStarted() > 0
             && movedWindowCounts.indices.contains(sourceSpaceIndex)
             && movedWindowCounts.indices.contains(destinationSpaceIndex)
             && movedWindowCounts[sourceSpaceIndex] == preparedWindowCounts[sourceSpaceIndex] - 1
@@ -2156,13 +2210,13 @@ if preparedWindowCounts.indices.contains(sourceSpaceIndex),
         info("  Reverse drag path: \(destinationPoint) -> \(returnedSpacePoint)")
         postMouseDrag(from: destinationPoint, to: returnedSpacePoint)
         for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
-            if readEvents().filter({ $0["event"] == "window_move_previewed_by_drag" }).count > moveEventCount + 1 {
+            if dragMovesSinceDropStarted() > 1 {
                 break
             }
             wait(0.1)
         }
         test("The refreshed destination stage supports an immediate reverse drag") {
-            readEvents().filter { $0["event"] == "window_move_previewed_by_drag" }.count > moveEventCount + 1
+            dragMovesSinceDropStarted() > 1
                 && spaceWindowCounts(in: readState()) == preparedWindowCounts
         }
     } else {
@@ -2216,7 +2270,7 @@ if keyboardMoveSpaceCount < 2 {
     skipTest("A keyboard move puts the window on the next space's desktop", reason: reason)
     skipTest("The keyboard move is reported and lands the window where the model says", reason: reason)
 } else {
-    let movesBefore = readEvents().filter { $0["event"] == "window_moved_by_key" }.count
+    let movesBefore = eventCursor()
 
     postFlagsChanged(flags: [.maskCommand])
     wait(0.1)
@@ -2255,22 +2309,22 @@ if keyboardMoveSpaceCount < 2 {
         postKeyDown(keyCode: CGKeyCode(kVK_DownArrow), flags: [.maskCommand])
         wait(1.0)
 
-        let previewEvents = readEvents().filter { $0["event"] == "window_moved_by_key" }
+        let previewEvents = events(since: movesBefore) { $0["event"] == "window_moved_by_key" }
         let previewCounts = spaceWindowCounts(in: readState())
-        let waitedForCommit = previewEvents.count == movesBefore
+        let waitedForCommit = previewEvents.isEmpty
         info("  Before Cmd release: windows=\(previewCounts), committed=\(!waitedForCommit)")
         let _ = takeScreenshot("12_keyboard_window_move")
 
         postFlagsChanged(flags: [])
         for _ in 0..<30 {
-            if readEvents().filter({ $0["event"] == "window_moved_by_key" }).count > movesBefore,
+            if !events(since: movesBefore, where: { $0["event"] == "window_moved_by_key" }).isEmpty,
                readState()["overlayVisible"] == "false" {
                 break
             }
             wait(0.1)
         }
 
-        let committedEvents = readEvents()
+        let committedEvents = events(since: movesBefore)
         let moveEvents = committedEvents.filter { $0["event"] == "window_moved_by_key" }
         let moveEventIndex = committedEvents.lastIndex { $0["event"] == "window_moved_by_key" }
         let spaceSwitchIndex = committedEvents.lastIndex { $0["event"] == "space_switched" }
@@ -2282,7 +2336,7 @@ if keyboardMoveSpaceCount < 2 {
         info("""
               Keyboard move commit: originSelected=\(originSelected) \
             waitedForCommit=\(waitedForCommit) \
-            moveEvents=\(moveEvents.count)>\(movesBefore) \
+            moveEvents=\(moveEvents.count) \
             movePrecededSwitch=\(windowMovePrecededSpaceSwitch) \
             moveIndex=\(moveEventIndex.map(String.init) ?? "nil") \
             switchIndex=\(spaceSwitchIndex.map(String.init) ?? "nil") \
@@ -2291,7 +2345,7 @@ if keyboardMoveSpaceCount < 2 {
         test("The keyboard move is reported and lands the window where the model says") {
             originSelected
                 && waitedForCommit
-                && moveEvents.count > movesBefore
+                && !moveEvents.isEmpty
                 && windowMovePrecededSpaceSwitch
                 && previewCounts == committedCounts
                 && committedCounts.indices.contains(originSpace + 1)
@@ -2429,9 +2483,7 @@ try? settingsStore.saveSettings(customizedSettings)
 clearDiagnosticFile()
 let customizedApplication = launchDebut()
 let customizedApplicationReady = waitForDebutReady(customizedApplication)
-let customizedActivationCount = readEvents().filter {
-    $0["event"] == "key_event" && $0["keyEvent"] == "cmdTabHold"
-}.count
+let customizedActivationBefore = eventCursor()
 postFlagsChanged(flags: [.maskCommand])
 wait(0.1)
 postKeyDown(keyCode: CGKeyCode(kVK_ANSI_B), flags: [.maskCommand])
@@ -2441,9 +2493,9 @@ test("A persisted custom shortcut replaces Command-Tab activation") {
     stoppedBeforeCustomization
         && customizedApplicationReady
         && readState()["overlayVisible"] == "true"
-        && readEvents().filter {
+        && !events(since: customizedActivationBefore) {
             $0["event"] == "key_event" && $0["keyEvent"] == "cmdTabHold"
-        }.count > customizedActivationCount
+        }.isEmpty
 }
 
 postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
@@ -2481,10 +2533,11 @@ if featureSpaces.userDesktops().count >= 2 {
     }
 
     let baselineReady = quickSwitch(to: 0, using: featureSpaces)
+    let controlArrowBefore = eventCursor()
     postControlArrow(kVK_RightArrow)
     test("Enabled Control-arrow reaches the adjacent real desktop through Debut") {
         featureReady && baselineReady && waitFor { featureSpaces.currentDesktopIndex() == 1 }
-            && readEvents().contains { $0["keyEvent"] == "switchAdjacentSpace(1)" }
+            && !events(since: controlArrowBefore) { $0["keyEvent"] == "switchAdjacentSpace(1)" }.isEmpty
     }
     wait(0.5)
     // Emulate the unmarked DockSwipe stream a physical desktop gesture produces. Every
@@ -2510,16 +2563,15 @@ if featureSpaces.userDesktops().count >= 2 {
         postPhysicalSwipe(phase: 2, progress: progress)
         postPhysicalSwipe(phase: 4, progress: progress)
     }
+    let swipeBefore = eventCursor()
     postPhysicalSwipeGesture(progress: -0.6, commitDelay: 0.25)
-    info("Swipe result: desktop=\(String(describing: featureSpaces.currentDesktopIndex())) events=\(readEvents().filter { ($0["event"] ?? "").contains("swipe") || ($0["keyEvent"] ?? "").contains("Adjacent") })")
+    info("Swipe result: desktop=\(String(describing: featureSpaces.currentDesktopIndex())) events=\(events(since: swipeBefore) { ($0["event"] ?? "").contains("swipe") || ($0["keyEvent"] ?? "").contains("Adjacent") })")
     test("A desktop swipe reaches the previous desktop without recapturing its replacement") {
         waitFor { featureSpaces.currentDesktopIndex() == 0 }
-            && readEvents().contains { $0["keyEvent"] == "switchAdjacentSpace(-1)" }
+            && !events(since: swipeBefore) { $0["keyEvent"] == "switchAdjacentSpace(-1)" }.isEmpty
     }
 
-    let burstEventsBefore = readEvents().filter {
-        ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
-    }.count
+    let burstEventsBefore = eventCursor()
     let burstModelReady = waitFor { readState()["activeSpaceIndex"] == "0" }
     let burstStack = featureSpaces.spaceTopology().stacks.first
     let burstOriginIndex = burstStack?.currentSpaceIndex
@@ -2549,40 +2601,42 @@ if featureSpaces.userDesktops().count >= 2 {
     }
     let burstReturned = burstReverseStepsCompleted
         && featureSpaces.currentDesktop() == burstStack?.currentDesktopID
-    let burstEventsAfter = readEvents().filter {
+    let burstEvents = events(since: burstEventsBefore) {
         ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
     }.count
     info(
         "Rapid swipe recovery: modelReady=\(burstModelReady) "
             + "endpoint=\(burstReachedEndpoint) returned=\(burstReturned) "
-            + "events=\(burstEventsAfter)-\(burstEventsBefore)"
+            + "events=\(burstEvents)"
     )
     test("Rapid consecutive trackpad swipes cannot leave later navigation coalesced") {
         burstModelReady && burstReachedEndpoint && burstReturned
-            && burstEventsAfter >= burstEventsBefore + 2
+            && burstEvents >= 2
     }
 
-    let adjacentEventsBeforeOverview = readEvents().filter {
-        ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
-    }.count
-    let swipeClaimsBeforeOverview = readEvents().filter {
-        $0["event"] == "desktop_swipe_claimed"
-    }.count
+    // The burst above can leave a stalled switch for the watchdog to abandon, and Mission Control
+    // asked for during that settling opens late. Start from a quiet desktop.
+    _ = dismissSystemWindowOverview()
+    wait(1.0)
+    let overviewRequestedAt = Date()
+    let overviewEventsBefore = eventCursor()
     toggleSystemWindowOverview(mode: 0)
-    let yieldedToOverview = waitFor { systemWindowOverviewActive() }
+    let yieldedToOverview = waitFor(timeout: 8) { systemWindowOverviewActive() }
+    info(
+        "Mission Control opened=\(yieldedToOverview) after "
+            + String(format: "%.1fs", Date().timeIntervalSince(overviewRequestedAt))
+    )
     postPhysicalSwipeGesture(progress: 0.6)
     wait(0.3)
-    let overviewSwipeStayedNative = readEvents().filter {
+    let overviewSwipeStayedNative = events(since: overviewEventsBefore) {
         $0["event"] == "desktop_swipe_claimed"
-    }.count == swipeClaimsBeforeOverview
+    }.isEmpty
     postControlArrow(kVK_RightArrow)
     wait(0.3)
-    let overviewInputsStayedNative = readEvents().filter {
+    let overviewInputsStayedNative = events(since: overviewEventsBefore) {
         ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
-    }.count == adjacentEventsBeforeOverview
-    postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [])
-    postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: [])
-    let resumedAfterOverview = waitFor { !systemWindowOverviewActive() }
+    }.isEmpty
+    let resumedAfterOverview = dismissSystemWindowOverview()
 
     test("Control-arrow stays native inside Mission Control") {
         yieldedToOverview && overviewInputsStayedNative
@@ -2596,9 +2650,7 @@ if featureSpaces.userDesktops().count >= 2 {
     // shortcut; events posted into the transition can be discarded before they reach Debut.
     wait(0.5)
     let resetAfterOverview = quickSwitch(to: 0, using: featureSpaces)
-    let yieldedNavigationCountBeforeRecovery = readEvents().filter {
-        $0["event"] == "desktop_navigation_input_yielded"
-    }.count
+    let recoveryEventsBefore = eventCursor()
     let requiresLegacyOverviewRecovery =
         ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 26
     postControlArrow(kVK_RightArrow)
@@ -2609,9 +2661,9 @@ if featureSpaces.userDesktops().count >= 2 {
     let yieldedNavigationEvents = readEvents().filter {
         $0["event"] == "desktop_navigation_input_yielded"
     }
-    let newYieldedNavigationEvents = yieldedNavigationEvents.dropFirst(
-        yieldedNavigationCountBeforeRecovery
-    )
+    let newYieldedNavigationEvents = events(since: recoveryEventsBefore) {
+        $0["event"] == "desktop_navigation_input_yielded"
+    }
     let firstPostOverviewInputWasYielded = newYieldedNavigationEvents.contains {
         $0["reason"] == "dockOverviewActive"
             || $0["reason"] == "dockOverviewRecovery"
@@ -2634,12 +2686,15 @@ if featureSpaces.userDesktops().count >= 2 {
     // so the native recovery chord above proves passthrough but cannot move the VM's desktop.
     // On newer systems the first chord already moved; either way this next chord proves Debut
     // did not leave recovery latched or its coordinator pending.
+    // Counted from just before this chord: on macOS 27 the recovery chord above is already
+    // claimed, and must not stand in for this one.
+    let resumedEventsBefore = eventCursor()
     postControlArrow(kVK_RightArrow)
     test("Faster desktop switching resumes after Mission Control recovery") {
         waitFor { featureSpaces.currentDesktopIndex() == 1 }
-            && readEvents().filter {
+            && !events(since: resumedEventsBefore) {
                 ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
-            }.count > adjacentEventsBeforeOverview
+            }.isEmpty
     }
 
     // A fullscreen window inserts a non-desktop Space into Mission Control's order. Both
@@ -2668,9 +2723,7 @@ if featureSpaces.userDesktops().count >= 2 {
         let adjacentSpaceID = stack.orderedSpaceIDs[adjacentIndex]
         let arrow = offset > 0 ? kVK_RightArrow : kVK_LeftArrow
         let reverseArrow = offset > 0 ? kVK_LeftArrow : kVK_RightArrow
-        let controlEventsBefore = readEvents().filter {
-            ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
-        }.count
+        let controlEventsBefore = eventCursor()
 
         postControlArrow(arrow)
         let controlLeftFullscreen = waitFor {
@@ -2680,27 +2733,22 @@ if featureSpaces.userDesktops().count >= 2 {
         let controlReturnedFullscreen = waitFor {
             featureSpaces.currentDesktop() == fullscreenSpaceID
         }
-        let controlEventsAfter = readEvents().filter {
+        let controlEvents = events(since: controlEventsBefore) {
             ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
         }.count
         info(
             "Fullscreen Control-arrow: order=\(stack.orderedSpaceIDs) "
                 + "fullscreen=\(fullscreenSpaceID) adjacent=\(adjacentSpaceID) "
                 + "left=\(controlLeftFullscreen) returned=\(controlReturnedFullscreen) "
-                + "events=\(controlEventsAfter)-\(controlEventsBefore)"
+                + "events=\(controlEvents)"
         )
         test("Control-arrow leaves and re-enters a fullscreen Space through Debut") {
             controlLeftFullscreen && controlReturnedFullscreen
-                && controlEventsAfter >= controlEventsBefore + 2
+                && controlEvents >= 2
         }
 
         wait(0.5)
-        let swipeEventUptimeBefore = readEvents().compactMap { event -> UInt64? in
-            guard (event["keyEvent"] ?? "").contains("switchAdjacentSpace") else {
-                return nil
-            }
-            return event["uptimeNanoseconds"].flatMap(UInt64.init)
-        }.max() ?? 0
+        let swipeEventUptimeBefore = eventCursor()
         postPhysicalSwipeGesture(progress: offset > 0 ? 0.6 : -0.6)
         let swipeLeftFullscreen = waitFor {
             featureSpaces.currentDesktop() == adjacentSpaceID
@@ -2711,16 +2759,12 @@ if featureSpaces.userDesktops().count >= 2 {
             featureSpaces.currentDesktop() == fullscreenSpaceID
         }
         let swipeEventsSettled = waitFor {
-            readEvents().filter {
+            events(since: swipeEventUptimeBefore) {
                 ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
-                    && ($0["uptimeNanoseconds"].flatMap(UInt64.init) ?? 0)
-                        > swipeEventUptimeBefore
             }.count >= 2
         }
-        let swipeEventsAfter = readEvents().filter {
+        let swipeEventsAfter = events(since: swipeEventUptimeBefore) {
             ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
-                && ($0["uptimeNanoseconds"].flatMap(UInt64.init) ?? 0)
-                    > swipeEventUptimeBefore
         }.count
         info(
             "Fullscreen trackpad: left=\(swipeLeftFullscreen) "
@@ -3664,9 +3708,7 @@ let hoveredWindowIDBeforeDismissal = dismissalActiveSpaceIndex.flatMap { index i
 let selectedCardCenter = firstWindowCenter(in: dismissalStateBefore)
 let dismissalScreen = CGDisplayBounds(CGMainDisplayID())
 let dismissalMetrics = drawnMetrics(cardAspects: [activeSpaceCardAspects(in: dismissalStateBefore)])
-let dismissalHoverCount = readEvents().filter {
-    $0["event"] == "overlay_pointer_selection_changed"
-}.count
+let dismissalHoverBefore = eventCursor()
 postMouseMove(to: CGPoint(x: dismissalScreen.maxX - 20, y: dismissalScreen.maxY - 20))
 wait(0.2)
 let dismissalHoverReady: Bool
@@ -3675,11 +3717,10 @@ if let selectedCardCenter {
     wait(0.15)
     postMouseMove(to: CGPoint(x: selectedCardCenter.x + 8, y: selectedCardCenter.y))
     dismissalHoverReady = waitFor(timeout: 2) {
-        let events = readEvents().filter {
+        let hovers = events(since: dismissalHoverBefore) {
             $0["event"] == "overlay_pointer_selection_changed"
         }
-        return events.count > dismissalHoverCount
-            && events.last?["windowIndex"] == "0"
+        return hovers.last?["windowIndex"] == "0"
             && readState()["selectedWindowIndex"] == "1"
     }
 } else {
@@ -4016,7 +4057,7 @@ if let coverageGateReason {
         // Mirrors 10b exactly: the origin space is read from inside the open overlay, not
         // before it opens — opening the overlay resets `selectedSpaceIndex` to the active
         // space, and computing origin from a stale pre-overlay snapshot desynced the two.
-        let coverageMovesBefore = readEvents().filter { $0["event"] == "window_moved_by_key" }.count
+        let coverageMovesBefore = eventCursor()
 
         postFlagsChanged(flags: [.maskCommand])
         wait(0.1)
@@ -4056,7 +4097,7 @@ if let coverageGateReason {
             wait(1.0)
             postFlagsChanged(flags: [])
             for _ in 0..<30 {
-                if readEvents().filter({ $0["event"] == "window_moved_by_key" }).count > coverageMovesBefore,
+                if !events(since: coverageMovesBefore, where: { $0["event"] == "window_moved_by_key" }).isEmpty,
                    readState()["overlayVisible"] == "false" {
                     break
                 }

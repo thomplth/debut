@@ -21,6 +21,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var desktopSwipeService: DesktopSwipeService?
     private var desktopNavigationStackID: String?
     private var desktopNavigationEligibility: DesktopNavigationEligibility?
+    private let overviewSignalConfirmer = OverviewSignalConfirmer()
     private var desktopNavigationRefreshScheduled = false
     private var consumeOverviewRecoveryOnRefresh = false
     private var tutorialViewModel: TutorialViewModel?
@@ -611,6 +612,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func handleDesktopDidChange() {
+        // The desktop settled, so a pending 1327 came from this transition, not an overview.
+        overviewSignalConfirmer.cancel()
         guard let controller = spaceController else { return }
         let changes = controller.desktopDidChange()
         let presentations = DesktopSwitchIndicatorPolicy.presentations(
@@ -662,25 +665,28 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
            !event.desktopListIsSettled {
             // SkyLight also emits 1327 around ordinary desktop transitions. Only the live
             // Dock/WindowManager marker proves an overview owns input; trusting the signal by
-            // itself poisons the cache and leaks the next shortcut back to macOS.
-            guard desktopNavigationEligibility?.overviewWillOpen(
-                confirmed: DockOverviewDetector.isActive()
-            ) == true else {
-                diag.report("desktop_navigation_overview_signal_ignored", level: .transient)
-                return
+            // itself poisons the cache and leaks the next shortcut back to macOS. The marker
+            // can also trail the signal, so the confirmer keeps looking for a bounded moment.
+            overviewSignalConfirmer.signalReceived { [weak self] in
+                self?.overviewConfirmed()
             }
-            // A synthetic hop has no completion signal once Mission Control takes over.
-            // Clear it now so a later request cannot coalesce behind stale state, and drain
-            // a physical gesture whose Began Debut may already have claimed. Do not sample
-            // topology here: 1327 arrives while the current desktop is transiently absent.
-            spaceService?.cancelPendingSwitches()
-            desktopSwipeService?.cancelActiveGesture()
-            diag.report("desktop_navigation_overview_will_open", level: .transient)
+            diag.report("desktop_navigation_overview_signal_received", level: .transient)
             return
         }
         spaceController?.reconcileSpacesWithDesktops()
         refreshDesktopNavigationAvailability()
         refreshTutorialEnvironment()
+    }
+
+    private func overviewConfirmed() {
+        guard desktopNavigationEligibility?.overviewWillOpen(confirmed: true) == true else { return }
+        // A synthetic hop has no completion signal once Mission Control takes over.
+        // Clear it now so a later request cannot coalesce behind stale state, and drain
+        // a physical gesture whose Began Debut may already have claimed. Do not sample
+        // topology here: 1327 arrives while the current desktop is transiently absent.
+        spaceService?.cancelPendingSwitches()
+        desktopSwipeService?.cancelActiveGesture()
+        diag.report("desktop_navigation_overview_will_open", level: .transient)
     }
 
     @objc private func screenParametersDidChange(_ notification: Notification) {

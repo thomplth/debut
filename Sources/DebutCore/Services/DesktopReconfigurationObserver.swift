@@ -98,6 +98,63 @@ enum DockOverviewDetector {
     }
 }
 
+/// SkyLight's 1327 can arrive before Dock or WindowManager puts up the overlay that proves an
+/// overview owns input. Measured in the macOS 26 Tart guest: the signal came first, a check at
+/// that instant found no marker, and Debut went on claiming swipes and Control-arrow inside
+/// Mission Control. So an unconfirmed signal is rechecked briefly rather than discarded.
+///
+/// The rechecks are bounded and belong to one signal: a newer signal replaces them, and a
+/// completed desktop change cancels them, since that signal came from the transition itself.
+/// Main thread only.
+final class OverviewSignalConfirmer {
+    static let checkInterval: TimeInterval = 0.05
+    static let maximumWait: TimeInterval = 1.5
+
+    typealias Scheduler = (TimeInterval, @escaping () -> Void) -> Void
+
+    private let isActive: () -> Bool
+    private let schedule: Scheduler
+    private var generation = 0
+
+    init(
+        isActive: @escaping () -> Bool = DockOverviewDetector.isActive,
+        schedule: @escaping Scheduler = { delay, work in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    ) {
+        self.isActive = isActive
+        self.schedule = schedule
+    }
+
+    /// Calls `onConfirmed` at most once, now or on a later recheck, if the overlay appears.
+    func signalReceived(onConfirmed: @escaping () -> Void) {
+        generation += 1
+        if isActive() {
+            onConfirmed()
+            return
+        }
+        let remaining = Int((Self.maximumWait / Self.checkInterval).rounded(.down))
+        recheck(generation: generation, remaining: remaining, onConfirmed: onConfirmed)
+    }
+
+    func cancel() {
+        generation += 1
+    }
+
+    private func recheck(generation: Int, remaining: Int, onConfirmed: @escaping () -> Void) {
+        guard remaining > 0 else { return }
+        schedule(Self.checkInterval) { [weak self] in
+            guard let self, self.generation == generation else { return }
+            if self.isActive() {
+                self.generation += 1
+                onConfirmed()
+            } else {
+                self.recheck(generation: generation, remaining: remaining - 1, onConfirmed: onConfirmed)
+            }
+        }
+    }
+}
+
 final class DesktopNavigationEligibility: @unchecked Sendable {
     enum BlockReason: String {
         case syntheticSwitchUnsupported
