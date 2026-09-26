@@ -54,3 +54,35 @@ wallpaper-capture path.
 
 Installed-app input and pixel validation runs in Tart. Profiling commands that
 only inspect an existing process are distinct from the global-input E2E harness.
+
+## E2E verification cost
+
+Every local Tart run writes `report.json` under `~/Library/Caches/Debut/TartE2E/runs/<run-id>/`
+with host phases (build, queue, stage, boot, provision, guest, collect), guest phases, check
+results, and CPU: `buildCpuSeconds` for the host build and `suiteVmCpuSeconds` for the
+Virtualization processes during the guest session. Compare runs by those fields rather than by
+one wall-clock total; queue time is waiting, not work.
+
+Measured on a 12-core Apple Silicon host on 2026-09-26. Build is the ~38 s release rebuild after a
+one-file DebutCore edit (whole-module optimization); a true no-op build is ~8 s.
+
+| Run | Boot | Guest | VM CPU |
+| --- | ---: | ---: | ---: |
+| Every group, 41-duration sweep, gallery (the former default) | 20 s | 338 s | 538 s |
+| Every group, 9-duration profile, no gallery | 20 s | 216 s | 330 s |
+| `drag-drop` alone | 23 s | 32 s | 55 s |
+| `desktop-navigation` alone (swipes, Control-arrow) | 22 s | 51 s | 88 s |
+| `smoke,overlay-input,drag-drop,fullscreen,rendering` (a narrow overlay change's gate) | 31 s | 82 s | 99 s |
+
+Single groups take 24–76 s in the guest (`permissions`, the three TCC journeys, is the
+slowest). With the rebuild, focused feedback is about 1.5 minutes for drag-drop and
+under 2 minutes for desktop navigation.
+
+A narrow overlay change iterated five times cost about 5 × 397 s ≈ 33 minutes of Tart runner
+time and ≈ 2,700 VM CPU-seconds when every attempt ran the whole default suite. Iterating four
+times on `drag-drop` and running `scripts/verify.sh affected` once costs about 4 × 93 s + 196 s
+(contracts, Swift suite and the five-group gate) ≈ 9.5 minutes and ≈ 320 VM CPU-seconds: about
+70% less time and 88% less VM CPU. These totals are modelled from the measured phases above,
+not observed as one task. A change to shared input, focus, topology or movement still ends with
+the full suite (about 6 minutes of guest time); iterating on its group first still saves about
+half.
