@@ -16,6 +16,7 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public var windowList: [WindowInfo] = []
     public var untrackableWindowIDList: Set<CGWindowID> = []
     public var disqualifiedWindowIDList: Set<CGWindowID> = []
+    public var undersizedWindowIDList: Set<CGWindowID> = []
     public var axContradictedWindowIDList: Set<CGWindowID> = []
     public var parentedWindowIDList: Set<CGWindowID> = []
     public var orderedOutWindowIDList: Set<CGWindowID> = []
@@ -56,7 +57,11 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public func listRunningApps() -> [AppInfo] { apps }
     public func listWindows() -> [WindowInfo] { windowList }
     public func listUntrackableWindowIDs() -> Set<CGWindowID> { untrackableWindowIDList }
-    public func listDisqualifiedWindowIDs() -> Set<CGWindowID> { disqualifiedWindowIDList }
+    public func listDisqualifiedWindows() -> [CGWindowID: WindowDisqualification] {
+        var result = Dictionary(uniqueKeysWithValues: undersizedWindowIDList.map { ($0, WindowDisqualification.smallWidth) })
+        for windowID in disqualifiedWindowIDList { result[windowID] = .nonApplicationLayer }
+        return result
+    }
     public func listAXContradictedWindowIDs() -> Set<CGWindowID> { axContradictedWindowIDList }
     public func listWindowServerVerdicts() -> WindowServerVerdicts {
         WindowServerVerdicts(parented: parentedWindowIDList, orderedOut: orderedOutWindowIDList)

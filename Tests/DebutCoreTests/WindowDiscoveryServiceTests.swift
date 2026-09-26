@@ -1141,6 +1141,41 @@ struct WindowDiscoveryServiceTests {
         #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [4797])
     }
 
+    @Test("An assigned window whose frame collapsed stays switchable; a new small one is refused")
+    func reconciliationKeepsAssignedWindowWithCollapsedFrame() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 1990, isHidden: false)]
+        windowService.windowList = [liveWindow(365, ownerPID: 1990)]
+        windowService.allWindowIDList = [365, 366, 900]
+        windowService.undersizedWindowIDList = [366, 900]
+
+        var spaceManager = SpaceManager()
+        let spaceID = spaceManager.activeSpaceID
+        for windowID in [CGWindowID(365), CGWindowID(366)] {
+            spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "notion.id",
+                    ownerName: "Notion",
+                    windowTitle: "",
+                    ownerPID: 1990
+                ),
+                toSpaceID: spaceID
+            )
+        }
+
+        let discovery = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        for _ in 0..<2 {
+            discovery.reconcileWindows(&spaceManager)
+            #expect(spaceManager.activeSpace.windows.map(\.windowID) == [365, 366])
+            #expect(spaceManager.dormantWindowAssignments.isEmpty)
+        }
+        #expect(spaceManager.spaceContainingWindow(windowID: 900) == nil)
+    }
+
     // The other three eviction paths can all miss a dismissed sheet indefinitely: it keeps a
     // layer-0 surface on a resolved desktop for the life of its app, so nothing degrades, no
     // destroy notification arrives, and the AX verdict waits on the user visiting that desktop.

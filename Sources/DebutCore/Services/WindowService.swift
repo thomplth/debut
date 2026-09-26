@@ -263,9 +263,10 @@ public protocol WindowService: Sendable {
     func listRunningApps() -> [AppInfo]
     func listWindows() -> [WindowInfo]
     func listUntrackableWindowIDs() -> Set<CGWindowID>
-    /// Window IDs Core Graphics positively contradicts being user-manageable windows,
-    /// which is a stronger claim than merely failing `listWindows()` admission.
-    func listDisqualifiedWindowIDs() -> Set<CGWindowID>
+    /// Windows Core Graphics positively contradicts being user-manageable right now, with the
+    /// reason — a stronger claim than merely failing `listWindows()` admission. Only some
+    /// reasons are grounds for parking a window that is already assigned.
+    func listDisqualifiedWindows() -> [CGWindowID: WindowDisqualification]
     /// Window IDs Accessibility positively contradicts, by enumerating their app while their
     /// own desktop was showing and declining to name them. Kept separate from the Core Graphics
     /// verdict because it is only ever available for the desktop currently on screen.
@@ -334,7 +335,7 @@ public extension WindowService {
     }
 
     func listUntrackableWindowIDs() -> Set<CGWindowID> { [] }
-    func listDisqualifiedWindowIDs() -> Set<CGWindowID> { [] }
+    func listDisqualifiedWindows() -> [CGWindowID: WindowDisqualification] { [:] }
     func listAXContradictedWindowIDs() -> Set<CGWindowID> { [] }
     func listWindowServerVerdicts() -> WindowServerVerdicts { WindowServerVerdicts() }
     func closeWindow(windowID: CGWindowID) -> Bool { false }
@@ -361,4 +362,16 @@ public extension WindowService {
         )
     }
     func frontmostApplicationPID() -> pid_t? { nil }
+}
+
+/// Why Core Graphics says a surface cannot be a user-manageable window right now.
+public enum WindowDisqualification: String, Sendable {
+    case nonApplicationLayer = "non_application_layer"
+    case smallWidth = "small_width"
+    case smallHeight = "small_height"
+
+    /// A layer is a statement about what the surface is. A small frame is only its current
+    /// presentation: Notion's inactive windows collapsed to 2x2 for 23 hours and came back
+    /// unchanged (KHA-786). Both refuse a new window; only the layer parks an assigned one.
+    public var evictsAssignedWindow: Bool { self == .nonApplicationLayer }
 }
