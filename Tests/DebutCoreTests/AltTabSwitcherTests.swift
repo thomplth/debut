@@ -97,6 +97,64 @@ struct AltTabSwitcherTests {
         #expect(controller.altTabSelection?.window.windowID == 101)
     }
 
+    /// Focus reports never name Debut's own windows, so while Settings is key the cached focus
+    /// still names the app the user left for it. Promoting that stale window put Settings at
+    /// entry one, and every release landed back on Settings without moving the order.
+    @Test("Opening from Debut's own Settings window leaves Settings")
+    func openingFromOwnSettingsWindowLeavesIt() {
+        let now = Date()
+        let settingsWindowID: CGWindowID = 303
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            ownKeyWindowProvider: {
+                FocusedWindowSnapshot(windowID: settingsWindowID, frame: nil, isFullscreen: false)
+            }
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(window(101, activatedAt: now), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(
+            window(settingsWindowID, activatedAt: now.addingTimeInterval(-1)),
+            toSpaceID: spaceID
+        )
+        controller.spaceManager.addWindow(
+            window(202, activatedAt: now.addingTimeInterval(-2)),
+            toSpaceID: spaceID
+        )
+        controller.recordWindowActivation(windowID: 101)
+
+        controller.handleKeyEvent(.altTabHold)
+
+        #expect(controller.altTabEntries.map(\.window.windowID) == [settingsWindowID, 101, 202])
+        #expect(controller.altTabSelection?.window.windowID == 101)
+    }
+
+    /// A key window Debut never admitted — the overlay, onboarding — is not a switcher entry,
+    /// so it must not displace the external window the user is on.
+    @Test("An unadmitted Debut key window does not replace the focused window")
+    func unadmittedOwnKeyWindowIsIgnored() {
+        let now = Date()
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            ownKeyWindowProvider: {
+                FocusedWindowSnapshot(windowID: 999, frame: nil, isFullscreen: false)
+            }
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        controller.spaceManager.addWindow(window(101, activatedAt: now), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(
+            window(202, activatedAt: now.addingTimeInterval(-1)),
+            toSpaceID: spaceID
+        )
+        controller.recordWindowActivation(windowID: 202)
+
+        controller.handleKeyEvent(.altTabHold)
+
+        #expect(controller.altTabEntries.map(\.window.windowID) == [202, 101])
+        #expect(controller.altTabSelection?.window.windowID == 101)
+    }
+
     @Test("Opening backward selects the last window in global order")
     func opensOnLastWindow() {
         let (controller, _) = makeTwoSpaceController()
