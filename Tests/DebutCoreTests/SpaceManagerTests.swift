@@ -194,38 +194,42 @@ struct SpaceManagerTests {
         #expect(sm.spaceContainingWindow(windowID: 999) == nil)
     }
 
-    @Test("Resetting the window cache removes live and dormant assignments")
-    func resetWindowCache() {
+    // KHA-784: the reset used to rebuild one synthetic stack, collapsing every desktop into
+    // stage 1 until later reconciliation and forgetting which desktop macOS was showing.
+    @Test("Clearing window assignments keeps every desktop and the one showing")
+    func clearWindowAssignmentsKeepsTopology() {
+        let ids: [CGSSpaceID] = [3, 4, 5]
+        let uuids = ["A-1", "B-2", "C-3"]
         var sm = SpaceManager()
-        let firstSpaceID = sm.activeSpaceID
-        sm.addWindow(
-            SpaceWindow(
-                windowID: 101,
-                ownerBundleID: "com.ghost",
-                ownerName: "Ghost",
-                windowTitle: "Stale",
-                ownerPID: 10
+        sm.reconcileSpaceStacks(with: SpaceTopology(separateSpaces: false, stacks: [
+            SpaceStackDescriptor(
+                id: SpaceTopology.sharedStackID,
+                displayID: nil,
+                displayName: "All Displays",
+                frame: .zero,
+                desktopIDs: ids,
+                desktopUUIDs: uuids,
+                currentDesktopID: ids[2],
+                currentDesktopUUID: uuids[2]
             ),
-            toSpaceID: firstSpaceID
+        ]))
+        let spaceIDs = sm.spaces.map(\.id)
+        sm.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.ghost", ownerName: "Ghost", windowTitle: "Stale", ownerPID: 10),
+            toSpaceID: spaceIDs[0]
         )
         _ = sm.makeWindowsDormant(forOwnerPID: 10)
-        sm.createSpace(position: .below)
         sm.addWindow(
-            SpaceWindow(
-                windowID: 202,
-                ownerBundleID: "com.live",
-                ownerName: "Live",
-                windowTitle: "Current",
-                ownerPID: 20
-            ),
-            toSpaceID: sm.activeSpaceID
+            SpaceWindow(windowID: 202, ownerBundleID: "com.live", ownerName: "Live", windowTitle: "Current", ownerPID: 20),
+            toSpaceID: spaceIDs[2]
         )
 
-        sm.resetWindowCache()
+        sm.clearWindowAssignments()
 
-        #expect(sm.spaces.count == 1)
-        #expect(sm.spaces[0].windows.isEmpty)
-        #expect(sm.activeSpaceID == sm.spaces[0].id)
+        #expect(sm.spaces.map(\.id) == spaceIDs)
+        #expect(sm.spaces.map(\.desktopUUID) == uuids)
+        #expect(sm.activeSpaceID == spaceIDs[2])
+        #expect(sm.allSpaces.allSatisfy { $0.windows.isEmpty })
         #expect(sm.dormantWindowAssignments.isEmpty)
     }
 
