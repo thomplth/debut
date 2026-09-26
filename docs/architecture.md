@@ -75,10 +75,15 @@ decide ownership from cached topology and overview state; they do not query
 WindowServer. Mission Control keeps every physical trackpad stream native from
 Began through Ended, including the first stream that observes its dismissal.
 When the
-parent feature is disabled, Debut-owned cross-desktop window selection still sends
-an addressed gesture to Dock, but uses a fixed standard 400 ms slide instead of the
-configured faster duration. It waits for the active-Space notification before
-focusing the selected window. Physical numbered, Control-arrow, and trackpad input
+parent feature is disabled, Debut-owned cross-desktop window selection posts macOS's
+own Switch to Desktop N shortcut (symbolic hotkeys 118-133), which Dock answers with
+one direct transition that never shows the desktops in between. A shortcut the user
+left disabled is enabled for the session only around Debut's keystroke; one that is
+unbound or has no modifier is never posted, because a keystroke Dock does not claim
+reaches the frontmost app. Separate display stacks, desktops past 16, and a shortcut
+Dock did not act on within 1.5 s fall back to an addressed gesture with a fixed
+standard 400 ms slide per desktop. Either route waits for the active-Space
+notification before focusing the selected window. Physical numbered, Control-arrow, and trackpad input
 is left to macOS, while the disabled child controls retain their saved settings.
 
 Stage commits, numbered navigation, cross-desktop Option-Tab selection, enabled
