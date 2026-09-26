@@ -288,6 +288,9 @@ public protocol WindowService: Sendable {
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async
     func raiseWindow(windowID: CGWindowID) -> Bool
+    /// Raises the window only through an element already held for it, and never searches for
+    /// one. For a window on a desktop that is not showing, a search cannot find it anyway.
+    func raiseTrackedWindow(windowID: CGWindowID) -> Bool
     /// Performs the target window's accessibility close action when the app exposes one.
     func closeWindow(windowID: CGWindowID) -> Bool
     /// Makes one window's process frontmost through the window server, naming the window so the
@@ -325,6 +328,11 @@ public protocol WindowService: Sendable {
 }
 
 public extension WindowService {
+    /// Conformers that keep no elements have no cheaper path than their ordinary raise.
+    func raiseTrackedWindow(windowID: CGWindowID) -> Bool {
+        raiseWindow(windowID: windowID)
+    }
+
     func listUntrackableWindowIDs() -> Set<CGWindowID> { [] }
     func listDisqualifiedWindowIDs() -> Set<CGWindowID> { [] }
     func listAXContradictedWindowIDs() -> Set<CGWindowID> { [] }

@@ -109,8 +109,12 @@ struct NativeDesktopShortcutTests {
         hotKeys.bindings[120] = SymbolicHotKeyBinding(keyCode: 20, flags: .maskControl,
                                                       isEnabled: true)
         let topology = topology()
-        let posted = makeSwitch(hotKeys).request(location(2, in: topology), in: topology)
-        #expect(posted == .init(hotKeyID: 120, temporarilyEnabled: false))
+        let shortcut = makeSwitch(hotKeys)
+        let resolved = shortcut.resolve(location(2, in: topology), in: topology)
+        #expect(resolved?.hotKeyID == 120)
+        #expect(resolved?.temporarilyEnabled == false)
+        #expect(hotKeys.calls.isEmpty)
+        #expect(resolved.map(shortcut.post) == true)
         #expect(hotKeys.calls == [.post(20)])
     }
 
@@ -120,8 +124,11 @@ struct NativeDesktopShortcutTests {
         hotKeys.bindings[120] = SymbolicHotKeyBinding(keyCode: 20, flags: .maskControl,
                                                       isEnabled: false)
         let topology = topology()
-        let posted = makeSwitch(hotKeys).request(location(2, in: topology), in: topology)
-        #expect(posted == .init(hotKeyID: 120, temporarilyEnabled: true))
+        let shortcut = makeSwitch(hotKeys)
+        let resolved = shortcut.resolve(location(2, in: topology), in: topology)
+        #expect(resolved?.temporarilyEnabled == true)
+        #expect(hotKeys.calls.isEmpty)
+        #expect(resolved.map(shortcut.post) == true)
         #expect(hotKeys.calls == [.enable(120, true), .post(20), .enable(120, false)])
     }
 
@@ -132,7 +139,9 @@ struct NativeDesktopShortcutTests {
         hotKeys.bindings[120] = SymbolicHotKeyBinding(keyCode: 20, flags: .maskControl,
                                                       isEnabled: false)
         let topology = topology()
-        #expect(makeSwitch(hotKeys).request(location(2, in: topology), in: topology) == nil)
+        let shortcut = makeSwitch(hotKeys)
+        let resolved = shortcut.resolve(location(2, in: topology), in: topology)
+        #expect(resolved.map(shortcut.post) == false)
         #expect(hotKeys.calls == [.enable(120, true)])
     }
 
@@ -143,7 +152,9 @@ struct NativeDesktopShortcutTests {
         hotKeys.bindings[120] = SymbolicHotKeyBinding(keyCode: 20, flags: .maskControl,
                                                       isEnabled: false)
         let topology = topology()
-        #expect(makeSwitch(hotKeys).request(location(2, in: topology), in: topology) == nil)
+        let shortcut = makeSwitch(hotKeys)
+        let resolved = shortcut.resolve(location(2, in: topology), in: topology)
+        #expect(resolved.map(shortcut.post) == false)
         #expect(hotKeys.calls == [.enable(120, true), .post(20), .enable(120, false)])
     }
 
@@ -151,7 +162,7 @@ struct NativeDesktopShortcutTests {
     func unbound() {
         let hotKeys = FakeHotKeys()
         let topology = topology()
-        #expect(makeSwitch(hotKeys).request(location(2, in: topology), in: topology) == nil)
+        #expect(makeSwitch(hotKeys).resolve(location(2, in: topology), in: topology) == nil)
         #expect(hotKeys.calls.isEmpty)
     }
 

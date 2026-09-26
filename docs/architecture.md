@@ -83,7 +83,19 @@ unbound or has no modifier is never posted, because a keystroke Dock does not cl
 reaches the frontmost app. Separate display stacks, desktops past 16, and a shortcut
 Dock did not act on within 1.5 s fall back to an addressed gesture with a fixed
 standard 400 ms slide per desktop. Either route waits for the active-Space
-notification before focusing the selected window. Physical numbered, Control-arrow, and trackpad input
+notification before focusing the selected window.
+
+Before any cross-desktop switch that will focus a window, the destination is
+prepared while it is still hidden, because a transition reveals the destination's
+stacking as it stands and a raise after arrival is seen. The selected window is
+raised through the Accessibility element Debut kept from a time its desktop was
+showing, which reorders it on the hidden desktop without switching to it, and the
+destination's front process is seeded. `kAXWindows` cannot reach a window on a
+desktop that is not showing, so a window Debut never saw there is raised on arrival
+instead. Measured alternatives that do not reorder a hidden window: the key-window
+event record, a move round trip between desktops, and `_SLPSSetFrontProcessWithOptions`.
+The native shortcut is posted one display frame after the raise, since the app
+applies it on its next screen update. Physical numbered, Control-arrow, and trackpad input
 is left to macOS, while the disabled child controls retain their saved settings.
 
 Stage commits, numbered navigation, cross-desktop Option-Tab selection, enabled

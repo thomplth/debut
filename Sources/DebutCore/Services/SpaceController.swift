@@ -1465,11 +1465,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                let stackID = spaceManager.spaceStackID(containingSpaceID: targetID),
                let location = spaceSwitcher?.spaceTopology().stack(id: stackID)?.location(at: index),
                let switcher = spaceSwitcher {
-                if fasterDesktopSwitchingEnabled {
-                    if let focusWindowID {
-                        seedFrontProcess(forWindow: focusWindowID, inSpaceID: targetID,
+                if let focusWindowID {
+                    prepareHiddenDesktop(forWindow: focusWindowID, inSpaceID: targetID,
                                          desktopID: location.desktopID, switcher: switcher)
-                    }
+                }
+                if fasterDesktopSwitchingEnabled {
                     desktopIsSettling = switcher.switchToDesktop(location)
                 } else {
                     desktopIsSettling = switcher.switchToDesktopWithSystemAnimation(location)
@@ -1512,18 +1512,31 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         delegate?.spaceControllerDidSwitchSpace(self)
     }
 
-    /// Tells the destination desktop which app to show forward, before it is revealed.
+    /// Puts the chosen window in front on the destination desktop before it is revealed.
     ///
     /// A Space keeps its own front-process memory, so a switch reveals whichever app was last
-    /// frontmost *there* and Debut's focus then reorders in front of the user — the window the
-    /// user chose arrives second, after a visible flash of the one they did not. Focus itself
-    /// still cannot be moved early: it would land on the desktop being left, and macOS would
-    /// overwrite it as the transition settles. Seeding the memory the reveal reads from is the
-    /// part that can happen in advance.
+    /// frontmost *there*, and inside that app whichever window was last raised. Debut's focus
+    /// then reorders in front of the user — the chosen window arrives second, after a visible
+    /// flash of the one they did not choose, for the whole length of an animated slide. Focus
+    /// itself still cannot be moved early: it would land on the desktop being left.
     ///
-    /// This names a process, not a window, so two windows of the same app still flash. There is
-    /// no bridged window-ordering operation to do better with, and AX cannot reach a window on a
-    /// desktop that is not showing.
+    /// Both halves can happen in advance. Seeding the front-process memory the reveal reads
+    /// from settles the app. Raising the window through the Accessibility element Debut kept
+    /// while that desktop was showing settles the window within its app, without switching
+    /// desktops; measured in Tart, it was the only request made from another desktop that did.
+    /// A window never seen on a showing desktop has no kept element, so it is raised on arrival
+    /// as before.
+    private func prepareHiddenDesktop(forWindow windowID: CGWindowID, inSpaceID spaceID: UUID,
+                                      desktopID: CGSSpaceID, switcher: any SpaceSwitching) {
+        let raised = windowService.raiseTrackedWindow(windowID: windowID)
+        diag.report("space_window_raised_before_reveal", details: [
+            "windowID": "\(windowID)",
+            "accepted": "\(raised)",
+        ])
+        seedFrontProcess(forWindow: windowID, inSpaceID: spaceID, desktopID: desktopID,
+                         switcher: switcher)
+    }
+
     private func seedFrontProcess(forWindow windowID: CGWindowID, inSpaceID spaceID: UUID,
                                   desktopID: CGSSpaceID, switcher: any SpaceSwitching) {
         guard let window = spaceManager.allSpaces.first(where: { $0.id == spaceID })?
@@ -3241,6 +3254,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
 
+        // Either transition reveals the destination's remembered front app, so seed it first.
+        _ = switcher.setFrontProcess(pid: ownerPID, onDesktop: location.desktopID)
         guard fasterDesktopSwitchingEnabled else {
             let started = switcher.switchToDesktopWithSystemAnimation(location)
             pendingSystemAttentionFocus = started
@@ -3256,7 +3271,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
 
-        _ = switcher.setFrontProcess(pid: ownerPID, onDesktop: location.desktopID)
         let settling = switcher.switchToDesktop(location)
         if settling {
             pendingSystemAttentionFocus = PendingSystemAttentionFocus(

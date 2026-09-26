@@ -76,6 +76,15 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
         }
     }
 
+    /// Raises made ahead of a desktop's reveal, kept apart from `raisedWindowIDs`, which records
+    /// focus actually applied.
+    public var trackedRaisedWindowIDs: [CGWindowID] = []
+
+    public func raiseTrackedWindow(windowID: CGWindowID) -> Bool {
+        trackedRaisedWindowIDs.append(windowID)
+        return true
+    }
+
     public func raiseWindow(windowID: CGWindowID) -> Bool {
         raisedWindowID = windowID
         raisedWindowIDs.append(windowID)

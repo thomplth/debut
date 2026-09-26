@@ -24,6 +24,9 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
         case switchToDesktopWithSystemAnimation(Int)
     }
     private(set) var operations: [Operation] = []
+    /// Runs as each switch is requested, so a test can see what was already done to the
+    /// destination before its desktop could be revealed.
+    var onSwitchRequest: (() -> Void)?
     private(set) var spaceDidChangeCount = 0
     private(set) var liveTopologyReadCount = 0
     private(set) var cachedTopologyReadCount = 0
@@ -93,6 +96,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     }
 
     func switchToDesktop(index: Int) -> Bool {
+        onSwitchRequest?()
         switchRequests.append(index)
         operations.append(.switchToDesktop(index))
         guard (0..<desktops).contains(index) else { return false }
@@ -101,6 +105,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     }
 
     func switchToDesktopWithSystemAnimation(_ location: DesktopLocation) -> Bool {
+        onSwitchRequest?()
         operations.append(.switchToDesktopWithSystemAnimation(location.index))
         guard (0..<desktops).contains(location.index) else { return false }
         if switchChangesDesktop { current = location.index }
@@ -425,6 +430,7 @@ struct SpaceControllerSpaceTests {
         controller.recordOverlayActionAttention(windowID: 909, ownerPID: 22)
 
         #expect(spaces.operations == [
+            .setFrontProcess(pid: 22, desktop: 101),
             .switchToDesktopWithSystemAnimation(1),
         ])
         #expect(windowService.frontedWindows.isEmpty)
@@ -1341,8 +1347,10 @@ struct SpaceControllerSpaceTests {
         controller.switchToSpace(id: targetSpaceID, raiseWindowID: 22)
 
         #expect(spaces.operations == [
+            .setFrontProcess(pid: 4242, desktop: 100),
             .switchToDesktopWithSystemAnimation(0),
         ])
+        #expect(windowService.trackedRaisedWindowIDs == [22])
         #expect(windowService.frontedWindows.isEmpty)
         #expect(windowService.raisedWindowID == nil)
         #expect(windowService.activatedPID == nil)
@@ -1391,11 +1399,20 @@ struct SpaceControllerSpaceTests {
             toSpaceID: targetSpaceID
         )
         spaces.windowDesktops = [101: 0, 202: 1]
+        var raisedWhenSwitchRequested: [CGWindowID] = []
+        spaces.onSwitchRequest = {
+            raisedWhenSwitchRequested = windowService.trackedRaisedWindowIDs
+        }
 
         keyboardService.simulateEvent(.cmdTabHold)
         keyboardService.simulateEvent(.nextSpace)
         keyboardService.simulateEvent(.cmdRelease)
 
+        // The destination is prepared while it is still hidden, in both modes: its front app is
+        // seeded and the chosen window raised inside that app, so the reveal already shows it.
+        #expect(raisedWhenSwitchRequested == [202])
+        #expect(windowService.frontedWindows.isEmpty)
+        #expect(windowService.activatedPID == nil)
         if fasterDesktopSwitchingEnabled {
             #expect(spaces.operations == [
                 .setFrontProcess(pid: 22, desktop: 101),
@@ -1404,11 +1421,9 @@ struct SpaceControllerSpaceTests {
             #expect(controller.spaceManager.activeSpaceID == targetSpaceID)
         } else {
             #expect(spaces.operations == [
+                .setFrontProcess(pid: 22, desktop: 101),
                 .switchToDesktopWithSystemAnimation(1),
             ])
-            #expect(windowService.frontedWindows.isEmpty)
-            #expect(windowService.raisedWindowID == nil)
-            #expect(windowService.activatedPID == nil)
             #expect(controller.spaceManager.activeSpaceID == sourceSpaceID)
         }
 
