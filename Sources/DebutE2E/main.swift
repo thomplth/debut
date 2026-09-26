@@ -115,6 +115,16 @@ func reportDragGeometryFailure(
     }
 }
 
+/// `nil` means the value names no profile. Reading it as ordinary would quietly run the shorter
+/// sweep for a typo of `full`.
+func isFullMoveDurationProfile(_ value: String?) -> Bool? {
+    switch value {
+    case nil, "ordinary": false
+    case "full": true
+    default: nil
+    }
+}
+
 func moveDurationValues(full: Bool) -> [Int] {
     if full { return Array(stride(from: 0, through: 400, by: 10)) }
     return [0, 10, 40, 50, 60, 70, 80, 150, 400]
@@ -176,6 +186,14 @@ if CommandLine.arguments.dropFirst().first == "--harness-self-check" {
            "ordinary duration profile retains all risk boundaries")
     expect(moveDurationValues(full: true) == Array(stride(from: 0, through: 400, by: 10)),
            "full duration profile retains the entire slider range")
+    expect(isFullMoveDurationProfile(nil) == false,
+           "an unset duration profile runs the ordinary sweep")
+    expect(isFullMoveDurationProfile("ordinary") == false,
+           "the ordinary duration profile runs the ordinary sweep")
+    expect(isFullMoveDurationProfile("full") == true,
+           "the full duration profile runs the full sweep")
+    expect(isFullMoveDurationProfile("quick") == nil && isFullMoveDurationProfile("") == nil,
+           "an unknown duration profile is rejected rather than read as ordinary")
     let shapeState = ["windowIDsBySpace": "10,20;30", "windowAspectsBySpace": "1.0000,1.5000;2.0000"]
     expect(reportedAspect(for: 20, in: shapeState) == 1.5,
            "resize checks the target window rather than another aspect")
@@ -216,6 +234,14 @@ func readEvents() -> [[String: String]] {
           let events = json["events"] as? [[String: String]]
     else { return [] }
     return events
+}
+
+// Checked before the screenshot directory below is cleared, so a rejected run changes nothing.
+guard let fullMoveDurationProfile = isFullMoveDurationProfile(environment["DEBUT_E2E_DURATION_PROFILE"]) else {
+    FileHandle.standardError.write(Data(
+        "DEBUT_E2E_DURATION_PROFILE must be ordinary or full, not '\(environment["DEBUT_E2E_DURATION_PROFILE"] ?? "")'.\n".utf8
+    ))
+    exit(2)
 }
 
 // MARK: - Screenshot
@@ -4371,7 +4397,6 @@ if let resizeFixtureWindow, let originalSize = windowSize(resizeFixtureWindow) {
 NSRunningApplication(processIdentifier: launchFocusPID)?.forceTerminate()
 
 // --- Consecutive window moves at every duration offered by the Settings slider. ---
-let fullMoveDurationProfile = environment["DEBUT_E2E_DURATION_PROFILE"] == "full"
 let moveDurations = moveDurationValues(full: fullMoveDurationProfile)
 header("Focused-window move shortcuts: \(moveDurations.count) switch durations (\(fullMoveDurationProfile ? "full" : "ordinary") profile)")
 let moveSettingsBackup = try? Data(contentsOf: settingsFile)
