@@ -1317,14 +1317,14 @@ struct StageMotionTests {
 
     /// A tap that resolves to nothing is otherwise indistinguishable from a tap that never
     /// arrived, so the overlay has to name what a tap landed on even when it landed on nothing.
-    @Test("A tap away from the stages keeps the desktop behaviour")
-    func overlayTapFallsThroughToDesktop() {
+    @Test("A tap away from the stages dismisses the overlay")
+    func overlayTapAwayFromStagesDismisses() {
         let stageFrames = [0: CGRect(x: 100, y: 100, width: 300, height: 200)]
         let route: (CGPoint) -> OverlayTapTarget = {
             StageInteraction.overlayTapTarget(at: $0, stageFrames: stageFrames)
         }
 
-        #expect(route(CGPoint(x: 900, y: 500)) == .desktop)
+        #expect(route(CGPoint(x: 900, y: 500)) == .dismiss)
         #expect(route(CGPoint(x: 250, y: 200)) == .none)
     }
 

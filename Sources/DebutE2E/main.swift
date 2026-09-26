@@ -2229,6 +2229,50 @@ func scenario_overlay_pointer() {
         skipTest("Moving the pointer enables hover selection", reason: reason)
         skipTest("Releasing Command commits the pointer hover selection", reason: reason)
     }
+
+    // --- 9b. A click on the blank backdrop cancels (KHA-780) ---
+    // The overlay panel covers the whole display, so this click lands on Debut even though it
+    // looks like it lands on the desktop. It used to hide every other application.
+    header("9b. Click away from the stages while holding Command")
+    func shownApplications() -> Set<pid_t> {
+        Set(NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && !$0.isHidden
+                && $0.bundleIdentifier != "com.thomplth.Debut"
+        }.map(\.processIdentifier))
+    }
+    let shownBefore = shownApplications()
+    let dismissEventsBefore = eventCursor()
+    postFlagsChanged(flags: [.maskCommand])
+    wait(0.1)
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+    postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
+    let overlayOpened = waitFor(timeout: 5) { readState()["overlayVisible"] == "true" }
+    wait(0.5)
+    let display = CGDisplayBounds(CGMainDisplayID())
+    let blankPoint = CGPoint(x: display.minX + 12, y: display.midY)
+    info("Clicking the blank backdrop at \(blankPoint)")
+    postMouseClick(at: blankPoint)
+    let dismissed = waitFor(timeout: 3) { readState()["overlayVisible"] == "false" }
+    postFlagsChanged(flags: [])
+    wait(0.8)
+
+    test("A click away from the stages closes the overlay as a cancel") {
+        overlayOpened && dismissed && !events(since: dismissEventsBefore) {
+            $0["event"] == "overlay_tap_routed" && $0["target"] == "dismiss"
+        }.isEmpty && !events(since: dismissEventsBefore) {
+            $0["event"] == "overlay_dismissed_by_pointer"
+        }.isEmpty
+    }
+    test("Cancelling from the backdrop hides no application") {
+        let newlyHidden = shownBefore.subtracting(shownApplications())
+        if !newlyHidden.isEmpty { info("  Newly hidden PIDs: \(newlyHidden.sorted())") }
+        return overlayOpened && newlyHidden.isEmpty
+    }
+    test("Releasing Command after a backdrop cancel commits nothing") {
+        overlayOpened && events(since: dismissEventsBefore) {
+            $0["event"] == "overlay_committed"
+        }.isEmpty
+    }
 }
 
 @MainActor

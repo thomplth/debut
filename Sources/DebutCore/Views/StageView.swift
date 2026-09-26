@@ -799,7 +799,7 @@ enum StageInteraction {
         at location: CGPoint,
         stageFrames: [Int: CGRect]
     ) -> OverlayTapTarget {
-        isDesktopArea(location, stageFrames: stageFrames) ? .desktop : .none
+        isDesktopArea(location, stageFrames: stageFrames) ? .dismiss : .none
     }
 
     /// Space scrolling is available across the entire overlay, including the bare desktop around
@@ -909,12 +909,14 @@ enum StageInteraction {
 }
 
 enum OverlayTapTarget: Equatable {
-    case desktop
+    /// The transparent panel covers the whole display, so a click that looks like it lands
+    /// outside the switcher still arrives here. It cancels, exactly like Escape.
+    case dismiss
     case none
 
     var diagnosticName: String {
         switch self {
-        case .desktop: "desktop"
+        case .dismiss: "dismiss"
         case .none: "none"
         }
     }
@@ -1276,7 +1278,7 @@ public struct StageOverlayView: View {
     public var onWindowSelected: ((Int, Int) -> Void)?
     public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
-    public var onDesktopSelected: (() -> Void)?
+    public var onBackdropDismissed: (() -> Void)?
     var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
     var onSpaceScrollSelected: ((Int) -> Void)?
     var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
@@ -1304,7 +1306,7 @@ public struct StageOverlayView: View {
         onWindowSelected: ((Int, Int) -> Void)? = nil,
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
-        onDesktopSelected: (() -> Void)? = nil
+        onBackdropDismissed: (() -> Void)? = nil
     ) {
         self.init(
             viewModel: viewModel,
@@ -1312,7 +1314,7 @@ public struct StageOverlayView: View {
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
             onPointerSelectionChanged: onPointerSelectionChanged,
-            onDesktopSelected: onDesktopSelected
+            onBackdropDismissed: onBackdropDismissed
         )
     }
 
@@ -1322,7 +1324,7 @@ public struct StageOverlayView: View {
         onWindowSelected: ((Int, Int) -> Void)? = nil,
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)? = nil,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)? = nil,
-        onDesktopSelected: (() -> Void)? = nil
+        onBackdropDismissed: (() -> Void)? = nil
     ) {
         self.init(
             viewModel: viewModel,
@@ -1330,7 +1332,7 @@ public struct StageOverlayView: View {
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
             onPointerSelectionChanged: onPointerSelectionChanged,
-            onDesktopSelected: onDesktopSelected
+            onBackdropDismissed: onBackdropDismissed
         )
     }
 
@@ -1340,13 +1342,13 @@ public struct StageOverlayView: View {
         onWindowSelected: ((Int, Int) -> Void)?,
         onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?,
         onPointerSelectionChanged: ((Int?, Int?) -> Void)?,
-        onDesktopSelected: (() -> Void)?
+        onBackdropDismissed: (() -> Void)?
     ) {
         self.viewModel = viewModel
         self.onWindowSelected = onWindowSelected
         self.onWindowMoved = onWindowMoved
         self.onPointerSelectionChanged = onPointerSelectionChanged
-        self.onDesktopSelected = onDesktopSelected
+        self.onBackdropDismissed = onBackdropDismissed
         _windowDrag = State(initialValue: initialWindowDrag)
         _lastHandledKeyboardMoveSequence = State(
             initialValue: viewModel.keyboardWindowMoveAnimation?.sequence ?? 0
@@ -1679,8 +1681,8 @@ public struct StageOverlayView: View {
                             target: target
                         ))
                         switch target {
-                        case .desktop:
-                            onDesktopSelected?()
+                        case .dismiss:
+                            onBackdropDismissed?()
                         case .none:
                             break
                         }

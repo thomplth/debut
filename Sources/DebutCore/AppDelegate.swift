@@ -285,12 +285,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         controller.spaceSwitcher = spaceService
         controller.fasterDesktopSwitchingEnabled =
             currentSettings.features.fasterDesktopSwitching
-        controller.onDesktopReveal = { [weak self] in
-            DispatchQueue.main.async {
-                NSWorkspace.shared.hideOtherApplications()
-                self?.diag.report("real_desktop_presented")
-            }
-        }
         spaceController = controller
 
         keyboardService.keyBindings = currentSettings.keyBindings
@@ -963,8 +957,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             ])
         }
 
-        overlayWindow.onDesktopSelected = { [weak self] in
-            self?.spaceController?.revealDesktop()
+        overlayWindow.onBackdropDismissed = { [weak self] in
+            self?.spaceController?.dismissOverlayFromPointer()
         }
 
         let display = overlayDisplay(
