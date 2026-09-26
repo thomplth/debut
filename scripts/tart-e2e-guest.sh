@@ -309,8 +309,10 @@ chown -R "$console_user" "$FIXTURE_DIR"
 echo "Resetting to the first desktop before planting fixtures..."
 as_console env HOME="$console_home" "$E2E_SOURCE" switch-to-desktop 0
 
-as_console open -na TextEdit "$FIXTURE_DIR/one.txt"
-as_console open -na TextEdit "$FIXTURE_DIR/two.txt"
+# TextEdit restores the documents it had open when it was last killed, so without this each new
+# instance below can come back holding both fixtures and the suite starts with duplicate copies.
+as_console open -na TextEdit "$FIXTURE_DIR/one.txt" --args -ApplePersistenceIgnoreState YES
+as_console open -na TextEdit "$FIXTURE_DIR/two.txt" --args -ApplePersistenceIgnoreState YES
 wait_for_fixture_apps
 
 # A freshly cloned VM logs in with one desktop, and a space is a desktop, so without this the
@@ -331,14 +333,14 @@ if [[ "$RUN_PERMISSIONS" == true ]]; then
 guest_phase permission-journeys
 as_console pkill -f "$APP_PATH" 2>/dev/null || true
 as_console env HOME="$console_home" "$E2E_SOURCE" switch-to-desktop 0
-as_console open -a TextEdit "$FIXTURE_DIR/one.txt" "$FIXTURE_DIR/two.txt"
+as_console open -a TextEdit "$FIXTURE_DIR/one.txt" "$FIXTURE_DIR/two.txt" --args -ApplePersistenceIgnoreState YES
 as_console rm -f "$support_dir/settings.json"
 sleep 2
 for denied_permission in accessibility capture desktop; do
     as_console pkill -x TextEdit 2>/dev/null || true
     as_console rm -rf "$support_dir"
     as_console env HOME="$console_home" "$E2E_SOURCE" switch-to-desktop 0
-    as_console open -a TextEdit "$FIXTURE_DIR/one.txt" "$FIXTURE_DIR/two.txt"
+    as_console open -a TextEdit "$FIXTURE_DIR/one.txt" "$FIXTURE_DIR/two.txt" --args -ApplePersistenceIgnoreState YES
     sleep 2
     grant_accessibility "$bundle_id" 0 "$APP_PATH"
     grant_screen_capture "$bundle_id" 0 "$APP_PATH"
@@ -383,8 +385,8 @@ as_console pkill -x "System Settings" 2>/dev/null || true
 provision_desktops
 as_console rm -rf "$support_dir"
 as_console pkill -x TextEdit 2>/dev/null || true
-as_console open -na TextEdit "$FIXTURE_DIR/one.txt"
-as_console open -na TextEdit "$FIXTURE_DIR/two.txt"
+as_console open -na TextEdit "$FIXTURE_DIR/one.txt" --args -ApplePersistenceIgnoreState YES
+as_console open -na TextEdit "$FIXTURE_DIR/two.txt" --args -ApplePersistenceIgnoreState YES
 wait_for_fixture_apps
 fi
 

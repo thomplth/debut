@@ -4923,11 +4923,44 @@ func restoreFixtureWindows() -> Bool {
         }
         return Array(kept.values)
     }
+    // Every placed copy of a fixture document, not just the one kept below. A second copy doubles
+    // every card the next group counts, so restoration has not happened while one survives.
+    func placedFixtureCopies() -> [(windowID: CGWindowID, pid: pid_t, title: String, desktop: Int)] {
+        (CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]] ?? []).compactMap { window in
+            guard (window[kCGWindowOwnerName as String] as? String) == "TextEdit",
+                  (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let title = window[kCGWindowName as String] as? String,
+                  fixtureDocumentTitles.contains(title),
+                  let windowID = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  let desktop = spaces.desktopIndex(forWindow: windowID)
+            else { return nil }
+            return (windowID, pid, title, desktop)
+        }
+    }
+    func describe(_ copies: [(windowID: CGWindowID, pid: pid_t, title: String, desktop: Int)]) -> String {
+        copies.map { "\($0.title)=\($0.windowID)/pid\($0.pid)@\($0.desktop)" }.joined(separator: " ")
+    }
     guard let fixtureDirectory = environment["DEBUT_E2E_FIXTURE_DIR"] else {
         info("Base state: DEBUT_E2E_FIXTURE_DIR is unset; left TextEdit as it was")
         return false
     }
     var fixtures = fixtureWindows()
+    // Keep every fixture from one process when one holds them all. Keeping each document from a
+    // different process terminates neither, and both processes' copies survive.
+    let copiesByPID = Dictionary(grouping: placedFixtureCopies(), by: \.pid)
+    if let keeper = copiesByPID
+        .filter({ Set($0.value.map(\.title)) == fixtureDocumentTitles })
+        .max(by: { first, second in
+            first.value.filter { $0.desktop == 0 }.count < second.value.filter { $0.desktop == 0 }.count
+        }) {
+        fixtures = fixtureDocumentTitles.sorted().compactMap { title in
+            let copies = keeper.value.filter { $0.title == title }
+            return (copies.first { $0.desktop == 0 } ?? copies.first)
+                .map { (windowID: $0.windowID, pid: $0.pid, title: $0.title) }
+        }
+    }
     let fixturePIDs = Set(fixtures.map(\.pid))
     for application in NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TextEdit")
     where !fixturePIDs.contains(application.processIdentifier) {
@@ -4966,6 +4999,10 @@ func restoreFixtureWindows() -> Bool {
     let restored = waitFor {
         Set(fixtures.map(\.title)) == fixtureDocumentTitles
             && fixtures.allSatisfy { spaces.desktopIndex(forWindow: $0.windowID) == 0 }
+            && placedFixtureCopies().count == fixtureDocumentTitles.count
+    }
+    if placedFixtureCopies().count != fixtureDocumentTitles.count {
+        info("Base state: duplicate fixture copies remain: \(describe(placedFixtureCopies()))")
     }
     if !restored || !missing.isEmpty {
         info("Base state: fixtures " + fixtures.map {
