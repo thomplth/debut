@@ -14,18 +14,65 @@ RUN_LOCK_HELD=false
 APP_ARTIFACT=""
 E2E_ARTIFACT=""
 GUEST_ARTIFACT=""
+DURATION_PROFILE=""
+GALLERY_CAPTURE=on
 
 usage() {
     cat <<EOF
 Usage: scripts/tart-e2e.sh <prepare|run|stop|status>
+       scripts/tart-e2e.sh run [--duration-profile ordinary|full] [--no-gallery]
 
   prepare  Clone and configure the free Tahoe VM (one-time, about 27 GB download)
   run      Run every check in the headless guest
   stop     Stop the warm guest VM
   status   Show the VM configuration and guest-agent readiness
 
-Overrides: DEBUT_TART_VM, DEBUT_TART_SHARE
+Run options:
+  --duration-profile ordinary|full
+           Window-move durations to sweep. ordinary runs nine values, including every
+           value from 40 through 80 ms; full runs all 41. Defaults to
+           DEBUT_E2E_DURATION_PROFILE, or full when that is unset.
+  --no-gallery
+           Skip the glass screenshot gallery. Rendering assertions still run.
+
+Overrides: DEBUT_TART_VM, DEBUT_TART_SHARE, DEBUT_E2E_DURATION_PROFILE
 EOF
+}
+
+# Parsed before anything touches Tart, so a bad request cannot boot, build or mutate the guest.
+parse_run_options() {
+    DURATION_PROFILE="${DEBUT_E2E_DURATION_PROFILE:-full}"
+    GALLERY_CAPTURE=on
+    while (( $# > 0 )); do
+        case "$1" in
+            --duration-profile)
+                if (( $# < 2 )); then
+                    echo "--duration-profile needs a value: ordinary or full." >&2
+                    exit 2
+                fi
+                DURATION_PROFILE="$2"
+                shift 2
+                ;;
+            --no-gallery) GALLERY_CAPTURE=off; shift ;;
+            *)
+                echo "Unknown run option: $1" >&2
+                usage >&2
+                exit 2
+                ;;
+        esac
+    done
+    if [[ "$DURATION_PROFILE" != ordinary && "$DURATION_PROFILE" != full ]]; then
+        echo "The duration profile must be ordinary or full, not '$DURATION_PROFILE'." >&2
+        exit 2
+    fi
+}
+
+guest_command() {
+    local command
+    printf -v command '/bin/bash %q %q %q %q %q' \
+        "/Volumes/My Shared Files/$GUEST_ARTIFACT" "$APP_ARTIFACT" "$E2E_ARTIFACT" \
+        "$DURATION_PROFILE" "$GALLERY_CAPTURE"
+    printf '%s\n' "$command"
 }
 
 require_tart() {
@@ -163,9 +210,8 @@ run_e2e() {
     start_vm
     prepare_loopback_ssh
 
-    echo "Running the full E2E suite inside $VM_NAME..."
-    printf -v remote_command '/bin/bash %q %q %q' \
-        "/Volumes/My Shared Files/$GUEST_ARTIFACT" "$APP_ARTIFACT" "$E2E_ARTIFACT"
+    echo "Running the full E2E suite inside $VM_NAME (duration profile: $DURATION_PROFILE, gallery: $GALLERY_CAPTURE)..."
+    remote_command="$(guest_command)"
     set +e
     if guest_ip="$(tart ip "$VM_NAME" --wait 15 2>/dev/null)"; then
         ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
@@ -204,13 +250,17 @@ show_status() {
     fi
 }
 
-require_tart
+# Sourcing defines the functions without running a command, which is how the contract checks
+# exactly what crosses the VM boundary.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
 
 case "${1:-}" in
-    prepare) prepare_vm ;;
-    run) run_e2e ;;
-    stop) tart stop "$VM_NAME" ;;
-    status) show_status ;;
+    prepare) require_tart; prepare_vm ;;
+    run) shift; parse_run_options "$@"; require_tart; run_e2e ;;
+    stop) require_tart; tart stop "$VM_NAME" ;;
+    status) require_tart; show_status ;;
     -h|--help|help) usage ;;
     *) usage >&2; exit 2 ;;
 esac
