@@ -106,9 +106,23 @@ public struct DesktopSwitchIndicatorView: View {
     }
 }
 
+/// The hosted indicator plus the inset its glass needs to render, named so the panel can keep
+/// one hosting view and swap its root instead of rebuilding the glass on every hop.
+struct DesktopSwitchIndicatorPanelContent: View {
+    let presentation: DesktopSwitchIndicatorPresentation
+    let glassStyle: GlassStyle
+
+    var body: some View {
+        DesktopSwitchIndicatorView(presentation: presentation, glassStyle: glassStyle)
+            .padding(DesktopSwitchIndicatorWindow.glassRenderingInset)
+    }
+}
+
 /// A small nonactivating panel that shares the stage overlay's top-center header position. A
 /// generation guards its delayed dismissal so another confirmed hop can replace the label and
-/// restart the one-second dwell without an older timer hiding it.
+/// restart the one-second dwell without an older timer hiding it. A hop that lands while the
+/// panel is still on screen, dwelling or fading out, updates the label in place and fades back
+/// up from wherever it is; restarting from zero is what made consecutive hops flash.
 @MainActor
 public final class DesktopSwitchIndicatorWindow: NSPanel {
     public static let visibleDuration: TimeInterval = 1.0
@@ -118,6 +132,7 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
 
     private var presentationGeneration: UInt = 0
     private var dismissal: DispatchWorkItem?
+    private var hostingView: NSHostingView<DesktopSwitchIndicatorPanelContent>?
 
     public init() {
         super.init(
@@ -163,13 +178,19 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
         visibleDuration: TimeInterval = visibleDuration
     ) {
         let generation = beginPresentation()
-        let hostingView = NSHostingView(
-            rootView: DesktopSwitchIndicatorView(
-                presentation: presentation,
-                glassStyle: glassStyle
-            )
-            .padding(Self.glassRenderingInset)
+        let content = DesktopSwitchIndicatorPanelContent(
+            presentation: presentation,
+            glassStyle: glassStyle
         )
+        let isOnScreen = isVisible
+        let hostingView: NSHostingView<DesktopSwitchIndicatorPanelContent>
+        if isOnScreen, let existing = self.hostingView {
+            existing.rootView = content
+            hostingView = existing
+        } else {
+            hostingView = NSHostingView(rootView: content)
+            self.hostingView = hostingView
+        }
         let fittingSize = hostingView.fittingSize
         let size = CGSize(
             width: max(1, fittingSize.width),
@@ -181,9 +202,9 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
             panelSize: size
         ), display: false)
         hostingView.frame = CGRect(origin: .zero, size: size)
-        contentView = hostingView
+        if contentView !== hostingView { contentView = hostingView }
 
-        alphaValue = 0
+        if !isOnScreen { alphaValue = 0 }
         orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.fadeDuration
@@ -210,6 +231,7 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
             alphaValue = 0
             orderOut(nil)
             contentView = nil
+            hostingView = nil
             return true
         }
         NSAnimationContext.runAnimationGroup { context in
@@ -221,6 +243,7 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
                 guard let self, self.presentationGeneration == generation else { return }
                 self.orderOut(nil)
                 self.contentView = nil
+                self.hostingView = nil
             }
         }
         return true
