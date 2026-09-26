@@ -2871,10 +2871,54 @@ struct SpaceControllerTests {
 
         controller.rebuildWindowCache(using: discovery)
 
-        #expect(controller.spaceManager.spaces.count == 1)
         #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [202])
-        #expect(controller.selectedSpaceIndex == 0)
         #expect(controller.selectedWindowIndex == 0)
+    }
+
+    // KHA-784: the reset collapsed three desktops into one stage, selected stage 1 whatever
+    // macOS was showing, and the caller then activated an app as a side effect.
+    @Test("Rebuilding the window cache keeps desktops, the one showing and focus")
+    func windowCacheRebuildPreservesTopology() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "com.live", name: "Live", pid: 20, isHidden: false)]
+        windowService.windowList = [202, 303].map {
+            WindowInfo(
+                windowID: $0,
+                ownerBundleID: "com.live",
+                ownerName: "Live",
+                ownerPID: 20,
+                title: "W\($0)",
+                bounds: CGRect(x: 0, y: 0, width: 800, height: 600),
+                isOnScreen: true
+            )
+        }
+        windowService.allWindowIDList = [202, 303]
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 2)
+        spaces.windowDesktops = [202: 1, 303: 2]
+        let discovery = WindowDiscoveryService(windowService: windowService)
+        discovery.armingOverride = { _, _ in .armed }
+        discovery.spaceSwitcher = spaces
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: MockKeyboardService()
+        )
+        controller.spaceSwitcher = spaces
+        controller.reconcileSpacesWithDesktops()
+        let spaceIDs = controller.spaceManager.spaces.map(\.id)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.ghost", ownerName: "Ghost", windowTitle: "Stale", ownerPID: 10),
+            toSpaceID: spaceIDs[0]
+        )
+
+        controller.rebuildWindowCache(using: discovery)
+
+        #expect(controller.spaceManager.spaces.map(\.id) == spaceIDs)
+        #expect(controller.spaceManager.spaces.map { $0.windows.map(\.windowID) } == [[], [202], [303]])
+        #expect(controller.spaceManager.activeSpaceID == spaceIDs[2])
+        #expect(controller.selectedSpaceIndex == 2)
+        #expect(windowService.activatedPID == nil)
+        #expect(windowService.activatedBundleID == nil)
+        #expect(windowService.raisedWindowIDs.isEmpty)
     }
 
     @Test("Cmd+Tab tap switches to second MRU window")

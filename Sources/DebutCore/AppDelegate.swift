@@ -1842,29 +1842,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         diag.report("window_cache_reset_started", details: [
             "liveAssignments": "\(previousLiveCount)",
             "dormantAssignments": "\(previousDormantCount)",
-            "spaceCount": "\(previousManager.spaces.count)",
+            "spaceCount": "\(previousManager.allSpaces.count)",
+            "stackCount": "\(previousManager.connectedSpaceStacks.count)",
         ])
 
         if let controller = spaceController, let discovery = windowDiscovery {
+            // Cache maintenance: nothing is activated or raised afterwards.
             controller.rebuildWindowCache(using: discovery)
-
-            // No z-order to rebuild — the windows of the active space are the windows on
-            // the current desktop, and macOS is already showing them.
-            if let firstWindow = controller.spaceManager.activeSpace.windows.first {
-                if let ownerPID = firstWindow.ownerPID {
-                    _ = controller.windowService.activateApp(pid: ownerPID)
-                } else {
-                    _ = controller.windowService.activateApp(bundleID: firstWindow.ownerBundleID)
-                }
-            }
 
             debouncedSaver?.flushNow(controller.spaceManager)
             diag.report("window_cache_reset_completed", details: [
-                "discoveredAssignments": "\(controller.spaceManager.activeSpace.windows.count)",
+                "discoveredAssignments": "\(controller.spaceManager.liveWindowCount)",
+                "spaceCount": "\(controller.spaceManager.allSpaces.count)",
+                "stackCount": "\(controller.spaceManager.connectedSpaceStacks.count)",
             ])
         } else {
+            // Keep the saved desktops; launch reconciles them against macOS as usual.
             var resetManager = previousManager
-            resetManager.resetWindowCache()
+            resetManager.clearWindowAssignments()
             pendingSpaceManager = resetManager
             debouncedSaver?.flushNow(resetManager)
             diag.report("window_cache_reset_completed", details: [
