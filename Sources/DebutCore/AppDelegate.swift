@@ -1814,6 +1814,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         ))
     }
 
+    public func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        spaceController?.recordOwnWindowBecameKey(windowID: CGWindowID(window.windowNumber))
+    }
+
     public func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         if window === onboardingWindow {
