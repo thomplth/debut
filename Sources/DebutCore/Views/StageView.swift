@@ -1151,6 +1151,57 @@ public struct StageConstants {
         return restingOffset + focused.centers[focusedSpaceIndex] - containerHeight / 2
     }
 
+    /// A point on `destinationSpaceIndex`'s first row in the drag view that picking up the given
+    /// card would show, in overlay coordinates. E2E aims its drops here: it is the same snapshot
+    /// the overlay draws and hit-tests, so the two cannot drift apart.
+    public static func dragViewDropPoint(
+        contentAspects: [[CGFloat?]],
+        stageScale: CGFloat,
+        cardSpacing: CGFloat,
+        containerSize: CGSize,
+        reservesDisplayIndicator: Bool,
+        sourceSpaceIndex: Int,
+        sourceWindowIndex: Int,
+        destinationSpaceIndex: Int
+    ) -> CGPoint? {
+        var nextWindowID: CGWindowID = 1
+        let fingerprint = StageStructureFingerprint(stages: contentAspects.map { aspects in
+            StageStructureFingerprint.Stage(spaceID: UUID(), windows: aspects.map { _ in
+                defer { nextWindowID += 1 }
+                return .init(windowID: nextWindowID, modelID: UUID())
+            })
+        })
+        let metrics = drawnMetrics(
+            stageScale: stageScale,
+            contentAspects: contentAspects,
+            containerSize: containerSize,
+            cardSpacing: cardSpacing
+        )
+        guard let snapshot = CompactDragSnapshot.make(
+            sessionID: UUID(),
+            generation: 1,
+            fingerprint: fingerprint,
+            layouts: stageLayouts(
+                forContentAspects: contentAspects,
+                screenWidth: containerSize.width,
+                metrics: metrics
+            ),
+            contentAspects: contentAspects,
+            sourceStageIndex: sourceSpaceIndex,
+            sourceWindowIndex: sourceWindowIndex,
+            containerSize: containerSize,
+            usableBounds: CompactDragSnapshot.usableBounds(
+                containerSize: containerSize,
+                reservesDisplayIndicator: reservesDisplayIndicator
+            )
+        ), let stage = snapshot.stages[safe: destinationSpaceIndex]
+        else { return nil }
+        return CGPoint(
+            x: snapshot.centerX,
+            y: stage.centerY + (stage.rowOffsets.first ?? 0) * snapshot.scale
+        )
+    }
+
     /// Where a window card is drawn, for callers outside the view hierarchy. E2E clicks and drags
     /// real screen coordinates; a second copy of the grid math there drifts from what the overlay
     /// draws without either side failing.

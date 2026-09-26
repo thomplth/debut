@@ -150,6 +150,26 @@ struct CompactDragLayoutTests {
         #expect(widest * snapshot.scale <= snapshot.usableBounds.width + 0.001)
     }
 
+    @Test("The E2E drop point is the drag view's own geometry")
+    func dragViewDropPointMatchesSnapshot() throws {
+        let counts = [4, 0, 3]
+        let size = CGSize(width: 1024, height: 768)
+        let snapshot = try #require(Self.snapshot(counts, source: (0, 1), size: size))
+        let point = try #require(StageConstants.dragViewDropPoint(
+            contentAspects: counts.map { Array(repeating: nil, count: $0) },
+            stageScale: CGFloat(AppSettings().stageScale),
+            cardSpacing: CGFloat(AppSettings().previewCardSpacing),
+            containerSize: size,
+            reservesDisplayIndicator: false,
+            sourceSpaceIndex: 0,
+            sourceWindowIndex: 1,
+            destinationSpaceIndex: 1
+        ))
+        let intent = try #require(snapshot.resolve(at: point, current: nil))
+        #expect(intent.stageIndex == 1)
+        #expect(intent.logicalIndex == 0)
+    }
+
     @Test("No drag starts without a positive usable rectangle")
     func invalidBoundsStartNothing() {
         #expect(Self.snapshot([3, 2], size: CGSize(width: 100, height: 40)) == nil)
