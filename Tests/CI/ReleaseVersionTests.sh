@@ -224,17 +224,16 @@ if [[ -x "$verify" ]]; then
     (cd "$clone" && "$verify" "$sha" >/dev/null 2>&1) \
         || fail "verify-release-commit must accept the commit main still points at"
 
-    # The failure that actually happened: main moved during the gate window, so the tested commit
-    # is no longer what a release would ship.
+    # The release run freezes its version at the gated commit. Later main commits belong to the
+    # next release and must not invalidate the already-tested snapshot.
     worker="$(mktemp -d)"
     git clone --quiet "$(git -C "$clone" remote get-url origin)" "$worker" 2>/dev/null
     git -C "$worker" config user.email "test@example.com"
     git -C "$worker" config user.name "Release Tests"
     git -C "$worker" commit --quiet --allow-empty -m "Landed during the gate window"
     git -C "$worker" push --quiet origin main 2>/dev/null
-    if (cd "$clone" && "$verify" "$sha" >/dev/null 2>&1); then
-        fail "verify-release-commit must refuse once main has advanced past the tested commit"
-    fi
+    (cd "$clone" && "$verify" "$sha" >/dev/null 2>&1) \
+        || fail "verify-release-commit must accept its frozen commit after main advances"
     rm -rf "$worker"
 
     # A checkout that silently landed somewhere else must not be published either.
@@ -244,10 +243,10 @@ if [[ -x "$verify" ]]; then
         fail "verify-release-commit must refuse when HEAD is not the commit it was told to release"
     fi
 
-    # A refusal that says nothing leaves whoever re-runs the release guessing.
-    output="$(cd "$clone" && "$verify" "$sha" 2>&1 || true)"
+    # The successful freeze check names the exact commit publication will use.
+    output="$(cd "$clone" && "$verify" "$sha" 2>&1)"
     grep -q "$sha" <<< "$output" \
-        || fail "verify-release-commit must name the tested commit when it refuses"
+        || fail "verify-release-commit must name the frozen tested commit"
     rm -rf "$clone" "$clone2"
 fi
 

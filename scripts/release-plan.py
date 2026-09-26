@@ -62,7 +62,10 @@ for tag in versions:
     annotation = git('for-each-ref', '--format=%(contents)', 'refs/tags/' + tag)
     for build in re.findall(r'^Debut-build: ([1-9][0-9]*)$', annotation, re.MULTILINE):
         maximum_build = max(maximum_build, int(build))
-    if versions[tag][4] and re.search(r'^Debut-update-channel: nightly-v1$', annotation, re.MULTILINE):
+    # The first isolated-channel releases were tagged before CHANNEL was passed into the tag
+    # step, so their immutable annotation is "-v1". Their nightly version suffix still identifies
+    # the channel; accept that exact historical malformed annotation as a migration fact.
+    if versions[tag][4] and re.search(r'^Debut-update-channel: (?:nightly)?-v1$', annotation, re.MULTILINE):
         compatible_nightly_tags.add(tag)
 previous_release = ''
 history = git('rev-list', '--first-parent', 'HEAD').splitlines()

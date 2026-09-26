@@ -80,7 +80,7 @@ for workflow in "$nightly" "$manual"; do
         "$name must derive the next version from the shared plan script"
     expect_contains "$workflow" 'concurrency:' \
         "$name must not race a second release"
-    # Without this, anything landing on main during the gate window ships untested.
+    # The plan output freezes the release at one commit even if main advances during its gates.
     expect_contains "$workflow" 'sha: \$\{\{ needs\.plan\.outputs\.sha \}\}' \
         "$name must publish the exact commit its gates tested"
 done
@@ -188,6 +188,8 @@ assert s.index('verify-appcast-signature.swift') < s.index('git push origin')
 assert s.index('ci-update-e2e.sh') < s.index('git push origin')
 assert s.rindex('verify-release-commit.sh') > s.index('ci-update-e2e.sh')
 assert s.index('gh release create "v$VERSION"') < s.index('gh release upload nightly-feed')
+tag_step = s[s.index('- name: Tag the tested commit'):s.index('- name: Build the disk image')]
+assert 'CHANNEL: ${{ inputs.channel }}' in tag_step
 PY
 
 echo "PASS: release workflow contract"

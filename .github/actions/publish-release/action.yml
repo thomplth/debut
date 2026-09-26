@@ -111,6 +111,7 @@ runs:
 
     - name: Tag the tested commit
       env:
+        CHANNEL: ${{ inputs.channel }}
         VERSION: ${{ inputs.version }}
         BUILD_VERSION: ${{ inputs.build_version }}
       shell: bash
