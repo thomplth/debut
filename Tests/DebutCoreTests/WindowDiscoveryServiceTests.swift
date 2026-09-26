@@ -388,8 +388,11 @@ struct WindowDiscoveryServiceTests {
         windowService.allWindowIDList = [82_256, 7]
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         spaces.windowDesktops = [82_256: 0, 7: 0]
+        // A deterministic focus answer keeps activation synchronous; the production probe
+        // publishes its snapshot later on the main queue, after the assertions have run.
         let service = WindowDiscoveryService(
             windowService: windowService,
+            focusedWindowProvider: { _ in nil },
             processExitMonitor: MockProcessExitMonitor()
         )
         service.spaceSwitcher = spaces
