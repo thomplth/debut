@@ -247,7 +247,7 @@ struct ScreenshotTests {
                 }
             } else {
                 sm.activateSpace(id: sm.spaces[i - 1].id)
-                sm.createSpace(position: .below)
+                sm.addFixtureDesktop()
                 let spaceID = sm.spaces[i].id
                 for _ in 0..<windowsPerSpace[i % windowsPerSpace.count] {
                     let w = windowData[Int(windowCounter - 100) % windowData.count]

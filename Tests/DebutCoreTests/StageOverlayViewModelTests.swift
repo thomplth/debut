@@ -25,7 +25,7 @@ struct OverlayViewModelTests {
         var sm = SpaceManager()
         sm.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "AppA", windowTitle: "Window A"), toSpaceID: sm.spaces[0].id)
         sm.addWindow(SpaceWindow(windowID: 102, ownerBundleID: "com.b", ownerName: "AppB", windowTitle: "Window B"), toSpaceID: sm.spaces[0].id)
-        sm.createSpace(position: .below)
+        sm.addFixtureDesktop()
         sm.addWindow(SpaceWindow(windowID: 201, ownerBundleID: "com.c", ownerName: "AppC", windowTitle: "Window C"), toSpaceID: sm.spaces[1].id)
         sm.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.d", ownerName: "AppD", windowTitle: "Window D"), toSpaceID: sm.spaces[1].id)
         sm.addWindow(SpaceWindow(windowID: 203, ownerBundleID: "com.e", ownerName: "AppE", windowTitle: "Window E"), toSpaceID: sm.spaces[1].id)

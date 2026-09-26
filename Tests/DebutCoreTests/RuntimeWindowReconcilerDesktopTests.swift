@@ -27,8 +27,8 @@ struct RuntimeWindowReconcilerDesktopTests {
 
     private func threeSpaces() -> SpaceManager {
         var manager = SpaceManager()
-        manager.createSpace(position: .below)
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
+        manager.addFixtureDesktop()
         return manager
     }
 

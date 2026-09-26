@@ -500,9 +500,9 @@ struct SpaceControllerSpaceTests {
     func switchesDesktop() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
-        // createSpace activates what it creates, so return to the first space before
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
+        // addFixtureDesktop shows the desktop it adds, so return to the first space before
         // switching — otherwise this would ask to switch to the space already showing.
         controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
 
@@ -523,7 +523,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         let (controller, windowService) = makeController(spaces: spaces)
         let spaceA = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let spaceB = controller.spaceManager.spaces[1].id
 
         controller.spaceManager.addWindow(
@@ -559,9 +559,9 @@ struct SpaceControllerSpaceTests {
     func clampsToDesktops() {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
 
         controller.reconcileSpacesWithDesktops()
 
@@ -576,8 +576,8 @@ struct SpaceControllerSpaceTests {
     func activeSpaceFollowsUserSwitch() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
 
         spaces.current = 2
@@ -592,8 +592,8 @@ struct SpaceControllerSpaceTests {
     func syncRequestsNoSwitch() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 2)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
 
         controller.syncActiveSpaceWithCurrentDesktop()
@@ -608,7 +608,7 @@ struct SpaceControllerSpaceTests {
     func unknownDesktopLeavesActiveSpace() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let expected = controller.spaceManager.activeSpaceID
 
         spaces.current = -1
@@ -625,8 +625,8 @@ struct SpaceControllerSpaceTests {
     func activationDoesNotSwitchDesktop() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 2)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[2].id)
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W"),
@@ -648,8 +648,8 @@ struct SpaceControllerSpaceTests {
     func activationWithoutDesktopKeepsAssignment() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 1)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[1].id)
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W"),
@@ -668,8 +668,8 @@ struct SpaceControllerSpaceTests {
     func activationOfUnknownWindowJoinsActiveSpace() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 1)
         let (controller, windowService) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[1].id)
         windowService.windowList = [
             WindowInfo(windowID: 7, ownerBundleID: "com.a", ownerName: "A", ownerPID: 42,
@@ -753,7 +753,7 @@ struct SpaceControllerSpaceTests {
         let (controller, _) = makeController(spaces: spaces)
         let delegate = SpaceMutationDelegate()
         controller.delegate = delegate
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W",
                         ownerPID: 42),
@@ -795,7 +795,7 @@ struct SpaceControllerSpaceTests {
     func diagnosticStateReportsWindowIDsInMRUOrder() {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let spaceA = controller.spaceManager.spaces[0].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 7, ownerBundleID: "com.a", ownerName: "A", windowTitle: ""),
@@ -825,8 +825,8 @@ struct SpaceControllerSpaceTests {
     func diagnosticStateSeparatesActiveFromSelected() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
         controller.selectedSpaceIndex = 0
 
@@ -846,7 +846,7 @@ struct SpaceControllerSpaceTests {
     func focusWaitsForDesktopChange() {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         let (controller, windowService) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let spaceB = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 55, ownerBundleID: "com.b", ownerName: "B", windowTitle: "W"),
@@ -867,7 +867,7 @@ struct SpaceControllerSpaceTests {
         spaces.switchChangesDesktop = false
         spaces.switchingStackIDs = [SpaceTopology.sharedStackID]
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let showingSpace = controller.spaceManager.spaces[0].id
         let settlingSpace = controller.spaceManager.spaces[1].id
         controller.spaceManager.activateSpace(id: settlingSpace)
@@ -954,8 +954,8 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
         spaces.switchChangesDesktop = false
         let (controller, windowService) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
         let target = controller.spaceManager.spaces[2]
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 55, ownerBundleID: "com.c", ownerName: "C", windowTitle: "W"),
@@ -986,7 +986,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 4, current: 0)
         spaces.switchChangesDesktop = false
         let (controller, _) = makeController(spaces: spaces)
-        for _ in 1..<4 { controller.spaceManager.createSpace(position: .below) }
+        for _ in 1..<4 { controller.spaceManager.addFixtureDesktop() }
         let ids = [11, 22, 33, 44] as [CGWindowID]
         let oldDates = ids.enumerated().map { index, _ in
             Date(timeIntervalSinceReferenceDate: TimeInterval(40 - index * 10))
@@ -1042,7 +1042,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
         spaces.switchChangesDesktop = false
         let (controller, _) = makeController(spaces: spaces)
-        for _ in 1..<3 { controller.spaceManager.createSpace(position: .below) }
+        for _ in 1..<3 { controller.spaceManager.addFixtureDesktop() }
         let oldDate = Date(timeIntervalSinceReferenceDate: 10)
         for index in 0..<3 {
             let windowID = CGWindowID((index + 1) * 10)
@@ -1095,7 +1095,7 @@ struct SpaceControllerSpaceTests {
     func sameAppCrossDesktopLaunchCreditsEarlyFocus() throws {
         let spaces = MockSpaceSwitcher(desktops: 4, current: 3)
         let (controller, _) = makeController(spaces: spaces)
-        for _ in 1..<4 { controller.spaceManager.createSpace(position: .below) }
+        for _ in 1..<4 { controller.spaceManager.addFixtureDesktop() }
         let oldDate = Date(timeIntervalSinceReferenceDate: 10)
         let targetSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
@@ -1150,7 +1150,7 @@ struct SpaceControllerSpaceTests {
     func earlyCrossDesktopFocusDoesNotSurviveAnotherLanding() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 2)
         let (controller, _) = makeController(spaces: spaces)
-        for _ in 1..<3 { controller.spaceManager.createSpace(position: .below) }
+        for _ in 1..<3 { controller.spaceManager.addFixtureDesktop() }
         let targetSpaceID = controller.spaceManager.spaces[0].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 11, ownerBundleID: "com.other", ownerName: "Other",
@@ -1178,7 +1178,7 @@ struct SpaceControllerSpaceTests {
         let clock = SpaceTopologyTestClock()
         let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
         let (controller, _) = makeController(spaces: spaces, clock: { clock.now })
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let targetSpaceID = controller.spaceManager.spaces[0].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 11, ownerBundleID: "com.other", ownerName: "Other",
@@ -1208,7 +1208,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
         spaces.switchChangesDesktop = false
         let (controller, _) = makeController(spaces: spaces)
-        for _ in 1..<3 { controller.spaceManager.createSpace(position: .below) }
+        for _ in 1..<3 { controller.spaceManager.addFixtureDesktop() }
         let oldDate = Date(timeIntervalSinceReferenceDate: 10)
         controller.spaceManager.addWindow(
             SpaceWindow(
@@ -1247,7 +1247,7 @@ struct SpaceControllerSpaceTests {
     func lateIntermediateFocusDoesNotChangeMRU() throws {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let oldDate = Date(timeIntervalSinceReferenceDate: 10)
         controller.spaceManager.addWindow(
             SpaceWindow(
@@ -1280,7 +1280,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
         spaces.switchChangesDesktop = false
         let (controller, _) = makeController(spaces: spaces)
-        for _ in 1..<3 { controller.spaceManager.createSpace(position: .below) }
+        for _ in 1..<3 { controller.spaceManager.addFixtureDesktop() }
         let oldDate = Date(timeIntervalSinceReferenceDate: 10)
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 22, ownerBundleID: "com.b", ownerName: "B", windowTitle: "B",
@@ -1315,7 +1315,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         spaces.switchChangesDesktop = false
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let target = controller.spaceManager.spaces[1]
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 21, ownerBundleID: "com.passive", ownerName: "Passive",
@@ -1349,7 +1349,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
         spaces.switchChangesDesktop = false
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 11, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A",
                         ownerPID: 4141),
@@ -1378,7 +1378,7 @@ struct SpaceControllerSpaceTests {
         spaces.switchChangesDesktop = false
         let (controller, windowService) = makeController(spaces: spaces)
         controller.fasterDesktopSwitchingEnabled = false
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let targetSpaceID = controller.spaceManager.spaces[0].id
         controller.spaceManager.addWindow(
             SpaceWindow(
@@ -1491,7 +1491,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
         spaces.switchChangesDesktop = false
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 11, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A",
                         ownerPID: 4141),
@@ -1514,7 +1514,7 @@ struct SpaceControllerSpaceTests {
     func sameSpaceSwitchSeedsNoFrontProcess() {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 11, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A",
                         ownerPID: 4141),
@@ -1535,7 +1535,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
         spaces.switchChangesDesktop = false
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 11, ownerBundleID: "com.a", ownerName: "A", windowTitle: "A"),
             toSpaceID: controller.spaceManager.spaces[0].id
@@ -1556,7 +1556,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
         spaces.switchChangesDesktop = false
         let (controller, _) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let stamps: [(CGWindowID, Int, TimeInterval)] = [
             (11, 0, 20), (22, 0, 10), (33, 1, 40), (44, 1, 30),
         ]
@@ -1594,7 +1594,7 @@ struct SpaceControllerSpaceTests {
     func quickSwitchQueuesNoFocus() {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let spaceB = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 55, ownerBundleID: "com.b", ownerName: "B", windowTitle: "W"),
@@ -1631,7 +1631,7 @@ struct SpaceControllerSpaceTests {
     func quickSwitchClearsPendingFocus() {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         let (controller, windowService, keyboardService) = makeKeyedController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let spaceA = controller.spaceManager.spaces[0].id
         let spaceB = controller.spaceManager.spaces[1].id
         controller.spaceManager.addWindow(
@@ -1676,8 +1676,8 @@ struct SpaceControllerSpaceTests {
     func pendingFocusDroppedOnDifferentDesktop() {
         let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
         let (controller, windowService) = makeController(spaces: spaces)
-        controller.spaceManager.createSpace(position: .below)
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 55, ownerBundleID: "com.b", ownerName: "B", windowTitle: "W"),
             toSpaceID: controller.spaceManager.spaces[1].id)
@@ -1697,7 +1697,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
         let spaceA = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: spaceA)
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
@@ -1758,7 +1758,7 @@ struct SpaceControllerSpaceTests {
         spaces.completesMovesImmediately = false
         let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
         let spaceA = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: spaceA)
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
@@ -1791,7 +1791,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
         let sourceSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let destinationSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.activateSpace(id: sourceSpaceID)
         controller.spaceManager.addWindow(
@@ -1838,7 +1838,7 @@ struct SpaceControllerSpaceTests {
         spaces.completesMovesImmediately = false
         let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
         let sourceSpaceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let destinationSpaceID = controller.spaceManager.spaces[1].id
         controller.spaceManager.activateSpace(id: sourceSpaceID)
         controller.spaceManager.addWindow(
@@ -1878,7 +1878,7 @@ struct SpaceControllerSpaceTests {
         spaces.completesMovesImmediately = false
         let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
         let spaceA = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: spaceA)
         for windowID in [CGWindowID(101), 202] {
             controller.spaceManager.addWindow(
@@ -1949,7 +1949,7 @@ struct SpaceControllerSpaceTests {
         spaces.canMoveWindows = false
         let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
         let spaceA = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: spaceA)
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
@@ -1967,7 +1967,7 @@ struct SpaceControllerSpaceTests {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
         let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
         let sourceID = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         controller.spaceManager.activateSpace(id: sourceID)
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 101,
@@ -2105,28 +2105,28 @@ struct SpaceControllerSpaceTests {
     // left alone, which is right, but the caller cannot tell that apart from a host that
     // genuinely has one desktop. E2E caught Debut launching with one space against three real
     // desktops and there was nothing in the log to say which step had declined.
-    @Test("A reconcile that cannot see any desktop reports that it refused")
-    func refusalIsObservable() {
-        var manager = SpaceManager()
-        manager.createSpace(position: .below)
+    @Test("A reconcile that cannot see any desktop leaves the stages alone and says so")
+    func refusalIsObservable() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: MockKeyboardService(),
+            diagnosticReporter: reporter
+        )
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        controller.spaceSwitcher = spaces
+        controller.reconcileSpacesWithDesktops()
+        let before = controller.spaceManager.spaces.map(\.id)
 
-        let outcome = SpaceController.reconcileSpaces(&manager, desktopCount: 0)
+        spaces.desktops = 0
+        controller.reconcileSpacesWithDesktops()
 
-        #expect(outcome.refused)
-        #expect(outcome.spacesBefore == 2)
-        #expect(outcome.spacesAfter == 2)
-        #expect(manager.spaces.count == 2)
-    }
-
-    @Test("A reconcile reports the desktop count it acted on")
-    func reconciliationReportsWhatItSaw() {
-        var manager = SpaceManager()
-
-        let outcome = SpaceController.reconcileSpaces(&manager, desktopCount: 3)
-
-        #expect(!outcome.refused)
-        #expect(outcome.desktopCount == 3)
-        #expect(outcome.spacesBefore == 1)
-        #expect(outcome.spacesAfter == 3)
+        #expect(controller.spaceManager.spaces.map(\.id) == before)
+        reporter.flush()
+        let log = try String(contentsOf: directory.appendingPathComponent("diagnostic.jsonl"), encoding: .utf8)
+        #expect(log.contains("spaces_reconcile_refused"))
     }
 }

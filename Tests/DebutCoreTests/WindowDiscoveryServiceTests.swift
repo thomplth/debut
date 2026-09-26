@@ -422,7 +422,7 @@ struct WindowDiscoveryServiceTests {
             AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 69_928, isHidden: false)
         )
         var manager = SpaceManager()
-        SpaceController.reconcileSpaces(&manager, desktopCount: 2)
+        manager.reconcileSpaceStacks(with: .synthetic(desktopCount: 2))
         service.reconcileWindows(&manager)
 
         #expect(refreshed == [7])
@@ -1057,7 +1057,7 @@ struct WindowDiscoveryServiceTests {
         )
         service.spaceSwitcher = spaces
         var manager = SpaceManager()
-        SpaceController.reconcileSpaces(&manager, desktopCount: 3)
+        manager.reconcileSpaceStacks(with: .synthetic(desktopCount: 3))
 
         service.reconcileWindows(&manager)
 
@@ -1085,7 +1085,7 @@ struct WindowDiscoveryServiceTests {
         )
         service.spaceSwitcher = spaces
         var manager = SpaceManager()
-        SpaceController.reconcileSpaces(&manager, desktopCount: 2)
+        manager.reconcileSpaceStacks(with: .synthetic(desktopCount: 2))
 
         service.populateInitialWindows(&manager)
 
@@ -1110,7 +1110,7 @@ struct WindowDiscoveryServiceTests {
         )
         service.spaceSwitcher = spaces
         var manager = SpaceManager()
-        SpaceController.reconcileSpaces(&manager, desktopCount: 3)
+        manager.reconcileSpaceStacks(with: .synthetic(desktopCount: 3))
         manager.activateSpace(id: manager.spaces[2].id)
 
         service.reconcileWindows(&manager)
@@ -1131,7 +1131,7 @@ struct WindowDiscoveryServiceTests {
         )
         service.spaceSwitcher = spaces
         var manager = SpaceManager()
-        SpaceController.reconcileSpaces(&manager, desktopCount: 3)
+        manager.reconcileSpaceStacks(with: .synthetic(desktopCount: 3))
         manager.activateSpace(id: manager.spaces[2].id)
 
         service.populateInitialWindows(&manager)
@@ -1575,8 +1575,8 @@ struct WindowDiscoveryServiceTests {
         windowService.untrackableWindowIDList = [22357]
 
         var spaceManager = SpaceManager()
-        spaceManager.createSpace(position: .below)
-        spaceManager.createSpace(position: .below)
+        spaceManager.addFixtureDesktop()
+        spaceManager.addFixtureDesktop()
         let originalSpaceID = spaceManager.spaces[2].id
         spaceManager.addWindow(
             SpaceWindow(windowID: 22357, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Leisure", ownerPID: 10),
@@ -1629,7 +1629,7 @@ struct WindowDiscoveryServiceTests {
         windowService.windowList = [liveWindow(1)]
 
         var spaceManager = SpaceManager()
-        spaceManager.createSpace(position: .below)
+        spaceManager.addFixtureDesktop()
         spaceManager.addWindow(
             SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Window 1", ownerPID: 10),
             toSpaceID: spaceManager.spaces[0].id
@@ -1683,7 +1683,7 @@ struct WindowDiscoveryServiceTests {
         windowService.untrackableWindowIDList = [22357]
 
         var spaceManager = SpaceManager()
-        spaceManager.createSpace(position: .below)
+        spaceManager.addFixtureDesktop()
         spaceManager.addWindow(
             SpaceWindow(windowID: 22357, ownerBundleID: "company.thebrowser.dia", ownerName: "Dia", windowTitle: "Leisure", ownerPID: 10),
             toSpaceID: spaceManager.spaces[1].id
@@ -1780,7 +1780,7 @@ struct WindowDiscoveryServiceTests {
         let windowService = MockWindowService()
         var spaceManager = SpaceManager()
         let originalSpaceID = spaceManager.activeSpaceID
-        spaceManager.createSpace(position: .below)
+        spaceManager.addFixtureDesktop()
         spaceManager.addWindow(
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Saved", ownerPID: 10),
             toSpaceID: originalSpaceID
@@ -1817,7 +1817,7 @@ struct WindowDiscoveryServiceTests {
 
         var spaceManager = SpaceManager()
         let space1 = spaceManager.spaces[0].id
-        spaceManager.createSpace(position: .below)
+        spaceManager.addFixtureDesktop()
         let space2 = spaceManager.spaces[1].id
         spaceManager.addWindow(
             SpaceWindow(windowID: 1, ownerBundleID: "notion.id", ownerName: "Notion", windowTitle: "Window 1", ownerPID: 10),

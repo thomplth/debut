@@ -35,7 +35,7 @@ struct AltTabSwitcherTests {
     private func makeTwoSpaceController() -> (SpaceController, MockWindowService) {
         let (controller, windowService) = makeController()
         let spaceA = controller.spaceManager.spaces[0].id
-        controller.spaceManager.createSpace(position: .below)
+        controller.spaceManager.addFixtureDesktop()
         let spaceB = controller.spaceManager.spaces[1].id
         let now = Date()
         controller.spaceManager.addWindow(

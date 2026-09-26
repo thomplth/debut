@@ -1,7 +1,6 @@
 import CoreGraphics
 import Foundation
 
-public enum SpaceInsertPosition: Codable, Sendable { case above, below }
 public enum SpaceStackEdge: Sendable, Equatable { case top, bottom }
 public enum SwapDirection: Sendable { case up, down }
 
@@ -196,7 +195,9 @@ public struct SpaceManager: Codable, Sendable {
 
     /// Matches connected stacks to macOS while retaining dormant assignments for unplugged displays.
     public mutating func reconcileSpaceStacks(with topology: SpaceTopology) {
-        guard !topology.stacks.isEmpty else { return }
+        // An answer naming no desktop is not evidence the desktops are gone. Acting on it
+        // disconnected and then discarded every stack, leaving no stage to index.
+        guard topology.hasDesktops else { return }
         prepareForTopologyTransition(topology)
         for index in spaceStacks.indices { spaceStacks[index].isConnected = false }
 
@@ -379,54 +380,9 @@ public struct SpaceManager: Codable, Sendable {
         }
     }
 
-    // MARK: Space lifecycle
-
-    public mutating func createSpace(position: SpaceInsertPosition) {
-        guard let stackIndex = selectedStackIndex else { return }
-        let newSpace = Space()
-        guard let activeIndex = spaceStacks[stackIndex].spaces.firstIndex(where: {
-            $0.id == spaceStacks[stackIndex].activeSpaceID
-        }) else { return }
-        let insertionIndex = position == .above ? activeIndex : activeIndex + 1
-        spaceStacks[stackIndex].spaces.insert(newSpace, at: insertionIndex)
-        spaceStacks[stackIndex].activeSpaceID = newSpace.id
-    }
-
-    public mutating func deleteSpace(id: UUID) {
-        guard let location = spaceLocation(id: id) else { return }
-        let deleted = spaceStacks[location.stack].spaces[location.space]
-        dormantWindowAssignments.removeAll { $0.spaceID == id }
-        if spaceStacks[location.stack].spaces.count == 1 {
-            let replacement = Space()
-            spaceStacks[location.stack].spaces = [replacement]
-            spaceStacks[location.stack].activeSpaceID = replacement.id
-            return
-        }
-        let overflow = location.space == 0 ? 1 : location.space - 1
-        for window in deleted.windows {
-            spaceStacks[location.stack].spaces[overflow].addWindow(window)
-        }
-        spaceStacks[location.stack].spaces.remove(at: location.space)
-        let active = min(overflow, spaceStacks[location.stack].spaces.count - 1)
-        spaceStacks[location.stack].activeSpaceID = spaceStacks[location.stack].spaces[active].id
-    }
-
     public mutating func activateSpace(id: UUID) {
         guard let location = spaceLocation(id: id) else { return }
         spaceStacks[location.stack].activeSpaceID = id
-    }
-
-    public mutating func removeEmptySpaces() {
-        guard let stackIndex = selectedStackIndex else { return }
-        let dormantIDs = Set(dormantWindowAssignments.map(\.spaceID))
-        let nonEmpty = spaceStacks[stackIndex].spaces.filter {
-            !$0.windows.isEmpty || dormantIDs.contains($0.id)
-        }
-        if nonEmpty.isEmpty { return }
-        spaceStacks[stackIndex].spaces = nonEmpty
-        if !nonEmpty.contains(where: { $0.id == spaceStacks[stackIndex].activeSpaceID }) {
-            spaceStacks[stackIndex].activeSpaceID = nonEmpty[0].id
-        }
     }
 
     // MARK: Window management

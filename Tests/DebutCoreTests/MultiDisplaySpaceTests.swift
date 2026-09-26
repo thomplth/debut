@@ -99,7 +99,7 @@ struct MultiDisplaySpaceTests {
     @Test("Enabling separate Spaces preserves the existing shared stack on the first display")
     func sharedToSeparateMigration() {
         var manager = SpaceManager()
-        manager.createSpace(position: .below)
+        manager.addFixtureDesktop()
         manager.addWindow(
             SpaceWindow(windowID: 70, ownerBundleID: "com.example", ownerName: "Example", windowTitle: "Example"),
             toSpaceID: manager.spaces[1].id

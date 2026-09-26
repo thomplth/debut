@@ -54,7 +54,7 @@ private func measure(
 
 private func manager(spaces: Int, windows: Int) -> SpaceManager {
     var manager = SpaceManager()
-    while manager.spaces.count < spaces { manager.createSpace(position: .below) }
+    manager.reconcileSpaceStacks(with: .synthetic(desktopCount: spaces))
     for index in 0..<windows {
         let space = manager.spaces[index % spaces].id
         manager.addWindow(SpaceWindow(
