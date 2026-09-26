@@ -170,7 +170,8 @@ public protocol SpaceControllerDelegate: AnyObject {
     /// Whether a destroy notification already retired this window. Discovery honours its own
     /// tombstones on every snapshot it takes, but the focus path admits from a raw window list,
     /// so without asking here the verdict that evicted the window never reaches the one path
-    /// that can let it back in.
+    /// that can let it back in. Also true while a creation probe holds the window back
+    /// (KHA-789): the incident's transient Dia surface received focus this way.
     func spaceController(
         _ controller: SpaceController,
         isWindowRetired windowID: CGWindowID,
