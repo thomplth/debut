@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=scripts/tart-queue.sh
+source "$SCRIPT_DIR/tart-queue.sh"
 VM_NAME="${DEBUT_TART_VM:-debut-e2e-tahoe}"
 SHARE_DIR="${DEBUT_TART_SHARE:-$HOME/Library/Caches/Debut/TartE2E}"
 PROFILE="${2:-typical}"
@@ -23,6 +25,11 @@ artifact_id="$(date +%s)-$$"
 /usr/bin/ditto -c -k --keepParent "$PROJECT_DIR/.build/Debut.app" "$SHARE_DIR/Debut-performance-$artifact_id.app.zip"
 /usr/bin/install -m 755 "$PROJECT_DIR/.build/release/DebutPerformanceFixture" "$SHARE_DIR/DebutPerformanceFixture-$artifact_id"
 /usr/bin/install -m 755 "$PROJECT_DIR/scripts/tart-performance-guest.sh" "$SHARE_DIR/tart-performance-guest-$artifact_id.sh"
+
+# The E2E suite uses the same guest; profiling beside it would measure both.
+trap tart_queue_leave EXIT
+trap 'exit 130' INT TERM
+tart_queue_enter "tart-performance $(basename "$PROJECT_DIR") $PROFILE"
 
 if ! tart exec "$VM_NAME" /usr/bin/true >/dev/null 2>&1; then
     nohup tart run --no-graphics --no-audio --no-clipboard --no-pointer --no-keyboard --dir="$SHARE_DIR" "$VM_NAME" > "$SHARE_DIR/tart-performance-vm.log" 2>&1 </dev/null &

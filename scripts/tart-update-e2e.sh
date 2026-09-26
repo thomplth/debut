@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/tart-queue.sh
+source "$root/scripts/tart-queue.sh"
 baseline="${1:?usage: tart-update-e2e.sh <baseline.dmg> <candidate.dmg> <appcast.xml> <build-version>}"
 candidate="${2:?missing candidate}"
 appcast="${3:?missing appcast}"
@@ -12,11 +14,15 @@ if ! tart list --source local --quiet | grep -Fxq "$vm"; then
     exit 1
 fi
 mkdir -p "$share"
+# A separate VM still competes for the same host CPU, so it takes its turn in the one queue.
+trap tart_queue_leave EXIT
+trap 'exit 130' INT TERM
+tart_queue_enter "tart-update-e2e $build"
 if tart exec "$vm" /usr/bin/true >/dev/null 2>&1; then tart stop "$vm"; fi
 "$root/scripts/prepare-update-e2e.sh" "$baseline" "$candidate" "$appcast" "$share"
 touch "$share/.debut-update-fixture"
 nohup tart run --no-graphics --no-audio --no-clipboard --no-pointer --no-keyboard --dir="$share" "$vm" >"$share/vm.log" 2>&1 </dev/null &
-trap 'tart stop "$vm" >/dev/null 2>&1 || true' EXIT
+trap 'tart stop "$vm" >/dev/null 2>&1 || true; tart_queue_leave' EXIT
 for _ in {1..90}; do
     if tart exec "$vm" /usr/bin/true >/dev/null 2>&1; then break; fi
     sleep 2
