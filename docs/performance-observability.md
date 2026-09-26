@@ -2,7 +2,7 @@
 
 Performance recording is triggered by existing work; it adds no recurring window-discovery poll. Bounded animation, retry, verification, and presentation schedules remain part of the app behavior. `diagnostic.json` is the offline source of truth; Instruments signposts, deterministic benchmark JSON, and Tart artifacts use the same `PerformanceOperation` names and millisecond units.
 
-Stage presentation uses `overlay_end_to_end_visible` as its primary user-facing latency. The span begins when the event tap recognizes a non-repeating activation and ends when the overlay's reveal animation completes. `diagnostic.json.overlayPresentation` retains the latest 20 correlated traces, including main-actor delivery, fullscreen probing, intentional presentation delay, deadline overshoot, preparation, window ordering, render submission, reveal completion, and preview capture. Wallpaper fields remain in the schema for compatibility, but the current overlay reports wallpaper as unavailable: Debut no longer captures or draws a desktop backdrop. Rejected and cancelled attempts remain local diagnostic traces but never enter the successful latency summary.
+Stage presentation uses `overlay_end_to_end_visible` as its primary user-facing latency. The span begins when the event tap recognizes a non-repeating activation and ends when the overlay's reveal animation completes. `diagnostic.json.overlayPresentation` retains the latest 20 correlated traces, including main-actor delivery, fullscreen probing, intentional presentation delay, deadline overshoot, preparation, window ordering, render submission, reveal completion, and preview capture. Debut does not capture or draw a desktop backdrop, so traces have no wallpaper phase or state. Rejected and cancelled attempts remain local diagnostic traces but never enter the successful latency summary.
 
 `overlay_render_submission` replaces the old `overlay_first_frame` name. It means AppKit drew pending content and Core Animation was flushed; it is not evidence that WindowServer displayed a physical frame. Installed-app performance validation may compare that marker and reveal completion against ScreenCaptureKit pixel observations inside the headless Tart VM.
 
@@ -22,7 +22,7 @@ Overlay invocation is cache-only for cross-process state. Focus identity and geo
 | busy | 7 | 21 | 7 |
 | stress | 10 | 50 | 10 |
 
-Report cold launch, first use, and warm operation runs separately. Overlay traces retain orthogonal process-use, preview-cache, legacy wallpaper, hosting-view, process-age, and workload dimensions. Every observation carries a random in-memory span ID plus an optional in-memory trace ID and geometric workload counts (spaces, windows, dormant windows, processes, captures). IDs never leave local diagnostics and traces.
+Report cold launch, first use, and warm operation runs separately. Overlay traces retain orthogonal process-use, preview-cache, hosting-view, process-age, and workload dimensions. Every observation carries a random in-memory span ID plus an optional in-memory trace ID and geometric workload counts (spaces, windows, dormant windows, processes, captures). IDs never leave local diagnostics and traces.
 
 ## Local schema and budgets
 
@@ -49,8 +49,7 @@ spans can finish before macOS confirms a switch, so a `space_switch` duration
 alone is not proof of settled desktop pixels or delivered window focus. Use
 confirmation and focus-delivery evidence alongside request timing. Likewise,
 `space_raise` is a retained operation name, not an instruction to AX-raise every
-window, and `wallpaper_capture` remains in the schema without an active production
-wallpaper-capture path.
+window.
 
 Installed-app input and pixel validation runs in Tart. Profiling commands that
 only inspect an existing process are distinct from the global-input E2E harness.

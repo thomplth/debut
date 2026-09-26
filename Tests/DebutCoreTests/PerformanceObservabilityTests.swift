@@ -12,7 +12,7 @@ struct PerformanceObservabilityTests {
             "preview_enumeration",
             "preview_first", "preview_all", "preview_capture", "window_discovery",
             "window_classification", "window_reconciliation", "space_switch",
-            "space_raise", "wallpaper_capture", "state_persistence", "hidden_idle",
+            "space_raise", "state_persistence", "hidden_idle",
         ])
     }
 

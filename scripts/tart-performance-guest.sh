@@ -102,7 +102,7 @@ else
     echo "Debut is not running; skipping stage-cycle profile" >&2
 fi
 
-for scenario in launch-restore overlay-end-to-end-visible overlay-render-submission first-preview all-previews preview-1 preview-5 preview-10 preview-21 preview-50 selection-cycle space-switch hidden-idle-45s cycles-100 process-exit title-change ax-timeout wallpaper-capture wallpaper-cancellation; do
+for scenario in launch-restore overlay-end-to-end-visible overlay-render-submission first-preview all-previews preview-1 preview-5 preview-10 preview-21 preview-50 selection-cycle space-switch hidden-idle-45s cycles-100 process-exit title-change ax-timeout; do
     start="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
     case "$scenario" in
         title-change)
