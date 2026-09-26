@@ -2576,9 +2576,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             overlayPresentationRecorder.updateEnvironment(
                 for: presentation,
                 previewCache: .classify(cached: cachedCount, assigned: assignedWindowIDs.count),
-                // Debut no longer draws a wallpaper of its own — the real desktop is the
-                // backdrop now, so there is no captured wallpaper whose state to report.
-                wallpaperState: .unavailable,
                 workload: workload,
                 cachedPreviewCount: cachedCount
             )

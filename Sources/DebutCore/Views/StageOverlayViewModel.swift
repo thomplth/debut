@@ -105,8 +105,6 @@ public struct StageOverlayViewModel: Sendable {
     /// from a preview, which arrives asynchronously and would reshape the grid mid-overlay.
     public let windowSizes: [CGWindowID: CGSize]
     public var appearance: AppSettings
-    /// Mean brightness of the wallpaper the overlay is drawn over, when it could be measured.
-    public var wallpaperLuminance: Double?
     /// Test-only presentation mode used by the single-display Tart guest so screenshots can
     /// review the display indicator without changing normal display-stack behavior.
     public var forceDisplayStackIndicator: Bool
@@ -136,14 +134,13 @@ public struct StageOverlayViewModel: Sendable {
 
     public var displayStackShortcutSpacing: CGFloat { 3.5 }
 
-    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], windowSizes: [CGWindowID: CGSize] = [:], appearance: AppSettings = AppSettings(), wallpaperLuminance: Double? = nil, forceDisplayStackIndicator: Bool = false, keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation? = nil, overlayKeyboardInteractionSequence: Int = 0) {
+    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], windowSizes: [CGWindowID: CGSize] = [:], appearance: AppSettings = AppSettings(), forceDisplayStackIndicator: Bool = false, keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation? = nil, overlayKeyboardInteractionSequence: Int = 0) {
         self.spaceManager = spaceManager
         self.activeSpaceIndex = activeSpaceIndex
         self.selectedWindowIndex = selectedWindowIndex
         self.windowPreviews = windowPreviews
         self.windowSizes = windowSizes
         self.appearance = appearance
-        self.wallpaperLuminance = wallpaperLuminance
         self.forceDisplayStackIndicator = forceDisplayStackIndicator
         self.keyboardWindowMoveAnimation = keyboardWindowMoveAnimation
         self.overlayKeyboardInteractionSequence = overlayKeyboardInteractionSequence

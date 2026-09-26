@@ -166,7 +166,6 @@ struct OverlayPresentationObservabilityTests {
         let environment = OverlayPresentationEnvironment(
             processUse: .firstAttempt,
             previewCache: .complete,
-            wallpaperState: .ready,
             hostingView: .created,
             processAge: .underMinute,
             workload: .init(spaces: 4, windows: 8, captures: 8),

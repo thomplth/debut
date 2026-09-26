@@ -134,8 +134,7 @@ their hosting view so SwiftUI does not keep laying out invisible content.
 ScreenCaptureKit supplies window screenshots. Captures are concurrent, cached in
 memory, and refreshed according to eligibility and age when requested. Previews
 are not continuous video. The desktop behind the glass is the real desktop;
-wallpaper capture fields retained in diagnostics are legacy schema, not evidence
-of an active wallpaper rendering path.
+Debut never captures or paints wallpaper.
 
 The saved model is a recovery aid. Window IDs and PIDs appear in local state, but
 must be validated against current identities. Desktop UUIDs join records to real

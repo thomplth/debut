@@ -1080,9 +1080,8 @@ struct RecentValueCacheTests {
 
     @Test("Callers that arrive during a load join it instead of starting another")
     func concurrentCallersShareOneLoad() async throws {
-        // The wallpaper capture and the window previews both need the shareable
-        // content at the same instant of a presentation, and the enumeration
-        // costs tens of milliseconds no matter who asks for it.
+        // A presentation starts every window preview capture at the same instant,
+        // and the enumeration costs tens of milliseconds no matter who asks for it.
         let loader = Loader()
         loader.delaySeconds = 0.05
         let cache = makeCache(loader)

@@ -1513,7 +1513,6 @@ public struct StageOverlayView: View {
                             selectedWindowIndex: selectedWindowIndex,
                             layout: displayedLayouts[index],
                             appearance: viewModel.appearance,
-                            wallpaperLuminance: viewModel.wallpaperLuminance,
                             windowDrag: $windowDrag,
                             layoutWindowDrag: layoutWindowDrag,
                             settlingWindowID: settlingWindowDrop?.request.windowID,
@@ -2013,7 +2012,6 @@ struct StageSwiftUIView: View {
     let selectedWindowIndex: Int?
     let layout: StageWindowLayout
     let appearance: AppSettings
-    let wallpaperLuminance: Double?
     @Binding var windowDrag: WindowDragState?
     let layoutWindowDrag: WindowDragState?
     let settlingWindowID: CGWindowID?
