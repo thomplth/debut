@@ -65,7 +65,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onAltTabPointerSelectionChanged: ((Int?) -> Void)?
-    public var onDesktopSelected: (() -> Void)?
+    public var onBackdropDismissed: (() -> Void)?
     var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
     var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
 
@@ -110,7 +110,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
             onWindowSelected: onWindowSelected,
             onWindowMoved: onWindowMoved,
             onPointerSelectionChanged: onPointerSelectionChanged,
-            onDesktopSelected: onDesktopSelected
+            onBackdropDismissed: onBackdropDismissed
         )
         view.onOverlayTapRouted = onOverlayTapRouted
         view.onOverlayPointerRegionChanged = onOverlayPointerRegionChanged
