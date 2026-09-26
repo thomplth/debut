@@ -953,7 +953,12 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let outcome = activation.outcome
         if outcome == .refused { pendingPractice = nil }
         if outcome != .refused, let ownerPID = window.ownerPID {
-            focusRequest = (windowID: windowID, ownerPID: ownerPID, at: clock())
+            // A request is only worth arming while its report is still to come. Raise-before-reveal
+            // usually delivers the report before this deferred step runs, and an answered request
+            // left armed reads the next report from the same app as a misreport of this window.
+            if focusedWindowID != windowID {
+                focusRequest = (windowID: windowID, ownerPID: ownerPID, at: clock())
+            }
             scheduleFrontVerification(windowID: windowID, ownerPID: ownerPID)
             if command != .general {
                 beginFocusDeliveryVerification(
@@ -1471,6 +1476,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                let location = spaceSwitcher?.spaceTopology().stack(id: stackID)?.location(at: index),
                let switcher = spaceSwitcher {
                 if let focusWindowID {
+                    // The raise below is what macOS answers with a focus report, so the intent is
+                    // recorded here rather than by the focus step that runs once the desktop settles.
+                    armFocusRequest(forWindow: focusWindowID, inSpaceID: targetID)
                     prepareHiddenDesktop(forWindow: focusWindowID, inSpaceID: targetID,
                                          desktopID: location.desktopID, switcher: switcher)
                 }
@@ -1531,6 +1539,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// desktops; measured in Tart, it was the only request made from another desktop that did.
     /// A window never seen on a showing desktop has no kept element, so it is raised on arrival
     /// as before.
+    private func armFocusRequest(forWindow windowID: CGWindowID, inSpaceID spaceID: UUID) {
+        guard let ownerPID = spaceManager.allSpaces.first(where: { $0.id == spaceID })?
+            .windows.first(where: { $0.windowID == windowID })?.ownerPID
+        else { return }
+        focusRequest = (windowID: windowID, ownerPID: ownerPID, at: clock())
+    }
+
     private func prepareHiddenDesktop(forWindow windowID: CGWindowID, inSpaceID spaceID: UUID,
                                       desktopID: CGSSpaceID, switcher: any SpaceSwitching) {
         let raised = windowService.raiseTrackedWindow(windowID: windowID)
