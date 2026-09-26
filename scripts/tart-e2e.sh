@@ -202,7 +202,7 @@ finish_run() {
         run_report_summary "$RUN_DIR" 2>/dev/null || echo "Tart E2E run: $result ($RUN_DIR)"
         # Pruning while holding the queue cannot delete another run's live directory.
         if [[ "$RUN_LOCK_HELD" == true ]]; then
-            run_report_prune "$RUNS_DIR" "$KEEP_RUNS" "$RUN_DIR"
+            run_report_prune "$RUNS_DIR" "$KEEP_RUNS" "$RUN_DIR" || true
         fi
     fi
     release_run_lock
