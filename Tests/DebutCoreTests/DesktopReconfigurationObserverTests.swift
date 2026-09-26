@@ -136,6 +136,107 @@ struct DesktopReconfigurationObserverTests {
         #expect(eligibility.blockReason() == nil)
     }
 
+    /// Runs scheduled checks by hand, so the tests control time instead of sleeping.
+    final class ManualScheduler {
+        var pending: [(delay: TimeInterval, work: () -> Void)] = []
+        func schedule(_ delay: TimeInterval, _ work: @escaping () -> Void) {
+            pending.append((delay, work))
+        }
+        /// Returns how many checks ran.
+        @discardableResult
+        func drain(limit: Int = 1_000) -> Int {
+            var ran = 0
+            while !pending.isEmpty, ran < limit {
+                pending.removeFirst().work()
+                ran += 1
+            }
+            return ran
+        }
+    }
+
+    @Test("An overview whose marker appears after SkyLight's signal is still confirmed")
+    func lateOverviewMarkerIsConfirmed() {
+        // Tart, macOS 26: 1327 arrived before Dock's layer-18 marker, the signal was discarded,
+        // and Debut claimed the next swipe and Control-arrow inside Mission Control.
+        let scheduler = ManualScheduler()
+        var probes = 0
+        var confirmations = 0
+        let confirmer = OverviewSignalConfirmer(
+            isActive: { probes += 1; return probes >= 4 },
+            schedule: scheduler.schedule
+        )
+
+        confirmer.signalReceived { confirmations += 1 }
+        #expect(confirmations == 0)
+        scheduler.drain()
+        #expect(confirmations == 1)
+        #expect(scheduler.pending.isEmpty)
+    }
+
+    @Test("A signal from an ordinary desktop transition expires after a bounded wait")
+    func unconfirmedOverviewSignalExpires() {
+        let scheduler = ManualScheduler()
+        var probes = 0
+        var confirmations = 0
+        let confirmer = OverviewSignalConfirmer(
+            isActive: { probes += 1; return false },
+            schedule: scheduler.schedule
+        )
+
+        confirmer.signalReceived { confirmations += 1 }
+        scheduler.drain()
+        #expect(confirmations == 0)
+        #expect(probes <= Int(
+            OverviewSignalConfirmer.maximumWait / OverviewSignalConfirmer.checkInterval
+        ) + 1)
+        #expect(scheduler.pending.isEmpty)
+    }
+
+    @Test("An already visible marker confirms without scheduling a recheck")
+    func visibleOverviewMarkerConfirmsImmediately() {
+        let scheduler = ManualScheduler()
+        var confirmations = 0
+        let confirmer = OverviewSignalConfirmer(isActive: { true }, schedule: scheduler.schedule)
+
+        confirmer.signalReceived { confirmations += 1 }
+        #expect(confirmations == 1)
+        #expect(scheduler.pending.isEmpty)
+    }
+
+    @Test("A completed desktop change stops rechecking its transition's signal")
+    func desktopChangeCancelsOverviewConfirmation() {
+        let scheduler = ManualScheduler()
+        var markerVisible = false
+        var confirmations = 0
+        let confirmer = OverviewSignalConfirmer(
+            isActive: { markerVisible },
+            schedule: scheduler.schedule
+        )
+
+        confirmer.signalReceived { confirmations += 1 }
+        confirmer.cancel()
+        markerVisible = true
+        scheduler.drain()
+        #expect(confirmations == 0)
+    }
+
+    @Test("A newer signal replaces the rechecks of an older one")
+    func newerOverviewSignalSupersedesOlder() {
+        let scheduler = ManualScheduler()
+        var markerVisible = false
+        var confirmations = 0
+        let confirmer = OverviewSignalConfirmer(
+            isActive: { markerVisible },
+            schedule: scheduler.schedule
+        )
+
+        confirmer.signalReceived { confirmations += 1 }
+        confirmer.signalReceived { confirmations += 1 }
+        markerVisible = true
+        scheduler.drain()
+        #expect(confirmations == 1)
+    }
+
     @Test("Only macOS 26 needs the Dock post-overview recovery input")
     func overviewRecoveryPolicyMatchesOperatingSystem() {
         #expect(DesktopNavigationEligibility.requiresOverviewRecovery(

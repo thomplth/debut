@@ -245,6 +245,12 @@ if [[ -f "$e2e_source" ]]; then
     expect_contains "$e2e_source" 'nativeTransitionSpaces\.switchToDesktop\(index: 0\)' \
         "the native Command-Tab fixture must return to the desktop where AX can enumerate it"
 
+    # diagnostic.json keeps its newest 100 events, so a before/after count of matching events is
+    # not monotonic: a fullscreen Control-arrow round trip read "7-7" after both switches landed.
+    if grep -A3 'readEvents()\.filter' "$e2e_source" | grep -Eq '\}\.count|\)\.count'; then
+        fail "E2E checks must compare events against an eventCursor(), not count the capped log"
+    fi
+
     # An unknown profile used to read as ordinary. Rejecting it only counts if it happens before
     # the harness clears its screenshots and starts driving the session.
     profile_guard_line="$(grep -n 'guard let fullMoveDurationProfile = isFullMoveDurationProfile' "$e2e_source" | cut -d: -f1)"
