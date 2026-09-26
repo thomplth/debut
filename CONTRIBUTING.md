@@ -35,7 +35,14 @@ or window-move timing, `./scripts/tart-e2e.sh run --duration-profile ordinary`
 runs the nine pull-request values instead, and `--no-gallery` skips the glass
 screenshot gallery; neither removes a behavioral assertion. Run the full profile
 before submitting any change to those areas. An unknown profile is rejected
-before anything is built or the VM is touched. The E2E executable's
+before anything is built or the VM is touched.
+
+Every script that boots a Debut VM (`tart-e2e.sh`, `tart-performance.sh`,
+`demo-capture.sh`, `tart-update-e2e.sh`) waits its turn in one first-come queue,
+shared across checkouts and overrides, so only one guest runs at a time. Builds
+happen before joining the queue. `./scripts/tart-e2e.sh status` shows who is
+running and waiting; `stop` refuses while another task's run holds the VM.
+SwiftPM already serializes builds that share one `.build` directory. The E2E executable's
 `--harness-self-check` mode checks its assertion logic without injecting input.
 
 ## Project map

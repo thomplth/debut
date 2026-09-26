@@ -8,6 +8,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=scripts/tart-queue.sh
+source "$SCRIPT_DIR/tart-queue.sh"
 VM_NAME="${DEBUT_TART_VM:-debut-e2e-tahoe}"
 SHARE_DIR="${DEBUT_TART_SHARE:-$HOME/Library/Caches/Debut/TartE2E}"
 SSH_KEY="$SHARE_DIR/id_ed25519"
@@ -61,6 +63,12 @@ echo "Building Debut and the demo driver on the host..."
 "$PROJECT_DIR/scripts/build-app.sh"
 TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift build -c release --product DebutDemo \
     --package-path "$PROJECT_DIR"
+
+# The capture shares the E2E guest and share directory, so wait for any run already using them
+# before replacing staged artifacts.
+trap tart_queue_leave EXIT
+trap 'exit 130' INT TERM
+tart_queue_enter "demo-capture $(basename "$PROJECT_DIR")"
 
 ARTIFACT_ID="$(date +%s)-$$"
 APP_ARTIFACT="DebutDemo-$ARTIFACT_ID.app.zip"
