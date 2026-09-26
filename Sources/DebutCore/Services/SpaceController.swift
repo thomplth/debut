@@ -1587,7 +1587,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         discovery.resetWindowTracking()
         var rebuiltManager = spaceManager
         rebuiltManager.resetWindowCache()
-        discovery.populateDefaultSpace(&rebuiltManager)
+        discovery.populateInitialWindows(&rebuiltManager)
         spaceManager = rebuiltManager
         selectedSpaceIndex = 0
         selectedWindowIndex = 0

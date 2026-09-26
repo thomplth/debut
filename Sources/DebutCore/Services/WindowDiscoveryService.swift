@@ -304,7 +304,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
     }
 
-    public func populateDefaultSpace(_ spaceManager: inout SpaceManager) {
+    public func populateInitialWindows(_ spaceManager: inout SpaceManager) {
         let windows = discoverRunningWindows()
         let liveIDs = Set(windows.map(\.windowID))
         let desktopLocations = (spaceSwitcher?.windowLocations() ?? [:])
@@ -316,7 +316,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             let desktopSpaceID = desktopLocations[window.windowID].flatMap {
                 spaceManager.spaceID(stackID: $0.stackID, at: $0.index)
             }
-            spaceManager.addWindow(window, toSpaceID: desktopSpaceID ?? spaceManager.spaces[0].id)
+            spaceManager.addWindow(window, toSpaceID: desktopSpaceID ?? spaceManager.activeSpaceID)
             trackAndRegister(windowID: window.windowID, pid: window.ownerPID ?? 0)
         }
 
@@ -498,7 +498,6 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // decides what gets an assignment.
         let admittedWindows = liveWindows.filter { !refusedWindowIDs.contains($0.windowID) }
 
-        let firstSpaceID = spaceManager.spaces[0].id
         var reconciler = RuntimeWindowReconciler()
         let result = reconciler.reconcile(
             RuntimeWindowSnapshot(
@@ -508,8 +507,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 desktopLocations: desktopLocations(for: admittedWindows),
                 skyLightWindowIDs: skyLightWindowIDs()
             ),
-            spaceManager: &spaceManager,
-            newWindowSpaceID: firstSpaceID
+            spaceManager: &spaceManager
         )
         for info in liveWindows {
             trackAndRegister(windowID: info.windowID, pid: info.ownerPID)

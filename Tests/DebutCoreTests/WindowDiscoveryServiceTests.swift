@@ -931,10 +931,56 @@ struct WindowDiscoveryServiceTests {
         var manager = SpaceManager()
         SpaceController.reconcileSpaces(&manager, desktopCount: 2)
 
-        service.populateDefaultSpace(&manager)
+        service.populateInitialWindows(&manager)
 
         #expect(manager.spaceContainingWindow(windowID: 1) == manager.spaces[1].id)
         #expect(manager.spaceContainingWindow(windowID: 2) == manager.spaces[0].id)
+    }
+
+    // KHA-782: stage 1 was the fallback for a window whose desktop has no single answer, left
+    // over from the virtual-stage model. The desktop macOS reports as showing is the answer.
+    @Test("A window with no single desktop answer lands on the showing desktop, not the first")
+    func unresolvedWindowLandsOnShowingDesktop() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1), liveWindow(2)]
+        windowService.allWindowIDList = [1, 2]
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 2)
+        spaces.windowDesktops = [2: 1]
+        spaces.allDesktopWindowIDs = [1]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        var manager = SpaceManager()
+        SpaceController.reconcileSpaces(&manager, desktopCount: 3)
+        manager.activateSpace(id: manager.spaces[2].id)
+
+        service.reconcileWindows(&manager)
+
+        #expect(manager.spaceContainingWindow(windowID: 1) == manager.spaces[2].id)
+        #expect(manager.spaceContainingWindow(windowID: 2) == manager.spaces[1].id)
+    }
+
+    @Test("First-run population puts an unresolved window on the showing desktop")
+    func firstRunUnresolvedWindowLandsOnShowingDesktop() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1)]
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 2)
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        var manager = SpaceManager()
+        SpaceController.reconcileSpaces(&manager, desktopCount: 3)
+        manager.activateSpace(id: manager.spaces[2].id)
+
+        service.populateInitialWindows(&manager)
+
+        #expect(manager.spaceContainingWindow(windowID: 1) == manager.spaces[2].id)
     }
 
     @Test("Launch publishes its complete window batch before focused-window activation")
