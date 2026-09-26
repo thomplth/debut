@@ -178,18 +178,23 @@ def phases(path, has_status):
     return rows
 
 checks = {"passed": 0, "failed": 0, "skipped": 0, "failures": [], "invocations": []}
+scenarios = {"ran": [], "not_selected": [], "setup_failed": []}
 for path in sorted(glob.glob(os.path.join(run_dir, "results", "checks", "*.json"))):
     try:
         data = json.load(open(path))
     except (OSError, ValueError):
         continue
     checks["invocations"].append(data.get("invocation", os.path.basename(path)))
+    for scenario in data.get("scenarios", []):
+        scenarios.setdefault(scenario.get("status", "unknown"), []).append(
+            f'{scenario.get("group", "")}/{scenario.get("id", "")}')
     for check in data.get("checks", []):
         status = check.get("status")
         if status in ("passed", "failed", "skipped"):
             checks[status] += 1
         if status == "failed":
-            checks["failures"].append(f'{check.get("section", "")}: {check.get("name", "")}')
+            where = check.get("scenario") and f'{check.get("group")}/{check.get("scenario")}'
+            checks["failures"].append(f'{where or check.get("section", "")}: {check.get("name", "")}')
 
 report = {
     "schemaVersion": 1,
@@ -202,6 +207,7 @@ report = {
     "hostPhases": phases(os.path.join(run_dir, "phases.tsv"), True),
     "guestPhases": phases(os.path.join(run_dir, "results", "guest-phases.tsv"), False),
     "checks": checks,
+    "scenarios": scenarios,
 }
 with open(os.path.join(run_dir, "report.json"), "w") as handle:
     json.dump(report, handle, indent=2)
@@ -228,6 +234,11 @@ if cpu:
     print("  cpu:   " + "  ".join(
         f"{k} {v if v is not None else 'unavailable'}" for k, v in cpu.items()
     ))
+scenarios = report.get("scenarios", {})
+if scenarios.get("ran") and scenarios.get("not_selected"):
+    print(f'  scenarios: {len(scenarios["ran"])} ran, {len(scenarios["not_selected"])} not selected')
+for scenario in scenarios.get("setup_failed", []):
+    print(f"  SETUP FAILED  {scenario}")
 for failure in checks["failures"]:
     print(f"  FAIL  {failure}")
 print(f"  evidence: {run_dir}")

@@ -43,6 +43,8 @@ jobs:
         run: |
           swift test --no-parallel
           swift run DebutE2E --harness-self-check
+          swift run DebutE2E --list
+          swift run DebutE2E --plan --groups smoke,window-moves
 
       - name: Build the release bundle
         run: ./scripts/build-app.sh
