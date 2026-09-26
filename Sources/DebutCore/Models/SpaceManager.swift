@@ -666,6 +666,11 @@ public struct SpaceManager: Codable, Sendable {
             spaceStacks[destination.stack].spaces[destination.space].addWindow(window)
         }
     }
+    func windowIDs(inSpaceID id: UUID) -> [CGWindowID]? {
+        guard let location = spaceLocation(id: id) else { return nil }
+        return spaceStacks[location.stack].spaces[location.space].windows.map(\.windowID)
+    }
+
     public mutating func bringWindowToFront(
         windowID: CGWindowID,
         inSpaceID id: UUID,

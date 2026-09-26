@@ -2008,6 +2008,120 @@ struct SpaceControllerSpaceTests {
         #expect(controller.spaceManager.spaces[0].windows.first?.windowID == 202)
     }
 
+    private func pointerDrop(
+        _ controller: SpaceController,
+        windowID: CGWindowID,
+        from: Int,
+        to: Int,
+        index: Int
+    ) -> PointerWindowDropRequest {
+        let preview = controller.overlaySpaceManager
+        let remaining = preview.spaces[to].windows.map(\.windowID).filter { $0 != windowID }
+        return PointerWindowDropRequest(
+            windowID: windowID,
+            modelID: preview.spaces[from].windows.first { $0.windowID == windowID }!.id,
+            fromSpaceID: preview.spaces[from].id,
+            toSpaceID: preview.spaces[to].id,
+            logicalIndex: index,
+            placement: PointerPlacement(index: index, in: remaining),
+            fingerprint: StageStructureFingerprint(spaces: preview.spaces)
+        )
+    }
+
+    private func twoStageController(
+        _ spaces: MockSpaceSwitcher
+    ) -> (SpaceController, MockKeyboardService) {
+        let (controller, _, keyboardService) = makeKeyedController(spaces: spaces)
+        let spaceA = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addFixtureDesktop()
+        let spaceB = controller.spaceManager.spaces[1].id
+        controller.spaceManager.activateSpace(id: spaceA)
+        for (windowID, space) in [(101, spaceA), (102, spaceA), (201, spaceB), (202, spaceB),
+                                  (203, spaceB)] as [(CGWindowID, UUID)] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.\(windowID)",
+                            ownerName: "App", windowTitle: "W\(windowID)"),
+                toSpaceID: space
+            )
+        }
+        return (controller, keyboardService)
+    }
+
+    @Test("A compact pointer drop lands in its exact middle gap and is never promoted to the head")
+    func pointerDropKeepsExactGap() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, keyboardService) = twoStageController(spaces)
+        keyboardService.simulateEvent(.cmdTabHold)
+
+        let request = pointerDrop(controller, windowID: 101, from: 0, to: 1, index: 2)
+        #expect(controller.moveWindowByPointerDrop(request) == .accepted)
+        #expect(controller.overlaySpaceManager.spaces[1].windows.map(\.windowID)
+            == [201, 202, 101, 203])
+        #expect(spaces.moveRequests.isEmpty)
+
+        keyboardService.simulateEvent(.cmdRelease)
+        #expect(controller.spaceManager.spaces[1].windows.map(\.windowID) == [201, 202, 101, 203])
+        #expect(spaces.moveRequests.map(\.windowID) == [101])
+    }
+
+    @Test("Repeated pointer drops replay in order against earlier accepted edits")
+    func repeatedPointerDropsReplayInOrder() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, keyboardService) = twoStageController(spaces)
+        keyboardService.simulateEvent(.cmdTabHold)
+
+        #expect(controller.moveWindowByPointerDrop(
+            pointerDrop(controller, windowID: 101, from: 0, to: 1, index: 3)
+        ) == .accepted)
+        #expect(controller.moveWindowByPointerDrop(
+            pointerDrop(controller, windowID: 203, from: 1, to: 1, index: 0)
+        ) == .accepted)
+        let expected: [CGWindowID] = [203, 201, 202, 101]
+        #expect(controller.overlaySpaceManager.spaces[1].windows.map(\.windowID) == expected)
+        keyboardService.simulateEvent(.cmdRelease)
+        #expect(controller.spaceManager.spaces[1].windows.map(\.windowID) == expected)
+    }
+
+    @Test("A pointer drop aimed at a stale stage structure is rejected")
+    func pointerDropRejectsStaleFingerprint() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, keyboardService) = twoStageController(spaces)
+        keyboardService.simulateEvent(.cmdTabHold)
+        let request = pointerDrop(controller, windowID: 101, from: 0, to: 1, index: 0)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 999, ownerBundleID: "com.new", ownerName: "New",
+                        windowTitle: "New"),
+            toSpaceID: controller.spaceManager.spaces[1].id
+        )
+
+        #expect(controller.moveWindowByPointerDrop(request) == .rejected("stage structure changed"))
+        #expect(controller.overlaySpaceManager.spaces[0].windows.map(\.windowID) == [101, 102])
+    }
+
+    @Test("A pointer drop back into its own slot is no edit")
+    func pointerDropNoOp() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, keyboardService) = twoStageController(spaces)
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(controller.moveWindowByPointerDrop(
+            pointerDrop(controller, windowID: 102, from: 0, to: 0, index: 1)
+        ) == .noChange)
+    }
+
+    @Test("A cross-space pointer drop is refused without the transport; a reorder is not")
+    func pointerDropTransportGate() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.canMoveWindows = false
+        let (controller, keyboardService) = twoStageController(spaces)
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(controller.moveWindowByPointerDrop(
+            pointerDrop(controller, windowID: 101, from: 0, to: 1, index: 0)
+        ) == .rejected("window moves unavailable"))
+        #expect(controller.moveWindowByPointerDrop(
+            pointerDrop(controller, windowID: 102, from: 0, to: 0, index: 0)
+        ) == .accepted)
+    }
+
     @Test("Missing desktops are added as spaces")
     func growsToDesktops() {
         let spaces = MockSpaceSwitcher(desktops: 4, current: 0)

@@ -923,120 +923,97 @@ struct ScreenshotTests {
         #expect(crowdedStage.height <= StageConstants.availableStageHeight(screenHeight: size.height))
     }
 
-    @Test("Dragging a window preview does not shift the stage stack")
-    func windowDragPreviewDoesNotShiftStageStack() throws {
-        let vm = makeSampleViewModel(spaceCount: 3, windowsPerSpace: [3, 4, 2], activeIndex: 1)
-        let size = NSSize(width: 1200, height: 600)
-        let drag = WindowDragState(
-            windowID: vm.stages[1].windows[0].id,
-            sourceSpaceIndex: 1,
-            sourceWindowIndex: 0,
-            location: CGPoint(x: 600, y: 300),
-            dropTarget: nil
-        )
-        let idleFrames = renderStageFrames(StageOverlayView(viewModel: vm), size: size)
-        let draggingFrames = renderStageFrames(
-            StageOverlayView(viewModel: vm, initialWindowDrag: drag),
-            size: size
-        )
-
-        guard let idleFrame = idleFrames[1], let draggingFrame = draggingFrames[1] else {
-            throw ScreenshotError.renderFailed
+    /// A view with a compact drag already picked up from `source`, aimed at `target`.
+    private func compactDragView(
+        _ vm: StageOverlayViewModel,
+        source: (Int, Int),
+        size: NSSize,
+        target: (stage: Int, gap: Int)?
+    ) throws -> (StageOverlayView, CompactDragSnapshot) {
+        let session = CompactDragSession()
+        let snapshot = try #require(StageOverlayView.compactDragSnapshot(
+            viewModel: vm, spaceIndex: source.0, windowIndex: source.1,
+            containerSize: size, generation: session.makeGeneration()
+        ))
+        let window = vm.stages[source.0].windows[source.1]
+        var location = CGPoint(x: 1, y: 1)
+        if let target {
+            let stage = snapshot.stages[target.stage]
+            let intent = CompactDropIntent(
+                stageIndex: target.stage, spaceID: stage.spaceID, row: 0, gap: target.gap,
+                logicalIndex: target.gap, generation: snapshot.generation
+            )
+            let placeholder = try #require(snapshot.projection(for: intent).placeholder)
+            location = try #require(snapshot.overlayPoint(
+                stageIndex: target.stage, offset: placeholder.offset
+            ))
         }
-        #expect(abs(idleFrame.midY - draggingFrame.midY) < 0.5)
+        session.begin(snapshot: snapshot, window: window, at: location)
+        var view = StageOverlayView(viewModel: vm)
+        view.compactDragSession = session
+        return (view, snapshot)
     }
 
-    @Test("Window frame preferences remain stable drag-slot anchors")
-    func windowFramesRemainStableDragSlotAnchors() throws {
-        let vm = makeSampleViewModel(spaceCount: 1, windowsPerSpace: [3], activeIndex: 0)
-        let size = NSSize(width: 1200, height: 400)
-        let drag = WindowDragState(
-            windowID: vm.stages[0].windows[0].id,
-            sourceSpaceIndex: 0,
-            sourceWindowIndex: 0,
-            location: CGPoint(x: 600, y: 200),
-            dropTarget: WindowDropTarget(spaceIndex: 0, windowIndex: 2)
+    @Test("A compact drag fits four overflowing stages, fixed under every target",
+          arguments: [NSSize(width: 1024, height: 768), NSSize(width: 1280, height: 800)])
+    func compactDragFitsOverflowingStages(size: NSSize) throws {
+        var appearance = AppSettings()
+        appearance.stageScale = AppSettings.maximumStageScale
+        let vm = makeSampleViewModel(
+            spaceCount: 4, windowsPerSpace: [6, 3, 0, 5], activeIndex: 0, appearance: appearance
         )
-        let idle = renderWindowFrames(StageOverlayView(viewModel: vm), size: size)
-        let dragging = renderWindowFrames(
-            StageOverlayView(viewModel: vm, initialWindowDrag: drag),
-            size: size
-        )
+        let normal = renderStageSurfaceFrames(StageOverlayView(viewModel: vm), size: size)
+        #expect(normal.values.contains { $0.minY < 0 || $0.maxY > size.height },
+                "fixture must overflow the ordinary overlay")
 
-        #expect(abs(
-            dragging[WindowFrameID(spaceIndex: 0, windowIndex: 0)]!.midX
-                - idle[WindowFrameID(spaceIndex: 0, windowIndex: 0)]!.midX
-        ) < 0.5)
+        var heights: [[CGFloat]] = []
+        var centers: [[CGFloat]] = []
+        for target in [(0, 0), (1, 0), (1, 3), (2, 0), (3, 5)] {
+            let (view, snapshot) = try compactDragView(
+                vm, source: (0, 1), size: size, target: (target.0, target.1)
+            )
+            let frames = renderStageSurfaceFrames(view, size: size)
+            #expect(frames.count == 4)
+            for frame in frames.values {
+                #expect(snapshot.usableBounds.insetBy(dx: -0.5, dy: -0.5).contains(frame))
+                #expect(abs(frame.midX - size.width / 2) < 0.5)
+            }
+            heights.append((0..<4).map { frames[$0]?.height ?? -1 })
+            centers.append((0..<4).map { frames[$0]?.midY ?? -1 })
+        }
+        for (h, c) in zip(heights.dropFirst(), centers.dropFirst()) {
+            #expect(zip(h, heights[0]).allSatisfy { abs($0 - $1) < 0.5 })
+            #expect(zip(c, centers[0]).allSatisfy { abs($0 - $1) < 0.5 })
+        }
+
+        let (view, _) = try compactDragView(vm, source: (0, 1), size: size, target: (2, 0))
+        let name = "compact-drag-\(Int(size.width))x\(Int(size.height))"
+        if let image = renderSwiftUI(view, size: size) { try saveImage(image, name: name) }
     }
 
-    @Test("Cross-space drag grows the target stage before drop")
-    func crossSpaceDragFocusesTargetStage() throws {
-        let vm = makeSampleViewModel(spaceCount: 2, windowsPerSpace: [2, 2], activeIndex: 0)
-        let size = NSSize(width: 1200, height: 500)
-        let drag = WindowDragState(
-            windowID: vm.stages[0].windows[0].id,
-            sourceSpaceIndex: 0,
-            sourceWindowIndex: 0,
-            location: CGPoint(x: 600, y: 330),
-            dropTarget: WindowDropTarget(spaceIndex: 1, windowIndex: 0)
-        )
-        let idle = renderStageFrames(StageOverlayView(viewModel: vm), size: size)
-        let dragging = renderStageFrames(
-            StageOverlayView(viewModel: vm, initialWindowDrag: drag),
-            size: size
-        )
-
-        #expect(idle[0]!.width > idle[1]!.width)
-        #expect(dragging[1]!.width > dragging[0]!.width)
-    }
-
-    @Test("Cross-space drag resizes the rendered stage surfaces")
-    func crossSpaceDragResizesStageSurfaces() throws {
-        let vm = makeSampleViewModel(spaceCount: 2, windowsPerSpace: [2, 2], activeIndex: 0)
-        let size = NSSize(width: 1200, height: 500)
-        let drag = WindowDragState(
-            windowID: vm.stages[0].windows[0].id,
-            sourceSpaceIndex: 0,
-            sourceWindowIndex: 0,
-            location: CGPoint(x: 600, y: 330),
-            dropTarget: WindowDropTarget(spaceIndex: 1, windowIndex: 0)
-        )
-        let idle = renderStageSurfaceFrames(StageOverlayView(viewModel: vm), size: size)
-        let dragging = renderStageSurfaceFrames(
-            StageOverlayView(viewModel: vm, initialWindowDrag: drag),
-            size: size
-        )
-
-        #expect(dragging[0]!.width < idle[0]!.width)
-        #expect(dragging[1]!.width > idle[1]!.width)
-    }
-
-    @Test("Cross-space drag keeps source icons inside its centered stage surface")
-    func crossSpaceDragKeepsSourceIconsInsideStageSurface() throws {
+    @Test("A compact drop target widens only its destination around a fixed centre")
+    func compactDragWidensDestinationOnly() throws {
         let vm = makeSampleViewModel(spaceCount: 2, windowsPerSpace: [3, 2], activeIndex: 0)
-        let size = NSSize(width: 1200, height: 500)
-        let drag = WindowDragState(
-            windowID: vm.stages[0].windows[2].id,
-            sourceSpaceIndex: 0,
-            sourceWindowIndex: 2,
-            location: CGPoint(x: 600, y: 330),
-            dropTarget: WindowDropTarget(spaceIndex: 1, windowIndex: 0)
-        )
-        let view = StageOverlayView(viewModel: vm, initialWindowDrag: drag)
-        let surfaces = renderStageSurfaceFrames(view, size: size)
-        let windows = renderWindowFrames(view, size: size)
+        let size = NSSize(width: 1280, height: 800)
+        let (idle, snapshot) = try compactDragView(vm, source: (0, 0), size: size, target: nil)
+        let (aimed, _) = try compactDragView(vm, source: (0, 0), size: size, target: (1, 1))
+        let before = renderStageSurfaceFrames(idle, size: size)
+        let after = renderStageSurfaceFrames(aimed, size: size)
 
-        let sourceSurface = try #require(surfaces[0])
-        let visibleSourceFrames = windows
-            .filter { $0.key.spaceIndex == 0 && $0.key.windowIndex != 2 }
-            .map(\.value)
-        let sourceBounds = try #require(visibleSourceFrames.reduce(nil as CGRect?) { bounds, frame in
-            bounds.map { $0.union(frame) } ?? frame
-        })
-
-        #expect(sourceBounds.minX >= sourceSurface.minX)
-        #expect(sourceBounds.maxX <= sourceSurface.maxX)
-        #expect(abs(sourceBounds.midX - sourceSurface.midX) < 0.5)
+        // Drawn exactly as the snapshot hit-tests it, magnified rather than transformed.
+        let plate = try #require(snapshot.plateFrame(
+            stageIndex: 0, projection: snapshot.projection(for: nil)
+        ))
+        #expect(abs(before[0]!.width - plate.width) <= 1)
+        // Within a point: SwiftUI snaps the drawn frame to whole points.
+        #expect(abs(before[0]!.midY - plate.midY) <= 1)
+        #expect(after[1]!.width > before[1]!.width)
+        #expect(abs(after[0]!.width - before[0]!.width) < 0.5)
+        for index in 0..<2 {
+            #expect(abs(after[index]!.midX - before[index]!.midX) < 0.5)
+            #expect(abs(after[index]!.midY - before[index]!.midY) < 0.5)
+            #expect(abs(after[index]!.height - before[index]!.height) < 0.5)
+        }
     }
 
     @Test(

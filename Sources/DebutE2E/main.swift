@@ -1163,7 +1163,6 @@ func stageCenter(
     cardAspects: [[CGFloat?]],
     activeSpaceIndex: Int,
     focusedSpaceIndex: Int,
-    edgeScrollPointerY: CGFloat,
     inactiveScale: CGFloat
 ) -> CGPoint? {
     guard let centered = stageCenter(
@@ -1175,20 +1174,17 @@ func stageCenter(
         cardAspects: cardAspects,
         activeSpaceIndex: activeSpaceIndex,
         focusedSpaceIndex: focusedSpaceIndex,
-        edgeScrollPointerY: edgeScrollPointerY,
         inactiveScale: inactiveScale
     ) else { return nil }
     return CGPoint(x: centered.x, y: centered.y + offset)
 }
 
-/// The focused stack remains anchored to its baseline slot, then edge-scrolls when the pointer
-/// that caused focus is near the top or bottom. A second drag must use the resulting rendered
+/// The focused stack remains anchored to its baseline slot. A second drag must use that rendered
 /// position, not merely the focused layout's centered position.
 func focusedStackOffset(
     cardAspects: [[CGFloat?]],
     activeSpaceIndex: Int,
     focusedSpaceIndex: Int,
-    edgeScrollPointerY: CGFloat,
     inactiveScale: CGFloat
 ) -> CGFloat? {
     guard cardAspects.indices.contains(activeSpaceIndex),
@@ -1203,7 +1199,6 @@ func focusedStackOffset(
         focusedSpaceIndex: focusedSpaceIndex,
         inactiveScale: inactiveScale,
         containerHeight: overlayBounds.height,
-        pointerY: edgeScrollPointerY - overlayBounds.minY,
         metrics: metrics
     )
 }

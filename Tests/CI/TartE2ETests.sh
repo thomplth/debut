@@ -286,7 +286,7 @@ if [[ -f "$e2e_source" ]]; then
     expect_contains "$e2e_source" 'claim the bundle identifier' \
         "an ambiguous install must be named and refused, not silently resolved"
     expect_contains "$e2e_source" 'focusedStackTranslation' \
-        "reverse-drag geometry must include the focused stack's live edge-scroll position"
+        "reverse-drag geometry must use the focused stack's anchored position"
     expect_contains "$e2e_source" 'nativeTransitionSpaces\.switchToDesktop\(index: 0\)' \
         "the native Command-Tab fixture must return to the desktop where AX can enumerate it"
 
