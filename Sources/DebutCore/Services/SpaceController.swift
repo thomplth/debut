@@ -452,6 +452,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var overlayPresentationGeneration: UInt = 0
     private var isOverlayPresented: Bool = false
     private let focusedWindowSnapshotProvider: (() -> FocusedWindowSnapshot)?
+    /// Debut's own key window, read locally. Focus reports never name this process's windows,
+    /// so this is the only way the probe learns the user is on Settings or a tutorial window.
+    private let ownKeyWindowProvider: (() -> FocusedWindowSnapshot?)?
     private var previewCaptureTask: Task<Void, Never>?
     private var previewCaptureGeneration: UInt = 0
     private var previewCacheEntries: [CGWindowID: PreviewCacheEntry] = [:]
@@ -513,6 +516,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         spaceManager: SpaceManager = SpaceManager(),
         overlayPresentationDelay: TimeInterval = AppSettings.defaultOverlayPresentationDelay,
         focusedWindowSnapshotProvider: (() -> FocusedWindowSnapshot)? = nil,
+        ownKeyWindowProvider: (() -> FocusedWindowSnapshot?)? = nil,
         focusDeliveryProbe: FocusDeliveryProbe? = nil,
         focusDeliveryVerificationDelay: TimeInterval = 0.12,
         overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
@@ -526,6 +530,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         self.spaceManager = spaceManager
         self.overlayPresentationDelay = overlayPresentationDelay
         self.focusedWindowSnapshotProvider = focusedWindowSnapshotProvider
+        self.ownKeyWindowProvider = ownKeyWindowProvider
         self.focusDeliveryProbe = focusDeliveryProbe
         self.focusDeliveryVerificationDelay = focusDeliveryVerificationDelay
         self.overlayPresentationRecorder = overlayPresentationRecorder
@@ -2613,16 +2618,32 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         if let focusedWindowSnapshotProvider {
             return focusedWindowSnapshotProvider()
         }
-        // Tutorial windows belong to this process and never enter discovery's external-window
-        // cache. Reading AppKit's own key window is local and bounded, so preserve tutorial
-        // isolation without reintroducing an AX or WindowServer round trip.
-        let localTutorialFocus: FocusedWindowSnapshot? = MainActor.assumeIsolated {
+        // Debut's own windows never produce a focus report: discovery drops this process's
+        // activations so the switcher is never named the app the user switched to. Settings is
+        // admitted as a switcher entry all the same, so while it is key the cached focus still
+        // names the window the user left for it, and promoting that one made Settings entry one
+        // — every release landed back on Settings. Reading AppKit's own key window is local and
+        // bounded, so this adds no AX or WindowServer round trip. Only a window the switchers
+        // offer counts; the overlay or onboarding being key says nothing about the user's place.
+        if let ownKeyWindow = ownKeyWindowProvider.map({ $0() }) ?? Self.localKeyWindowSnapshot(),
+           let windowID = ownKeyWindow.windowID,
+           tutorialScope?.windowIDs.contains(windowID) == true
+               || spaceManager.spaceContainingWindow(windowID: windowID) != nil {
+            return ownKeyWindow
+        }
+        let windowID = focusedWindowID ?? spaceManager.activeSpace.windows.first?.windowID
+        let frame = windowID.flatMap { windowFrames[$0] }
+        return FocusedWindowSnapshot(
+            windowID: windowID,
+            frame: frame,
+            isFullscreen: frame.map(Self.frameFillsScreen) ?? false
+        )
+    }
+
+    private static func localKeyWindowSnapshot() -> FocusedWindowSnapshot? {
+        MainActor.assumeIsolated {
             let application = NSApplication.shared
-            guard application.isActive,
-                  let tutorialScope,
-                  let window = application.keyWindow,
-                  tutorialScope.windowIDs.contains(CGWindowID(window.windowNumber))
-            else { return nil }
+            guard application.isActive, let window = application.keyWindow else { return nil }
             let frame = window.frame
             let top = NSScreen.screens.first?.frame.maxY ?? frame.maxY
             return FocusedWindowSnapshot(
@@ -2636,14 +2657,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 isFullscreen: false
             )
         }
-        if let localTutorialFocus { return localTutorialFocus }
-        let windowID = focusedWindowID ?? spaceManager.activeSpace.windows.first?.windowID
-        let frame = windowID.flatMap { windowFrames[$0] }
-        return FocusedWindowSnapshot(
-            windowID: windowID,
-            frame: frame,
-            isFullscreen: frame.map(Self.frameFillsScreen) ?? false
-        )
     }
 
     private static func frameFillsScreen(_ frame: CGRect) -> Bool {
