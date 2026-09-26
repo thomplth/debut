@@ -179,11 +179,12 @@ finish_run() {
 }
 
 timed_build() {
-    local before after
-    before="$(run_report_children_cpu_seconds)"
+    local before
+    run_report_children_cpu_seconds
+    before="$RUN_REPORT_CPU"
     build_products
-    after="$(run_report_children_cpu_seconds)"
-    BUILD_CPU_SECONDS="$(awk -v a="$before" -v b="$after" 'BEGIN { printf "%.1f", b - a }')"
+    run_report_children_cpu_seconds
+    BUILD_CPU_SECONDS="$(awk -v a="$before" -v b="$RUN_REPORT_CPU" 'BEGIN { printf "%.1f", b - a }')"
 }
 
 enter_queue() {
@@ -202,34 +203,40 @@ restart_guest() {
     start_vm
 }
 
-run_guest() {
-    local guest_ip remote_command ssh_status vm_cpu_before
-    echo "Running the full E2E suite inside $VM_NAME (duration profile: $DURATION_PROFILE, gallery: $GALLERY_CAPTURE)..."
+# The whole guest session, with its output kept in the run directory. Returns the guest's status.
+guest_session() {
+    local guest_ip remote_command
     remote_command="$(guest_command)"
-    vm_cpu_before="$(run_report_vm_cpu_seconds)"
-    set +e
     if guest_ip="$(tart ip "$VM_NAME" --wait 15 2>/dev/null)"; then
         ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$KNOWN_HOSTS" "admin@$guest_ip" "$remote_command" \
             2>&1 | tee "$RUN_DIR/guest.log"
-        ssh_status="${PIPESTATUS[0]}"
-    else
-        # DHCP is not guaranteed in a headless Tart guest. Enter over vsock, then
-        # launch through loopback SSH so the input driver keeps the same TCC-responsible
-        # identity as the ordinary network path.
-        tart exec "$VM_NAME" /bin/bash -c '
-            set -e
-            umask 077
-            key="$HOME/.ssh/id_ed25519_debut_e2e_loopback"
-            [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N "" -C "debut-e2e-loopback" -f "$key"
-            grep -qxF "$(<"$key.pub")" "$HOME/.ssh/authorized_keys" || cat "$key.pub" >> "$HOME/.ssh/authorized_keys"
-            exec ssh -i "$key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new admin@127.0.0.1 "$1"
-        ' _ "$remote_command" 2>&1 | tee "$RUN_DIR/guest.log"
-        ssh_status="${PIPESTATUS[0]}"
+        return "${PIPESTATUS[0]}"
     fi
-    set -e
+    # DHCP is not guaranteed in a headless Tart guest. Enter over vsock, then
+    # launch through loopback SSH so the input driver keeps the same TCC-responsible
+    # identity as the ordinary network path.
+    tart exec "$VM_NAME" /bin/bash -c '
+        set -e
+        umask 077
+        key="$HOME/.ssh/id_ed25519_debut_e2e_loopback"
+        [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N "" -C "debut-e2e-loopback" -f "$key"
+        grep -qxF "$(<"$key.pub")" "$HOME/.ssh/authorized_keys" || cat "$key.pub" >> "$HOME/.ssh/authorized_keys"
+        exec ssh -i "$key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new admin@127.0.0.1 "$1"
+    ' _ "$remote_command" 2>&1 | tee "$RUN_DIR/guest.log"
+    return "${PIPESTATUS[0]}"
+}
+
+# Always succeeds as a phase; the suite's own verdict is kept in GUEST_STATUS so the collect
+# phase still runs and is timed after a failing suite.
+GUEST_STATUS=0
+run_guest() {
+    local vm_cpu_before
+    echo "Running the full E2E suite inside $VM_NAME (duration profile: $DURATION_PROFILE, gallery: $GALLERY_CAPTURE)..."
+    vm_cpu_before="$(run_report_vm_cpu_seconds)"
+    GUEST_STATUS=0
+    run_report_interruptibly guest_session || GUEST_STATUS=$?
     SUITE_VM_CPU_SECONDS="$(awk -v a="$vm_cpu_before" -v b="$(run_report_vm_cpu_seconds)" 'BEGIN { printf "%.1f", b - a }')"
-    return "$ssh_status"
 }
 
 prepare_vm() {
@@ -252,13 +259,17 @@ build_products() {
     # The bundle name belongs to build-app.sh; naming it again here is how a rename last
     # slipped through, staging a path that no longer existed.
     build_log="$(mktemp)"
-    DEBUT_BUILD_PRODUCTS="Debut DebutE2E" "$PROJECT_DIR/scripts/build-app.sh" | tee "$build_log"
+    run_report_interruptibly build_app_logged "$build_log"
     APP_BUNDLE="$(awk '/^Built: /{ sub(/^Built: /, ""); print }' "$build_log")"
     rm -f "$build_log"
     if [[ -z "$APP_BUNDLE" || ! -d "$APP_BUNDLE" ]]; then
         echo "build-app.sh did not report a built app bundle." >&2
         exit 1
     fi
+}
+
+build_app_logged() {
+    DEBUT_BUILD_PRODUCTS="Debut DebutE2E" "$PROJECT_DIR/scripts/build-app.sh" | tee "$1"
 }
 
 # Replaces the previous run's artifacts in the shared directory, so it needs the queue.
@@ -336,7 +347,7 @@ run_e2e() {
     RUN_DIR="$RUNS_DIR/$(date -u +%Y%m%dT%H%M%S)-$$"
     mkdir -p "$RUN_DIR"
     trap finish_run EXIT
-    trap 'RUN_CANCELED=true; exit 130' INT TERM
+    trap 'RUN_CANCELED=true; run_report_kill_children; exit 130' INT TERM
     SOURCE_IDENTITY="$(run_report_source_identity "$PROJECT_DIR")"
 
     run_report_phase build timed_build
@@ -344,13 +355,9 @@ run_e2e() {
     run_report_phase stage space_build
     run_report_phase boot restart_guest
     run_report_phase provision prepare_loopback_ssh
-    local guest_status
-    set +e
     run_report_phase guest run_guest
-    guest_status=$?
-    set -e
     run_report_phase collect collect_results
-    return "$guest_status"
+    return "$GUEST_STATUS"
 }
 
 show_status() {
