@@ -2300,11 +2300,19 @@ func scenario_window_drop() {
     postMouseMove(to: neutralPointerLocation)
     wait(0.3)
 
+    // Drag a fixture document, not whichever card leads the stage. After an earlier commit the
+    // lead card can be a system window the guest shows on the first desktop (one that refuses
+    // focus), and the immediate reverse drag of that window intermittently failed.
+    let sourceWindowIDs = SpaceController.decodeWindowIDs(preparedDropState["windowIDsBySpace"] ?? "")
+    let fixtureIDs = currentFixtureWindowIDs()
+    let dragWindowIndex = sourceWindowIDs.indices.contains(sourceSpaceIndex)
+        ? sourceWindowIDs[sourceSpaceIndex].firstIndex(where: fixtureIDs.contains) : nil
+    if dragWindowIndex == nil { info("  No fixture document card on the source stage; dragging its first card") }
     if preparedWindowCounts.indices.contains(sourceSpaceIndex),
        preparedWindowCounts.indices.contains(destinationSpaceIndex),
        let sourcePoint = windowCenter(
             spaceIndex: sourceSpaceIndex,
-            windowIndex: 0,
+            windowIndex: dragWindowIndex ?? 0,
             cardAspects: preparedCardAspects,
             activeSpaceIndex: stageActiveSpaceIndex,
             inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
@@ -4692,6 +4700,31 @@ func scenario_move_duration_sweep() {
                     + "expected=\(fixture.ownerPID)/\(fixture.windowID) model=\(readState()["activeSpaceIndex"] ?? "none") "
                     + "workspacePID=\(NSWorkspace.shared.frontmostApplication?.processIdentifier.description ?? "none")"
             }
+            // KHA-788: the chain intermittently stops a hop short with focus on another process.
+            // Name that process and its window, and what Debut did, instead of a bare PID.
+            func focusThiefDescription(since cursor: UInt64) -> String {
+                let focus = liveKeyboardFocus()
+                let owner = focus.flatMap { NSRunningApplication(processIdentifier: $0.ownerPID) }
+                let ownerWindow = focus.flatMap { focused in
+                    moveWindows.listWindows().first { $0.windowID == focused.windowID }
+                }
+                let debutEvents = events(since: cursor) { event in
+                    let name = event["event"] ?? ""
+                    return name.contains("move") || name.contains("switch") || name.contains("refus")
+                        || name.contains("activation") || name.contains("yield")
+                        || (event["keyEvent"] ?? "").contains("Adjacent")
+                }.map { event in
+                    ([event["event"] ?? "?"] + event.keys.sorted()
+                        .filter { !["event", "timestamp", "uptimeNanoseconds"].contains($0) }
+                        .map { "\($0)=\(event[$0] ?? "")" }).joined(separator: " ")
+                }
+                return "focus owner: pid=\(focus?.ownerPID.description ?? "none") "
+                    + "bundle=\(owner?.bundleIdentifier ?? "none") name=\(owner?.localizedName ?? "none") "
+                    + "window=\(focus?.windowID.description ?? "none") title=\(ownerWindow?.title ?? "unknown") "
+                    + "isFixture=\(focus?.ownerPID == fixture.ownerPID)\n"
+                    + debutEvents.map { "      \($0)" }.joined(separator: "\n")
+            }
+            let chainEventsBefore = eventCursor()
             let forwardStart = ProcessInfo.processInfo.systemUptime
             // No settling between presses: later commands must retain the original window even
             // when Dock is still on its first hop. Mix both aliases in the same traversal.
@@ -4713,6 +4746,7 @@ func scenario_move_duration_sweep() {
             let reverseElapsed = ProcessInfo.processInfo.systemUptime - reverseStart
             if !forwardLanded || !reverseLanded {
                 info("  Forward: \(forwardDescription); reverse: \(endpointDescription())")
+                info("  \(focusThiefDescription(since: chainEventsBefore))")
             }
             // Leave margin for guest scheduling, but catch per-key delays or stalled confirmations.
             let responsivenessBudget = 3 * settings.spaceSwitchDuration + 1.0
@@ -4819,6 +4853,18 @@ let settingsStore = StateStore()
 /// The two TextEdit documents both runners open before the suite; every group starts with
 /// exactly their windows on the first desktop.
 let fixtureDocumentTitles: Set<String> = ["one.txt", "two.txt"]
+
+/// Window IDs of the fixture documents' windows, wherever they are.
+func currentFixtureWindowIDs() -> Set<CGWindowID> {
+    let windows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID)
+        as? [[String: Any]] ?? []
+    return Set(windows.compactMap { window in
+        guard (window[kCGWindowOwnerName as String] as? String) == "TextEdit",
+              fixtureDocumentTitles.contains((window[kCGWindowName as String] as? String) ?? "")
+        else { return nil }
+        return (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value
+    })
+}
 
 /// Puts the shared fixture back: one window for each fixture document on the first desktop, and
 /// no other TextEdit instance. Groups close fixture windows (dismissal), park them on other

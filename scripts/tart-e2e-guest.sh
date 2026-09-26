@@ -287,7 +287,7 @@ as_console env HOME="$console_home" defaults write NSGlobalDomain NSAutomaticWin
 
 # Demo capture uses this same disposable guest. Remove its windows before planting the
 # two-window fixture, including restored state that would repopulate other desktops.
-for fixture_app in TextEdit Safari Terminal Calculator Notes Preview "Script Editor" "System Settings"; do
+for fixture_app in TextEdit Safari Terminal Calculator Notes Preview "Script Editor" "System Settings" Chess; do
     as_console pkill -9 -x "$fixture_app" 2>/dev/null || true
 done
 as_console rm -rf "$console_home/Library/Saved Application State"
@@ -375,6 +375,9 @@ guest_phase relaunch
 # Revoking capture during first-use probes can recreate a pending reminder. Clear that
 # fixture state before the full suite so its screenshots observe the actual app.
 reset_capture_reminders
+# The denied-permission journeys leave System Settings open on its Accessibility pane. Its window
+# joined the first desktop's stage and reflowed the drop scenario's layout under the pointer.
+as_console pkill -x "System Settings" 2>/dev/null || true
 
 # Restore the full suite fixture after the isolated first-run journeys.
 provision_desktops

@@ -100,6 +100,8 @@ if [[ -f "$guest_runner" ]]; then
         "the guest must pin the host to the spring the motion check samples"
     expect_contains "$guest_runner" 'TextEdit' \
         "the guest must create deterministic E2E fixture windows"
+    expect_contains "$guest_runner" 'pkill -x "System Settings"' \
+        "the permission journeys must not leave System Settings on the suite's first desktop"
     expect_contains "$guest_runner" 'wait_for_fixture_apps' \
         "the guest must wait for both fixture apps before launching Debut"
     expect_contains "$guest_runner" 'pgrep -x TextEdit' \
