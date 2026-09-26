@@ -112,13 +112,48 @@ run_report_vm_cpu_seconds() {
     echo "$total"
 }
 
-# Cumulative user+system CPU of this shell's finished children, from `times`.
+# Cumulative user+system CPU of this shell's finished children, from `times`, into
+# RUN_REPORT_CPU. It must run in this shell: `times` inside $( ) reports the subshell's own
+# children, which is none.
 run_report_children_cpu_seconds() {
-    times | tail -1 | awk '{
+    local line
+    times > "${TMPDIR:-/tmp}/debut-times.$$"
+    line="$(tail -1 "${TMPDIR:-/tmp}/debut-times.$$")"
+    rm -f "${TMPDIR:-/tmp}/debut-times.$$"
+    RUN_REPORT_CPU="$(awk '{
         total = 0
         for (i = 1; i <= 2; i++) { split($i, p, "m"); sub("s", "", p[2]); total += p[1] * 60 + p[2] }
         printf "%.1f\n", total
-    }'
+    }' <<< "$line")"
+}
+
+# Bash runs a trap only after the foreground command returns, so a Ctrl-C during a four-minute
+# guest session would wait for the whole session. Running the command in the background and
+# waiting lets the trap fire at once; run_report_kill_children then ends what it started.
+# The command keeps its own errexit behaviour, which an `if` or `||` around it would switch off.
+RUN_REPORT_CHILD=""
+run_report_interruptibly() {
+    local status=0
+    "$@" &
+    RUN_REPORT_CHILD=$!
+    wait "$RUN_REPORT_CHILD" || status=$?
+    RUN_REPORT_CHILD=""
+    return "$status"
+}
+
+run_report_kill_tree() {
+    local child
+    for child in $(pgrep -P "$1" 2>/dev/null); do
+        run_report_kill_tree "$child"
+    done
+    kill -TERM "$1" 2>/dev/null || true
+}
+
+run_report_kill_children() {
+    if [[ -n "$RUN_REPORT_CHILD" ]]; then
+        run_report_kill_tree "$RUN_REPORT_CHILD"
+        RUN_REPORT_CHILD=""
+    fi
 }
 
 # run_report_write <run dir> <result> <source json> <selection json> <artifacts json> <cpu json>
@@ -190,7 +225,9 @@ if report["guestPhases"]:
     print("  guest: " + "  ".join(f'{p["name"]} {p["seconds"]:.1f}s' for p in report["guestPhases"]))
 cpu = report.get("cpu", {})
 if cpu:
-    print("  cpu:   " + "  ".join(f"{k} {v}" for k, v in cpu.items()))
+    print("  cpu:   " + "  ".join(
+        f"{k} {v if v is not None else 'unavailable'}" for k, v in cpu.items()
+    ))
 for failure in checks["failures"]:
     print(f"  FAIL  {failure}")
 print(f"  evidence: {run_dir}")

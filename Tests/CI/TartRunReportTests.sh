@@ -151,6 +151,48 @@ for expected_gone in 20260101T000001-1 20260101T000002-1; do
     [[ ! -d "$runs/$expected_gone" ]] || fail "retention kept $expected_gone beyond its bound; kept: $kept"
 done
 
+# --- Child CPU is read in this shell; `times` in a subshell sees no children at all. ---
+run_report_children_cpu_seconds
+before_cpu="$RUN_REPORT_CPU"
+/usr/bin/perl -MTime::HiRes=time -e 'my $end = time + 1; 1 while time < $end'
+run_report_children_cpu_seconds
+after_cpu="$RUN_REPORT_CPU"
+awk -v a="$before_cpu" -v b="$after_cpu" 'BEGIN { exit !(b - a >= 0.5) }' \
+    || fail "a CPU-bound child must be counted (before=$before_cpu after=$after_cpu)"
+
+# --- Cancelling reaches a long-running phase at once, and takes its children with it. ---
+cat > "$work/cancel.sh" <<EOF
+#!/bin/bash
+set -euo pipefail
+source "$PWD/$report_lib"
+trap 'run_report_kill_children; exit 130' INT TERM
+long_phase() { /bin/sleep 30 | /bin/cat; }
+run_report_interruptibly long_phase
+echo finished
+EOF
+chmod +x "$work/cancel.sh"
+"$work/cancel.sh" > "$work/cancel.out" 2>&1 &
+cancel_pid=$!
+sleep 1
+started="$(date +%s)"
+kill -TERM "$cancel_pid"
+set +e
+wait "$cancel_pid"
+cancel_status=$?
+set -e
+(( $(date +%s) - started <= 3 )) || fail "cancellation waited for the running phase to finish"
+(( cancel_status == 130 )) || fail "a cancelled run must exit 130, got $cancel_status"
+grep -q finished "$work/cancel.out" && fail "a cancelled phase must not continue"
+pgrep -f '/bin/sleep 30' >/dev/null && fail "cancellation left the phase's children running"
+
+# A failing interruptible phase reports its status without switching errexit off inside it.
+set +e
+( set -e; failing() { false; echo "kept going"; }; run_report_interruptibly failing ) > "$work/errexit2.out" 2>&1
+interrupt_status=$?
+set -e
+(( interrupt_status == 1 )) || fail "an interruptible phase must return its command's status, got $interrupt_status"
+grep -q 'kept going' "$work/errexit2.out" && fail "errexit must still apply inside an interruptible phase"
+
 # --- ps CPU times parse in every format ps prints. ---
 [[ "$(run_report_ps_seconds '0:01.50')" == 1.5 ]] || fail "M:SS.ss CPU time parsed wrong"
 [[ "$(run_report_ps_seconds '1:02:03')" == 3723.0 ]] || fail "H:MM:SS CPU time parsed wrong"
