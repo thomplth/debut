@@ -1787,33 +1787,51 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         requestSwitch(to: location, animation: .configured)
     }
 
-    @discardableResult
     /// Prefers macOS's own Switch to Desktop N, which the Dock answers with one direct
     /// transition. The addressed swipe route stays as the fallback for a desktop the shortcut
     /// cannot reach, and for a shortcut the Dock did not act on.
+    @discardableResult
     public func switchToDesktopWithSystemAnimation(_ location: DesktopLocation) -> Bool {
         let topology = spaceTopology()
-        if !isSwitchInFlight(stackID: location.stackID),
-           let originID = topology.stack(id: location.stackID)?.currentDesktopID,
-           let posted = nativeDesktopShortcut.request(location, in: topology) {
-            let generation = nativeShortcutLock.withLock {
-                nativeShortcutGeneration &+= 1
-                return nativeShortcutGeneration
-            }
+        guard !isSwitchInFlight(stackID: location.stackID),
+              let originID = topology.stack(id: location.stackID)?.currentDesktopID,
+              let resolved = nativeDesktopShortcut.resolve(location, in: topology)
+        else { return requestSwitch(to: location, animation: .system) }
+
+        let generation = nativeShortcutLock.withLock {
+            nativeShortcutGeneration &+= 1
+            return nativeShortcutGeneration
+        }
+        // A window raised to front for this reveal is reordered by its app on that app's next
+        // screen update, measured landing about 6ms after the request returns. The transition
+        // reveals the destination from its first frame, so it starts one frame later.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.nativeShortcutRevealDelay) {
+            [weak self] in
+            guard let self,
+                  self.nativeShortcutLock.withLock({ self.nativeShortcutGeneration == generation })
+            else { return }
+            let posted = self.nativeDesktopShortcut.post(resolved)
             DiagnosticReporter.shared.report("desktop_switch_native_shortcut_posted", details: [
                 "desktop": "\(location.index + 1)",
-                "hotKeyID": "\(posted.hotKeyID)",
-                "temporarilyEnabled": "\(posted.temporarilyEnabled)",
+                "hotKeyID": "\(resolved.hotKeyID)",
+                "temporarilyEnabled": "\(resolved.temporarilyEnabled)",
+                "posted": "\(posted)",
             ])
+            guard posted else {
+                _ = self.requestSwitch(to: location, animation: .system)
+                return
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.nativeShortcutFallbackDelay) {
                 [weak self] in
                 self?.fallBackIfNativeShortcutMissed(location, originID: originID,
                                                      generation: generation)
             }
-            return true
         }
-        return requestSwitch(to: location, animation: .system)
+        return true
     }
+
+    /// One display frame.
+    static let nativeShortcutRevealDelay: TimeInterval = 1.0 / 60
 
     /// Past the length of any Dock transition, including the Reduce Motion fade.
     static let nativeShortcutFallbackDelay: TimeInterval = 1.5
