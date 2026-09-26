@@ -4516,8 +4516,9 @@ func scenario_recycled_window_id() {
         let _ = takeScreenshot("16_recycled_identity_overlay")
         let overlayStrings = application.map { accessibilityStrings(for: $0.processIdentifier) } ?? []
         postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
-        postKeyDown(keyCode: CGKeyCode(kVK_Escape))
-        postKeyUp(keyCode: CGKeyCode(kVK_Escape))
+        // Command is still held; an Escape without it would read as a missed release and commit.
+        postKeyDown(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
+        postKeyUp(keyCode: CGKeyCode(kVK_Escape), flags: [.maskCommand])
         postFlagsChanged(flags: [])
 
         _ = terminateDebutAndWait()

@@ -101,7 +101,10 @@ struct LaunchFeatureTests {
         #expect(service.handleCGEvent(type: .keyDown, event: event(kVK_RightArrow, true, [.maskControl, .maskShift])) != nil)
         #expect(service.handleCGEvent(type: .keyDown, event: event(kVK_RightArrow, true, .maskControl)) == nil)
         service.features.controlArrows = false
-        #expect(service.handleCGEvent(type: .keyDown, event: event(kVK_RightArrow, true, .maskControl)) == nil)
+        // Still held: macOS sends repeats. A non-repeat press would be a new one (KHA-787).
+        let heldRepeat = event(kVK_RightArrow, true, .maskControl)
+        heldRepeat.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+        #expect(service.handleCGEvent(type: .keyDown, event: heldRepeat) == nil)
         #expect(service.handleCGEvent(type: .keyUp, event: event(kVK_RightArrow, false, [])) == nil)
         #expect(delegate.receivedEvents == [.switchAdjacentSpace(1)])
         service.features.controlArrows = true

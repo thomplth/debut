@@ -222,7 +222,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         }
     }
 
-    fileprivate func reenableEventTap() {
+    fileprivate func reenableEventTap(after type: CGEventType) {
+        DiagnosticReporter.shared.report("keyboard_tap_reenabled", details: [
+            "reason": type == .tapDisabledByTimeout ? "timeout" : "user_input",
+        ])
         let tap = lifecycleLock.withLock { eventTap }
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: true)
@@ -251,6 +254,13 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
+
+        // macOS drops events while it has the tap disabled, so a claimed press can lose its
+        // release. A held key only ever repeats; a non-repeat key-down is a new physical press,
+        // which proves the previous one ended. Settle what the missed release would have.
+        if type == .keyDown, event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+            recoverMissedRelease(keyCode: keyCode, flags: flags, deliverAsynchronously: deliverAsynchronously)
+        }
 
         if type == .keyUp,
            configurationLock.withLock({ shortcutRecordingKeysDown.remove(keyCode) != nil }) {
@@ -439,6 +449,35 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         return event
     }
 
+    private func recoverMissedRelease(
+        keyCode: Int64,
+        flags: CGEventFlags,
+        deliverAsynchronously: Bool
+    ) {
+        let recordingClaim = configurationLock.withLock {
+            shortcutRecordingKeysDown.remove(keyCode) != nil
+        }
+        let quickSwitchClaim = quickSwitchKeysDown.remove(keyCode) != nil
+        if recordingClaim || quickSwitchClaim {
+            DiagnosticReporter.shared.report("keyboard_claim_recovered", details: [
+                "keyCode": "\(keyCode)",
+                "claim": recordingClaim ? "shortcut_recording" : "quick_switch",
+            ])
+        }
+
+        // The same applies to the session's modifier: a keystroke without it means it was
+        // released unseen, and an overlay left to own the keyboard would swallow typing.
+        if spaceManagerActive,
+           let primaryModifier = sessionPrimaryModifier,
+           !flags.contains(primaryModifier) {
+            spaceManagerActive = false
+            sessionPrimaryModifier = nil
+            sessionTriggerKeyCode = nil
+            DiagnosticReporter.shared.report("keyboard_session_release_recovered")
+            deliver(.cmdRelease, asynchronously: deliverAsynchronously)
+        }
+    }
+
     private func beginSession(using action: KeyAction) {
         guard !spaceManagerActive,
               let combo = keyBindings.combo(for: action)
@@ -603,7 +642,7 @@ private func eventTapCallback(
 
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
         let service = Unmanaged<EventTapKeyboardService>.fromOpaque(userInfo).takeUnretainedValue()
-        service.reenableEventTap()
+        service.reenableEventTap(after: type)
         return Unmanaged.passUnretained(event)
     }
 
