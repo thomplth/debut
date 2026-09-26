@@ -611,10 +611,15 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     /// or fullscreen window looks like — so only layer and size, which cannot be true of a
     /// window the user can manage, are grounds for parking one that is already assigned.
     static func isDisqualifiedWindow(layer: Int?, bounds: CGRect) -> Bool {
-        guard let layer else { return false }
-        return layer != 0
-            || bounds.width < minimumPlausibleWindowDimension
-            || bounds.height < minimumPlausibleWindowDimension
+        disqualification(layer: layer, bounds: bounds) != nil
+    }
+
+    static func disqualification(layer: Int?, bounds: CGRect) -> WindowDisqualification? {
+        guard let layer else { return nil }
+        if layer != 0 { return .nonApplicationLayer }
+        if bounds.width < minimumPlausibleWindowDimension { return .smallWidth }
+        if bounds.height < minimumPlausibleWindowDimension { return .smallHeight }
+        return nil
     }
 
     /// Assigned windows Accessibility now contradicts. Only windows on the desktop currently
@@ -671,15 +676,15 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return contradicted.union(contradictionLock.withLock { contradictions.windowIDs })
     }
 
-    /// Assigned windows Core Graphics now contradicts. Absence from this set is not a claim
-    /// that a window is fine, only that nothing disproves it.
-    public func listDisqualifiedWindowIDs() -> Set<CGWindowID> {
+    /// Windows Core Graphics now contradicts, and why. Absence is not a claim that a window
+    /// is fine, only that nothing disproves it.
+    public func listDisqualifiedWindows() -> [CGWindowID: WindowDisqualification] {
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
             as? [[CFString: Any]]
-        else { return [] }
+        else { return [:] }
 
-        var disqualified = Set<CGWindowID>()
+        var disqualified: [CGWindowID: WindowDisqualification] = [:]
         for dict in infoList {
             guard let windowID = dict[kCGWindowNumber] as? CGWindowID,
                   let boundsDict = dict[kCGWindowBounds] as? [String: CGFloat]
@@ -690,9 +695,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                 width: boundsDict["Width"] ?? 0,
                 height: boundsDict["Height"] ?? 0
             )
-            if Self.isDisqualifiedWindow(layer: dict[kCGWindowLayer] as? Int, bounds: bounds) {
-                disqualified.insert(windowID)
-            }
+            disqualified[windowID] = Self.disqualification(
+                layer: dict[kCGWindowLayer] as? Int,
+                bounds: bounds
+            )
         }
         return disqualified
     }

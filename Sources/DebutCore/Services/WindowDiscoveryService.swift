@@ -335,7 +335,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
         let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
-        let disqualifiedWindowIDs = windowService.listDisqualifiedWindowIDs()
+        let disqualifiedWindows = windowService.listDisqualifiedWindows()
+        let disqualifiedWindowIDs = Set(disqualifiedWindows.keys)
         let axContradictedWindowIDs = windowService.listAXContradictedWindowIDs()
         let windowServerVerdicts = windowService.listWindowServerVerdicts()
         let runningApps = windowService.listRunningApps()
@@ -442,7 +443,17 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     continue
                 } else if untrackableWindowIDs.contains(windowID) {
                     reason = "untrackable"
-                } else if disqualifiedWindowIDs.contains(windowID) {
+                } else if let disqualification = disqualifiedWindows[windowID] {
+                    // Still refused as new, and not offered as live, but a collapsed frame is
+                    // no reason to take a real window out of the switcher (KHA-786).
+                    guard disqualification.evictsAssignedWindow else {
+                        diag.report("window_kept_despite_geometry", details: [
+                            "windowID": "\(windowID)",
+                            "disqualification": disqualification.rawValue,
+                            "fromSpace": "\(spaceManager.spaceIndex(id: space.id) ?? -1)",
+                        ])
+                        continue
+                    }
                     reason = "disqualified"
                 } else if axContradictedWindowIDs.contains(windowID) {
                     reason = "ax_contradicted"
@@ -461,6 +472,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     "windowTitle": assignment.window.windowTitle,
                     "fromSpace": "\(spaceManager.spaceIndex(id: assignment.spaceID) ?? -1)",
                     "reason": reason,
+                    "disqualification": disqualifiedWindows[windowID]?.rawValue ?? "none",
                 ])
             }
         }

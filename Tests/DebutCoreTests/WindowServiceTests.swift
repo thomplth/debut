@@ -242,6 +242,29 @@ struct WindowServiceTests {
         ))
     }
 
+    // KHA-786: four real Notion windows were parked for 23 hours after their frames collapsed
+    // (2x2 captures) while Notion was inactive, then came back unchanged when it activated.
+    // Only the layer is a statement about what a surface is; a small frame can be a real
+    // window's presentation, so it refuses a new window but never evicts an assigned one.
+    @Test("Only a non-application layer evicts an assigned window; a small frame refuses")
+    func disqualificationReasons() {
+        #expect(AccessibilityWindowService.disqualification(
+            layer: 3, bounds: CGRect(x: 0, y: 0, width: 84, height: 77)
+        ) == .nonApplicationLayer)
+        #expect(AccessibilityWindowService.disqualification(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 2, height: 1440)
+        ) == .smallWidth)
+        #expect(AccessibilityWindowService.disqualification(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 1442, height: 2)
+        ) == .smallHeight)
+        #expect(AccessibilityWindowService.disqualification(
+            layer: 0, bounds: CGRect(x: 0, y: 0, width: 1442, height: 1440)
+        ) == nil)
+        #expect(WindowDisqualification.nonApplicationLayer.evictsAssignedWindow)
+        #expect(!WindowDisqualification.smallWidth.evictsAssignedWindow)
+        #expect(!WindowDisqualification.smallHeight.evictsAssignedWindow)
+    }
+
     // Admission used to consult size and parentage only for a window Accessibility could not
     // classify, while eviction parked any assigned window on those same two verdicts. A window
     // AX called trackable was therefore parked and re-admitted from the same snapshot on every
