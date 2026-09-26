@@ -30,6 +30,9 @@ struct StageStackTransaction: Sendable {
         let fromSpaceID: UUID
         let toSpaceID: UUID
         let windowIndex: Int
+        /// Pointer drops name their gap by the windows around it, so a replay after an earlier
+        /// edit still lands between the same neighbours. `nil` keeps the index semantics.
+        let placement: PointerPlacement?
         let source: Source
         let activatedAt: Date?
     }
@@ -55,8 +58,26 @@ struct StageStackTransaction: Sendable {
             fromSpaceID: fromSpaceID,
             toSpaceID: toSpaceID,
             windowIndex: windowIndex,
+            placement: nil,
             source: source,
             activatedAt: activatedAt
+        ))
+    }
+
+    mutating func pointerMove(
+        windowID: CGWindowID,
+        fromSpaceID: UUID,
+        toSpaceID: UUID,
+        placement: PointerPlacement
+    ) {
+        moves.append(Move(
+            windowID: windowID,
+            fromSpaceID: fromSpaceID,
+            toSpaceID: toSpaceID,
+            windowIndex: 0,
+            placement: placement,
+            source: .pointer,
+            activatedAt: nil
         ))
     }
 
@@ -105,11 +126,21 @@ struct StageStackTransaction: Sendable {
 
     private func applyMoves(to spaceManager: inout SpaceManager) {
         for move in moves {
+            var windowIndex = move.windowIndex
+            if let placement = move.placement {
+                // Neither neighbour survived: skip the move before removing its source rather
+                // than appending it somewhere the user never pointed at.
+                guard let remaining = spaceManager.windowIDs(inSpaceID: move.toSpaceID)?
+                        .filter({ $0 != move.windowID }),
+                      let resolved = placement.resolvedIndex(in: remaining)
+                else { continue }
+                windowIndex = resolved
+            }
             spaceManager.moveWindow(
                 windowID: move.windowID,
                 fromSpaceID: move.fromSpaceID,
                 toSpaceID: move.toSpaceID,
-                at: move.windowIndex
+                at: windowIndex
             )
             if let activatedAt = move.activatedAt {
                 spaceManager.bringWindowToFront(

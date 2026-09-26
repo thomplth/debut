@@ -703,52 +703,6 @@ struct StageMotionTests {
         #expect(layout.scales[0] == 1)
     }
 
-    @Test("Edge hover scrolls overflow toward its boundary")
-    func edgeHoverScrollDestination() {
-        #expect(StageMotion.edgeScrollDestination(
-            pointerY: 20,
-            containerHeight: 600,
-            restingOffset: -300,
-            topLimit: 48,
-            bottomLimit: -948
-        ) == 48)
-        #expect(StageMotion.edgeScrollDestination(
-            pointerY: 580,
-            containerHeight: 600,
-            restingOffset: -300,
-            topLimit: 48,
-            bottomLimit: -948
-        ) == -948)
-        #expect(StageMotion.edgeScrollDestination(
-            pointerY: 300,
-            containerHeight: 600,
-            restingOffset: -300,
-            topLimit: 48,
-            bottomLimit: -948
-        ) == -300)
-        #expect(StageMotion.edgeScrollDestination(
-            pointerY: 20,
-            containerHeight: 600,
-            restingOffset: 50,
-            topLimit: 48,
-            bottomLimit: 52
-        ) == 50)
-    }
-
-    @Test("Resting edge-scroll animation key is stable across screen sizes")
-    func resizedScreenDoesNotAnimateRestingStack() {
-        #expect(StageMotion.edgeScrollTarget(
-            pointerY: nil,
-            containerHeight: 900,
-            edgeRegion: 80
-        ) == .resting)
-        #expect(StageMotion.edgeScrollTarget(
-            pointerY: nil,
-            containerHeight: 1_800,
-            edgeRegion: 80
-        ) == .resting)
-    }
-
     @Test("Stage centers use the distance-based layout scale")
     func stageCentersFollowDepthLayout() {
         let stageHeights: [CGFloat] = [164, 164, 164]
@@ -771,8 +725,8 @@ struct StageMotionTests {
         #expect(abs((precedingCenter ?? 0) - 222.4) < 0.001)
     }
 
-    @Test("Focused stack geometry includes bottom-edge scrolling")
-    func focusedStackTranslationIncludesEdgeScroll() throws {
+    @Test("Focused stack geometry stays anchored with no edge scrolling")
+    func focusedStackTranslationStaysAnchored() throws {
         let aspects: [[CGFloat?]] = [
             [1.5698, 1.5698, 1.1568, 1.5698],
             [1.5698],
@@ -801,7 +755,6 @@ struct StageMotionTests {
             focusedSpaceIndex: 1,
             inactiveScale: 0.7,
             containerHeight: container.height,
-            pointerY: container.height - 1,
             metrics: metrics
         ))
         #expect(translation.isFinite)

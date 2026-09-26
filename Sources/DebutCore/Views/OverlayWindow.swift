@@ -56,13 +56,15 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     private var renderedWindowIDs: Set<CGWindowID> = []
     private var renderGeneration = 0
     private let scrollRelay = OverlayScrollRelay()
+    /// Outlives every root update and tree rebase, so a preview refresh cannot restart a drag.
+    let compactDragSession = CompactDragSession()
     private var scrollSequence = 0
     private var scrollMonitor: Any?
     public var onSpaceScrollSelected: ((Int) -> Void)?
     var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     public var onWindowSelected: ((Int, Int) -> Void)?
     public var onAltTabWindowSelected: ((Int) -> Void)?
-    public var onWindowMoved: ((CGWindowID, Int, Int, Int, Int) -> Void)?
+    var onPointerWindowDrop: ((PointerWindowDropRequest) -> PointerWindowDropResult)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onAltTabPointerSelectionChanged: ((Int?) -> Void)?
     public var onBackdropDismissed: (() -> Void)?
@@ -108,13 +110,14 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         var view = StageOverlayView(
             viewModel: viewModel,
             onWindowSelected: onWindowSelected,
-            onWindowMoved: onWindowMoved,
             onPointerSelectionChanged: onPointerSelectionChanged,
             onBackdropDismissed: onBackdropDismissed
         )
         view.onOverlayTapRouted = onOverlayTapRouted
         view.onOverlayPointerRegionChanged = onOverlayPointerRegionChanged
         view.scrollRelay = scrollRelay
+        view.compactDragSession = compactDragSession
+        view.onPointerWindowDrop = onPointerWindowDrop
         view.onSpaceScrollSelected = onSpaceScrollSelected
         view.onSpaceScrollRouted = onSpaceScrollRouted
         return present(
@@ -252,9 +255,33 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     /// can be swallowed before it reaches the window. A monitor sees it either way.
     private func startWatchingScroll() {
         guard scrollMonitor == nil else { return }
-        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            self?.relayScroll(event)
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.scrollWheel, .leftMouseUp]
+        ) { [weak self] event in
+            if event.type == .leftMouseUp {
+                self?.endAbandonedCompactDrag()
+            } else {
+                self?.relayScroll(event)
+            }
             return event
+        }
+    }
+
+    /// A mouse-up always ends the drag view. The gesture's own end handler runs while this event
+    /// is dispatched, so a drag still held after it is one SwiftUI cancelled without ending, and
+    /// leaving it up would keep the overlay in the drag view until the next pickup.
+    private func endAbandonedCompactDrag() {
+        DispatchQueue.main.async { [weak self] in
+            guard let session = self?.compactDragSession, session.phase == .dragging else { return }
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { session.cancel(reason: "gesture ended without a drop") }
+            } else {
+                withAnimation(StageMotion.focusTransition(reduceMotion: false).animation) {
+                    session.cancel(reason: "gesture ended without a drop")
+                }
+            }
         }
     }
 
@@ -285,6 +312,8 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     }
 
     public func hideOverlay() {
+        // Before the fade, not on disappear: nothing held under a fading overlay may be accepted.
+        compactDragSession.cancel(reason: "overlay hidden")
         stopWatchingScroll()
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.1

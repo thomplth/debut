@@ -22,12 +22,6 @@ struct WindowMoveRequest: Equatable {
     let toWindowIndex: Int
 }
 
-struct WindowDropSettlingState {
-    let request: WindowMoveRequest
-    let window: StageWindowData
-    let destination: CGPoint
-}
-
 struct KeyboardWindowDeparture {
     let move: KeyboardWindowMoveAnimation
     let window: StageWindowData

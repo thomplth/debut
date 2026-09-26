@@ -877,26 +877,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             self?.spaceController?.commitAltTabSelection(index: index)
         }
 
-        overlayWindow.onWindowMoved = {
-            [weak self] windowID, fromIndex, fromWindowIndex, toIndex, toWindowIndex in
-            guard let self, let ctrl = self.spaceController else { return }
-            guard ctrl.moveWindowByDrag(
-                windowID: windowID,
-                fromSpaceIndex: fromIndex,
-                toSpaceIndex: toIndex,
-                toWindowIndex: toWindowIndex
-            ) else { return }
-            self.diag.report("window_move_previewed_by_drag", level: .transient, details: [
-                "windowID": "\(windowID)",
-                "fromSpaceIndex": "\(fromIndex)",
-                "fromWindowIndex": "\(fromWindowIndex)",
-                "toSpaceIndex": "\(toIndex)",
-                "toWindowIndex": "\(toWindowIndex)",
+        overlayWindow.onPointerWindowDrop = { [weak self] request in
+            guard let self, let ctrl = self.spaceController else {
+                return .rejected("controller unavailable")
+            }
+            let result = ctrl.moveWindowByPointerDrop(request)
+            self.diag.report("window_drop_resolved", level: .transient, details: [
+                "windowID": "\(request.windowID)",
+                "toSpaceID": request.toSpaceID.uuidString,
+                "logicalIndex": "\(request.logicalIndex)",
+                "result": "\(result)",
             ])
-            // Let SwiftUI finish the drag transaction before replacing its root view.
+            guard result == .accepted else { return result }
+            self.diag.report("window_move_previewed_by_drag", level: .transient, details: [
+                "windowID": "\(request.windowID)",
+                "toWindowIndex": "\(request.logicalIndex)",
+            ])
             DispatchQueue.main.async { [weak self] in
                 self?.updateOverlay()
             }
+            return result
         }
 
         overlayWindow.onSpaceScrollSelected = { [weak self] index in

@@ -3045,6 +3045,63 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         return true
     }
 
+    /// Stages a compact-overlay drop (KHA-553) after checking that the preview it was aimed at
+    /// is still the one on screen. The drop names its gap by identity and is replayed that way,
+    /// and it records an insertion only: it never promotes the window to the head of its stage.
+    func moveWindowByPointerDrop(_ request: PointerWindowDropRequest) -> PointerWindowDropResult {
+        let preview = overlaySpaceManager
+        guard isSpaceManagerVisible else { return .rejected("overlay hidden") }
+        guard !isStageStackCommitInFlight else { return .rejected("commit in flight") }
+        guard StageStructureFingerprint(spaces: preview.spaces) == request.fingerprint else {
+            return .rejected("stage structure changed")
+        }
+        guard let fromSpaceIndex = preview.spaces.firstIndex(where: { $0.id == request.fromSpaceID }),
+              let toSpaceIndex = preview.spaces.firstIndex(where: { $0.id == request.toSpaceID })
+        else { return .rejected("space unavailable") }
+        guard let window = preview.spaces[fromSpaceIndex].windows.first(where: {
+            $0.windowID == request.windowID
+        }), window.id == request.modelID
+        else { return .rejected("window identity changed") }
+        guard canRelocate(from: fromSpaceIndex, to: toSpaceIndex) else {
+            return .rejected("window moves unavailable")
+        }
+        guard fromSpaceIndex == toSpaceIndex
+            || !TransientWindowIdentity.isTransient(window.ownerBundleID)
+        else { return .rejected("transient window") }
+        if let scope = activeTutorialScope {
+            guard scope.practice == .moveWindow, request.windowID == scope.target.windowID,
+                  scope.desktopIndices.contains(toSpaceIndex)
+            else { return .rejected("tutorial scope") }
+        }
+
+        let remaining = preview.spaces[toSpaceIndex].windows.map(\.windowID)
+            .filter { $0 != request.windowID }
+        guard let index = request.placement.resolvedIndex(in: remaining) else {
+            return .rejected("placement unavailable")
+        }
+        if fromSpaceIndex == toSpaceIndex,
+           preview.spaces[fromSpaceIndex].windows.firstIndex(where: {
+               $0.windowID == request.windowID
+           }) == index {
+            return .noChange
+        }
+
+        stageStackTransaction.pointerMove(
+            windowID: request.windowID,
+            fromSpaceID: request.fromSpaceID,
+            toSpaceID: request.toSpaceID,
+            placement: request.placement
+        )
+        if selectedSpaceIndex == toSpaceIndex,
+           let movedIndex = overlaySpaceManager.spaces[toSpaceIndex].windows.firstIndex(where: {
+               $0.windowID == request.windowID
+           }) {
+            selectedWindowIndex = movedIndex
+        }
+        notifyOverlayUpdated()
+        return .accepted
+    }
+
     /// Close the overlay but keep the Cmd session alive.
     /// Next Cmd+Tab or Cmd+Option+Tab reopens the overlay.
     private func discardOverlay() {
