@@ -198,6 +198,38 @@ struct DesktopSwitchIndicatorTests {
         #expect(!window.hidesOnDeactivate)
     }
 
+    @Test("A hop over a visible indicator updates it in place without blanking")
+    func consecutiveHopDoesNotFlash() throws {
+        let screen = try #require(NSScreen.screens.first)
+        let window = DesktopSwitchIndicatorWindow()
+        defer { window.hideImmediately() }
+        func hop(to position: Int) {
+            window.present(
+                DesktopSwitchIndicatorPresentation(
+                    stackID: "display-a",
+                    displayID: nil,
+                    displayName: "Built-in Display",
+                    desktopPosition: position,
+                    desktopCount: 4
+                ),
+                on: screen,
+                glassStyle: .regular
+            )
+        }
+
+        hop(to: 2)
+        #expect(window.alphaValue == 0)
+        // Settled on screen, or part-way through the fade-out when the next hop lands.
+        window.alphaValue = 0.6
+        let hostingView = window.contentView
+
+        hop(to: 3)
+
+        #expect(window.isVisible)
+        #expect(window.alphaValue > 0)
+        #expect(window.contentView === hostingView)
+    }
+
     @Test("A stale dismissal cannot hide a refreshed indicator")
     func staleDismissalCannotHideRefresh() {
         let window = DesktopSwitchIndicatorWindow()
