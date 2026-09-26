@@ -1448,8 +1448,8 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     private var storedTopology: SpaceTopology?
 
     let nativeDesktopShortcut: NativeDesktopShortcutSwitch
-    private let nativeShortcutLock = NSLock()
-    private var nativeShortcutGeneration: UInt64 = 0
+    private let nativeRouteLock = NSLock()
+    private var nativeRoutes = NativeShortcutRouteTracker()
 
     public convenience init() {
         self.init(nativeDesktopShortcut: NativeDesktopShortcutSwitch(
@@ -1792,23 +1792,39 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     /// cannot reach, and for a shortcut the Dock did not act on.
     @discardableResult
     public func switchToDesktopWithSystemAnimation(_ location: DesktopLocation) -> Bool {
+        let coalesced = nativeRouteLock.withLock { () -> Bool in
+            guard nativeRoutes.isInFlight(stackID: location.stackID) else { return false }
+            _ = nativeRoutes.request(location, originID: 0)
+            return true
+        }
+        if coalesced {
+            DiagnosticReporter.shared.report("desktop_switch_native_shortcut_coalesced", details: [
+                "desktop": "\(location.index + 1)",
+            ])
+            return true
+        }
+
         let topology = spaceTopology()
-        guard !isSwitchInFlight(stackID: location.stackID),
+        let swipeRouteInFlight = switchCoordinatorLock.withLock {
+            switchCoordinator.isInFlight(stackID: location.stackID)
+        }
+        guard !swipeRouteInFlight,
               let originID = topology.stack(id: location.stackID)?.currentDesktopID,
-              let resolved = nativeDesktopShortcut.resolve(location, in: topology)
+              let resolved = nativeDesktopShortcut.resolve(location, in: topology),
+              case .start(let generation) = nativeRouteLock.withLock({
+                  nativeRoutes.request(location, originID: originID)
+              })
         else { return requestSwitch(to: location, animation: .system) }
 
-        let generation = nativeShortcutLock.withLock {
-            nativeShortcutGeneration &+= 1
-            return nativeShortcutGeneration
-        }
         // A window raised to front for this reveal is reordered by its app on that app's next
         // screen update, measured landing about 6ms after the request returns. The transition
         // reveals the destination from its first frame, so it starts one frame later.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.nativeShortcutRevealDelay) {
             [weak self] in
             guard let self,
-                  self.nativeShortcutLock.withLock({ self.nativeShortcutGeneration == generation })
+                  self.nativeRouteLock.withLock({
+                      self.nativeRoutes.route(stackID: location.stackID)?.generation == generation
+                  })
             else { return }
             let posted = self.nativeDesktopShortcut.post(resolved)
             DiagnosticReporter.shared.report("desktop_switch_native_shortcut_posted", details: [
@@ -1818,12 +1834,16 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
                 "posted": "\(posted)",
             ])
             guard posted else {
-                _ = self.requestSwitch(to: location, animation: .system)
+                if let target = self.nativeRouteLock.withLock({
+                    self.nativeRoutes.postingFailed(generation: generation, stackID: location.stackID)
+                }) {
+                    _ = self.requestSwitch(to: target, animation: .system)
+                }
                 return
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.nativeShortcutFallbackDelay) {
                 [weak self] in
-                self?.fallBackIfNativeShortcutMissed(location, originID: originID,
+                self?.fallBackIfNativeShortcutMissed(stackID: location.stackID,
                                                      generation: generation)
             }
         }
@@ -1839,17 +1859,14 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     /// A keystroke the Dock did not act on leaves the origin showing and nothing else to wait
     /// for, so the request continues on the swipe route. Any other desktop showing is a result
     /// — the requested one, or one the user chose meanwhile — and is left alone.
-    private func fallBackIfNativeShortcutMissed(
-        _ location: DesktopLocation,
-        originID: CGSSpaceID,
-        generation: UInt64
-    ) {
-        guard nativeShortcutLock.withLock({ nativeShortcutGeneration == generation }),
-              spaceTopology().stack(id: location.stackID)?.currentDesktopID == originID
-        else { return }
-        let continued = requestSwitch(to: location, animation: .system)
+    private func fallBackIfNativeShortcutMissed(stackID: String, generation: UInt64) {
+        let current = spaceTopology().stack(id: stackID)?.currentDesktopID
+        guard let target = nativeRouteLock.withLock({
+            nativeRoutes.missed(generation: generation, stackID: stackID, currentDesktopID: current)
+        }) else { return }
+        let continued = requestSwitch(to: target, animation: .system)
         DiagnosticReporter.shared.report("desktop_switch_native_shortcut_missed", details: [
-            "desktop": "\(location.index + 1)",
+            "desktop": "\(target.index + 1)",
             "fallbackPosted": "\(continued)",
         ])
     }
@@ -1908,6 +1925,8 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     public func isSwitchInFlight(stackID: String) -> Bool {
         switchCoordinatorLock.withLock {
             switchCoordinator.isInFlight(stackID: stackID)
+        } || nativeRouteLock.withLock {
+            nativeRoutes.isInFlight(stackID: stackID)
         }
     }
 
@@ -1919,12 +1938,23 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         }
         let routes = Dictionary(grouping: nextHops, by: \.stackID)
         for route in routes.values { _ = postRoute(route, in: topology) }
+
+        let showing = Dictionary(uniqueKeysWithValues: topology.stacks.compactMap { stack in
+            stack.currentDesktopID.map { (stack.id, $0) }
+        })
+        let arrivals = nativeRouteLock.withLock {
+            nativeRoutes.desktopDidChange(currentDesktopIDs: showing)
+        }
+        for case .continueTo(let target) in arrivals.values {
+            _ = switchToDesktopWithSystemAnimation(target)
+        }
     }
 
     public func cancelPendingSwitches() {
         switchCoordinatorLock.withLock {
             switchCoordinator.cancelPendingSwitches()
         }
+        nativeRouteLock.withLock { nativeRoutes.cancelAll() }
     }
 
     private func postRoute(_ hops: [SpaceSwitchHop], in topology: SpaceTopology) -> Bool {
