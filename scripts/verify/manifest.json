@@ -74,8 +74,6 @@
 
     {"pattern": "docs/*", "e2e": [], "swift": false, "reason": "documentation"},
     {"pattern": "spec/*", "e2e": [], "swift": false, "reason": "specification prose"},
-    {"pattern": "website/*", "e2e": [], "swift": false, "reason": "website, verified separately"},
-    {"pattern": "debut.website/*", "e2e": [], "swift": false, "reason": "website, verified separately"},
     {"pattern": "*.md", "e2e": [], "swift": false, "reason": "documentation"},
     {"pattern": "LICENSE", "e2e": [], "swift": false, "reason": "license text"},
     {"pattern": ".gitignore", "e2e": [], "swift": false, "reason": "repository hygiene; its contract always runs"},
