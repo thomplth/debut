@@ -544,13 +544,28 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
         // Seed frontmost-app state outside the keyboard event-tap callback.
         let front = NSWorkspace.shared.frontmostApplication
-        onFrontmostAppChanged?(front?.bundleIdentifier, .startupSnapshot)
-
-        // Install focus observer on the current frontmost app
         if let front, let info = appInfo(for: front) {
-            installWindowCreationObserver(for: info.pid, bundleID: info.bundleID)
-            installFocusObserver(for: info.pid, bundleID: info.bundleID)
+            seedFrontmostApp(info)
+        } else {
+            onFrontmostAppChanged?(front?.bundleIdentifier, .startupSnapshot)
         }
+    }
+
+    /// The app already in front at launch sends no activation, so without a probe here Debut
+    /// knew only its bundle. With several of its windows visible that names none of them, and
+    /// focus stayed unknown until the user switched apps: a window entering fullscreen in the
+    /// meantime was invisible to the next Command-Tab. Probe it exactly as an activation would.
+    func seedFrontmostApp(_ app: AppInfo?) {
+        guard let app, app.bundleID != "com.thomplth.Debut" else {
+            onFrontmostAppChanged?(app?.bundleID, .startupSnapshot)
+            if let app {
+                installWindowCreationObserver(for: app.pid, bundleID: app.bundleID)
+                installFocusObserver(for: app.pid, bundleID: app.bundleID)
+            }
+            return
+        }
+        installFocusObserver(for: app.pid, bundleID: app.bundleID)
+        handleAppActivation(app, source: .startupSnapshot)
     }
 
     /// Clears runtime-only observer and process caches without unregistering
@@ -1650,7 +1665,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
     }
 
-    func handleAppActivation(_ app: AppInfo) {
+    func handleAppActivation(
+        _ app: AppInfo,
+        source: FrontmostAppObservationSource = .workspaceActivation
+    ) {
         activationProbeGeneration += 1
         activatedPID = app.pid
         let generation = activationProbeGeneration
@@ -1666,9 +1684,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         diag.report("app_activation_observed", details: [
             "bundleID": app.bundleID,
             "ownerPID": "\(app.pid)",
-            "source": FrontmostAppObservationSource.workspaceActivation.rawValue,
+            "source": source.rawValue,
         ])
-        onFrontmostAppChanged?(app.bundleID, .workspaceActivation)
+        onFrontmostAppChanged?(app.bundleID, source)
 
         let pid = app.pid
         let shouldTrackActivation = !excludedBundleIDs.contains(app.bundleID)
@@ -1677,7 +1695,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 app,
                 sampledFocusedWindowID: nil,
                 generation: generation,
-                probeStartedAt: probeStartedAt
+                probeStartedAt: probeStartedAt,
+                source: source
             )
             return
         }
@@ -1689,7 +1708,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 sampledFocusedWindowID: sampledFocusedWindowID,
                 generation: generation,
                 focusGeneration: focusGeneration,
-                probeStartedAt: probeStartedAt
+                probeStartedAt: probeStartedAt,
+                source: source
             )
         }
     }
@@ -1699,7 +1719,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         sampledFocusedWindowID: CGWindowID?,
         generation: Int,
         focusGeneration: Int? = nil,
-        probeStartedAt: UInt64
+        probeStartedAt: UInt64,
+        source: FrontmostAppObservationSource = .workspaceActivation
     ) {
         guard activationProbeGeneration == generation, activatedPID == app.pid else { return }
         let pid = app.pid
@@ -1744,7 +1765,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             "ownerPID": "\(pid)",
             "resolvedWindowID": focusedWindowID.map(String.init) ?? "none",
             "sampledWindowID": sampledFocusedWindowID.map(String.init) ?? "none",
-            "source": FrontmostAppObservationSource.workspaceActivation.rawValue,
+            "source": source.rawValue,
         ])
         if let focusedWindowID {
             trackAndRegister(windowID: focusedWindowID, pid: pid)
