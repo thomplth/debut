@@ -104,7 +104,10 @@ struct ScreenshotTests {
         #expect(same.meanChannelDifference == 0)
         #expect(different.comparedPixelCount == same.comparedPixelCount)
         #expect(different.meanChannelDifference > 0.4)
-        #expect(different.changedPixelRatio > 0.9)
+        // The 20x20 changed core can acquire a one-pixel antialiased fringe when AppKit's
+        // point-backed image is normalized on a hosted runner: 400 changed pixels out of a
+        // 22x22 content mask. Most of the content must still change.
+        #expect(different.changedPixelRatio > 0.8)
     }
 
     /// Draws an image into a deterministic @2x bitmap. Passing a smaller point size is the
@@ -412,7 +415,10 @@ struct ScreenshotTests {
                     x: Int(point.x * 2), y: Int(point.y * 2)
                 ))
                 let bare = try #require(bitmap.colorAt(x: Int((size.width - 5 * scale) * 2), y: Int(centerY * 2)))
-                #expect(bare.redComponent - shadow.redComponent > (dark ? 0.015 : 0.03))
+                // Color components are 8-bit here. Require a visible four-level dark shadow or
+                // seven-level light shadow without accidentally rounding those minima up.
+                let minimumShadowDifference = (dark ? 4.0 : 7.0) / 255.0
+                #expect(bare.redComponent - shadow.redComponent >= minimumShadowDifference)
             }
         }
     }
