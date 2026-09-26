@@ -43,8 +43,8 @@ struct SendableShareableContent: @unchecked Sendable {
 }
 
 /// Enumerating shareable content costs tens of milliseconds regardless of how
-/// much of the result a caller uses, and presenting the overlay makes the
-/// wallpaper capture and the window previews both need it at the same instant.
+/// much of the result a caller uses, and presenting the overlay starts every
+/// window preview capture at the same instant.
 /// The snapshot is short-lived so a window that opened moments ago is still
 /// found, but long enough to cover one presentation.
 enum ShareableContent {

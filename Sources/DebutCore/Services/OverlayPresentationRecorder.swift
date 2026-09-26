@@ -22,7 +22,6 @@ public enum OverlayPresentationPhase: String, Codable, CaseIterable, Sendable {
     case revealCompleted = "reveal_completed"
     case firstPreviewCompleted = "first_preview_completed"
     case allPreviewsCompleted = "all_previews_completed"
-    case wallpaperCompleted = "wallpaper_completed"
 }
 
 public enum OverlayPresentationOutcome: String, Codable, Sendable {
@@ -49,12 +48,6 @@ public enum OverlayPreviewCacheState: String, Codable, Sendable {
     }
 }
 
-public enum OverlayWallpaperState: String, Codable, Sendable {
-    case ready
-    case capturePending = "capture_pending"
-    case unavailable
-}
-
 public enum OverlayHostingViewState: String, Codable, Sendable {
     case created
     case reused
@@ -70,7 +63,6 @@ public enum OverlayProcessAge: String, Codable, Sendable {
 public struct OverlayPresentationEnvironment: Codable, Equatable, Sendable {
     public var processUse: OverlayProcessUse
     public var previewCache: OverlayPreviewCacheState
-    public var wallpaperState: OverlayWallpaperState
     public var hostingView: OverlayHostingViewState
     public var processAge: OverlayProcessAge
     public var workload: PerformanceWorkload
@@ -79,7 +71,6 @@ public struct OverlayPresentationEnvironment: Codable, Equatable, Sendable {
     public init(
         processUse: OverlayProcessUse,
         previewCache: OverlayPreviewCacheState,
-        wallpaperState: OverlayWallpaperState,
         hostingView: OverlayHostingViewState,
         processAge: OverlayProcessAge,
         workload: PerformanceWorkload,
@@ -87,7 +78,6 @@ public struct OverlayPresentationEnvironment: Codable, Equatable, Sendable {
     ) {
         self.processUse = processUse
         self.previewCache = previewCache
-        self.wallpaperState = wallpaperState
         self.hostingView = hostingView
         self.processAge = processAge
         self.workload = workload
@@ -186,7 +176,6 @@ public final class OverlayPresentationRecorder: @unchecked Sendable {
         let environment = OverlayPresentationEnvironment(
             processUse: processUse,
             previewCache: .empty,
-            wallpaperState: .unavailable,
             hostingView: .unknown,
             processAge: processAge(at: started),
             workload: .init(),
@@ -230,7 +219,6 @@ public final class OverlayPresentationRecorder: @unchecked Sendable {
     public func updateEnvironment(
         for context: OverlayPresentationContext,
         previewCache: OverlayPreviewCacheState,
-        wallpaperState: OverlayWallpaperState,
         hostingView: OverlayHostingViewState? = nil,
         workload: PerformanceWorkload,
         cachedPreviewCount: Int
@@ -241,7 +229,6 @@ public final class OverlayPresentationRecorder: @unchecked Sendable {
             return
         }
         trace.environment.previewCache = previewCache
-        trace.environment.wallpaperState = wallpaperState
         if let hostingView { trace.environment.hostingView = hostingView }
         trace.environment.workload = workload
         trace.environment.cachedPreviewCount = max(0, cachedPreviewCount)

@@ -18,7 +18,6 @@ public enum PerformanceOperation: String, CaseIterable, Codable, Sendable {
     case windowReconciliation = "window_reconciliation"
     case spaceSwitch = "space_switch"
     case spaceRaise = "space_raise"
-    case wallpaperCapture = "wallpaper_capture"
     case statePersistence = "state_persistence"
     case hiddenIdle = "hidden_idle"
 }
