@@ -210,15 +210,40 @@ EOF
         local actual
         actual="$(guest_command_for "$env_profile" "$@" 2>&1)" \
             || { fail "could not build guest command for '$*': $actual"; return; }
+        # Compare the words the guest receives, not how %q chose to quote them.
+        actual="$(eval "printf '%s ' $actual")"
+        actual="${actual% }"
         [[ "$actual" == *"$expected" ]] \
             || fail "guest command for env='$env_profile' args='$*' ended '${actual: -40}', expected '$expected'"
     }
-    expect_guest_command "app.zip e2e full on" ""
-    expect_guest_command "app.zip e2e ordinary on" "" --duration-profile ordinary
-    expect_guest_command "app.zip e2e ordinary off" "" --duration-profile ordinary --no-gallery
-    expect_guest_command "app.zip e2e ordinary on" "ordinary"
-    expect_guest_command "app.zip e2e full on" "ordinary" --duration-profile full
-    expect_guest_command "app.zip e2e full off" "" --no-gallery
+    expect_guest_command "app.zip e2e full on all" ""
+    expect_guest_command "app.zip e2e ordinary on all" "" --duration-profile ordinary
+    expect_guest_command "app.zip e2e ordinary off all" "" --duration-profile ordinary --no-gallery
+    expect_guest_command "app.zip e2e ordinary on all" "ordinary"
+    expect_guest_command "app.zip e2e full on all" "ordinary" --duration-profile full
+    expect_guest_command "app.zip e2e full off all" "" --no-gallery
+    expect_guest_command "app.zip e2e full on drag-drop,smoke" "" --groups drag-drop,smoke
+    expect_guest_command "app.zip e2e ordinary on permissions" "" --groups permissions --duration-profile ordinary
+
+    for bad_arguments in "run --groups" "run --groups nonsense" "run --groups ,"; do
+        rm -f "$stub_dir/tart-calls"
+        set +e
+        # shellcheck disable=SC2086
+        bad_output="$(run_host $bad_arguments)"
+        bad_status=$?
+        set -e
+        (( bad_status == 2 )) || fail "host exited $bad_status for '$bad_arguments', expected 2: $bad_output"
+        [[ -e "$stub_dir/tart-calls" ]] && fail "host invoked tart before rejecting '$bad_arguments'"
+    done
+
+    # The host, the guest and DebutE2E must agree on the group names.
+    swift_groups="$(awk '/^enum E2EGroup/,/^}/' Sources/DebutE2E/Scenarios.swift \
+        | sed -n 's/^ *case \([a-zA-Z]*\)\( = "\([a-z-]*\)"\)\{0,1\}$/\1 \3/p' \
+        | awk '{ print ($2 != "" ? $2 : $1) }' | sort | tr '\n' ' ')"
+    host_groups="$(sed -n 's/^KNOWN_GROUPS="\(.*\)"$/\1/p' "$host_runner" | tr ' ' '\n' | grep -v '^permissions$' | sort | tr '\n' ' ')"
+    guest_groups="$(sed -n 's/^SUITE_GROUP_NAMES="\(.*\)"$/\1/p' "$guest_runner" | tr ' ' '\n' | sort | tr '\n' ' ')"
+    [[ -n "$swift_groups" && "$swift_groups" == "$host_groups" && "$swift_groups" == "$guest_groups" ]] \
+        || fail "group names disagree: swift='$swift_groups' host='$host_groups' guest='$guest_groups'"
 fi
 
 if [[ -f "$e2e_source" ]]; then
@@ -250,6 +275,18 @@ if [[ -f "$e2e_source" ]]; then
     if grep -A3 'readEvents()\.filter' "$e2e_source" | grep -Eq '\}\.count|\)\.count'; then
         fail "E2E checks must compare events against an eventCursor(), not count the capped log"
     fi
+
+    # The suite drives the whole session, so it refuses to start unless the caller declares a
+    # disposable one, and that refusal must come before anything is cleared or launched.
+    guard_line="$(grep -n 'environment\["DEBUT_E2E_DISPOSABLE_SESSION"\] == "1"' "$e2e_source" | cut -d: -f1)"
+    screenshot_mark="$(grep -n '^// MARK: - Screenshot' "$e2e_source" | cut -d: -f1)"
+    if [[ -z "$guard_line" ]] || (( guard_line > screenshot_mark )); then
+        fail "DebutE2E must refuse the suite outside a disposable session before any side effect"
+    fi
+    grep -q 'DEBUT_E2E_DISPOSABLE_SESSION=1' "$guest_runner" || fail "the Tart guest must declare its disposable session"
+    grep -Eq 'DEBUT_E2E_DISPOSABLE_SESSION=1 .*"\$e2e_path"$' scripts/ci-e2e.sh || fail "the hosted runner must declare its disposable session"
+    grep -q 'DEBUT_E2E_FIXTURE_DIR=' "$guest_runner" && grep -q 'DEBUT_E2E_FIXTURE_DIR=' scripts/ci-e2e.sh \
+        || fail "both runners must tell the suite where its fixture documents are, so groups can restore them"
 
     # An unknown profile used to read as ordinary. Rejecting it only counts if it happens before
     # the harness clears its screenshots and starts driving the session.

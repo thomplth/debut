@@ -104,4 +104,5 @@ echo "Launching Debut..."
 open "$app_path"
 sleep 4
 
-"$e2e_path"
+# A hosted runner is a disposable session, which is the only place the suite may drive input.
+DEBUT_E2E_DISPOSABLE_SESSION=1 DEBUT_E2E_FIXTURE_DIR="$fixture_dir" "$e2e_path"

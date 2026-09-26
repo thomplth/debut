@@ -17,9 +17,6 @@ nonisolated(unsafe) var failCount = 0
 nonisolated(unsafe) var skipCount = 0
 nonisolated(unsafe) var totalCount = 0
 nonisolated(unsafe) var currentSection = ""
-nonisolated(unsafe) var currentScenario = ""
-nonisolated(unsafe) var currentGroup = ""
-nonisolated(unsafe) var recordedScenarios: [[String: String]] = []
 nonisolated(unsafe) var recordedChecks: [[String: String]] = []
 let environment = ProcessInfo.processInfo.environment
 let isGitHubHosted = environment["GITHUB_ACTIONS"] == "true"
@@ -66,36 +63,18 @@ func header(_ msg: String) {
 /// check, so a crash still leaves the results up to it.
 let checkResultsFile: URL = {
     let arguments = CommandLine.arguments.dropFirst()
-    let invocation = arguments.first.map { $0.hasPrefix("--") } ?? true
-        ? "suite" : arguments.joined(separator: "-")
+    let invocation = arguments.isEmpty ? "suite" : arguments.joined(separator: "-")
     return URL(fileURLWithPath: "/tmp/debut-e2e-results")
         .appendingPathComponent("\(invocation).json")
 }()
 
 func recordCheck(_ name: String, status: String, reason: String? = nil) {
     var check = ["section": currentSection, "name": name, "status": status]
-    if !currentScenario.isEmpty {
-        check["scenario"] = currentScenario
-        check["group"] = currentGroup
-    }
     if let reason { check["reason"] = reason }
     recordedChecks.append(check)
-    writeCheckResults()
-}
-
-/// A scenario's own outcome: ran, not_selected, or setup_failed when base state could not be
-/// restored before it. Not selecting a scenario is recorded, never silently omitted.
-func recordScenario(_ scenario: E2EScenarioDescriptor, status: String) {
-    recordedScenarios.append(["id": scenario.id, "group": scenario.group.rawValue, "status": status])
-    writeCheckResults()
-}
-
-func writeCheckResults() {
     let invocation = checkResultsFile.deletingPathExtension().lastPathComponent
     guard let data = try? JSONSerialization.data(
-        withJSONObject: [
-            "invocation": invocation, "checks": recordedChecks, "scenarios": recordedScenarios,
-        ],
+        withJSONObject: ["invocation": invocation, "checks": recordedChecks],
         options: [.prettyPrinted, .sortedKeys]
     ) else { return }
     try? FileManager.default.createDirectory(
@@ -357,38 +336,6 @@ guard let fullMoveDurationProfile = isFullMoveDurationProfile(environment["DEBUT
         "DEBUT_E2E_DURATION_PROFILE must be ordinary or full, not '\(environment["DEBUT_E2E_DURATION_PROFILE"] ?? "")'.\n".utf8
     ))
     exit(2)
-}
-
-// Suite options are settled before the screenshot directory is cleared or anything launches:
-// listing, planning and bad options never touch the session.
-let e2eInvocation: E2EInvocation? = {
-    guard let parsed = parseE2EInvocation(Array(CommandLine.arguments.dropFirst())) else { return nil }
-    switch parsed {
-    case .failure(let error):
-        FileHandle.standardError.write(Data("\(error.message)\n".utf8))
-        exit(2)
-    case .success(let invocation):
-        return invocation
-    }
-}()
-switch e2eInvocation {
-case .list?:
-    printScenarioCatalog()
-    exit(0)
-case .plan(let groups)?:
-    printScenarioPlan(groups: groups)
-    exit(0)
-case .suite?:
-    // The suite posts global input, launches and quits apps and rewrites Debut's settings. Only a
-    // disposable session may say it is one; the developer's own desktop never should.
-    guard environment["DEBUT_E2E_DISPOSABLE_SESSION"] == "1" else {
-        FileHandle.standardError.write(Data(("The E2E suite drives the whole session. Run it in the "
-            + "headless Tart VM (scripts/tart-e2e.sh run), or set DEBUT_E2E_DISPOSABLE_SESSION=1 "
-            + "only in a disposable session.\n").utf8))
-        exit(2)
-    }
-case nil:
-    break
 }
 
 // MARK: - Screenshot
@@ -1613,12 +1560,7 @@ if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
         _ = takeScreenshot("onboarding_without_capture_complete")
     }
     _ = terminateDebutAndWait()
-    let journey = oneDesktop ? "one-desktop" : deniedAccessibility ? "denied-accessibility" : "denied-capture"
-    print("Onboarding \(journey) flow: \(passed ? "PASS" : "FAIL")")
-    // The journeys are the permissions group; record them like any other check.
-    currentGroup = "permissions"
-    currentScenario = "onboarding-\(journey)"
-    recordCheck("First-use onboarding completes with \(journey)", status: passed ? "passed" : "failed")
+    print("Onboarding \(oneDesktop ? "one-desktop" : deniedAccessibility ? "denied-accessibility" : "denied-capture") flow: \(passed ? "PASS" : "FAIL")")
     exit(passed ? 0 : 1)
 }
 
@@ -1746,7 +1688,6 @@ func scenario_baseline() {
 
 @MainActor
 func scenario_system_overviews() {
-    let userDesktopCount = SpaceService().userDesktops().count
     // --- 1c. System window overviews ---
     // Mission Control and App Exposé can change the Space behind Debut's back. Debut must follow
     // a desktop it did not switch to, and must not invent or drop a space on the way through.
@@ -1782,7 +1723,6 @@ func scenario_system_overviews() {
 
 @MainActor
 func scenario_space_switch() {
-    let userDesktopCount = SpaceService().userDesktops().count
     // --- 1d. A space switch moves the real desktop ---
     // This is what the architecture is for, and until desktops were provisioned there was no check
     // of it anywhere: a one-desktop host makes every SpaceSwitchPlan nil, so the switch path was
@@ -2539,11 +2479,8 @@ func scenario_overlay_fullscreen() {
     let enteredFullscreen = fullscreenWindow.map { setWindowFullscreen($0, true) } ?? false
 
     if enteredFullscreen {
-        // The Space animation keeps running after the attribute flips. Debut learns which window
-        // has focus from that app's focus report, which a just-launched fixture or Debut can
-        // deliver late; give it that long, and let the check below fail if it never arrives.
+        // The Space animation keeps running after the attribute flips.
         wait(2)
-        _ = waitFor(timeout: 5) { readState()["focusedWindowFullscreen"] == "true" }
         postFlagsChanged(flags: [.maskCommand])
         wait(0.1)
         postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
@@ -2623,6 +2560,7 @@ func scenario_custom_activation() {
     let stoppedBeforeCustomization = terminateDebutAndWait()
 
     let originalSettingsData = try? Data(contentsOf: settingsFile)
+    let settingsStore = StateStore()
     var customizedSettings = (try? settingsStore.loadSettings()) ?? AppSettings()
     customizedSettings.keyBindings.bindings[.activateNextWindow] = KeyCombo(
         keyCode: kVK_ANSI_B,
@@ -2662,10 +2600,28 @@ func scenario_custom_activation() {
 func scenario_navigation_controls() {
     // --- Launch feature controls: read the actual desktop after intercepted input. ---
     header("Launch feature controls")
-    let (featureReady, featureSettingsBackup) = launchWithFeatureControls()
+    let featureSettingsBackup = try? Data(contentsOf: settingsFile)
+    var featureSettings = (try? settingsStore.loadSettings()) ?? AppSettings()
+    featureSettings.features.controlArrows = true
+    featureSettings.features.trackpadSwipes = true
+    featureSettings.features.workspaceIsolation = false
+    featureSettings.features.windowPreviews = false
+    try? settingsStore.saveSettings(featureSettings)
+    clearDiagnosticFile()
+    let featureApplication = launchDebut()
+    let featureReady = waitForDebutReady(featureApplication)
     let featureSpaces = SpaceService()
 
     if featureSpaces.userDesktops().count >= 2 {
+        func postControlArrow(_ keyCode: Int) {
+            // The Dock tracks the modifier around native Mission Control shortcuts. A bare arrow
+            // carrying a Control flag exercises Debut's chord match, but is not a complete physical
+            // press once Debut yields it to macOS.
+            postKeyDown(keyCode: CGKeyCode(kVK_Control), flags: .maskControl)
+            postKeyDown(keyCode: CGKeyCode(keyCode), flags: .maskControl)
+            postKeyUp(keyCode: CGKeyCode(keyCode), flags: .maskControl)
+            postKeyUp(keyCode: CGKeyCode(kVK_Control), flags: [])
+        }
 
         let baselineReady = quickSwitch(to: 0, using: featureSpaces)
         let controlArrowBefore = eventCursor()
@@ -2675,6 +2631,29 @@ func scenario_navigation_controls() {
                 && !events(since: controlArrowBefore) { $0["keyEvent"] == "switchAdjacentSpace(1)" }.isEmpty
         }
         wait(0.5)
+        // Emulate the unmarked DockSwipe stream a physical desktop gesture produces. Every
+        // DockControl payload has a generic gesture envelope; omitting those is harmless while
+        // Debut swallows the stream, but leaves Dock with an invalid stream when Debut yields it.
+        // Debut's marked replacement must pass through its own tap without a second hop.
+        func postPhysicalSwipe(phase: Int64, progress: Double) {
+            guard let event = CGEvent(source: nil), let envelope = CGEvent(source: nil) else { return }
+            for (field, value) in [(55, Int64(30)), (110, Int64(23)), (123, Int64(1)), (132, phase)] {
+                event.setIntegerValueField(CGEventField(rawValue: UInt32(field))!, value: value)
+            }
+            event.setDoubleValueField(CGEventField(rawValue: 139)!, value: Double(Float.leastNonzeroMagnitude))
+            event.setDoubleValueField(CGEventField(rawValue: 124)!, value: progress)
+            event.post(tap: .cgSessionEventTap)
+            envelope.setIntegerValueField(CGEventField(rawValue: 55)!, value: 29)
+            envelope.post(tap: .cgSessionEventTap)
+        }
+        func postPhysicalSwipeGesture(progress: Double, commitDelay: TimeInterval = 0.03) {
+            postPhysicalSwipe(phase: 1, progress: 0)
+            wait(0.03)
+            postPhysicalSwipe(phase: 2, progress: progress > 0 ? 0.2 : -0.2)
+            wait(commitDelay)
+            postPhysicalSwipe(phase: 2, progress: progress)
+            postPhysicalSwipe(phase: 4, progress: progress)
+        }
         let swipeBefore = eventCursor()
         postPhysicalSwipeGesture(progress: -0.6, commitDelay: 0.25)
         info("Swipe result: desktop=\(String(describing: featureSpaces.currentDesktopIndex())) events=\(events(since: swipeBefore) { ($0["event"] ?? "").contains("swipe") || ($0["keyEvent"] ?? "").contains("Adjacent") })")
@@ -2809,31 +2788,6 @@ func scenario_navigation_controls() {
                 }.isEmpty
         }
 
-    } else {
-        test("Launch input fixture has at least two desktops") { false }
-    }
-    let commandTabBefore = eventCursor()
-    postFlagsChanged(flags: .maskCommand)
-    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
-    wait(0.3)
-    test("Disabled workspace isolation leaves Command-Tab to macOS") {
-        let state = readState()
-        return state["eventTapRunning"] == "true"
-            && Int(state["spaceCount"] ?? "") != nil
-            && state["overlayVisible"] == "false"
-            && events(since: commandTabBefore) { $0["keyEvent"] == "cmdTabHold" }.isEmpty
-    }
-    postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
-    postFlagsChanged(flags: [])
-    finishFeatureControls(settingsBackup: featureSettingsBackup)
-}
-
-@MainActor
-func scenario_fullscreen_navigation() {
-    header("Fullscreen Space navigation")
-    let (featureReady, featureSettingsBackup) = launchWithFeatureControls()
-    let featureSpaces = SpaceService()
-    if featureReady, featureSpaces.userDesktops().count >= 2, quickSwitch(to: 0, using: featureSpaces) {
         // A fullscreen window inserts a non-desktop Space into Mission Control's order. Both
         // physical adjacent inputs must start from that real position, and the reverse input must
         // be able to enter it again even when Dock placed it at the first or last edge.
@@ -2879,15 +2833,6 @@ func scenario_fullscreen_navigation() {
                     + "left=\(controlLeftFullscreen) returned=\(controlReturnedFullscreen) "
                     + "events=\(controlEvents)"
             )
-            if controlEvents < 2 {
-                // Which press went unclaimed, and whether Debut saw it at all.
-                for event in events(since: controlEventsBefore) {
-                    let details = event.keys.sorted()
-                        .filter { !["event", "timestamp", "uptimeNanoseconds"].contains($0) }
-                        .map { "\($0)=\(event[$0] ?? "")" }.joined(separator: " ")
-                    info("    \(event["event"] ?? "?") \(details)")
-                }
-            }
             test("Control-arrow leaves and re-enters a fullscreen Space through Debut") {
                 controlLeftFullscreen && controlReturnedFullscreen
                     && controlEvents >= 2
@@ -2934,9 +2879,23 @@ func scenario_fullscreen_navigation() {
             wait(1)
         }
     } else {
-        test("Fullscreen navigation fixture has Debut ready on the first of two desktops") { false }
+        test("Launch input fixture has at least two desktops") { false }
     }
-    finishFeatureControls(settingsBackup: featureSettingsBackup)
+    postFlagsChanged(flags: .maskCommand)
+    postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+    wait(0.3)
+    test("Disabled workspace isolation leaves Command-Tab to macOS") {
+        let state = readState()
+        return state["eventTapRunning"] == "true"
+            && Int(state["spaceCount"] ?? "") != nil
+            && state["overlayVisible"] == "false"
+            && !readEvents().contains { $0["keyEvent"] == "cmdTabHold" }
+    }
+    postKeyUp(keyCode: CGKeyCode(kVK_Tab), flags: .maskCommand)
+    postFlagsChanged(flags: [])
+    _ = terminateDebutAndWait()
+    if let featureSettingsBackup { try? featureSettingsBackup.write(to: settingsFile, options: .atomic) }
+    else { try? FileManager.default.removeItem(at: settingsFile) }
 }
 
 @MainActor
@@ -3765,10 +3724,6 @@ func scenario_onboarding_journey() {
     _ = takeScreenshot("11_onboarding_previews")
     test("Option-Tab reaches the named target without a capture gate") { performOnboardingExercise(.allWindows) }
     _ = takeScreenshot("11_tutorial_complete")
-    // The last exercise ends with a Space switch, and the tutorial's AX tree can be empty for a
-    // moment afterwards although its buttons are already drawn. Wait for the control to exist
-    // rather than read that lag as a missing button.
-    _ = waitFor(timeout: 5) { onboardingButton("Finish tutorial") != nil }
     test("Finishing the tutorial closes it without reopening setup") {
         onboardingPress("Finish tutorial") && !onboardingContains("Tutorial complete")
             && !onboardingContains("Welcome to Debut")
@@ -3842,11 +3797,7 @@ func scenario_selected_window_dismissal() {
     // --- 15. Selected window dismissal ---
     header("15. Selected window dismissal")
 
-    // Borrowing the settings scenario's relaunch coupled this group to that one; launch fresh.
-    _ = terminateDebutAndWait()
-    clearDiagnosticFile()
-    let dismissalApplication = launchDebut()
-    _ = waitForDebutReady(dismissalApplication)
+    let dismissalApplication = finalApplication
     let dismissalPID = dismissalApplication?.processIdentifier
     postFlagsChanged(flags: [.maskCommand])
     postKeyDown(keyCode: CGKeyCode(kVK_Tab), flags: [.maskCommand])
@@ -4752,238 +4703,6 @@ func scenario_move_duration_sweep() {
     else { try? FileManager.default.removeItem(at: settingsFile) }
 }
 
-@MainActor
-func postControlArrow(_ keyCode: Int) {
-    // The Dock tracks the modifier around native Mission Control shortcuts. A bare arrow
-    // carrying a Control flag exercises Debut's chord match, but is not a complete physical
-    // press once Debut yields it to macOS.
-    postKeyDown(keyCode: CGKeyCode(kVK_Control), flags: .maskControl)
-    postKeyDown(keyCode: CGKeyCode(keyCode), flags: .maskControl)
-    postKeyUp(keyCode: CGKeyCode(keyCode), flags: .maskControl)
-    postKeyUp(keyCode: CGKeyCode(kVK_Control), flags: [])
-}
-
-// Emulate the unmarked DockSwipe stream a physical desktop gesture produces. Every
-// DockControl payload has a generic gesture envelope; omitting those is harmless while
-// Debut swallows the stream, but leaves Dock with an invalid stream when Debut yields it.
-// Debut's marked replacement must pass through its own tap without a second hop.
-@MainActor
-func postPhysicalSwipe(phase: Int64, progress: Double) {
-    guard let event = CGEvent(source: nil), let envelope = CGEvent(source: nil) else { return }
-    for (field, value) in [(55, Int64(30)), (110, Int64(23)), (123, Int64(1)), (132, phase)] {
-        event.setIntegerValueField(CGEventField(rawValue: UInt32(field))!, value: value)
-    }
-    event.setDoubleValueField(CGEventField(rawValue: 139)!, value: Double(Float.leastNonzeroMagnitude))
-    event.setDoubleValueField(CGEventField(rawValue: 124)!, value: progress)
-    event.post(tap: .cgSessionEventTap)
-    envelope.setIntegerValueField(CGEventField(rawValue: 55)!, value: 29)
-    envelope.post(tap: .cgSessionEventTap)
-}
-@MainActor
-func postPhysicalSwipeGesture(progress: Double, commitDelay: TimeInterval = 0.03) {
-    postPhysicalSwipe(phase: 1, progress: 0)
-    wait(0.03)
-    postPhysicalSwipe(phase: 2, progress: progress > 0 ? 0.2 : -0.2)
-    wait(commitDelay)
-    postPhysicalSwipe(phase: 2, progress: progress)
-    postPhysicalSwipe(phase: 4, progress: progress)
-}
-
-/// Debut with Control-arrow and swipe interception on, and workspace isolation and previews off,
-/// which is what the navigation and fullscreen-navigation scenarios exercise.
-@MainActor
-func launchWithFeatureControls() -> (ready: Bool, settingsBackup: Data?) {
-    let settingsBackup = try? Data(contentsOf: settingsFile)
-    var featureSettings = (try? settingsStore.loadSettings()) ?? AppSettings()
-    featureSettings.features.controlArrows = true
-    featureSettings.features.trackpadSwipes = true
-    featureSettings.features.workspaceIsolation = false
-    featureSettings.features.windowPreviews = false
-    try? settingsStore.saveSettings(featureSettings)
-    clearDiagnosticFile()
-    return (waitForDebutReady(launchDebut()), settingsBackup)
-}
-
-@MainActor
-func finishFeatureControls(settingsBackup: Data?) {
-    _ = terminateDebutAndWait()
-    if let settingsBackup { try? settingsBackup.write(to: settingsFile, options: .atomic) }
-    else { try? FileManager.default.removeItem(at: settingsFile) }
-}
-
-// MARK: - Scenario runner
-
-/// Debut's own settings store, which several groups rewrite and restore around their checks.
-let settingsStore = StateStore()
-
-/// The two TextEdit documents both runners open before the suite; every group starts with
-/// exactly their windows on the first desktop.
-let fixtureDocumentTitles: Set<String> = ["one.txt", "two.txt"]
-
-/// Puts the shared fixture back: one window for each fixture document on the first desktop, and
-/// no other TextEdit instance. Groups close fixture windows (dismissal), park them on other
-/// desktops (startup discovery) and launch their own instances (the move sweep); a reordered run
-/// otherwise handed the next group an emptied instance, which opened an untitled window when
-/// activated, or a window parked elsewhere, which changed the drop scenario's source space.
-@MainActor
-func restoreFixtureWindows() -> Bool {
-    let spaces = SpaceService()
-    // Only windows on a desktop count. A closed document leaves an ordered-out entry with its old
-    // title and no desktop; counting that kept an emptied TextEdit alive, and activating it later
-    // opened an untitled window that a fullscreen scenario then took for the fixture.
-    func fixtureWindows() -> [(windowID: CGWindowID, pid: pid_t, title: String)] {
-        let windows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID)
-            as? [[String: Any]] ?? []
-        var kept: [String: (windowID: CGWindowID, pid: pid_t, title: String)] = [:]
-        for window in windows {
-            guard (window[kCGWindowOwnerName as String] as? String) == "TextEdit",
-                  (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
-                  let title = window[kCGWindowName as String] as? String,
-                  fixtureDocumentTitles.contains(title),
-                  let windowID = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
-                  let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
-                  let desktop = spaces.desktopIndex(forWindow: windowID)
-            else { continue }
-            // One window per document, preferring the one already on the first desktop.
-            if let existing = kept[title], spaces.desktopIndex(forWindow: existing.windowID) == 0 || desktop != 0 {
-                continue
-            }
-            kept[title] = (windowID, pid, title)
-        }
-        return Array(kept.values)
-    }
-    guard let fixtureDirectory = environment["DEBUT_E2E_FIXTURE_DIR"] else {
-        info("Base state: DEBUT_E2E_FIXTURE_DIR is unset; left TextEdit as it was")
-        return false
-    }
-    var fixtures = fixtureWindows()
-    let fixturePIDs = Set(fixtures.map(\.pid))
-    for application in NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TextEdit")
-    where !fixturePIDs.contains(application.processIdentifier) {
-        application.forceTerminate()
-    }
-    let missing = fixtureDocumentTitles.subtracting(fixtures.map(\.title))
-    for title in missing.sorted() {
-        let open = Process()
-        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        // A force-quit TextEdit restores its old windows on the next launch unless told not to.
-        open.arguments = [
-            "-na", "TextEdit", URL(fileURLWithPath: fixtureDirectory).appendingPathComponent(title).path,
-            "--args", "-ApplePersistenceIgnoreState", "YES",
-        ]
-        try? open.run()
-        open.waitUntilExit()
-    }
-    if !missing.isEmpty {
-        _ = waitFor(timeout: 10) { Set(fixtureWindows().map(\.title)) == fixtureDocumentTitles }
-        fixtures = fixtureWindows()
-        // A just-launched app's Accessibility server stays silent for up to ~3s, and every group
-        // reads the fixture through it; Debut's own focus probe included.
-        _ = waitFor(timeout: 10) {
-            fixtures.allSatisfy { fixture in
-                var windows: CFTypeRef?
-                let application = AXUIElementCreateApplication(fixture.pid)
-                AXUIElementSetMessagingTimeout(application, 0.5)
-                return AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &windows) == .success
-                    && !((windows as? [AXUIElement]) ?? []).isEmpty
-            }
-        }
-    }
-    for fixture in fixtures where spaces.desktopIndex(forWindow: fixture.windowID) != 0 {
-        spaces.moveWindow(windowID: fixture.windowID, toDesktop: 0)
-    }
-    let restored = waitFor {
-        Set(fixtures.map(\.title)) == fixtureDocumentTitles
-            && fixtures.allSatisfy { spaces.desktopIndex(forWindow: $0.windowID) == 0 }
-    }
-    if !restored || !missing.isEmpty {
-        info("Base state: fixtures " + fixtures.map {
-            "\($0.title)=\($0.windowID)@\(spaces.desktopIndex(forWindow: $0.windowID).map(String.init) ?? "none")"
-        }.joined(separator: " ") + " reopened=\(missing.sorted())")
-    }
-    return restored
-}
-
-/// Returns the session to the state every group starts from: no overlay, overview or held
-/// modifier, the fixture windows on the first desktop, and that desktop showing. Debut's own
-/// state is each scenario's precondition.
-@MainActor
-func restoreBaseState() -> Bool {
-    postKeyDown(keyCode: CGKeyCode(kVK_Escape))
-    postKeyUp(keyCode: CGKeyCode(kVK_Escape))
-    postFlagsChanged(flags: [])
-    let overviewClosed = dismissSystemWindowOverview()
-    let fixturesRestored = restoreFixtureWindows()
-    _ = SpaceService().switchToDesktop(index: 0)
-    let onFirstDesktop = waitFor { SpaceService().currentDesktopIndex() == 0 }
-    wait(0.5)
-    if !(overviewClosed && fixturesRestored && onFirstDesktop) {
-        info("Base state: overviewClosed=\(overviewClosed) fixturesRestored=\(fixturesRestored) "
-            + "firstDesktop=\(onFirstDesktop)")
-    }
-    return overviewClosed && fixturesRestored && onFirstDesktop
-}
-
-/// Puts Debut in the state a scenario expects before it starts.
-@MainActor
-func satisfyDebutPrecondition(_ precondition: DebutPrecondition) -> Bool {
-    let running = !NSRunningApplication.runningApplications(withBundleIdentifier: debutBundleID).isEmpty
-    switch precondition {
-    case .running where !running:
-        clearDiagnosticFile()
-        guard waitForDebutReady(launchDebut()) else { return false }
-        // Ready is not settled: the legacy order handed these scenarios a Debut that had been
-        // running for minutes, with previews for the cards it lays out. Wait for those rather
-        // than for a fixed interval.
-        _ = waitFor(timeout: 8) {
-            let state = readState()
-            guard !previewsDisabled, let windows = Int(state["windowsInActiveSpace"] ?? "") else { return true }
-            return (Int(state["windowPreviewCount"] ?? "") ?? 0) >= windows
-        }
-        return true
-    case .stopped where running:
-        return terminateDebutAndWait()
-    default:
-        return true
-    }
-}
-
-@MainActor
-func runSelectedScenarios(bodies: [String: @MainActor () -> Void]) {
-    let catalogIDs = Set(e2eScenarioCatalog.map(\.id))
-    let bodyIDs = Set(bodies.keys)
-    guard catalogIDs == bodyIDs else {
-        fail("Scenario catalog and bodies disagree: catalog-only \(catalogIDs.subtracting(bodyIDs).sorted()), "
-            + "body-only \(bodyIDs.subtracting(catalogIDs).sorted())")
-        exit(1)
-    }
-    let groups: [E2EGroup]?
-    if case .suite(let selected)? = e2eInvocation { groups = selected } else { groups = nil }
-    let planned = plannedScenarios(groups: groups)
-    var previousGroup: E2EGroup?
-    for scenario in planned {
-        currentScenario = scenario.id
-        currentGroup = scenario.group.rawValue
-        // Groups never inherit each other's leftovers, in the full order or any other.
-        let baseRestored = previousGroup == nil || previousGroup == scenario.group || restoreBaseState()
-        if !baseRestored || !satisfyDebutPrecondition(scenario.debut) {
-            fail("\(scenario.group.rawValue)/\(scenario.id): its starting state could not be established")
-            failCount += 1
-            totalCount += 1
-            recordScenario(scenario, status: "setup_failed")
-            continue
-        }
-        previousGroup = scenario.group
-        recordScenario(scenario, status: "ran")
-        bodies[scenario.id]?()
-    }
-    currentScenario = ""
-    currentGroup = ""
-    for scenario in e2eScenarioCatalog where !planned.contains(where: { $0.id == scenario.id }) {
-        recordScenario(scenario, status: "not_selected")
-    }
-}
-
 // Every scenario body, keyed by its catalog ID; runSelectedScenarios refuses a mismatch.
 let scenarioBodies: [String: @MainActor () -> Void] = [
     "baseline": scenario_baseline,
@@ -4996,7 +4715,6 @@ let scenarioBodies: [String: @MainActor () -> Void] = [
     "overlay-fullscreen": scenario_overlay_fullscreen,
     "custom-activation": scenario_custom_activation,
     "navigation-controls": scenario_navigation_controls,
-    "fullscreen-navigation": scenario_fullscreen_navigation,
     "system-duration-transition": scenario_system_duration_transition,
     "onboarding-journey": scenario_onboarding_journey,
     "settings-chrome": scenario_settings_chrome,

@@ -25,7 +25,18 @@ not needed. `./scripts/rebuild.sh` replaces `/Applications/Debut.app` and launch
 it; run it only when you want to replace your installed copy.
 
 The global-input E2E harness runs in a disposable headless Tart VM with
-`./scripts/tart-e2e.sh run`. Do not run it against an active desktop session.
+`./scripts/tart-e2e.sh run`. Do not run it against an active desktop session; the
+suite refuses to start unless its caller sets `DEBUT_E2E_DISPOSABLE_SESSION=1`,
+which only the Tart guest and hosted runners do.
+
+The suite is split into groups that each own their setup and can run alone or in
+any order: `smoke`, `overlay-input`, `drag-drop`, `desktop-navigation`,
+`fullscreen`, `window-moves`, `window-lifecycle`, `onboarding`, `rendering`, and
+`permissions` (the first-use TCC journeys). Iterate with the smallest relevant
+group, for example `./scripts/tart-e2e.sh run --groups drag-drop`, and finish with
+the full suite before delivering a change to shared behavior.
+`swift run DebutE2E --list` shows every scenario, and `--plan --groups ...` shows
+what a selection runs without running it.
 Pull requests exercise nine focused window-move durations, including every value
 from 40 through 80 ms. Release and manual E2E workflows exercise the full
 41-value matrix, and so does the Tart VM by default.

@@ -9,6 +9,9 @@ SYSTEM_TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
 FIXTURE_DIR="/tmp/debut-e2e-fixtures"
 DURATION_PROFILE="${3:-full}"
 GALLERY_CAPTURE="${4:-on}"
+SELECTED_GROUPS="${5:-all}"
+# Suite groups run inside DebutE2E; permissions are the first-use TCC journeys this script runs.
+SUITE_GROUP_NAMES="smoke overlay-input drag-drop desktop-navigation fullscreen window-moves window-lifecycle onboarding rendering"
 
 # Checked before anything else, including the artifacts, so a bad request mutates nothing.
 if [[ "$DURATION_PROFILE" != ordinary && "$DURATION_PROFILE" != full ]]; then
@@ -18,6 +21,27 @@ fi
 if [[ "$GALLERY_CAPTURE" != on && "$GALLERY_CAPTURE" != off ]]; then
     echo "Gallery capture must be on or off, not '$GALLERY_CAPTURE'." >&2
     exit 2
+fi
+RUN_PERMISSIONS=false
+SUITE_GROUPS=""
+if [[ "$SELECTED_GROUPS" == all ]]; then
+    RUN_PERMISSIONS=true
+    SUITE_GROUPS=all
+else
+    for group in ${SELECTED_GROUPS//,/ }; do
+        if [[ "$group" == permissions ]]; then
+            RUN_PERMISSIONS=true
+        elif [[ " $SUITE_GROUP_NAMES " == *" $group "* ]]; then
+            SUITE_GROUPS="${SUITE_GROUPS:+$SUITE_GROUPS,}$group"
+        else
+            echo "Unknown group '$group'. Known groups: $SUITE_GROUP_NAMES permissions" >&2
+            exit 2
+        fi
+    done
+    if [[ "$RUN_PERMISSIONS" == false && -z "$SUITE_GROUPS" ]]; then
+        echo "The group selection '$SELECTED_GROUPS' selects nothing." >&2
+        exit 2
+    fi
 fi
 
 # This script replaces the installed app and rewrites TCC, so refuse to run
@@ -299,9 +323,12 @@ rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 status=0
 
-guest_phase onboarding
 # First-run permissions must be tested as real TCC denials, not simulated model flags.
 # Only this disposable host rewrites TCC; the normal suite never changes the developer's grants.
+# They cost the better part of a minute and a second fixture restore, so only a selection that
+# includes the permissions group pays for them.
+if [[ "$RUN_PERMISSIONS" == true ]]; then
+guest_phase permission-journeys
 as_console pkill -f "$APP_PATH" 2>/dev/null || true
 as_console env HOME="$console_home" "$E2E_SOURCE" switch-to-desktop 0
 as_console open -a TextEdit "$FIXTURE_DIR/one.txt" "$FIXTURE_DIR/two.txt"
@@ -356,20 +383,27 @@ as_console pkill -x TextEdit 2>/dev/null || true
 as_console open -na TextEdit "$FIXTURE_DIR/one.txt"
 as_console open -na TextEdit "$FIXTURE_DIR/two.txt"
 wait_for_fixture_apps
+fi
 
+if [[ -n "$SUITE_GROUPS" ]]; then
+guest_phase launch
 echo "Launching Debut in the guest Aqua session..."
 as_console launchctl setenv DEBUT_FORCE_DISPLAY_STACK_INDICATOR 1
 as_console env DEBUT_FORCE_DISPLAY_STACK_INDICATOR=1 "$APP_PATH/Contents/MacOS/Debut" --force-display-stack-indicator >/tmp/debut-e2e-debut.log 2>&1 </dev/null &
 wait_for_debut_ready
 
 guest_phase suite
-echo "Running the full suite with the $DURATION_PROFILE duration profile, including the synthetic drag gestures..."
+suite_arguments=()
+if [[ "$SUITE_GROUPS" != all ]]; then suite_arguments=(--groups "$SUITE_GROUPS"); fi
+echo "Running suite groups $SUITE_GROUPS with the $DURATION_PROFILE duration profile, including the synthetic drag gestures..."
 unset GITHUB_ACTIONS
 set +e
-as_console env HOME="$console_home" GITHUB_ACTIONS= DEBUT_E2E_DURATION_PROFILE="$DURATION_PROFILE" "$E2E_SOURCE"
+as_console env HOME="$console_home" GITHUB_ACTIONS= DEBUT_E2E_DISPOSABLE_SESSION=1 \
+    DEBUT_E2E_FIXTURE_DIR="$FIXTURE_DIR" DEBUT_E2E_DURATION_PROFILE="$DURATION_PROFILE" "$E2E_SOURCE" ${suite_arguments[@]+"${suite_arguments[@]}"}
 suite_status=$?
 if (( suite_status != 0 )); then status="$suite_status"; fi
 set -e
+fi
 
 # The gallery is review evidence: it asserts only that each screenshot was written. Rendering
 # assertions live in the suite above and run either way.
