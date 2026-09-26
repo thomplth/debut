@@ -11,13 +11,38 @@ MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 FRAMEWORKS="$APP_BUNDLE/Contents/Frameworks"
 
-echo "Building $APP_NAME in release mode..."
+# Only the products a caller stages are compiled. The app needs Debut alone; E2E callers add
+# DebutE2E. Building every product used to compile the demo, benchmark and fixture executables
+# on every local E2E retry. CI's `swift test` still compiles every target.
+#   DEBUT_BUILD_PRODUCTS="Debut DebutE2E" scripts/build-app.sh
+#   scripts/build-app.sh --plan    # print the build commands and stop
+KNOWN_PRODUCTS="Debut DebutE2E DebutDemo DebutBenchmarks DebutPerformanceFixture"
+PRODUCTS="${DEBUT_BUILD_PRODUCTS:-Debut}"
+case " $PRODUCTS " in *" Debut "*) ;; *) PRODUCTS="Debut $PRODUCTS" ;; esac
+for product in $PRODUCTS; do
+    case " $KNOWN_PRODUCTS " in
+        *" $product "*) ;;
+        *) echo "Unknown product '$product'; expected some of: $KNOWN_PRODUCTS" >&2; exit 2 ;;
+    esac
+done
+
 cd "$PROJECT_DIR"
 # Debut is arm64-only. Without --arch, `swift build` targets whatever host it runs on, so an
 # Intel machine or a toolchain running under Rosetta would produce an x86_64 bundle that still
 # looks like a valid release.
 SWIFT_BUILD=(env TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift build -c release --arch arm64)
-"${SWIFT_BUILD[@]}" 2>&1
+
+if [[ "${1:-}" == --plan ]]; then
+    for product in $PRODUCTS; do
+        echo "swift build -c release --arch arm64 --product $product"
+    done
+    exit 0
+fi
+
+echo "Building $APP_NAME in release mode (products: $PRODUCTS)..."
+for product in $PRODUCTS; do
+    "${SWIFT_BUILD[@]}" --product "$product" 2>&1
+done
 
 # --arch puts the product under a triple-specific directory, so ask rather than assume.
 BIN_DIR="$("${SWIFT_BUILD[@]}" --show-bin-path)"
@@ -88,5 +113,10 @@ codesign "${SIGN_ARGS[@]}" --entitlements "$PROJECT_DIR/Resources/Debut.entitlem
 codesign --verify --strict --verbose=2 "$APP_BUNDLE"
 
 echo ""
+for product in $PRODUCTS; do
+    [[ "$product" == Debut ]] && continue
+    [[ -x "$BIN_DIR/$product" ]] || { echo "Missing built product $BIN_DIR/$product" >&2; exit 1; }
+    echo "Built product: $BIN_DIR/$product"
+done
 echo "Built: $APP_BUNDLE"
 echo "To install: cp -R \"$APP_BUNDLE\" /Applications/"

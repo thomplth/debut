@@ -252,7 +252,7 @@ build_products() {
     # The bundle name belongs to build-app.sh; naming it again here is how a rename last
     # slipped through, staging a path that no longer existed.
     build_log="$(mktemp)"
-    "$PROJECT_DIR/scripts/build-app.sh" | tee "$build_log"
+    DEBUT_BUILD_PRODUCTS="Debut DebutE2E" "$PROJECT_DIR/scripts/build-app.sh" | tee "$build_log"
     APP_BUNDLE="$(awk '/^Built: /{ sub(/^Built: /, ""); print }' "$build_log")"
     rm -f "$build_log"
     if [[ -z "$APP_BUNDLE" || ! -d "$APP_BUNDLE" ]]; then
