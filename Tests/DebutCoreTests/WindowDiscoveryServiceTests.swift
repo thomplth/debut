@@ -125,6 +125,50 @@ struct WindowDiscoveryServiceTests {
         )
     }
 
+    @Test("At startup the front app's focused window is probed, not left to the next activation")
+    func startupProbesFrontAppFocus() throws {
+        // Two visible windows of the front app make its bundle ambiguous, so only the AX probe can
+        // say which one has focus. Without a startup probe, Debut learned nothing until the user
+        // activated another app, and a fullscreen entry in the meantime went unnoticed.
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1, ownerPID: 10), liveWindow(2, ownerPID: 10)]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 2 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.armingOverride = { _, _ in .armed }
+        var sources: [FrontmostAppObservationSource] = []
+        service.onFrontmostAppChanged = { _, source in sources.append(source) }
+        var activation: RuntimeWindowSnapshot?
+        service.onAppActivated = { activation = $0 }
+
+        service.seedFrontmostApp(AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false))
+
+        #expect(activation?.focusedWindowID == 2)
+        #expect(sources == [.startupSnapshot])
+    }
+
+    @Test("Debut in front at startup is seeded without probing itself")
+    func startupDoesNotProbeDebut() {
+        let service = WindowDiscoveryService(
+            windowService: MockWindowService(),
+            focusedWindowProvider: { _ in 7 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var fronts: [String?] = []
+        service.onFrontmostAppChanged = { bundleID, _ in fronts.append(bundleID) }
+        var activated = false
+        service.onAppActivated = { _ in activated = true }
+
+        service.seedFrontmostApp(AppInfo(bundleID: "com.thomplth.Debut", name: "Debut", pid: 42, isHidden: false))
+        service.seedFrontmostApp(nil)
+
+        #expect(fronts == ["com.thomplth.Debut", nil])
+        #expect(!activated)
+    }
+
     @Test("Activation reconciles the early focus sample before publishing focus")
     func activationReconcilesBeforePublishingFocus() {
         let windowService = MockWindowService()
