@@ -60,7 +60,7 @@ if [[ ! -f "$SHARE_DIR/KeyCastr-0.11.1.app.zip" ]]; then
 fi
 
 echo "Building Debut and the demo driver on the host..."
-"$PROJECT_DIR/scripts/build-app.sh"
+DEBUT_BUILD_PRODUCTS="Debut DebutE2E" "$PROJECT_DIR/scripts/build-app.sh"
 TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift build -c release --product DebutDemo \
     --package-path "$PROJECT_DIR"
 
