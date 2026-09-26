@@ -2973,12 +2973,15 @@ func scenario_system_duration_transition() {
             && nativeTransitionSpaces.desktopIndex(forWindow: $0.windowID) != nil
     }
 
+    // Two desktops away, so a route that walks through the one between is visible: macOS's own
+    // Switch to Desktop N never shows it, and a hop-by-hop Dock route shows it for a whole slide.
     if nativeFixtureDesktopReady,
-       nativeTransitionSpaces.desktopCount() >= 2,
+       nativeTransitionSpaces.desktopCount() >= 3,
        let fixture = nativeTransitionFixture,
        let originalDesktop = nativeTransitionSpaces.desktopIndex(forWindow: fixture.windowID),
        let sourceDesktop = nativeTransitionSpaces.currentDesktopIndex() {
-        let targetDesktop = sourceDesktop == 0 ? 1 : 0
+        let targetDesktop = sourceDesktop == 0 ? 2 : 0
+        let intermediateDesktop = 1
         nativeTransitionSpaces.moveWindow(windowID: fixture.windowID, toDesktop: targetDesktop)
         let fixturePlaced = waitFor {
             nativeTransitionSpaces.desktopIndex(forWindow: fixture.windowID) == targetDesktop
@@ -3044,9 +3047,20 @@ func scenario_system_duration_transition() {
         }
         let selectedFixture = selectedStageWindowID() == String(fixture.windowID)
         postFlagsChanged(flags: [])
-        let nativeTransitionLanded = waitFor(timeout: 8) {
-            nativeTransitionSpaces.currentDesktopIndex() == targetDesktop
+        // The intermediate desktop shows for a whole slide on a hop-by-hop route, so sampling
+        // every 10ms cannot miss it.
+        var observedDesktops: [Int] = []
+        let transitionDeadline = Date().addingTimeInterval(8)
+        while Date() < transitionDeadline {
+            if let current = nativeTransitionSpaces.currentDesktopIndex(),
+               observedDesktops.last != current {
+                observedDesktops.append(current)
+            }
+            if observedDesktops.last == targetDesktop { break }
+            wait(0.01)
         }
+        let nativeTransitionLanded = observedDesktops.last == targetDesktop
+        let intermediateShown = observedDesktops.contains(intermediateDesktop)
         let nativeFocusLanded = waitFor(timeout: 5) {
             let focus = liveKeyboardFocus()
             return focus?.ownerPID == fixture.ownerPID && focus?.windowID == fixture.windowID
@@ -3055,6 +3069,9 @@ func scenario_system_duration_transition() {
             $0["event"] == "system_desktop_switch_requested"
                 && $0["windowID"] == String(fixture.windowID)
         }
+        let nativeShortcut = readEvents().last {
+            $0["event"] == "desktop_switch_native_shortcut_posted"
+        }
         let finalNativeFocus = liveKeyboardFocus()
         info("  System-duration transition: fixtureReady=\(nativeTransitionFixtureReady) "
             + "placed=\(fixturePlaced) sourceReady=\(nativeTransitionSourceReady) "
@@ -3062,6 +3079,8 @@ func scenario_system_duration_transition() {
             + "tracked=\(fixtureTracked) overlay=\(overlayOpened) "
             + "selected=\(selectedFixture) requested=\(nativeRequestReported) "
             + "landed=\(nativeTransitionLanded) focused=\(nativeFocusLanded) "
+            + "observed=\(observedDesktops.map(String.init).joined(separator: "->")) "
+            + "shortcut=\(nativeShortcut.map { "\($0)" } ?? "none") "
             + "desktop=\(nativeTransitionSpaces.currentDesktopIndex().map(String.init) ?? "none") "
             + "expected=\(fixture.ownerPID)/\(fixture.windowID) "
             + "actual=\(finalNativeFocus.map { "\($0.ownerPID)/\($0.windowID)" } ?? "none")")
@@ -3070,6 +3089,9 @@ func scenario_system_duration_transition() {
                 && nativeApplicationReady && fixtureTracked && overlayOpened
                 && selectedFixture && nativeRequestReported && nativeTransitionLanded
                 && nativeFocusLanded
+        }
+        test("A far Command-Tab switch never shows the desktop in between when faster movement is off") {
+            nativeTransitionLanded && !intermediateShown && nativeShortcut != nil
         }
 
         _ = terminateDebutAndWait()
@@ -3087,6 +3109,9 @@ func scenario_system_duration_transition() {
             + "current=\(nativeTransitionSpaces.currentDesktopIndex().map(String.init) ?? "none")")
         test("The disabled master preserves each child desktop preference") { false }
         test("Command-Tab uses the system-style desktop transition when faster movement is off") {
+            false
+        }
+        test("A far Command-Tab switch never shows the desktop in between when faster movement is off") {
             false
         }
     }

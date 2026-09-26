@@ -1447,7 +1447,22 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     private let topologyCacheLock = NSLock()
     private var storedTopology: SpaceTopology?
 
-    public init() {}
+    let nativeDesktopShortcut: NativeDesktopShortcutSwitch
+    private let nativeShortcutLock = NSLock()
+    private var nativeShortcutGeneration: UInt64 = 0
+
+    public convenience init() {
+        self.init(nativeDesktopShortcut: NativeDesktopShortcutSwitch(
+            hotKeys: WindowServerSymbolicHotKeys(),
+            scheduleRestore: { delay, restore in
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: restore)
+            }
+        ))
+    }
+
+    init(nativeDesktopShortcut: NativeDesktopShortcutSwitch) {
+        self.nativeDesktopShortcut = nativeDesktopShortcut
+    }
 
     public func cachedSpaceTopology() -> SpaceTopology? {
         topologyCacheLock.withLock { storedTopology }
@@ -1773,8 +1788,52 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     }
 
     @discardableResult
+    /// Prefers macOS's own Switch to Desktop N, which the Dock answers with one direct
+    /// transition. The addressed swipe route stays as the fallback for a desktop the shortcut
+    /// cannot reach, and for a shortcut the Dock did not act on.
     public func switchToDesktopWithSystemAnimation(_ location: DesktopLocation) -> Bool {
-        requestSwitch(to: location, animation: .system)
+        let topology = spaceTopology()
+        if !isSwitchInFlight(stackID: location.stackID),
+           let originID = topology.stack(id: location.stackID)?.currentDesktopID,
+           let posted = nativeDesktopShortcut.request(location, in: topology) {
+            let generation = nativeShortcutLock.withLock {
+                nativeShortcutGeneration &+= 1
+                return nativeShortcutGeneration
+            }
+            DiagnosticReporter.shared.report("desktop_switch_native_shortcut_posted", details: [
+                "desktop": "\(location.index + 1)",
+                "hotKeyID": "\(posted.hotKeyID)",
+                "temporarilyEnabled": "\(posted.temporarilyEnabled)",
+            ])
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.nativeShortcutFallbackDelay) {
+                [weak self] in
+                self?.fallBackIfNativeShortcutMissed(location, originID: originID,
+                                                     generation: generation)
+            }
+            return true
+        }
+        return requestSwitch(to: location, animation: .system)
+    }
+
+    /// Past the length of any Dock transition, including the Reduce Motion fade.
+    static let nativeShortcutFallbackDelay: TimeInterval = 1.5
+
+    /// A keystroke the Dock did not act on leaves the origin showing and nothing else to wait
+    /// for, so the request continues on the swipe route. Any other desktop showing is a result
+    /// — the requested one, or one the user chose meanwhile — and is left alone.
+    private func fallBackIfNativeShortcutMissed(
+        _ location: DesktopLocation,
+        originID: CGSSpaceID,
+        generation: UInt64
+    ) {
+        guard nativeShortcutLock.withLock({ nativeShortcutGeneration == generation }),
+              spaceTopology().stack(id: location.stackID)?.currentDesktopID == originID
+        else { return }
+        let continued = requestSwitch(to: location, animation: .system)
+        DiagnosticReporter.shared.report("desktop_switch_native_shortcut_missed", details: [
+            "desktop": "\(location.index + 1)",
+            "fallbackPosted": "\(continued)",
+        ])
     }
 
     @discardableResult

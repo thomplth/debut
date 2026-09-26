@@ -244,6 +244,11 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     ) -> CGEvent? {
         let performanceID = performanceRecorder.begin(.eventTap, sampleResources: false)
         defer { performanceRecorder.end(performanceID) }
+        // Debut's own keystrokes, such as the native Switch to Desktop N it posts, are
+        // addressed to macOS and must never be read back as the user's shortcut.
+        if event.getIntegerValueField(.eventSourceUserData) == DesktopSwipeService.syntheticMarker {
+            return event
+        }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
