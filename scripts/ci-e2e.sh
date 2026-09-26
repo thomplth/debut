@@ -39,7 +39,7 @@ rm -f "$RUNNER_TEMP/screen-capture-preflight.png"
 
 echo "Building and installing Debut..."
 build_log="$(mktemp)"
-./scripts/build-app.sh | tee "$build_log"
+DEBUT_BUILD_PRODUCTS="Debut DebutE2E" ./scripts/build-app.sh | tee "$build_log"
 app_bundle="$(awk '/^Built: /{ sub(/^Built: /, ""); print }' "$build_log")"
 rm -f "$build_log"
 if [[ -z "$app_bundle" || ! -d "$app_bundle" ]]; then
