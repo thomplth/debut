@@ -52,7 +52,16 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS" "$RESOURCES" "$FRAMEWORKS"
 
 cp "$BIN_DIR/Debut" "$MACOS/Debut"
+# Symbols for crash reports. SwiftPM leaves the debug info in the object files, which do not
+# ship, so a report from this exact binary can only be symbolicated with this dSYM.
+rm -rf "$BUILD_DIR/Debut.dSYM"
+/usr/bin/xcrun dsymutil "$BIN_DIR/Debut" -o "$BUILD_DIR/Debut.dSYM"
 cp "$PROJECT_DIR/Resources/Info.plist" "$CONTENTS/Info.plist"
+# Crash reports need a destination, which only release builds are given. Without one the
+# reporter stays off, so source builds and forks never send to the maintainer's project.
+if [[ -n "${DEBUT_CRASH_REPORT_DSN:-}" ]]; then
+    /usr/bin/plutil -insert DebutCrashReportDSN -string "$DEBUT_CRASH_REPORT_DSN" "$CONTENTS/Info.plist"
+fi
 cp "$PROJECT_DIR/Resources/PrivacyInfo.xcprivacy" "$RESOURCES/PrivacyInfo.xcprivacy"
 # Onboarding illustrates the current app with the same real captures as the README.
 for image in overlay all-windows; do
@@ -119,4 +128,5 @@ for product in $PRODUCTS; do
     echo "Built product: $BIN_DIR/$product"
 done
 echo "Built: $APP_BUNDLE"
+echo "Symbols: $BUILD_DIR/Debut.dSYM"
 echo "To install: cp -R \"$APP_BUNDLE\" /Applications/"

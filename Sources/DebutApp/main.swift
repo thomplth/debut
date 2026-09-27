@@ -20,6 +20,9 @@ final class SparkleApplicationUpdater: ApplicationUpdating {
 }
 
 let app = NSApplication.shared
-let delegate = AppDelegate(applicationUpdater: SparkleApplicationUpdater())
+let delegate = AppDelegate(
+    applicationUpdater: SparkleApplicationUpdater(),
+    crashReporter: SentryCrashReporter()
+)
 app.delegate = delegate
 app.run()

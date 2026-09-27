@@ -36,6 +36,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Numbered / same-app numbered modifiers | Control / Control-Option |
 | Overlay card selection | H left, J down, K up, L right (configurable) |
 | Launch at login / show in Dock | On / On |
+| Send crash reports automatically | Off; shown only in release builds that can send reports |
 | Excluded apps | Empty |
 
 Cache age is evaluated when capture work is requested; it is not a recurring
@@ -83,7 +84,7 @@ changes save immediately and update shared onboarding controls and menu checkmar
 
 | Page | Contents |
 | --- | --- |
-| General | Login launch, Dock visibility, Reduce Motion guidance, and a running-app picker for applications ignored by window management. The menu-bar item remains available with the Dock icon off. |
+| General | Login launch, Dock visibility, automatic crash reports, Reduce Motion guidance, and a running-app picker for applications ignored by window management. The menu-bar item remains available with the Dock icon off. |
 | Desktops | Faster switching and its number-key, Control-arrow, and trackpad methods, followed by transition duration and the desktop-change indicator. |
 | Switcher | Command-Tab desktop isolation, Option-Tab activation, window previews, display placement, preview freshness, overlay hold delay, and held cycling pace. |
 | Appearance | Glass and card layout, adaptive preview sizing, inactive-stage scale, and selected-window treatment. |
@@ -99,8 +100,12 @@ Support contains actions rather than preferences.
 
 The menu-bar item provides feature toggles, Settings, Setup, Tutorial, update
 checks, and Quit. System Reduce Motion changes overlay animation; it is not a separate
-Debut animation switch. See [privacy](../docs/privacy.md) for local data and the
-user-initiated diagnostic export boundary.
+Debut animation switch. See [privacy](../docs/privacy.md) for local data, the
+user-initiated diagnostic export boundary, and crash reports.
+
+After a crash, the next launch asks whether to send that report, with a checkbox
+that turns on automatic sending. Don’t Send deletes it. The question appears only
+in builds that can send reports.
 
 ## Onboarding and tutorial
 
@@ -129,7 +134,7 @@ Setup has five pages and never requires shortcut practice:
    action completes setup before opening its destination.
 
 Without Screen Recording, both example screenshots show the icon-based fallback.
-No remote telemetry or sharing consent is part of setup. Back/Continue never
+No telemetry or crash-report consent is part of setup. Back/Continue never
 changes feature preferences. Setup progress survives restarts, and existing users
 are not forced through setup again. The menu bar reopens setup at any time,
 resuming wherever it was left.
