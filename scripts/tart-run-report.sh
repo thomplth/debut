@@ -220,6 +220,12 @@ for path in sorted(glob.glob(os.path.join(run_dir, "results", "checks", "*.json"
             where = check.get("scenario") and f'{check.get("group")}/{check.get("scenario")}'
             checks["failures"].append(f'{where or check.get("section", "")}: {check.get("name", "")}')
 
+def optional_json(path):
+    try:
+        return json.load(open(path))
+    except (OSError, ValueError):
+        return None
+
 report = {
     "schemaVersion": 1,
     "runID": os.path.basename(run_dir.rstrip("/")),
@@ -232,6 +238,7 @@ report = {
     "guestPhases": phases(os.path.join(run_dir, "results", "guest-phases.tsv"), False),
     "checks": checks,
     "scenarios": scenarios,
+    "hostProfile": optional_json(os.path.join(run_dir, "results", "host-profile.json")),
 }
 with open(os.path.join(run_dir, "report.json"), "w") as handle:
     json.dump(report, handle, indent=2)
@@ -264,6 +271,9 @@ if cpu:
             return f'peak {value["peakPercent"]}% mean {value["meanPercent"]}%'
         return str(value)
     print("  cpu:   " + "  ".join(f"{k} {show(v)}" for k, v in cpu.items()))
+profile = report.get("hostProfile") or {}
+if profile:
+    print("  host profile: " + " ".join(f"{k}={v}" for k, v in profile.items()))
 scenarios = report.get("scenarios", {})
 if scenarios.get("ran") and scenarios.get("not_selected"):
     print(f'  scenarios: {len(scenarios["ran"])} ran, {len(scenarios["not_selected"])} not selected')

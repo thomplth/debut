@@ -1289,7 +1289,7 @@ public struct StageOverlayView: View {
     @State private var windowFrames: [WindowFrameID: CGRect] = [:]
     @State private var hoveredSpaceIndex: Int?
     @State private var scrollAccumulator = SpaceScrollAccumulator()
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @HostReducesMotion private var reduceMotion
 
     public init(
         viewModel: StageOverlayViewModel,
@@ -2110,7 +2110,7 @@ struct StageSwiftUIView: View {
     var onWindowSelected: ((Int, Int) -> Void)?
     var onWindowDragChanged: ((StageWindowData, Int, DragGesture.Value) -> Void)?
     var onWindowDragEnded: ((StageWindowData, Int, DragGesture.Value) -> Void)?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @HostReducesMotion private var reduceMotion
 
     private var lifecycleTransition: StageFocusTransition? {
         StageMotion.windowLifecycleTransition(

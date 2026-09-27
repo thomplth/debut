@@ -6,7 +6,7 @@ import SwiftUI
 /// the user's duration setting, and both sides preserve the captured elapsed time.
 struct OnboardingSpeedVideo: View {
     let directory: URL?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @HostReducesMotion private var reduceMotion
     @State private var paused = false
 
     var body: some View {

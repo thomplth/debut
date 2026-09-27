@@ -49,9 +49,13 @@ fi
 RUN_SUITE=false
 if [[ -n "$SUITE_GROUPS" || "$SELECTED_SCENARIOS" != none ]]; then RUN_SUITE=true; fi
 
+# Staged beside this script under the same artifact ID; see space_build in tart-e2e.sh.
+HOST_PROFILE="$(dirname "${BASH_SOURCE[0]}")/$(basename "${BASH_SOURCE[0]}" | sed 's/^tart-e2e-guest-/host-profile-/')"
+HOST_FINGERPRINT="/tmp/debut-host-profile.json"
+
 # This script replaces the installed app and rewrites TCC, so refuse to run
 # anywhere the host has not staged artifacts through VirtioFS.
-if [[ ! -f "$APP_ARCHIVE" || ! -x "$E2E_SOURCE" ]]; then
+if [[ ! -f "$APP_ARCHIVE" || ! -x "$E2E_SOURCE" || ! -f "$HOST_PROFILE" ]]; then
     echo "The staged E2E artifacts are missing; run scripts/tart-e2e.sh from the host." >&2
     exit 1
 fi
@@ -86,6 +90,7 @@ GUEST_PHASE=""
 GUEST_PHASE_START=""
 rm -f "$GUEST_PHASES"
 rm -rf /tmp/debut-e2e-results
+rm -f "$HOST_FINGERPRINT"
 guest_phase() {
     local now
     now="$(/usr/bin/perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%.0f", clock_gettime(CLOCK_MONOTONIC) * 1000')"
@@ -100,6 +105,7 @@ cleanup() {
     guest_phase ""
     mkdir -p "$RESULTS_DIR"
     cp "$GUEST_PHASES" "$RESULTS_DIR/guest-phases.tsv" 2>/dev/null || true
+    cp "$HOST_FINGERPRINT" "$RESULTS_DIR/host-profile.json" 2>/dev/null || true
     # Every DebutE2E invocation writes its own per-check results file.
     if [[ -d /tmp/debut-e2e-results ]]; then
         ditto /tmp/debut-e2e-results "$RESULTS_DIR/checks"
@@ -284,11 +290,9 @@ reset_capture_reminders() {
 reset_capture_reminders
 
 guest_phase fixtures
-# Under Reduce Motion the removal transition is a 0.12s fade rather than a 0.36s spring, which is
-# correct behaviour but too brief to sample as motion. The fade branch is covered by unit tests, so
-# the disposable guest is pinned to the spring instead of the E2E check guessing which one it drew.
-as_console env HOME="$console_home" defaults write com.apple.universalaccess reduceMotion -bool false
-as_console env HOME="$console_home" defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool true
+# The same profile hosted runners apply; its fingerprint comes back as results/host-profile.json.
+as_console env HOME="$console_home" DEBUT_HOST_PROFILE_DISPOSABLE=1 \
+    /bin/bash "$HOST_PROFILE" apply --out "$HOST_FINGERPRINT"
 
 # Demo capture uses this same disposable guest. Remove its windows before planting the
 # two-window fixture, including restored state that would repopulate other desktops.
