@@ -46,6 +46,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private let activationPolicy = ActivationPolicyCoordinator()
     private let processResponsivenessActivity = ProcessResponsivenessActivity()
     private let applicationUpdater: any ApplicationUpdating
+    private var crashReports: CrashReportCoordinator!
 
     private var windowService: AccessibilityWindowService?
     private var keyboardService: EventTapKeyboardService?
@@ -68,9 +69,35 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         ])
     }
 
-    public init(applicationUpdater: any ApplicationUpdating = DisabledApplicationUpdater()) {
+    public init(
+        applicationUpdater: any ApplicationUpdating = DisabledApplicationUpdater(),
+        crashReporter: any CrashReporting = DisabledCrashReporter()
+    ) {
         self.applicationUpdater = applicationUpdater
         super.init()
+        crashReports = CrashReportCoordinator(
+            reporter: crashReporter,
+            askToSend: { Self.askToSendCrashReport() },
+            enableAutomaticSending: { [weak self] in
+                guard let self else { return }
+                var settings = self.currentSettings
+                settings.sendsCrashReportsAutomatically = true
+                self.applySettings(settings)
+            }
+        )
+    }
+
+    private static func askToSendCrashReport() -> CrashReportDecision {
+        let alert = NSAlert()
+        alert.messageText = "Debut quit unexpectedly"
+        alert.informativeText = "Send a crash report to help fix the problem? It contains the app and macOS versions, your Mac model, and where Debut stopped, but no window titles or screenshots."
+        alert.addButton(withTitle: "Send Report")
+        alert.addButton(withTitle: "Don’t Send")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Send crash reports automatically in the future"
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return .dontSend }
+        return alert.suppressionButton?.state == .on ? .alwaysSend : .send
     }
 
     private static func runningBundleIDsByPID(windowService: any WindowService) -> [pid_t: String] {
@@ -95,6 +122,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         debouncedSaver = DebouncedSaver(store: store)
         pendingSpaceManager = (try? store.load()) ?? SpaceManager()
         currentSettings = (try? store.loadSettings()) ?? AppSettings()
+        crashReports.start(sendsAutomatically: currentSettings.sendsCrashReportsAutomatically)
         let spaceService = SpaceService()
         spaceService.switchDuration = currentSettings.spaceSwitchDuration
         spaceService.onSwitchRecovery = { [weak self] in
@@ -161,6 +189,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         diag.report("app_ready")
+        DispatchQueue.main.async { [weak self] in self?.crashReports.resolveUnsentCrashReport() }
         hiddenIdlePerformanceID = PerformanceRecorder.shared.begin(.hiddenIdle)
     }
 
@@ -1683,6 +1712,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         self.launchAtLogin.apply(enabled: newSettings.launchAtLogin)
         self.activationPolicy.apply(showsDockIcon: newSettings.showsDockIcon)
         self.currentSettings = newSettings
+        crashReports.settingsChanged(sendsAutomatically: newSettings.sendsCrashReportsAutomatically)
         if !newSettings.showsDesktopSwitchIndicator {
             desktopSwitchIndicatorWindows.values.forEach { $0.hideImmediately() }
         }
@@ -1746,6 +1776,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             settings: settings,
             spaceManager: currentSpaceManager
         )
+        vm.crashReportingAvailable = crashReports.isAvailable
         vm.onSettingsChanged = { [weak self] newSettings in
             DispatchQueue.main.async {
                 guard let self else { return }

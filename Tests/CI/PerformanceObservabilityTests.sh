@@ -22,7 +22,7 @@ grep -q 'user-initiated' docs/privacy.md
 ! grep -q 'supervisory authority' docs/privacy.md
 ! test -f docs/telemetry-anonymization-assessment.md
 /usr/bin/plutil -extract NSPrivacyTracking raw -o - Resources/PrivacyInfo.xcprivacy | grep -qx false
-/usr/bin/plutil -extract NSPrivacyCollectedDataTypes raw -o - Resources/PrivacyInfo.xcprivacy | grep -qx 0
+/usr/bin/plutil -extract NSPrivacyCollectedDataTypes raw -o - Resources/PrivacyInfo.xcprivacy | grep -qx 2
 grep -q 'PrivacyInfo.xcprivacy' scripts/build-app.sh
 ! grep -Riq 'TelemetryDeck' Sources Resources
 ! test -f Sources/DebutCore/Services/Telemetry.swift
