@@ -63,6 +63,80 @@ struct DesktopReconfigurationObserverTests {
         ))
     }
 
+    /// Measured on macOS 27.0 (26A428): the WindowManager layer-19 overlay orders out for
+    /// 40-80ms around every desktop switch inside Mission Control, while the Dock's one
+    /// display-sized layer-20 window stays up from open to close.
+    @Test("macOS 27 keeps an overview while its WindowManager overlay blinks out for a switch")
+    func detectsDockMissionControlBackdrop() {
+        let display = CGRect(x: 0, y: 0, width: 2_560, height: 1_440)
+        let switching: [[String: Any]] = [
+            ["kCGWindowLayer": 14, "kCGWindowOwnerName": "WindowManager",
+             "kCGWindowBounds": CGRect(x: 0, y: 0, width: 2_560, height: 96).dictionaryRepresentation],
+            ["kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
+             "kCGWindowBounds": display.dictionaryRepresentation],
+        ]
+        let dockBadge: [[String: Any]] = [
+            ["kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
+             "kCGWindowBounds": CGRect(x: 0, y: 0, width: 91, height: 30).dictionaryRepresentation],
+        ]
+
+        #expect(DockOverviewDetector.isActive(
+            in: switching, operatingSystemMajor: 27, displayBounds: [display]
+        ))
+        #expect(!DockOverviewDetector.isActive(
+            in: dockBadge, operatingSystemMajor: 27, displayBounds: [display]
+        ))
+    }
+
+    @Test("The Dock backdrop is found while ordered out, and an empty by-id answer means ordered out")
+    func dockBackdropIsReadByWindowID() {
+        let display = CGRect(x: 0, y: 0, width: 2_560, height: 1_440)
+        let everyWindow: [[String: Any]] = [
+            ["kCGWindowNumber": 59_051, "kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
+             "kCGWindowBounds": display.dictionaryRepresentation],
+            ["kCGWindowNumber": 7, "kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
+             "kCGWindowBounds": CGRect(x: 0, y: 0, width: 91, height: 30).dictionaryRepresentation],
+            ["kCGWindowNumber": 8, "kCGWindowLayer": 20, "kCGWindowOwnerName": "Other",
+             "kCGWindowBounds": display.dictionaryRepresentation],
+        ]
+        #expect(DockOverviewWindowProbe.backdropWindowIDs(
+            in: everyWindow, displayBounds: [display]
+        ) == [59_051])
+
+        #expect(DockOverviewWindowProbe.anyOnScreen(
+            [["kCGWindowNumber": 59_051, "kCGWindowIsOnscreen": true]]
+        ))
+        // Measured on macOS 27.0: a by-id query returns nothing at all for the ordered-out
+        // backdrop, exactly as for a window that no longer exists. Reading that as unknown
+        // sent every input back to the stale cache, so the first swipe was still claimed.
+        #expect(!DockOverviewWindowProbe.anyOnScreen([]))
+        #expect(!DockOverviewWindowProbe.anyOnScreen([["kCGWindowNumber": 59_051]]))
+    }
+
+    @Test("A live Mission Control reading overrides stale cached overview state")
+    func liveOverviewStateOverridesCache() {
+        let state = NavigationEligibilityState()
+        let live = LiveOverview()
+        let eligibility = DesktopNavigationEligibility(
+            canSwitchSpaces: { state.canSwitch },
+            requiresOverviewRecovery: false,
+            liveOverviewActive: { live.value }
+        )
+        eligibility.update(stackID: "display", topology: state.topology, overviewActive: false)
+
+        // No 1327 on macOS 27: the cache still says closed when the first swipe begins.
+        live.value = true
+        #expect(eligibility.blockReason() == .dockOverviewActive)
+
+        // Closed again before any refresh ran: the cache must not hold the swipe hostage.
+        eligibility.update(stackID: "display", topology: state.topology, overviewActive: true)
+        live.value = false
+        #expect(eligibility.blockReason() == nil)
+
+        live.value = nil
+        #expect(eligibility.blockReason() == .dockOverviewActive)
+    }
+
     @Test("Overview recovery yields once after the Dock overlay disappears")
     func overviewEligibilityRecovers() {
         let state = NavigationEligibilityState()
@@ -331,6 +405,15 @@ struct DesktopReconfigurationObserverTests {
                 }
             }
         }
+    }
+}
+
+private final class LiveOverview: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Bool?
+    var value: Bool? {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }
 
