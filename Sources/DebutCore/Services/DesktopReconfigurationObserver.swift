@@ -50,6 +50,11 @@ public extension Notification.Name {
 /// Exposé to a display-sized WindowManager layer-19 overlay, while Show Desktop uses a
 /// display-sized WindowManager layer-18 overlay. Requiring display size prevents ordinary
 /// WindowManager thumbnails and tiling affordances from blocking navigation.
+///
+/// The layer-19 overlay is not continuous: measured on macOS 27.0 it orders out for 40-80ms
+/// around every desktop switch inside Mission Control, and a refresh that lands in that gap
+/// read the overview as closed. The Dock's display-sized layer-20 backdrop stays up from
+/// open to close, so it is a marker too.
 enum DockOverviewDetector {
     static func isActive() -> Bool {
         guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
@@ -75,21 +80,28 @@ enum DockOverviewDetector {
         }
 
         return windows.contains { window in
-            guard (window[kCGWindowOwnerName as String] as? String) == "WindowManager",
-                  let layer = (window[kCGWindowLayer as String] as? NSNumber)?.int32Value,
-                  layer == 18 || layer == 19,
-                  let boundsDictionary = window[kCGWindowBounds as String] as? [String: Any],
-                  let bounds = CGRect(
-                    dictionaryRepresentation: boundsDictionary as CFDictionary
-                  )
+            guard let owner = window[kCGWindowOwnerName as String] as? String,
+                  let layer = (window[kCGWindowLayer as String] as? NSNumber)?.int32Value
             else { return false }
-            return displayBounds.contains {
-                abs($0.width - bounds.width) <= 1 && abs($0.height - bounds.height) <= 1
+            switch (owner, layer) {
+            case ("WindowManager", 18), ("WindowManager", 19), ("Dock", 20):
+                return isDisplaySized(window, displayBounds: displayBounds)
+            default:
+                return false
             }
         }
     }
 
-    private static func activeDisplayBounds() -> [CGRect] {
+    static func isDisplaySized(_ window: [String: Any], displayBounds: [CGRect]) -> Bool {
+        guard let boundsDictionary = window[kCGWindowBounds as String] as? [String: Any],
+              let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary)
+        else { return false }
+        return displayBounds.contains {
+            abs($0.width - bounds.width) <= 1 && abs($0.height - bounds.height) <= 1
+        }
+    }
+
+    static func activeDisplayBounds() -> [CGRect] {
         var count: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
         var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
@@ -155,6 +167,71 @@ final class OverviewSignalConfirmer {
     }
 }
 
+/// Reads the Dock's overview backdrop at the instant a navigation input begins.
+///
+/// macOS 27.0 sends no overview-open signal at all: SkyLight's 1327 and the Dock's
+/// `AXExposeShowAllWindows` both stay silent, so the cached state still says closed when the
+/// first swipe inside Mission Control begins. The Dock keeps one display-sized layer-20
+/// window per display for the life of its process and only orders it in and out, so it can
+/// be found once off the input path and then queried by id, which measured 0.09ms median
+/// against 0.36ms median and 65ms worst for a full on-screen window list.
+///
+/// A by-id query answers nothing for an ordered-out window, exactly as for one that no
+/// longer exists, so the ids cannot vouch for themselves: a Dock relaunch invalidates them.
+final class DockOverviewWindowProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var windowIDs: [CGWindowID] = []
+
+    /// Looks up the backdrop windows when none are known. Main thread, never from a tap.
+    func resolveIfNeeded() {
+        guard lock.withLock({ windowIDs.isEmpty }) else { return }
+        guard let windows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)
+            as? [[String: Any]]
+        else { return }
+        let found = Self.backdropWindowIDs(
+            in: windows, displayBounds: DockOverviewDetector.activeDisplayBounds()
+        )
+        lock.withLock { windowIDs = found }
+    }
+
+    /// Forgets the backdrop, for when the Dock relaunches or the displays it was sized to
+    /// change.
+    func invalidate() {
+        lock.withLock { windowIDs = [] }
+    }
+
+    /// Whether an overview is up now, or nil when the backdrop is not known.
+    func isOverviewActive() -> Bool? {
+        let ids = lock.withLock { windowIDs }
+        guard !ids.isEmpty else { return nil }
+        return ids.contains { id in
+            Self.anyOnScreen(
+                CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]] ?? []
+            )
+        }
+    }
+
+    static func backdropWindowIDs(
+        in windows: [[String: Any]],
+        displayBounds: [CGRect]
+    ) -> [CGWindowID] {
+        windows.compactMap { window in
+            guard (window[kCGWindowOwnerName as String] as? String) == "Dock",
+                  (window[kCGWindowLayer as String] as? NSNumber)?.int32Value == 20,
+                  DockOverviewDetector.isDisplaySized(window, displayBounds: displayBounds),
+                  let id = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value
+            else { return nil }
+            return id
+        }
+    }
+
+    static func anyOnScreen(_ descriptions: [[String: Any]]) -> Bool {
+        descriptions.contains {
+            ($0[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true
+        }
+    }
+}
+
 final class DesktopNavigationEligibility: @unchecked Sendable {
     enum BlockReason: String {
         case syntheticSwitchUnsupported
@@ -171,15 +248,18 @@ final class DesktopNavigationEligibility: @unchecked Sendable {
     private var overviewRecoveryPending = false
     private var currentDesktopResolved = false
     private let canSwitchSpaces: @Sendable () -> Bool
+    private let liveOverviewActive: @Sendable () -> Bool?
     private let needsOverviewRecovery: Bool
 
     init(
         canSwitchSpaces: @escaping @Sendable () -> Bool,
         requiresOverviewRecovery: Bool = DesktopNavigationEligibility.requiresOverviewRecovery(
             operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-        )
+        ),
+        liveOverviewActive: @escaping @Sendable () -> Bool? = { nil }
     ) {
         self.canSwitchSpaces = canSwitchSpaces
+        self.liveOverviewActive = liveOverviewActive
         self.needsOverviewRecovery = requiresOverviewRecovery
     }
 
@@ -229,11 +309,14 @@ final class DesktopNavigationEligibility: @unchecked Sendable {
         return true
     }
 
+    /// A live reading, when one is available, decides overview ownership outright: the
+    /// cache has no open signal to update it on macOS 27, in either direction.
     func blockReason() -> BlockReason? {
         guard canSwitchSpaces() else { return .syntheticSwitchUnsupported }
+        let liveOverviewActive = liveOverviewActive()
         return lock.withLock {
             guard let overviewActive else { return .dockOverviewStateUnknown }
-            guard !overviewActive else { return .dockOverviewActive }
+            guard !(liveOverviewActive ?? overviewActive) else { return .dockOverviewActive }
             if overviewRecoveryPending {
                 overviewRecoveryPending = false
                 return .dockOverviewRecovery
