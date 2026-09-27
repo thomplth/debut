@@ -57,6 +57,15 @@ final class DeferredFocusProbe: @unchecked Sendable {
         }
         completion?(windowID)
     }
+
+    /// Answers the most recent probe first, as a worker can when the earlier AX read blocks.
+    func resolveLast(pid: pid_t, windowID: CGWindowID?) {
+        let completion: Completion? = lock.withLock {
+            guard let index = pending.lastIndex(where: { $0.0 == pid }) else { return nil }
+            return pending.remove(at: index).1
+        }
+        completion?(windowID)
+    }
 }
 
 final class DeferredWindowCreationRetryScheduler: @unchecked Sendable {
@@ -900,6 +909,74 @@ struct WindowDiscoveryServiceTests {
         probe.resolve(pid: 10, windowID: 1)
 
         #expect(activatedPIDs == [20])
+        #expect(focusedWindowIDs == [2])
+    }
+
+    /// KHA-829. Activating an app whose window is fullscreen fires its focus-changed
+    /// notification while the activation's own probe is still out, and while that Space animates
+    /// in AX names no focused window at all. Starting that second probe silenced the activation's
+    /// answer; the second then answered nothing, so the fullscreen window never reached the MRU.
+    @Test("A focus-change probe that answers nothing does not silence the activation's answer")
+    func emptyFocusChangeProbeKeepsActivationAnswer() {
+        for focusChangeAnswersFirst in [false, true] {
+            let windowService = MockWindowService()
+            windowService.apps = [
+                AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 10, isHidden: false),
+            ]
+            windowService.windowList = [liveWindow(81_083, ownerPID: 10)]
+            let probe = DeferredFocusProbe()
+            let service = WindowDiscoveryService(
+                windowService: windowService,
+                focusProbeScheduler: probe.schedule,
+                processExitMonitor: MockProcessExitMonitor()
+            )
+            service.focusObserverRegistrationOverride = { _ in .success }
+            var focusedWindowIDs: [CGWindowID] = []
+            service.onWindowActivated = { focusedWindowIDs.append($0) }
+
+            service.installFocusObserver(for: 10, bundleID: "company.thebrowser.dia")
+            service.handleAppActivation(
+                AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 10, isHidden: false)
+            )
+            service.handleFocusChanged()
+            if focusChangeAnswersFirst {
+                probe.resolveLast(pid: 10, windowID: nil)
+                probe.resolve(pid: 10, windowID: nil)
+            } else {
+                probe.resolve(pid: 10, windowID: nil)
+                probe.resolve(pid: 10, windowID: nil)
+            }
+
+            #expect(focusedWindowIDs == [81_083], "focus change answered first: \(focusChangeAnswersFirst)")
+        }
+    }
+
+    /// The reason a focus change supersedes the activation at all: its answer is fresher.
+    @Test("A focus-change probe that names a window still supersedes the activation's answer")
+    func answeringFocusChangeProbeSupersedesActivation() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 10, isHidden: false),
+        ]
+        windowService.windowList = [liveWindow(1, ownerPID: 10), liveWindow(2, ownerPID: 10)]
+        let probe = DeferredFocusProbe()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusProbeScheduler: probe.schedule,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.focusObserverRegistrationOverride = { _ in .success }
+        var focusedWindowIDs: [CGWindowID] = []
+        service.onWindowActivated = { focusedWindowIDs.append($0) }
+
+        service.installFocusObserver(for: 10, bundleID: "company.thebrowser.dia")
+        service.handleAppActivation(
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 10, isHidden: false)
+        )
+        service.handleFocusChanged()
+        probe.resolveLast(pid: 10, windowID: 2)
+        probe.resolve(pid: 10, windowID: 1)
+
         #expect(focusedWindowIDs == [2])
     }
 
