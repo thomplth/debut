@@ -141,3 +141,12 @@ public enum CrashReportRedaction {
         path.replacing(/\/Users\/(?!Shared\/)[^\/]+\//, with: "/Users/<redacted>/")
     }
 }
+
+public enum CrashReportEnvironment {
+    /// Keeps local installs and nightlies apart from stable crashes in Sentry.
+    public static func name(forVersion version: String) -> String {
+        if version.hasSuffix("-dev") { return "development" }
+        if version.contains("-nightly.") { return "nightly" }
+        return "production"
+    }
+}

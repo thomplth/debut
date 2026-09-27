@@ -4,9 +4,10 @@ import Sentry
 
 /// Reports crashes and hangs to Sentry only with the user's consent.
 ///
-/// The DSN is stamped into release bundles by `scripts/build-app.sh`, so source and local builds
-/// have none and report nothing. Everything Sentry would send on its own besides error events,
-/// such as sessions, breadcrumbs, traces and counts of dropped events, is turned off.
+/// Every build reports to the one Debut project through the same consent flow; the Sentry
+/// environment keeps development, nightly and stable crashes apart. Everything Sentry would send
+/// on its own besides error events, such as sessions, breadcrumbs, traces and counts of dropped
+/// events, is turned off.
 @MainActor
 final class SentryCrashReporter: CrashReporting {
     static let dsnInfoKey = "DebutCrashReportDSN"
@@ -31,6 +32,7 @@ final class SentryCrashReporter: CrashReporting {
         SentrySDK.start { options in
             options.dsn = dsn
             options.releaseName = "com.thomplth.Debut@\(DebutCore.version)"
+            options.environment = CrashReportEnvironment.name(forVersion: DebutCore.version)
             options.sendDefaultPii = false
             options.sendClientReports = false
             options.enableAutoSessionTracking = false
