@@ -96,8 +96,10 @@ if [[ -f "$guest_runner" ]]; then
         "the isolated local guest must run hosted-skipped gesture checks"
     expect_not_contains "$guest_runner" 'DEBUT_SKIP_VIRTUALIZED_DRAGS' \
         "the guest attempts synthetic drags; there is no virtualized skip to set"
-    expect_contains "$guest_runner" 'com\.apple\.universalaccess reduceMotion -bool false' \
-        "the guest must pin the host to the spring the motion check samples"
+    # The pins themselves live in scripts/host-profile.sh; Tests/CI/HostEnvironmentTests.sh
+    # checks what they are.
+    expect_contains "$guest_runner" 'host-profile\.sh|HOST_PROFILE' \
+        "the guest must apply the shared host profile"
     expect_contains "$guest_runner" 'TextEdit' \
         "the guest must create deterministic E2E fixture windows"
     expect_contains "$guest_runner" 'pkill -x "System Settings"' \

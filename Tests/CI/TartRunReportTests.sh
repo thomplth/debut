@@ -112,6 +112,7 @@ cat > "$RUN_DIR/results/checks/suite.json" <<'EOF'
  {"section": "2. Other", "name": "c", "status": "skipped", "reason": "no fixture"}
 ]}
 EOF
+printf '{"reduceMotion": "0", "appearance": "Light", "xcode": "none"}\n' > "$RUN_DIR/results/host-profile.json"
 run_report_write "$RUN_DIR" failed '{"commit": "abc", "dirty": false}' \
     '{"durationProfile": "ordinary", "gallery": "off"}' '{"app": "sha"}' '{"buildCpuSeconds": 1.5}'
 report="$RUN_DIR/report.json"
@@ -125,9 +126,12 @@ python3 -m json.tool "$report" >/dev/null 2>&1 || fail "report.json is not valid
 [[ "$(json_field "$report" checks.failed)" == 1 ]] || fail "report did not count failed checks"
 [[ "$(json_field "$report" checks.skipped)" == 1 ]] || fail "report did not count skipped checks"
 [[ "$(json_field "$report" checks.failures.0)" == "1. Baseline: b" ]] || fail "report did not name failed checks"
+[[ "$(json_field "$report" hostProfile.reduceMotion)" == 0 ]] \
+    || fail "report must carry the fingerprint the guest recorded"
 summary="$(run_report_summary "$RUN_DIR")"
 grep -q 'failed' <<< "$summary" && grep -q 'suite 2.0s' <<< "$summary" \
     || fail "the summary must state the result and phase times: $summary"
+grep -q 'reduceMotion=0' <<< "$summary" || fail "the summary must show the host profile: $summary"
 
 # --- Retention keeps recent and failed runs and never deletes the active one. ---
 runs="$work/prune"

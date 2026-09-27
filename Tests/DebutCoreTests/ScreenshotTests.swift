@@ -24,6 +24,9 @@ struct ScreenshotTests {
             .frame(width: size.width, height: size.height)
             .background(Color(nsColor: NSColor(white: background, alpha: 1.0)))
         )
+        // Otherwise dynamic colours follow the host's light or dark mode, which differs between
+        // machines. A view that sets its own colour scheme still overrides this.
+        hostingView.appearance = NSAppearance(named: .aqua)
         hostingView.frame = NSRect(origin: .zero, size: size)
         hostingView.layoutSubtreeIfNeeded()
         let rep = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds)

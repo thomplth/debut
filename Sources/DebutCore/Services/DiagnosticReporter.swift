@@ -16,7 +16,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         // those events into the real support directory corrupts the log a live
         // session is diagnosed from, and has already produced false evidence.
         let dir: URL
-        if isHostedByDebutApp {
+        if HostEnvironment.isDebutApp {
             dir = DebutCore.applicationSupportDirectory
         } else {
             dir = FileManager.default.temporaryDirectory
@@ -25,13 +25,6 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
-
-    /// Identifies the shipped app positively. Test runners expose neither an
-    /// `.xctest` bundle nor `XCTestConfigurationFilePath` under swift-testing,
-    /// so detecting them by absence is unreliable.
-    private static var isHostedByDebutApp: Bool {
-        Bundle.main.bundleIdentifier == "com.thomplth.Debut"
-    }
 
     private let directory: URL
     private let rotationByteLimit: Int
