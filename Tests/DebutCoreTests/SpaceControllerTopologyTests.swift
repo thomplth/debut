@@ -18,6 +18,11 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     var completesMovesImmediately = true
     var switchingStackIDs: Set<String> = []
     var canSetFrontProcess = true
+    /// The Space showing while `current` is off the end: a fullscreen app's own Space, which
+    /// macOS reports as the current Space although it is no user desktop.
+    var showingNonDesktopSpaceID: CGSSpaceID?
+    /// Every Space SkyLight reports a window on, for a window that no desktop claims.
+    var windowSpaceIDs: [CGWindowID: [CGSSpaceID]] = [:]
     /// Ordered because seeding the destination's front process is only worth anything before
     /// the swipe is posted: afterwards the desktop has already been revealed.
     enum Operation: Equatable {
@@ -67,7 +72,9 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
                 frame: .zero,
                 desktopIDs: desktopIDs,
                 desktopUUIDs: keys.map { "DESKTOP-\($0)" },
-                currentDesktopID: desktopIDs.indices.contains(current) ? desktopIDs[current] : nil,
+                currentDesktopID: desktopIDs.indices.contains(current)
+                    ? desktopIDs[current]
+                    : showingNonDesktopSpaceID,
                 currentDesktopUUID: keys.indices.contains(current) ? "DESKTOP-\(keys[current])" : nil
             ),
         ])
@@ -91,6 +98,13 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
         return windowDesktops.reduce(into: [:]) { result, entry in
             result[entry.key] = stack.location(at: entry.value)
         }
+    }
+
+    func spaces(forWindow windowID: CGWindowID) -> [CGSSpaceID] {
+        if let desktop = windowDesktops[windowID] {
+            return keys.indices.contains(desktop) ? [CGSSpaceID(keys[desktop] + 100)] : []
+        }
+        return windowSpaceIDs[windowID] ?? []
     }
 
     func isSwitchInFlight(stackID: String) -> Bool {
@@ -331,6 +345,54 @@ struct SpaceControllerSpaceTests {
         controller.updateFrontmostApp(bundleID: "company.thebrowser.dia")
 
         #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [182, 104_661, 104_662])
+    }
+
+    /// KHA-829. A fullscreen window lives on a Space of its own, which is no user desktop, so
+    /// macOS showing it leaves the model on whichever desktop was showing before — for Dia
+    /// fullscreen on desktop 1, reached from desktop 3 through the Dock rather than Debut.
+    /// Attributing Dia's activation against that stale desktop promoted Dia's *other* window
+    /// there, and the fullscreen window's own report left the model on desktop 3, so Command-Tab
+    /// offered desktop 3 and Option-Tab's second entry was a Dia window the user never touched.
+    @Test("A fullscreen window reached outside Debut heads its own stage, not the desktop left")
+    func fullscreenActivationHeadsItsOwnStage() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 2)
+        let (controller, _) = makeController(spaces: spaces)
+        controller.reconcileSpacesWithDesktops()
+        let desktopOne = controller.spaceManager.spaces[0].id
+        let desktopThree = controller.spaceManager.spaces[2].id
+        func add(_ windowID: CGWindowID, _ bundleID: String, pid: pid_t, to spaceID: UUID) {
+            controller.spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: bundleID,
+                    ownerName: bundleID,
+                    windowTitle: "\(windowID)",
+                    ownerPID: pid
+                ),
+                toSpaceID: spaceID
+            )
+        }
+        add(67_694, "notion.id", pid: 660, to: desktopOne)
+        add(81_083, "company.thebrowser.dia", pid: 69_928, to: desktopOne)
+        add(17_422, "com.mitchellh.ghostty", pid: 1_989, to: desktopThree)
+        add(81_082, "company.thebrowser.dia", pid: 69_928, to: desktopThree)
+        spaces.windowDesktops = [67_694: 0, 17_422: 2, 81_082: 2]
+        spaces.windowSpaceIDs = [81_083: [900]]
+
+        controller.recordWindowActivation(windowID: 17_422)
+
+        spaces.current = 3
+        spaces.showingNonDesktopSpaceID = 900
+        controller.desktopDidChange()
+        controller.updateFrontmostApp(bundleID: "company.thebrowser.dia")
+        controller.recordWindowActivation(windowID: 81_083)
+
+        #expect(controller.spaceManager.spaces[2].windows.map(\.windowID) == [17_422, 81_082])
+        #expect(controller.spaceManager.spaces[0].windows.map(\.windowID) == [81_083, 67_694])
+        #expect(controller.spaceManager.activeSpaceID == desktopOne)
+        // Option-Tab orders by activation stamp across every stage, so the sibling must not
+        // carry one: it would sit between the fullscreen window and the window just left.
+        #expect(controller.spaceManager.spaces[2].windows.last?.lastActivatedAt == nil)
     }
 
     /// During a desktop transition the currently showing desktop is intentionally unsettled.

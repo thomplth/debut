@@ -1277,6 +1277,9 @@ public protocol SpaceSwitching: AnyObject, Sendable {
     func cachedSpaceTopology() -> SpaceTopology?
     func desktopLocation(forWindow windowID: CGWindowID) -> DesktopLocation?
     func desktopLocations(forWindows windowIDs: [CGWindowID]) -> [CGWindowID: DesktopLocation]
+    /// Every Space the window server puts a window on, desktop or not. A fullscreen window's
+    /// is a Space of its own that `desktopLocation(forWindow:)` has no answer for.
+    func spaces(forWindow windowID: CGWindowID) -> [CGSSpaceID]
     /// Every window on every desktop, keyed by window ID. Unlike `desktopLocations(forWindows:)`
     /// this does not start from a set of window IDs to resolve — `kAXWindows` only reports
     /// windows on the active Space, so this is how a window on another desktop is discovered
@@ -1332,6 +1335,7 @@ public extension SpaceSwitching {
     }
     func placedWindowIDs() -> Set<CGWindowID> { Set(windowLocations().keys) }
     func isSwitchInFlight(stackID: String) -> Bool { false }
+    func spaces(forWindow windowID: CGWindowID) -> [CGSSpaceID] { [] }
     func spaceDidChange() {}
     func cancelPendingSwitches() {}
     func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool { false }

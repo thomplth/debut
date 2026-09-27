@@ -1677,6 +1677,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         if ownerSpaceID == targetSpaceID {
+            if desktopLocation == nil, !isSpaceManagerVisible {
+                adoptStageOfShowingFullscreenWindow(windowID, spaceID: targetSpaceID)
+            }
             cacheAcceptedFocus(windowID: windowID)
             spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: targetSpaceID)
             // The MRU head decides what every switch offers next, and this is the path that moves
@@ -1755,6 +1758,34 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         delegate?.spaceControllerDidMutateState(self)
     }
 
+    /// A fullscreen window has a Space of its own, and macOS showing it reports no desktop, so
+    /// the model stayed on whichever desktop showed last. Reached through Debut, the switch to
+    /// the window's stage already moved the model there; reached any other way — the Dock, a
+    /// link, a swipe — Command-Tab kept offering the desktop left behind (KHA-829). The focused
+    /// window is the positive evidence the missing desktop answer is not: only its own Space
+    /// showing moves the model, never a window that merely lacks a single desktop.
+    private func adoptStageOfShowingFullscreenWindow(_ windowID: CGWindowID, spaceID: UUID) {
+        guard let switcher = spaceSwitcher,
+              let stackID = spaceManager.spaceStackID(containingSpaceID: spaceID),
+              let previousID = spaceManager.connectedSpaceStacks
+                  .first(where: { $0.id == stackID })?.activeSpaceID,
+              previousID != spaceID,
+              let stack = switcher.spaceTopology().stack(id: stackID),
+              stack.currentDesktopIndex == nil,
+              let showingSpaceID = stack.currentDesktopID,
+              switcher.spaces(forWindow: windowID).contains(showingSpaceID)
+        else { return }
+        spaceManager.selectSpaceStack(id: stackID)
+        spaceManager.activateSpace(id: spaceID)
+        previousSpaceID = previousID
+        diag.report("active_space_synced", details: [
+            "to": spaceLabel(forID: spaceID),
+            "reason": "fullscreen_window_focused",
+            "windowID": "\(windowID)",
+        ])
+        delegate?.spaceControllerDidSwitchSpace(self)
+    }
+
     /// Discovery never observes Debut's own process, so a click into Settings produced no focus
     /// report and the MRU kept naming the window the user had left. AppKit's key-window change is
     /// that report for Debut's own windows. Only a window the switchers already offer counts: the
@@ -1797,11 +1828,22 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // Command-Tab can read the previous MRU head even though the launcher already put the new
         // app on screen. Bundle identity is enough only when exactly one managed window for that
         // app is on a desktop currently showing; any wider choice remains the AX probe's job.
+        //
+        // The model's active desktop is only "showing" while macOS agrees. A fullscreen Space
+        // leaves the model on the desktop shown before it, and crediting the app's window there
+        // promoted a window the user never touched over the one they left (KHA-829).
+        let topology = spaceSwitcher?.spaceTopology()
         let visibleMatches: [(spaceID: UUID, stackID: String, window: SpaceWindow)] =
             spaceManager.connectedSpaceStacks.flatMap { stack
                 -> [(spaceID: UUID, stackID: String, window: SpaceWindow)] in
                 guard let activeSpace = stack.spaces.first(where: { $0.id == stack.activeSpaceID })
                 else { return [] }
+                if let showing = topology?.stack(id: stack.id),
+                   showing.currentDesktopIndex.flatMap({
+                       spaceManager.spaceID(stackID: stack.id, at: $0)
+                   }) != activeSpace.id {
+                    return []
+                }
                 return activeSpace.windows.compactMap { window in
                     window.ownerBundleID == bundleID
                         ? (spaceID: activeSpace.id, stackID: stack.id, window: window)
