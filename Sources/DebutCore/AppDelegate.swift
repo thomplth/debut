@@ -22,6 +22,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var desktopNavigationStackID: String?
     private var desktopNavigationEligibility: DesktopNavigationEligibility?
     private let overviewSignalConfirmer = OverviewSignalConfirmer()
+    private var overviewWindowProbe: DockOverviewWindowProbe?
     private var desktopNavigationRefreshScheduled = false
     private var consumeOverviewRecoveryOnRefresh = false
     private var tutorialViewModel: TutorialViewModel?
@@ -129,8 +130,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             DispatchQueue.main.async { self?.handleDesktopDidChange() }
         }
         self.spaceService = spaceService
+        // macOS 26 still announces overviews, and its Dock backdrop was never measured.
+        let overviewWindowProbe = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+            ? DockOverviewWindowProbe() : nil
+        self.overviewWindowProbe = overviewWindowProbe
         let navigationEligibility = DesktopNavigationEligibility(
-            canSwitchSpaces: { spaceService.canSwitchSpaces }
+            canSwitchSpaces: { spaceService.canSwitchSpaces },
+            liveOverviewActive: { overviewWindowProbe?.isOverviewActive() }
         )
         desktopNavigationEligibility = navigationEligibility
         activationPolicy.apply(showsDockIcon: currentSettings.showsDockIcon)
@@ -516,6 +522,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             name: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil
         )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceApplicationTerminated(_:)),
+            name: NSWorkspace.didTerminateApplicationNotification,
+            object: nil
+        )
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenParametersDidChange(_:)),
@@ -612,6 +624,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let stackID = spaceController?.spaceManager.selectedSpaceStackID
         desktopNavigationStackID = stackID
         guard let spaceService else { return }
+        overviewWindowProbe?.resolveIfNeeded()
         desktopNavigationEligibility?.update(
             stackID: stackID,
             topology: spaceService.spaceTopology(),
@@ -707,9 +720,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         diag.report("desktop_navigation_overview_will_open", level: .transient)
     }
 
+    /// A relaunched Dock draws a new overview backdrop, and a by-id query for the old one
+    /// answers exactly as it does for an ordered-out window.
+    @objc private func workspaceApplicationTerminated(_ notification: Notification) {
+        let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+            as? NSRunningApplication
+        guard app?.bundleIdentifier == "com.apple.dock" else { return }
+        overviewWindowProbe?.invalidate()
+    }
+
     @objc private func screenParametersDidChange(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            self.overviewWindowProbe?.invalidate()
             self.spaceController?.reconcileSpacesWithDesktops()
             self.windowDiscovery?.refreshDesktopAssignmentsInBackground()
         }
