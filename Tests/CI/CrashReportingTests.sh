@@ -49,6 +49,10 @@ for index in 0 1; do
     [[ "$linked" == false ]] || fail "$type must be declared as not linked to the user"
 done
 
+# Development builds (local installs, E2E, Tart, CI, source builds and forks) carry the DSN but
+# must never report: a crash prompt would block a test VM, and unsymbolicated dev crashes are noise.
+grep -q 'CrashReportEnvironment.reportsCrashes' Sources/DebutApp/SentryCrashReporter.swift \
+    || fail "the reporter must stay unavailable in development builds"
 grep -q 'CrashReportEnvironment.name' Sources/DebutApp/SentryCrashReporter.swift \
     || fail "the reporter must tag each build's Sentry environment"
 

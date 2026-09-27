@@ -36,7 +36,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Numbered / same-app numbered modifiers | Control / Control-Option |
 | Overlay card selection | H left, J down, K up, L right (configurable) |
 | Launch at login / show in Dock | On / On |
-| Send crash reports automatically | Off; shown only in release builds that can send reports |
+| Send crash reports automatically | Off; shown only in nightly and stable releases |
 | Excluded apps | Empty |
 
 Cache age is evaluated when capture work is requested; it is not a recurring
@@ -105,7 +105,7 @@ user-initiated diagnostic export boundary, and crash reports.
 
 After a crash, the next launch asks whether to send that report, with a checkbox
 that turns on automatic sending. Don’t Send deletes it. The question appears only
-in builds that can send reports.
+in nightly and stable releases.
 
 ## Onboarding and tutorial
 

@@ -4,8 +4,8 @@ import Sentry
 
 /// Reports crashes and hangs to Sentry only with the user's consent.
 ///
-/// Every build reports to the one Debut project through the same consent flow; the Sentry
-/// environment keeps development, nightly and stable crashes apart. Everything Sentry would send
+/// Nightlies and stable releases report to the one Debut project through the same consent flow;
+/// the Sentry environment keeps them apart. Development builds carry the DSN but never report. Everything Sentry would send
 /// on its own besides error events, such as sessions, breadcrumbs, traces and counts of dropped
 /// events, is turned off.
 @MainActor
@@ -18,7 +18,8 @@ final class SentryCrashReporter: CrashReporting {
     init(bundle: Bundle = .main) {
         let dsn = (bundle.object(forInfoDictionaryKey: Self.dsnInfoKey) as? String)?
             .trimmingCharacters(in: .whitespaces)
-        self.dsn = dsn?.isEmpty == false ? dsn : nil
+        self.dsn = dsn?.isEmpty == false
+            && CrashReportEnvironment.reportsCrashes(forVersion: DebutCore.version) ? dsn : nil
     }
 
     var isAvailable: Bool { dsn != nil }
