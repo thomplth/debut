@@ -185,3 +185,14 @@ private extension CrashReportCoordinator {
         resolveUnsentCrashReport()
     }
 }
+
+@Suite("Crash report environment")
+struct CrashReportEnvironmentTests {
+    @Test("Each kind of build reports into its own Sentry environment")
+    func environments() {
+        #expect(CrashReportEnvironment.name(forVersion: "0.0.0-dev") == "development")
+        #expect(CrashReportEnvironment.name(forVersion: "0.4.0-nightly.20260927") == "nightly")
+        #expect(CrashReportEnvironment.name(forVersion: "0.4.0-nightly.20260927.2") == "nightly")
+        #expect(CrashReportEnvironment.name(forVersion: "0.4.0") == "production")
+    }
+}

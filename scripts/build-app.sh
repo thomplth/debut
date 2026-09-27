@@ -57,11 +57,6 @@ cp "$BIN_DIR/Debut" "$MACOS/Debut"
 rm -rf "$BUILD_DIR/Debut.dSYM"
 /usr/bin/xcrun dsymutil "$BIN_DIR/Debut" -o "$BUILD_DIR/Debut.dSYM"
 cp "$PROJECT_DIR/Resources/Info.plist" "$CONTENTS/Info.plist"
-# Crash reports need a destination, which only release builds are given. Without one the
-# reporter stays off, so source builds and forks never send to the maintainer's project.
-if [[ -n "${DEBUT_CRASH_REPORT_DSN:-}" ]]; then
-    /usr/bin/plutil -insert DebutCrashReportDSN -string "$DEBUT_CRASH_REPORT_DSN" "$CONTENTS/Info.plist"
-fi
 cp "$PROJECT_DIR/Resources/PrivacyInfo.xcprivacy" "$RESOURCES/PrivacyInfo.xcprivacy"
 # Onboarding illustrates the current app with the same real captures as the README.
 for image in overlay all-windows; do

@@ -126,13 +126,8 @@ runs:
       env:
         DEBUT_DISTRIBUTION_SIGNING: '1'
         DEBUT_SIGNING_IDENTITY: ${{ env.DEVELOPER_IDENTITY }}
-        DEBUT_CRASH_REPORT_DSN: ${{ env.DEBUT_CRASH_REPORT_DSN }}
       shell: bash
       run: |
-        # Optional: without a destination the release still ships, with crash reporting off.
-        if [[ -z "$DEBUT_CRASH_REPORT_DSN" ]]; then
-            echo "::warning::DEBUT_CRASH_REPORT_DSN is not set; this release cannot send crash reports"
-        fi
         ./scripts/package-dmg.sh
         /usr/bin/ditto -c -k --keepParent .build/Debut.dSYM .build/Debut.dSYM.zip
 

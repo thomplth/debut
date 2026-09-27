@@ -5,7 +5,7 @@ performance boundary in [performance observability](performance-observability.md
 
 - Confirm `PrivacyInfo.xcprivacy` matches the binary and dependency inventory and declares only crash and performance data, unlinked and not used for tracking.
 - Confirm the packaged app contains no analytics endpoint, routing identifier, remote metrics queue, or analytics SDK. Sentry is the only reporting SDK, and it sends only crash and hang events.
-- Confirm a release carries `DebutCrashReportDSN` in its `Info.plist`, and that `Debut.dSYM.zip` is attached to the release with a UUID matching the shipped binary.
+- Confirm the release's `Info.plist` carries the Debut project's `DebutCrashReportDSN`, and that `Debut.dSYM.zip` is attached to the release with a UUID matching the shipped binary.
 - Confirm that with automatic sending off, a crash is sent only after Send Report, and Don’t Send leaves nothing queued in `~/Library/Caches/io.sentry`.
 - Confirm the Sentry project still has IP address storage turned off and its data scrubbing defaults on.
 - Confirm onboarding contains no usage-data sharing control, and that Settings offers only the crash report preference.
