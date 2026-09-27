@@ -46,9 +46,10 @@ The one exception is crash reports, and only with your consent.
 
 ### Crash reports
 
-Release builds can send crash and hang reports to [Sentry](https://sentry.io),
-the service the maintainer uses to diagnose them. Builds compiled from source have
-no reporting destination and never send one.
+Debut can send crash and hang reports to [Sentry](https://sentry.io), the service
+the maintainer uses to diagnose them. Every build reports to the Debut project,
+including builds compiled from source, and each report names whether it came from a
+development build, a nightly, or a stable release.
 
 Nothing is sent without your consent:
 

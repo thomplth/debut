@@ -13,25 +13,18 @@ fail() {
 
 action=".github/actions/publish-release/action.yml"
 
-# The DSN is stamped at release build time. Committing it would route crashes from every
-# source build and fork to the maintainer's project.
-if grep -Eq 'DebutCrashReportDSN|sentry\.io' Resources/Info.plist; then
-    fail "Resources/Info.plist must not carry a crash report destination"
-fi
-if grep -REq 'https://[0-9a-f]+@[^ ]*sentry\.io' Sources Resources scripts .github; then
-    fail "a Sentry DSN must not be committed"
-fi
-grep -q 'DEBUT_CRASH_REPORT_DSN' scripts/build-app.sh \
-    || fail "build-app.sh must stamp the DSN from DEBUT_CRASH_REPORT_DSN"
-grep -q 'DebutCrashReportDSN' scripts/build-app.sh \
-    || fail "build-app.sh must write the DebutCrashReportDSN key the reporter reads"
+# Every build reports to the one Debut project, so the destination is committed rather than
+# stamped by one workflow; a build without it would silently report nothing.
+dsn="$(/usr/bin/plutil -extract DebutCrashReportDSN raw -o - Resources/Info.plist 2>/dev/null || true)"
+[[ "$dsn" =~ ^https://[0-9a-f]+@[^/]+\.sentry\.io/[0-9]+$ ]] \
+    || fail "Resources/Info.plist must carry the Debut project's DebutCrashReportDSN (got '$dsn')"
 grep -q 'dsnInfoKey = "DebutCrashReportDSN"' Sources/DebutApp/SentryCrashReporter.swift \
-    || fail "the reporter must read the key build-app.sh writes"
+    || fail "the reporter must read the key Info.plist carries"
+if grep -Rq 'DEBUT_CRASH_REPORT_DSN' scripts .github; then
+    fail "no build may substitute its own destination"
+fi
 grep -q 'dsymutil' scripts/build-app.sh \
     || fail "build-app.sh must produce a dSYM so crash reports can be symbolicated"
-
-grep -q 'DEBUT_CRASH_REPORT_DSN' "$action" \
-    || fail "the release build must receive the crash report DSN"
 grep -q 'Debut.dSYM.zip' "$action" \
     || fail "every release must archive its dSYM"
 
@@ -55,6 +48,9 @@ for index in 0 1; do
     esac
     [[ "$linked" == false ]] || fail "$type must be declared as not linked to the user"
 done
+
+grep -q 'CrashReportEnvironment.name' Sources/DebutApp/SentryCrashReporter.swift \
+    || fail "the reporter must tag each build's Sentry environment"
 
 grep -q 'Sentry' docs/privacy.md || fail "the privacy notice must name Sentry"
 grep -q 'Send crash reports automatically' docs/privacy.md \
