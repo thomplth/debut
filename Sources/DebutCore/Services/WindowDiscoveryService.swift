@@ -189,6 +189,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private var activationProbeGeneration = 0
     private var activatedPID: pid_t?
     private var focusChangeProbeGeneration = 0
+    /// Focus-change probes that named a window. Only one of those is fresher than an
+    /// activation's answer; a probe that merely started, or answered nothing, is not (KHA-829).
+    private var focusChangeDeliveryCount = 0
+    private var focusChangeProbePending = false
+    /// An activation's answer waiting on a focus-change probe still out, to be published only
+    /// if that probe comes back without a window of its own.
+    private var heldActivationAnswer: (
+        generation: Int,
+        pid: pid_t,
+        windowID: CGWindowID,
+        focusDeliveries: Int
+    )?
     private var launchProbeGeneration = 0
     private var destructionProbeGeneration = 0
     private var desktopRefreshGeneration = 0
@@ -1531,21 +1543,40 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         pendingFocusObserverPID = nil
     }
 
-    fileprivate func handleFocusChanged() {
+    func handleFocusChanged() {
         guard let pid = observedPID else { return }
         focusChangeProbeGeneration += 1
+        focusChangeProbePending = true
         let generation = focusChangeProbeGeneration
         let activationGeneration = activationProbeGeneration
         focusProbeScheduler(pid) { [weak self] windowID in
-            guard let self,
-                  self.observedPID == pid,
-                  self.focusChangeProbeGeneration == generation,
+            guard let self, self.focusChangeProbeGeneration == generation else { return }
+            self.focusChangeProbePending = false
+            // A fullscreen Space animating in answers the focused-window read with nothing, and
+            // it is exactly then that the app's focus notification races its own activation.
+            // No answer is no evidence, so the activation's answer stands.
+            guard self.observedPID == pid,
                   self.activationProbeGeneration == activationGeneration,
                   let windowID
-            else { return }
+            else {
+                self.releaseHeldActivationAnswer()
+                return
+            }
+            self.heldActivationAnswer = nil
+            self.focusChangeDeliveryCount += 1
             self.trackAndRegister(windowID: windowID, pid: pid)
             self.onWindowActivated?(windowID)
         }
+    }
+
+    private func releaseHeldActivationAnswer() {
+        guard let held = heldActivationAnswer else { return }
+        heldActivationAnswer = nil
+        guard held.generation == activationProbeGeneration,
+              activatedPID == held.pid,
+              focusChangeDeliveryCount == held.focusDeliveries
+        else { return }
+        onWindowActivated?(held.windowID)
     }
 
     // MARK: - NSWorkspace notifications
@@ -1770,13 +1801,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             return
         }
         installWindowCreationObserver(for: app.pid, bundleID: app.bundleID)
-        let focusGeneration = focusChangeProbeGeneration
+        let focusDeliveries = focusChangeDeliveryCount
         focusProbeScheduler(pid) { [weak self] sampledFocusedWindowID in
             self?.finishAppActivation(
                 app,
                 sampledFocusedWindowID: sampledFocusedWindowID,
                 generation: generation,
-                focusGeneration: focusGeneration,
+                focusDeliveries: focusDeliveries,
                 probeStartedAt: probeStartedAt,
                 source: source
             )
@@ -1787,7 +1818,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         _ app: AppInfo,
         sampledFocusedWindowID: CGWindowID?,
         generation: Int,
-        focusGeneration: Int? = nil,
+        focusDeliveries: Int? = nil,
         probeStartedAt: UInt64,
         source: FrontmostAppObservationSource = .workspaceActivation
     ) {
@@ -1848,10 +1879,17 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             desktopLocations: desktopLocations(for: liveWindows),
             skyLightWindowIDs: skyLightWindowIDs()
         ))
-        if let focusedWindowID,
-           focusGeneration == nil || focusChangeProbeGeneration == focusGeneration {
-            onWindowActivated?(focusedWindowID)
+        guard let focusedWindowID else { return }
+        if let focusDeliveries {
+            // A focus change reported since this probe started is fresher only once it names a
+            // window; until its probe answers, this answer waits rather than being dropped.
+            guard focusChangeDeliveryCount == focusDeliveries else { return }
+            if focusChangeProbePending {
+                heldActivationAnswer = (generation, pid, focusedWindowID, focusDeliveries)
+                return
+            }
         }
+        onWindowActivated?(focusedWindowID)
     }
 
     @objc private func appDidTerminate(_ notification: Notification) {
