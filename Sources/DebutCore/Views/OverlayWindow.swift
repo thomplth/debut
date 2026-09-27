@@ -59,6 +59,9 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     /// Outlives every root update and tree rebase, so a preview refresh cannot restart a drag.
     let compactDragSession = CompactDragSession()
     private var scrollSequence = 0
+    /// Read at each removal, so a test can pin the branch its timing assumes instead of
+    /// inheriting whatever the host's accessibility settings say.
+    var reducesMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     private var scrollMonitor: Any?
     public var onSpaceScrollSelected: ((Int) -> Void)?
     var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
@@ -156,7 +159,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
                 contentState.rootView = view
             } else {
                 let transition = StageMotion.windowRemovalTransition(
-                    reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                    reduceMotion: reducesMotion()
                 )
                 withAnimation(transition.animation) {
                     contentState.rootView = view
