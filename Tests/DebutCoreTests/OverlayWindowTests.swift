@@ -76,6 +76,9 @@ struct OverlayWindowTests {
     @Test("Removing a window preserves motion then rebases the rendered tree")
     func windowRemovalRebasesRenderedTreeAfterMotion() async throws {
         let window = OverlayWindow()
+        // Hosted runners boot with Reduce Motion on, which swaps the 0.36s spring for a 0.12s
+        // fade and lands the rebase exactly when this test samples the preserved tree.
+        window.reducesMotion = { false }
         var spaceManager = SpaceManager()
         let spaceID = spaceManager.activeSpaceID
         spaceManager.addWindow(
@@ -131,6 +134,44 @@ struct OverlayWindowTests {
         #expect(window.contentView?.subviews.first === initialHostingView)
 
         try await Task.sleep(for: .milliseconds(380))
+
+        #expect(window.contentView?.subviews.first !== initialHostingView)
+    }
+
+    @Test("With Reduce Motion on, removal rebases the tree after the shorter fade")
+    func windowRemovalRebasesAfterReducedMotionFade() async throws {
+        let window = OverlayWindow()
+        window.reducesMotion = { true }
+        var spaceManager = SpaceManager()
+        let spaceID = spaceManager.activeSpaceID
+        for (windowID, name) in [(CGWindowID(101), "One"), (CGWindowID(202), "Two")] {
+            spaceManager.addWindow(
+                SpaceWindow(
+                    windowID: windowID,
+                    ownerBundleID: "com.example.\(name)",
+                    ownerName: name,
+                    windowTitle: name
+                ),
+                toSpaceID: spaceID
+            )
+        }
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: spaceManager,
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0
+        ))
+        let initialHostingView = try #require(window.contentView?.subviews.first)
+
+        spaceManager.removeWindow(windowID: 202, fromSpaceID: spaceID)
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: spaceManager,
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0
+        ))
+        #expect(window.contentView?.subviews.first === initialHostingView)
+
+        // Well short of the 0.36s spring, so only the fade branch can have rebased by now.
+        try await Task.sleep(for: .milliseconds(300))
 
         #expect(window.contentView?.subviews.first !== initialHostingView)
     }
