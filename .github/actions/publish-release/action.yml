@@ -126,8 +126,15 @@ runs:
       env:
         DEBUT_DISTRIBUTION_SIGNING: '1'
         DEBUT_SIGNING_IDENTITY: ${{ env.DEVELOPER_IDENTITY }}
+        DEBUT_CRASH_REPORT_DSN: ${{ env.DEBUT_CRASH_REPORT_DSN }}
       shell: bash
-      run: ./scripts/package-dmg.sh
+      run: |
+        # Optional: without a destination the release still ships, with crash reporting off.
+        if [[ -z "$DEBUT_CRASH_REPORT_DSN" ]]; then
+            echo "::warning::DEBUT_CRASH_REPORT_DSN is not set; this release cannot send crash reports"
+        fi
+        ./scripts/package-dmg.sh
+        /usr/bin/ditto -c -k --keepParent .build/Debut.dSYM .build/Debut.dSYM.zip
 
     - name: Notarize and staple the disk image
       env:
@@ -205,7 +212,7 @@ runs:
       shell: bash
       run: |
         flags=()
-        assets=(.build/Debut.dmg .build/appcast.xml)
+        assets=(.build/Debut.dmg .build/appcast.xml .build/Debut.dSYM.zip)
         if [[ "${{ inputs.channel }}" == "nightly" ]]; then
             flags+=(--prerelease)
         fi
@@ -214,6 +221,18 @@ runs:
           --notes-file "$RUNNER_TEMP/notes.md" \
           "${flags[@]}" \
           "${assets[@]}"
+
+    # The dSYM is already a release asset, so a failed upload here loses nothing: it can be
+    # retried by hand with `sentry-cli debug-files upload` against the downloaded zip.
+    - name: Upload symbols to Sentry
+      if: inputs.dry-run != 'true' && env.SENTRY_AUTH_TOKEN != ''
+      continue-on-error: true
+      env:
+        SENTRY_AUTH_TOKEN: ${{ env.SENTRY_AUTH_TOKEN }}
+        SENTRY_ORG: ${{ env.SENTRY_ORG }}
+        SENTRY_PROJECT: ${{ env.SENTRY_PROJECT }}
+      shell: bash
+      run: npx --yes @sentry/cli@3.8.0 debug-files upload --include-sources .build/Debut.dSYM
 
     # GitHub's /releases/latest endpoint deliberately excludes prereleases. A permanent
     # prerelease provides the nightly channel with a stable appcast URL while versioned

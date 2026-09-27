@@ -9,6 +9,7 @@ enum AboutLinks {
     static let github = URL(string: "https://github.com/thomplth/debut")!
     static let bugReport = URL(string: "https://github.com/thomplth/Debut/issues/new?template=bug_report.yml")!
     static let twitter = URL(string: "https://twitter.com/thomplth")!
+    static let privacy = URL(string: "https://github.com/thomplth/Debut/blob/main/docs/privacy.md")!
 }
 
 @MainActor
@@ -145,6 +146,21 @@ public struct SettingsView: View {
                 Text("Debut remains available in the menu bar when this is off.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if viewModel.crashReportingAvailable {
+                VStack(alignment: .leading, spacing: 4) {
+                    settingsToggle(
+                        "Send crash reports automatically",
+                        isOn: $viewModel.settings.sendsCrashReportsAutomatically
+                    )
+                    Text("Sends crash and hang reports to Sentry without asking. When this is off, Debut asks after a crash and sends nothing else. Reports contain no window titles or screenshots.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Link("Privacy notice", destination: AboutLinks.privacy)
+                        .font(.caption)
+                }
             }
 
             Text("Debut follows the system Reduce Motion setting in System Settings ▸ Accessibility ▸ Display.")

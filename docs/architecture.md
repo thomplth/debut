@@ -139,7 +139,7 @@ Debut never captures or paints wallpaper.
 The saved model is a recovery aid. Window IDs and PIDs appear in local state, but
 must be validated against current identities. Desktop UUIDs join records to real
 desktops, while macOS continues to decide their order and current window membership.
-See [privacy](privacy.md) for what is kept locally.
+See [privacy](privacy.md) for what is kept locally and when a crash report may leave the Mac.
 
 ## Verification map
 

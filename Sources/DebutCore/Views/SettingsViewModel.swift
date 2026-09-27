@@ -12,7 +12,7 @@ public enum SettingsSection: String, CaseIterable, Sendable {
     var options: [SettingsOption] {
         switch self {
         case .general:
-            [.launchAtLogin, .showInDock, .ignoredApps]
+            [.launchAtLogin, .showInDock, .ignoredApps, .crashReports]
         case .desktops:
             [
                 .fasterDesktopSwitching,
@@ -64,6 +64,7 @@ enum SettingsOption: String, CaseIterable, Sendable {
     case launchAtLogin
     case showInDock
     case ignoredApps
+    case crashReports
     case fasterDesktopSwitching
     case numberShortcuts
     case controlArrows
@@ -102,6 +103,8 @@ public struct SettingsViewModel: Sendable {
     public var onResetWindowCache: (@Sendable () -> Void)?
     public var onExportDiagnosticData: (@Sendable () -> Void)?
     public var onCheckForUpdates: (@Sendable () -> Void)?
+    /// Hides the crash report preference in builds that have nowhere to send reports.
+    public var crashReportingAvailable = false
 
     public init(settings: AppSettings = AppSettings(), spaceManager: SpaceManager = SpaceManager()) {
         self.settings = settings
