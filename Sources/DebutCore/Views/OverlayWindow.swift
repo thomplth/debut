@@ -61,7 +61,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     private var scrollSequence = 0
     /// Read at each removal, so a test can pin the branch its timing assumes instead of
     /// inheriting whatever the host's accessibility settings say.
-    var reducesMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    var reducesMotion: () -> Bool = { HostEnvironment.current.reducesMotion }
     private var scrollMonitor: Any?
     public var onSpaceScrollSelected: ((Int) -> Void)?
     var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
@@ -275,8 +275,9 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     /// leaving it up would keep the overlay in the drag view until the next pickup.
     private func endAbandonedCompactDrag() {
         DispatchQueue.main.async { [weak self] in
-            guard let session = self?.compactDragSession, session.phase == .dragging else { return }
-            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            guard let self, compactDragSession.phase == .dragging else { return }
+            let session = compactDragSession
+            if reducesMotion() {
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) { session.cancel(reason: "gesture ended without a drop") }

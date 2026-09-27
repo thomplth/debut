@@ -77,12 +77,9 @@ sudo killall tccd 2>/dev/null || true
 launchctl setenv DEBUT_DISABLE_WINDOW_PREVIEWS 1
 export DEBUT_DISABLE_WINDOW_PREVIEWS=1
 
-# Under Reduce Motion the removal transition is a 0.12s fade rather than a 0.36s spring, which is
-# correct behaviour but too brief to sample as motion. The fade branch is covered by unit tests, so
-# the disposable host is pinned to the spring instead of the E2E check guessing which one it drew.
-echo "Reduce Motion before pinning: $(defaults read com.apple.universalaccess reduceMotion 2>&1)"
-defaults write com.apple.universalaccess reduceMotion -bool false
-defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool true
+# The same profile the Tart guest and the unit-test job apply; the fingerprint goes out with the
+# evidence so a hosted-only failure can be compared against a Tart run's report.json.
+./scripts/host-profile.sh apply --out /tmp/debut-e2e-host-profile.json
 
 echo "Preparing deterministic fixture windows..."
 rm -rf "$HOME/Library/Application Support/${bundle_id##*.}"

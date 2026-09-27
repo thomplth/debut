@@ -213,12 +213,15 @@ collect_results() {
 }
 
 artifact_digests() {
-    local app e2e guest
+    local app e2e guest profile
     [[ -n "$APP_ARTIFACT" && -f "$SHARE_DIR/$APP_ARTIFACT" ]] || { echo '{}'; return; }
     app="$(shasum -a 256 "$SHARE_DIR/$APP_ARTIFACT" | cut -d' ' -f1)"
     e2e="$(shasum -a 256 "$SHARE_DIR/$E2E_ARTIFACT" | cut -d' ' -f1)"
     guest="$(shasum -a 256 "$SHARE_DIR/$GUEST_ARTIFACT" | cut -d' ' -f1)"
-    printf '{"appArchive": "%s", "e2eExecutable": "%s", "guestScript": "%s"}\n' "$app" "$e2e" "$guest"
+    profile="$(shasum -a 256 "$SHARE_DIR/${GUEST_ARTIFACT/tart-e2e-guest-/host-profile-}" 2>/dev/null \
+        | cut -d' ' -f1)"
+    printf '{"appArchive": "%s", "e2eExecutable": "%s", "guestScript": "%s", "hostProfile": "%s"}\n' \
+        "$app" "$e2e" "$guest" "$profile"
 }
 
 # Runs on every exit, including failures and Ctrl-C, so a report and the evidence always exist.
@@ -368,6 +371,7 @@ space_build() {
         "$SHARE_DIR"/Debut-*.app.zip
         "$SHARE_DIR"/DebutE2E-*
         "$SHARE_DIR"/tart-e2e-guest-*.sh
+        "$SHARE_DIR"/host-profile-*.sh
     )
     shopt -u nullglob
     if (( ${#old_artifacts[@]} > 0 )); then
@@ -380,6 +384,9 @@ space_build() {
     /usr/bin/ditto -c -k --keepParent "$APP_BUNDLE" "$SHARE_DIR/$APP_ARTIFACT"
     /usr/bin/install -m 755 "$PROJECT_DIR/.build/release/DebutE2E" "$SHARE_DIR/$E2E_ARTIFACT"
     /usr/bin/install -m 755 "$PROJECT_DIR/scripts/tart-e2e-guest.sh" "$SHARE_DIR/$GUEST_ARTIFACT"
+    # The guest finds the profile beside itself by this shared artifact ID.
+    /usr/bin/install -m 755 "$PROJECT_DIR/scripts/host-profile.sh" \
+        "$SHARE_DIR/host-profile-$ARTIFACT_ID.sh"
 }
 
 guest_is_ready() {

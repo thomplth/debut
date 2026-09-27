@@ -39,6 +39,7 @@ jobs:
           name: debut-e2e-evidence
           path: |
             /tmp/debut-e2e-screenshots
+            /tmp/debut-e2e-host-profile.json
             ~/Library/Application Support/Debut/diagnostic.json
           if-no-files-found: warn
           retention-days: 7

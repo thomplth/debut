@@ -72,8 +72,10 @@ if [[ -f "$runner" ]]; then
         "CI E2E must suppress capture reminders for the hosted runner process"
     expect_contains "$runner" 'killall replayd' \
         "CI E2E must reload replayd after changing its capture approval"
-    expect_contains "$runner" 'com\.apple\.universalaccess reduceMotion -bool false' \
-        "CI E2E must pin the host to the spring the motion check samples"
+    # The pins themselves live in scripts/host-profile.sh; Tests/CI/HostEnvironmentTests.sh
+    # checks what they are.
+    expect_contains "$runner" 'host-profile\.sh|HOST_PROFILE' \
+        "CI E2E must apply the shared host profile"
     expect_contains "$runner" './scripts/build-app.sh' "CI E2E entry point must build the app"
     expect_contains "$runner" 'sudo cp -R "\$app_bundle" "\$app_path"' \
         "CI E2E entry point must install the bundle build-app.sh reported"

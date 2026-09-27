@@ -36,6 +36,10 @@ jobs:
           done
           exit $status
 
+      - name: Pin and record the host profile
+        # Hosted runners boot with Reduce Motion on, unlike a developer's Mac or the Tart guest.
+        run: ./scripts/host-profile.sh apply
+
       - name: Run unit and screenshot tests
         # Several suites block the main thread waiting on semaphores, which starves main-queue
         # work in whichever suite happens to run alongside them. Serial runs are ~3s slower and
