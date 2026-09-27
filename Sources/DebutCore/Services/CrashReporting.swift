@@ -149,4 +149,9 @@ public enum CrashReportEnvironment {
         if version.contains("-nightly.") { return "nightly" }
         return "production"
     }
+
+    /// Unstamped builds never report: local installs, test VMs, CI, source builds and forks.
+    public static func reportsCrashes(forVersion version: String) -> Bool {
+        name(forVersion: version) != "development"
+    }
 }

@@ -195,4 +195,11 @@ struct CrashReportEnvironmentTests {
         #expect(CrashReportEnvironment.name(forVersion: "0.4.0-nightly.20260927.2") == "nightly")
         #expect(CrashReportEnvironment.name(forVersion: "0.4.0") == "production")
     }
+
+    @Test("Only nightlies and stable releases report crashes")
+    func developmentBuildsNeverReport() {
+        #expect(!CrashReportEnvironment.reportsCrashes(forVersion: "0.0.0-dev"))
+        #expect(CrashReportEnvironment.reportsCrashes(forVersion: "0.4.0-nightly.20260927"))
+        #expect(CrashReportEnvironment.reportsCrashes(forVersion: "0.4.0"))
+    }
 }
