@@ -158,6 +158,55 @@ struct MoveFocusedWindowTests {
         #expect(spaces.moveRequests.map(\.windowID) == [103])
     }
 
+    /// Chrome, 2026-09-29: a new window took focus while its admission was still pending, and
+    /// Command-backtick's confirmed landing never reached the cached report. Every later press
+    /// moved the older window of the same app, sharing its desktop, until Command-Tab.
+    @Test("The app's window in front outranks a stale report naming its sibling")
+    func staleSameAppFocusUsesVisibleWindow() {
+        let (controller, windows, spaces) = fixture()
+        windows.frontmostPID = 42
+        windows.visibleFrontWindowID = 101
+
+        controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1))
+
+        #expect(spaces.moveRequests.map(\.windowID) == [101])
+    }
+
+    @Test("A window in front that Debut does not track yet moves nothing")
+    func untrackedFrontWindowRefusesMove() {
+        let (controller, windows, spaces) = fixture()
+        windows.frontmostPID = 42
+        windows.visibleFrontWindowID = 999
+
+        controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1))
+
+        #expect(spaces.moveRequests.isEmpty)
+    }
+
+    @Test("A Command-backtick landing confirmed on screen becomes the cached focus")
+    func confirmedCycleLandingCachesFocus() {
+        let windows = MockWindowService()
+        let keyboard = MockKeyboardService()
+        let controller = SpaceController(windowService: windows, keyboardService: keyboard,
+                                         focusDeliveryVerificationDelay: 60)
+        for id in [101, 102] {
+            controller.spaceManager.addWindow(.init(windowID: CGWindowID(id), ownerBundleID: "com.test.App",
+                ownerName: "App", windowTitle: "W\(id)", ownerPID: 42), toSpaceID: controller.spaceManager.activeSpaceID)
+        }
+        controller.recordWindowActivation(windowID: 102)
+        #expect(controller.focusedWindowID == 102)
+
+        keyboard.simulateEvent(.cmdBacktick)
+        windows.frontmostPID = 42
+        windows.visibleFrontWindowID = 101
+        #expect(controller.verifyPendingFocusDelivery())
+        // The app's own report for the raise is suppressed during the cycle, so the
+        // confirmation is the only answer the cache will get.
+        controller.recordWindowActivation(windowID: 102)
+
+        #expect(controller.focusedWindowID == 101)
+    }
+
     @Test("Desktop reconciliation can observe a relocation before its confirmation callback")
     func reconciliationOverlapsConfirmation() {
         let (controller, _, spaces) = fixture()
