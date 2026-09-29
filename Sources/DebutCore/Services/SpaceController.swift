@@ -1128,6 +1128,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             if visibleWindowArrived, focusRequest?.windowID == request.windowID {
                 focusRequest = nil
             }
+            // A Command-backtick cycle suppresses the app's own report of this raise, so without
+            // this the cache kept naming the window the step left, and the next window move took
+            // it (KHA-837). The window server putting the target in front is the live answer.
+            if visibleWindowArrived { cacheAcceptedFocus(windowID: request.windowID) }
             diag.report("window_focus_delivery_confirmed", details: [
                 "attempt": "\(request.attempt)",
                 "command": request.command.rawValue,
@@ -2128,21 +2132,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         if followingWindowMove == nil {
             let focused = probeFocusedWindow()
             var focusedWindowID = focused.windowID
-            // Focus can lag behind the frontmost process, or name one of its windows on another
-            // desktop. Neither report can own the keyboard now; use the visible WindowServer
-            // order for the process actually in front rather than moving a stale assignment.
-            if let reportedID = focusedWindowID,
-               let frontmostPID = windowService.frontmostApplicationPID() {
-                let reportedOwnerPID = spaceManager.allSpaces.lazy.flatMap(\.windows)
-                    .first(where: { $0.windowID == reportedID })?.ownerPID
-                let reportedLocation = switcher.desktopLocation(forWindow: reportedID)
-                let reportedIsOnAnotherDesktop = reportedLocation.map { location in
-                    switcher.spaceTopology().stack(id: location.stackID)?.currentDesktopIndex
-                        != location.index
-                } ?? false
-                if reportedOwnerPID != frontmostPID || reportedIsOnAnotherDesktop {
-                    focusedWindowID = windowService.frontmostWindowID(ownerPID: frontmostPID)
-                }
+            // The report is a cache, and it lags: behind the frontmost process, behind one of its
+            // windows on another desktop, and behind a sibling on this one — a new window whose
+            // admission is still pending, or a Command-backtick landing whose own report the cycle
+            // suppresses (KHA-837). Moving the report's window then moves one the user is not
+            // looking at, so the visible WindowServer order for the process in front decides.
+            // A front window Debut does not track yet, or none at all, refuses the move below
+            // rather than falling back to the stale one.
+            if let frontmostPID = windowService.frontmostApplicationPID() {
+                focusedWindowID = windowService.frontmostWindowID(ownerPID: frontmostPID)
             }
             guard !focused.isFullscreen, let windowID = focusedWindowID,
                   let sourceID = spaceManager.spaceContainingWindow(windowID: windowID),
