@@ -27,7 +27,7 @@ artifact_id="$(date +%s)-$$"
 /usr/bin/install -m 755 "$PROJECT_DIR/scripts/tart-performance-guest.sh" "$SHARE_DIR/tart-performance-guest-$artifact_id.sh"
 
 # The E2E suite uses the same guest; profiling beside it would measure both.
-trap tart_queue_leave EXIT
+trap 'tart_queue_leave_stopping_vm "$VM_NAME"' EXIT
 trap 'exit 130' INT TERM
 tart_queue_enter "tart-performance $(basename "$PROJECT_DIR") $PROFILE"
 

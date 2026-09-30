@@ -135,6 +135,47 @@ wait
 grep -q 'busy run' <<< "$stop_output" || fail "stop did not name the run it protected: $stop_output"
 grep -q '^stop' "$work/tart-calls" 2>/dev/null && fail "stop reached tart while another run held the queue"
 
+# An idle guest is not free: its WindowServer spins at ~100% (KHA-838), and every run cold-boots
+# the guest anyway. Leaving the queue stops it while the ticket still guarantees it is ours.
+printf '#!/bin/bash\necho "$* tickets=$(ls "%s"/*.ticket 2>/dev/null | wc -l | tr -d " ")" >> "%s/tart-calls"\nexit 1\n' \
+    "$DEBUT_TART_QUEUE_DIR" "$work" > "$stub/tart"
+: > "$work/tart-calls"
+(
+    source "$queue_lib"
+    tart_queue_enter "finished run" >/dev/null
+    PATH="$stub:$PATH" tart_queue_leave_stopping_vm debut-test-vm
+    [[ -z "$TART_QUEUE_TICKET" ]] || echo "ticket kept" >> "$work/tart-calls"
+)
+[[ "$(<"$work/tart-calls")" == "stop debut-test-vm tickets=1" ]] \
+    || fail "leaving the queue did not stop the guest while holding the ticket: $(<"$work/tart-calls")"
+[[ -z "$(ls "$DEBUT_TART_QUEUE_DIR"/*.ticket 2>/dev/null)" ]] \
+    || fail "a failed stop kept the ticket"
+
+# A caller that never reached the head of the queue must not stop another task's guest.
+: > "$work/tart-calls"
+(
+    source "$queue_lib"
+    PATH="$stub:$PATH" tart_queue_leave_stopping_vm debut-test-vm
+)
+[[ ! -s "$work/tart-calls" ]] || fail "a caller without a ticket stopped the guest"
+
+# DEBUT_TART_KEEP_WARM keeps the guest up for inspecting it after a run.
+: > "$work/tart-calls"
+(
+    source "$queue_lib"
+    tart_queue_enter "inspected run" >/dev/null
+    DEBUT_TART_KEEP_WARM=1 PATH="$stub:$PATH" tart_queue_leave_stopping_vm debut-test-vm
+)
+[[ ! -s "$work/tart-calls" ]] || fail "DEBUT_TART_KEEP_WARM=1 still stopped the guest"
+[[ -z "$(ls "$DEBUT_TART_QUEUE_DIR"/*.ticket 2>/dev/null)" ]] \
+    || fail "keeping the guest warm kept the ticket"
+
+# Every script that boots the shared guest stops it again on the way out.
+for script in scripts/tart-e2e.sh scripts/tart-performance.sh scripts/demo-capture.sh; do
+    grep -q 'tart_queue_leave_stopping_vm "\$VM_NAME"' "$script" \
+        || fail "$script leaves the guest running after it releases the queue"
+done
+
 if (( failures > 0 )); then
     exit 1
 fi

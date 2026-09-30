@@ -70,13 +70,16 @@ Run options:
 
 Runs wait in arrival order for the one local guest, across every checkout and
 override. Interrupting a waiting run leaves the queue without touching the VM.
+A run that reached the guest stops it as it leaves the queue: an idle guest keeps
+burning host CPU, and every run cold-boots it anyway. DEBUT_TART_KEEP_WARM=1 keeps
+it up for inspecting the guest afterwards.
 
 Each run keeps its log, guest results and a report.json with phase timings, source
 identity and check results in \$DEBUT_TART_SHARE/runs/<run-id>. The newest
 DEBUT_TART_KEEP_RUNS (default 5) runs and as many unsuccessful ones are kept.
 
 Overrides: DEBUT_TART_VM, DEBUT_TART_SHARE, DEBUT_E2E_DURATION_PROFILE,
-           DEBUT_TART_QUEUE_DIR, DEBUT_TART_KEEP_RUNS
+           DEBUT_TART_QUEUE_DIR, DEBUT_TART_KEEP_RUNS, DEBUT_TART_KEEP_WARM
 EOF
 }
 
@@ -181,7 +184,7 @@ release_run_lock() {
         rm -f "$RUN_LOCK"
         RUN_LOCK_HELD=false
     fi
-    tart_queue_leave
+    tart_queue_leave_stopping_vm "$VM_NAME"
 }
 
 # A run from a checkout that predates the queue still takes only this share lock. Wait it out
