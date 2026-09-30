@@ -66,7 +66,7 @@ TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift build -c release -
 
 # The capture shares the E2E guest and share directory, so wait for any run already using them
 # before replacing staged artifacts.
-trap tart_queue_leave EXIT
+trap 'tart_queue_leave_stopping_vm "$VM_NAME"' EXIT
 trap 'exit 130' INT TERM
 tart_queue_enter "demo-capture $(basename "$PROJECT_DIR")"
 

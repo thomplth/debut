@@ -127,6 +127,18 @@ tart_queue_leave() {
     fi
 }
 
+# tart_queue_leave_stopping_vm <vm>
+# Stops the guest, then releases this caller's ticket. An idle guest is not free — its
+# WindowServer spins at ~100% — and every run cold-boots it anyway, so keeping it warm buys
+# nothing. Only a caller holding a ticket stops it: one that never reached the head would stop
+# another task's guest mid-run. DEBUT_TART_KEEP_WARM=1 keeps it up for inspection.
+tart_queue_leave_stopping_vm() {
+    if [[ -n "$TART_QUEUE_TICKET" && "${DEBUT_TART_KEEP_WARM:-0}" != 1 ]]; then
+        tart stop "$1" >/dev/null 2>&1 || true
+    fi
+    tart_queue_leave
+}
+
 # Prints the live head's description, or nothing when the queue is idle.
 tart_queue_holder() {
     local head
