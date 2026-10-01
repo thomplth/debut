@@ -26,16 +26,12 @@ struct MoveFocusedWindowTests {
         #expect(delegate.receivedEvents == Array(repeating: .moveFocusedWindowToAdjacentSpace(input.1), count: 3))
     }
 
-    @Test("Window-moving chord yields when isolation is disabled, app excluded, or overview visible")
+    @Test("Window-moving chord yields when isolation is disabled or overview visible")
     func chordYields() {
-        for mode in 0..<4 {
-            let service = EventTapKeyboardService(desktopNavigationBlocked: { mode == 2 })
+        for mode in 0..<3 {
+            let service = EventTapKeyboardService(desktopNavigationBlocked: { mode == 1 })
             if mode == 0 { service.features.workspaceIsolation = false }
-            if mode == 1 {
-                service.excludedBundleIDs = ["com.test.Excluded"]
-                service.updateFrontmostApp(bundleIdentifier: "com.test.Excluded")
-            }
-            if mode == 3 { service.desktopNavigationAvailable = false }
+            if mode == 2 { service.desktopNavigationAvailable = false }
             let delegate = TestKeyboardDelegate()
             #expect(service.start(delegate: delegate))
             defer { service.stop() }
@@ -44,6 +40,20 @@ struct MoveFocusedWindowTests {
             #expect(service.handleCGEvent(type: .keyDown, event: event) != nil)
             #expect(delegate.receivedEvents.isEmpty)
         }
+    }
+
+    @Test("An ignored app in front still has the window-moving chord claimed for it")
+    func chordClaimedForIgnoredApp() {
+        let service = EventTapKeyboardService()
+        service.excludedBundleIDs = ["com.test.Excluded"]
+        service.updateFrontmostApp(bundleIdentifier: "com.test.Excluded")
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+        let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_RightArrow), keyDown: true)!
+        event.flags = [.maskCommand, .maskAlternate]
+        #expect(service.handleCGEvent(type: .keyDown, event: event) == nil)
+        #expect(delegate.receivedEvents == [.moveFocusedWindowToAdjacentSpace(1)])
     }
 
     private func fixture() -> (SpaceController, MockWindowService, MockSpaceSwitcher) {
@@ -180,6 +190,63 @@ struct MoveFocusedWindowTests {
 
         controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1))
 
+        #expect(spaces.moveRequests.isEmpty)
+    }
+
+    /// An ignored app's windows never join a stage, but they still live on a real desktop.
+    private func ignoredAppInFront() -> (SpaceController, MockWindowService, MockSpaceSwitcher) {
+        let (controller, windows, spaces) = fixture()
+        controller.excludedBundleIDs = ["com.test.Excluded"]
+        controller.updateFrontmostApp(bundleID: "com.test.Excluded")
+        spaces.windowDesktops[201] = 0
+        windows.frontmostPID = 50
+        windows.visibleFrontWindowID = 201
+        return (controller, windows, spaces)
+    }
+
+    @Test("An ignored app's window in front moves, follows and is focused, but is never admitted")
+    func ignoredWindowMoves() {
+        let (controller, windows, spaces) = ignoredAppInFront()
+
+        controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1))
+
+        #expect(spaces.moveRequests.map(\.windowID) == [201])
+        #expect(spaces.moveRequests.map(\.desktop) == [1])
+        #expect(spaces.switchRequests == [1])
+        #expect(windows.frontedWindows.isEmpty)
+        spaces.current = 1
+        controller.desktopDidChange()
+        #expect(windows.frontedWindows.last == .init(windowID: 201, ownerPID: 50))
+        #expect(controller.spaceManager.activeSpaceID == controller.spaceManager.spaces[1].id)
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 201) == nil)
+    }
+
+    @Test("Presses on an ignored app's window chain through each confirmed desktop")
+    func ignoredWindowChainsMoves() {
+        let (controller, windows, spaces) = ignoredAppInFront()
+        spaces.completesMovesImmediately = false
+
+        for _ in 0..<3 { controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1)) }
+        #expect(spaces.moveRequests.map(\.desktop) == [1])
+        for desktop in 1...3 {
+            spaces.completeNextMove()
+            #expect(spaces.switchRequests.last == desktop)
+            spaces.current = desktop
+            controller.desktopDidChange()
+        }
+
+        #expect(spaces.moveRequests.map(\.windowID) == [201, 201, 201])
+        #expect(spaces.moveRequests.map(\.desktop) == [1, 2, 3])
+        #expect(windows.frontedWindows.last == .init(windowID: 201, ownerPID: 50))
+        #expect(controller.spaceManager.spaceContainingWindow(windowID: 201) == nil)
+    }
+
+    @Test("An ignored app's window at the last desktop, or on none, moves nothing")
+    func ignoredWindowBoundaries() {
+        let (controller, _, spaces) = ignoredAppInFront()
+        controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(-1))
+        spaces.windowDesktops[201] = nil
+        controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1))
         #expect(spaces.moveRequests.isEmpty)
     }
 

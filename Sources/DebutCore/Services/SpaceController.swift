@@ -477,6 +477,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let stackID: String
         var destinationID: UUID
         var relocating = false
+        /// Set only for an ignored app's window, which no stage holds: the space whose desktop
+        /// the window server last confirmed it on. Such a move is followed by the
+        /// system-attention route, which focuses a window without admitting it.
+        var ignoredSourceID: UUID?
     }
     private var followingWindowMove: FollowingWindowMove?
 
@@ -857,6 +861,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return true
         }
         pendingSystemAttentionFocus = nil
+        // An ignored app's window move ends on this focus, as a tracked one ends on its own.
+        if let request = followingWindowMove, request.ignoredSourceID != nil,
+           request.windowID == pending.windowID,
+           let index = stack.desktopIDs.firstIndex(of: pending.location.desktopID),
+           spaceManager.spaceID(stackID: pending.location.stackID, at: index) == request.destinationID {
+            followingWindowMove = nil
+        }
         focusSystemAttention(windowID: pending.windowID, ownerPID: pending.ownerPID)
         return true
     }
@@ -2139,24 +2150,25 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             // looking at, so the visible WindowServer order for the process in front decides.
             // A front window Debut does not track yet, or none at all, refuses the move below
             // rather than falling back to the stale one.
-            if let frontmostPID = windowService.frontmostApplicationPID() {
+            let frontmostPID = windowService.frontmostApplicationPID()
+            if let frontmostPID {
                 focusedWindowID = windowService.frontmostWindowID(ownerPID: frontmostPID)
             }
-            guard !focused.isFullscreen, let windowID = focusedWindowID,
-                  let sourceID = spaceManager.spaceContainingWindow(windowID: windowID),
-                  let stackID = spaceManager.spaceStackID(containingSpaceID: sourceID),
-                  let sourceIndex = spaceManager.spaceIndex(id: sourceID),
-                  let stack = switcher.spaceTopology().stack(id: stackID),
-                  stack.currentDesktopIndex == sourceIndex,
-                  let location = switcher.desktopLocation(forWindow: windowID),
-                  location.stackID == stackID, location.index == sourceIndex,
-                  let window = spaceManager.allSpaces.first(where: { $0.id == sourceID })?
-                    .windows.first(where: { $0.windowID == windowID }),
-                  !excludedBundleIDs.contains(window.ownerBundleID), let ownerPID = window.ownerPID,
-                  spaceManager.spaceID(stackID: stackID, at: sourceIndex + offset) != nil
-            else { return }
-            followingWindowMove = .init(windowID: windowID, ownerPID: ownerPID,
-                                        stackID: stackID, destinationID: sourceID)
+            // An ignored app's windows never join a stage, so its front window is resolved from
+            // the window server alone (KHA-839).
+            let request: FollowingWindowMove?
+            if frontmostAppIsExcluded {
+                request = frontmostPID.flatMap { ownerPID in focusedWindowID.flatMap {
+                    ignoredWindowMove(windowID: $0, ownerPID: ownerPID, offset: offset,
+                                      switcher: switcher)
+                } }
+            } else if !focused.isFullscreen, let windowID = focusedWindowID {
+                request = trackedWindowMove(windowID: windowID, offset: offset, switcher: switcher)
+            } else {
+                request = nil
+            }
+            guard let request else { return }
+            followingWindowMove = request
             if isSpaceManagerVisible {
                 stageStackTransaction.discard()
                 isSpaceManagerVisible = false
@@ -2173,13 +2185,46 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         continueFollowingWindowMove()
     }
 
+    private func trackedWindowMove(windowID: CGWindowID, offset: Int,
+                                   switcher: any SpaceSwitching) -> FollowingWindowMove? {
+        guard let sourceID = spaceManager.spaceContainingWindow(windowID: windowID),
+              let stackID = spaceManager.spaceStackID(containingSpaceID: sourceID),
+              let sourceIndex = spaceManager.spaceIndex(id: sourceID),
+              let stack = switcher.spaceTopology().stack(id: stackID),
+              stack.currentDesktopIndex == sourceIndex,
+              let location = switcher.desktopLocation(forWindow: windowID),
+              location.stackID == stackID, location.index == sourceIndex,
+              let window = spaceManager.allSpaces.first(where: { $0.id == sourceID })?
+                .windows.first(where: { $0.windowID == windowID }),
+              !excludedBundleIDs.contains(window.ownerBundleID), let ownerPID = window.ownerPID,
+              spaceManager.spaceID(stackID: stackID, at: sourceIndex + offset) != nil
+        else { return nil }
+        return .init(windowID: windowID, ownerPID: ownerPID, stackID: stackID,
+                     destinationID: sourceID)
+    }
+
+    /// A window on a fullscreen Space, or on every desktop, has no single desktop location, so
+    /// it refuses here the way a tracked fullscreen window does.
+    private func ignoredWindowMove(windowID: CGWindowID, ownerPID: pid_t, offset: Int,
+                                   switcher: any SpaceSwitching) -> FollowingWindowMove? {
+        guard let location = switcher.desktopLocation(forWindow: windowID),
+              switcher.spaceTopology().stack(id: location.stackID)?.currentDesktopIndex
+                == location.index,
+              let sourceID = spaceManager.spaceID(stackID: location.stackID, at: location.index),
+              spaceManager.spaceID(stackID: location.stackID, at: location.index + offset) != nil
+        else { return nil }
+        return .init(windowID: windowID, ownerPID: ownerPID, stackID: location.stackID,
+                     destinationID: sourceID, ignoredSourceID: sourceID)
+    }
+
     /// Move and follow one adjacent desktop at a time. Moving the focused window past an
     /// unconfirmed swipe lets macOS change desktops out of sequence. Presses update the final
     /// destination immediately, but the next relocation waits for the preceding desktop event.
     private func continueFollowingWindowMove() {
         guard var request = followingWindowMove, !request.relocating else { return }
         guard let switcher = spaceSwitcher,
-              let sourceID = spaceManager.spaceContainingWindow(windowID: request.windowID),
+              let sourceID = request.ignoredSourceID
+                ?? spaceManager.spaceContainingWindow(windowID: request.windowID),
               let sourceIndex = spaceManager.spaceIndex(id: sourceID),
               let finalIndex = spaceManager.spaceIndex(id: request.destinationID),
               let stack = switcher.spaceTopology().stack(id: request.stackID)
@@ -2188,12 +2233,12 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
         guard pendingSpaceFocus?.command != .moveFocusedWindow,
+              pendingSystemAttentionFocus?.windowID != request.windowID,
               !switcher.isSwitchInFlight(stackID: request.stackID),
               stack.currentDesktopIndex == sourceIndex else { return }
         spaceManager.selectSpaceStack(id: request.stackID)
         if sourceID == request.destinationID {
-            performSpaceSwitch(id: request.destinationID, raiseWindowID: request.windowID,
-                               command: .moveFocusedWindow)
+            follow(request, to: request.destinationID, at: stack.location(at: finalIndex))
             followingWindowMove = nil
             return
         }
@@ -2208,39 +2253,60 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // Superseded focus must not front the window on an intermediate desktop.
         pendingSpaceFocus = nil
         if pendingFocusDelivery?.windowID == request.windowID { pendingFocusDelivery = nil }
+        if pendingSystemAttentionFocus?.windowID == request.windowID {
+            pendingSystemAttentionFocus = nil
+        }
         let windowID = request.windowID
         let ownerPID = request.ownerPID
         let requestID = request.id
+        let ignored = request.ignoredSourceID != nil
         switcher.moveWindow(windowID: windowID, to: location) { [weak self] moved in
             let finish: @Sendable () -> Void = { [weak self] in
                 guard let self else { return }
-                guard moved,
-                      let confirmedSourceID = self.spaceManager.spaceContainingWindow(windowID: windowID),
-                      self.spaceManager.allSpaces.first(where: { $0.id == confirmedSourceID })?
+                let confirmedSourceID = ignored
+                    ? sourceID : self.spaceManager.spaceContainingWindow(windowID: windowID)
+                guard moved, let confirmedSourceID,
+                      ignored || self.spaceManager.allSpaces.first(where: { $0.id == confirmedSourceID })?
                         .windows.contains(where: { $0.windowID == windowID && $0.ownerPID == ownerPID }) == true,
                       self.spaceManager.allSpaces.contains(where: { $0.id == destinationID }) else {
                     if self.followingWindowMove?.id == requestID { self.followingWindowMove = nil }
                     self.diag.report("window_move_failed", details: ["windowID": "\(windowID)"])
                     return
                 }
-                // Reconciliation may already have credited the window server's move while
-                // this callback was waiting for the main queue. Accept that membership too.
-                self.spaceManager.moveWindow(windowID: windowID, fromSpaceID: confirmedSourceID,
-                                             toSpaceID: destinationID, at: 0)
+                if !ignored {
+                    // Reconciliation may already have credited the window server's move while
+                    // this callback was waiting for the main queue. Accept that membership too.
+                    self.spaceManager.moveWindow(windowID: windowID, fromSpaceID: confirmedSourceID,
+                                                 toSpaceID: destinationID, at: 0)
+                }
                 self.diag.report("focused_window_moved", details: [
                     "windowID": "\(windowID)", "toSpaceIndex": "\(index)",
+                    "ignored": "\(ignored)",
                 ])
-                self.delegate?.spaceControllerDidMutateState(self)
+                if !ignored { self.delegate?.spaceControllerDidMutateState(self) }
                 // Another command can cancel following while the bridge confirms a move.
                 // Keep the confirmed assignment, but never resume its superseded desktop route.
                 guard var current = self.followingWindowMove, current.id == requestID else { return }
                 current.relocating = false
+                if ignored { current.ignoredSourceID = destinationID }
                 self.followingWindowMove = current
-                self.performSpaceSwitch(id: destinationID, raiseWindowID: windowID,
-                                        command: .moveFocusedWindow)
+                self.follow(current, to: destinationID, at: location)
             }
             if Thread.isMainThread { finish() }
             else { DispatchQueue.main.async(execute: finish) }
+        }
+    }
+
+    /// Shows the desktop a moved window has reached and focuses the window there. An ignored
+    /// app's window has no stage membership for a space switch to raise, so it takes the
+    /// route system-owned windows do.
+    private func follow(_ request: FollowingWindowMove, to spaceID: UUID, at location: DesktopLocation?) {
+        if request.ignoredSourceID == nil {
+            performSpaceSwitch(id: spaceID, raiseWindowID: request.windowID,
+                               command: .moveFocusedWindow)
+        } else {
+            routeSystemAttention(windowID: request.windowID, ownerPID: request.ownerPID,
+                                 location: location)
         }
     }
 
