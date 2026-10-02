@@ -337,9 +337,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         if type == .keyDown,
            let action = configuredAction(keyCode: keyCode, flags: flags, scope: .global),
            action.movesFocusedWindowBetweenSpaces {
+            // An ignored app's windows still live on real desktops, so the chord is claimed for
+            // them too (KHA-839); only Debut's stage membership skips them.
             guard features.workspaceIsolation,
                   desktopNavigationAvailable,
-                  !isFrontmostAppExcluded,
                   !desktopNavigationBlocked()
             else { return event }
             if quickSwitchKeysDown.insert(keyCode).inserted {
