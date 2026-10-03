@@ -5,6 +5,9 @@ individual windows, organize them by space, and switch between spaces faster.
 
 [**Download Debut**](https://github.com/thomplth/debut/releases/latest) · macOS 26 or later · Apple Silicon
 
+See the native demos and installation requirements on the
+[Debut website](https://debutspace.com/).
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/overlay-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/media/overlay.png">
