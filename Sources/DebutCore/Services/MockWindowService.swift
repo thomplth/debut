@@ -35,6 +35,11 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public var frontWindowDeliveryTrace: FrontWindowDeliveryTrace?
     public var visibleFrontWindowID: CGWindowID?
     public var focusObservation: WindowFocusObservation?
+    public var focusObservationCount = 0
+    /// Holds deferred raises until `runHeldRaises`, the way the Accessibility service holds them on
+    /// its own queue. Off by default, so a deferred raise lands before the caller returns.
+    public var holdsDeferredRaises = false
+    private var heldRaises: [() -> Void] = []
     /// Who macOS reports as frontmost afterwards, which is a separate answer from the one above:
     /// the window server takes a request it then does not honour, and reports success either way.
     public var frontmostPID: pid_t?
@@ -96,6 +101,20 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
         return true
     }
 
+    public func raiseWindowDeferred(
+        windowID: CGWindowID,
+        completion: @escaping @Sendable (Bool) -> Void
+    ) {
+        let raise = { completion(self.raiseWindow(windowID: windowID)) }
+        if holdsDeferredRaises { heldRaises.append(raise) } else { raise() }
+    }
+
+    public func runHeldRaises() {
+        let raises = heldRaises
+        heldRaises = []
+        raises.forEach { $0() }
+    }
+
     public func closeWindow(windowID: CGWindowID) -> Bool {
         closedWindowIDs.append(windowID)
         return closeWindowResult
@@ -127,7 +146,8 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     }
 
     public func focusObservation(ownerPID: pid_t) -> WindowFocusObservation {
-        focusObservation ?? WindowFocusObservation(
+        focusObservationCount += 1
+        return focusObservation ?? WindowFocusObservation(
             frontmostApplicationPID: frontmostPID,
             axFocusedWindowID: nil,
             visibleWindows: visibleFrontWindowID.map {

@@ -1,6 +1,7 @@
 import Testing
-import Foundation
+import AppKit
 import ApplicationServices
+import os
 @testable import DebutCore
 
 @Suite("MockWindowService")
@@ -858,6 +859,46 @@ struct WindowServiceTests {
         _ = service.raiseWindow(windowID: 42)
 
         #expect(scannedWindowIDs == [42])
+    }
+
+    /// AppKit answers Accessibility requests for Debut's own windows on the main queue. Sent from
+    /// the raise queue while main made an Accessibility call of its own, the two waited on each
+    /// other and the tutorial froze the app (KHA-856).
+    @MainActor
+    @Test("Debut's own window is raised before returning, never from the raise queue")
+    func ownWindowRaisesOnCaller() {
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let service = AccessibilityWindowService()
+        service.elementScanOverride = { _ in nil }
+        let answered = OSAllocatedUnfairLock(initialState: false)
+
+        service.raiseWindowDeferred(windowID: CGWindowID(window.windowNumber)) { _ in
+            answered.withLock { $0 = true }
+        }
+
+        #expect(answered.withLock { $0 })
+    }
+
+    @Test("Another app's window is raised off the caller")
+    func foreignWindowRaisesOffCaller() {
+        let service = AccessibilityWindowService()
+        let element = AXUIElementCreateSystemWide()
+        service.windowElementResolver = { _ in element }
+        let answered = OSAllocatedUnfairLock(initialState: false)
+
+        let finished = DispatchSemaphore(value: 0)
+
+        service.raiseWindowDeferred(windowID: 42) { _ in
+            answered.withLock { $0 = true }
+            finished.signal()
+        }
+        let answeredBeforeReturning = answered.withLock { $0 }
+
+        #expect(!answeredBeforeReturning)
+        #expect(finished.wait(timeout: .now() + 5) == .success)
     }
 
     @Test("Raising without a resolver still scans, so untracked windows keep working")

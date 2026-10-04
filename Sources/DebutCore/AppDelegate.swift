@@ -860,8 +860,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         _ controller: SpaceController,
         overlayPresentation: OverlayPresentationContext?
     ) {
-        DispatchQueue.main.async { [weak self] in
-            self?.hideSpaceManagerOverlay(overlayPresentation: overlayPresentation)
+        // A commit closes the overlay and then fronts the chosen window in the same turn. A hop
+        // queued the fade behind all of that, and the overlay sat opaque until it was done
+        // (KHA-856).
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.hideSpaceManagerOverlay(overlayPresentation: overlayPresentation)
+            }
+            return
+        }
+        MainActor.assumeIsolated {
+            hideSpaceManagerOverlay(overlayPresentation: overlayPresentation)
         }
     }
 

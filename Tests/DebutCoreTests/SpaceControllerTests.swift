@@ -2283,8 +2283,12 @@ struct SpaceControllerTests {
         #expect(windowService.frontedWindows.map(\.windowID) == [202, 202])
     }
 
-    @Test("App-window cycle diagnostics distinguish stale model, WindowServer, and AX sources")
-    func appWindowCycleDiagnosticsExposeSourceMismatch() throws {
+    /// Every Accessibility message waits for the owning app, and an app that was just fronted
+    /// answers only once its own activation work is done: Dia took ~85ms per raise, Codex up to
+    /// 577ms. The overlay's fade is queued behind the commit, so the commit may front the window
+    /// but must not wait on the app (KHA-856).
+    @Test("A focus commit fronts the window at once and leaves the raise to run off the caller")
+    func focusCommitDefersAccessibilityRaise() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("DebutCycleDiagnostics-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -2343,21 +2347,20 @@ struct SpaceControllerTests {
             toSpaceID: spaceID
         )
 
+        windowService.holdsDeferredRaises = true
         keyboardService.simulateEvent(.cmdBacktick)
+
+        #expect(windowService.frontedWindows.map(\.windowID) == [202])
+        #expect(windowService.raisedWindowIDs.isEmpty)
+        #expect(windowService.focusObservationCount == 0)
+
+        windowService.runHeldRaises()
         reporter.flush()
 
+        #expect(windowService.raisedWindowIDs == [202])
         let data = try Data(contentsOf: directory.appendingPathComponent("diagnostic.json"))
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let events = try #require(object["events"] as? [[String: String]])
-        let sourceEvent = events.last(where: {
-            $0["event"] == "window_focus_delivery_observed" && $0["phase"] == "before_request"
-        })
-        let source = try #require(sourceEvent)
-        #expect(source["modelFrontWindowID"] == "101")
-        #expect(source["windowServerFrontWindowID"] == "202")
-        #expect(source["axFocusedWindowID"] == "202")
-        #expect(source["visibleZOrder"] == "202@0,101@0")
-        #expect(source["targetWindowID"] == "202")
         let actionEvent = events.last(where: { $0["event"] == "window_focus_delivery_action" })
         let action = try #require(actionEvent)
         #expect(action["frontRequestAccepted"] == "true")

@@ -292,6 +292,11 @@ public protocol WindowService: Sendable {
     /// Raises the window only through an element already held for it, and never searches for
     /// one. For a window on a desktop that is not showing, a search cannot find it anyway.
     func raiseTrackedWindow(windowID: CGWindowID) -> Bool
+    /// Raises without holding the caller. An Accessibility message waits for the owning app, and
+    /// an app that was just fronted answers only after its own activation work, which held the
+    /// main queue — and the switcher's fade queued behind it — for up to 577ms (KHA-856).
+    /// `completion` may run on any queue.
+    func raiseWindowDeferred(windowID: CGWindowID, completion: @escaping @Sendable (Bool) -> Void)
     /// Performs the target window's accessibility close action when the app exposes one.
     func closeWindow(windowID: CGWindowID) -> Bool
     /// Makes one window's process frontmost through the window server, naming the window so the
@@ -332,6 +337,14 @@ public extension WindowService {
     /// Conformers that keep no elements have no cheaper path than their ordinary raise.
     func raiseTrackedWindow(windowID: CGWindowID) -> Bool {
         raiseWindow(windowID: windowID)
+    }
+
+    /// Conformers that make no cross-process call can answer before returning.
+    func raiseWindowDeferred(
+        windowID: CGWindowID,
+        completion: @escaping @Sendable (Bool) -> Void
+    ) {
+        completion(raiseWindow(windowID: windowID))
     }
 
     func listUntrackableWindowIDs() -> Set<CGWindowID> { [] }

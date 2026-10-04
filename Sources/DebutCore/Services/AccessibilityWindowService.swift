@@ -99,6 +99,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     /// exactly one desktop before the CG heuristic in `listWindows()` will trust it.
     public var spaceSwitcher: (any SpaceSwitching)?
 
+    /// Serial, so raises reach apps in the order they were asked for.
+    private let raiseQueue = DispatchQueue(label: "com.thomplth.Debut.accessibility-raise",
+                                           qos: .userInteractive)
     private let contradictionLock = NSLock()
     private var contradictions = AXContradictionRegistry()
 
@@ -1187,6 +1190,34 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString) == .success
     }
 
+    /// Resolved here, sent from `raiseQueue`: the tracked elements belong to the main queue, but
+    /// the message itself waits for the owning app (KHA-856).
+    ///
+    /// Debut's own windows are the exception. AppKit answers their requests on the main queue, so
+    /// one sent from `raiseQueue` while main made an Accessibility call of its own left each
+    /// waiting on the other, and the tutorial froze the app. Raised from main, they cost nothing.
+    public func raiseWindowDeferred(
+        windowID: CGWindowID,
+        completion: @escaping @Sendable (Bool) -> Void
+    ) {
+        if Self.isOwnWindow(windowID) {
+            completion(raiseWindow(windowID: windowID))
+            return
+        }
+        let tracked = windowElementResolver?(windowID)
+        let scans = tracked == nil && elementScanOverride == nil
+        let element = UncheckedSendableElement(element: tracked ?? elementScanOverride?(windowID))
+        raiseQueue.async { [weak self] in
+            guard let axWindow = element.element
+                    ?? (scans ? self?.axWindowElement(for: windowID, excludingOwnProcess: true) : nil)
+            else {
+                completion(false)
+                return
+            }
+            completion(AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString) == .success)
+        }
+    }
+
     public func raiseTrackedWindow(windowID: CGWindowID) -> Bool {
         guard let axWindow = windowElementResolver?(windowID) else { return false }
         return AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString) == .success
@@ -1217,10 +1248,21 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return axWindowElement(for: windowID)
     }
 
-    private func axWindowElement(for targetWindowID: CGWindowID) -> AXUIElement? {
+    private static func isOwnWindow(_ windowID: CGWindowID) -> Bool {
+        guard Thread.isMainThread else { return false }
+        return MainActor.assumeIsolated {
+            NSApplication.shared.window(withWindowNumber: Int(windowID)) != nil
+        }
+    }
+
+    private func axWindowElement(
+        for targetWindowID: CGWindowID,
+        excludingOwnProcess: Bool = false
+    ) -> AXUIElement? {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
         let runningApps = resolvedRunningApplications()
 
-        for app in runningApps {
+        for app in runningApps where !(excludingOwnProcess && app.pid == ownPID) {
             let axApp = AXUIElementCreateApplication(app.pid)
             var windowsRef: CFTypeRef?
             let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
@@ -1240,4 +1282,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     private func findApp(bundleID: String) -> NSRunningApplication? {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
     }
+}
+
+/// AX elements are CF objects that are safe to message from any thread; Swift cannot see that.
+private struct UncheckedSendableElement: @unchecked Sendable {
+    let element: AXUIElement?
 }

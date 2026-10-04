@@ -928,7 +928,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         } else {
             _ = windowService.activateApp(pid: ownerPID)
         }
-        _ = windowService.raiseWindow(windowID: windowID)
+        windowService.raiseWindowDeferred(windowID: windowID) { _ in }
         diag.report("overlay_action_attention_focused", details: [
             "windowID": "\(windowID)",
             "ownerPID": "\(ownerPID)",
@@ -951,15 +951,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
         let sourceWindowID = spaceManager.activeSpace.windows.first?.windowID
-        if command != .general, let ownerPID = window.ownerPID {
-            reportFocusDeliveryObservation(
-                windowService.focusObservation(ownerPID: ownerPID),
-                phase: "before_request",
-                command: command,
-                sourceWindowID: sourceWindowID,
-                targetWindowID: windowID
-            )
-        }
         let activation = activateOwner(of: window, raising: windowID)
         let outcome = activation.outcome
         if outcome == .refused { pendingPractice = nil }
@@ -981,9 +972,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 )
             }
         }
-        let raised = windowService.raiseWindow(windowID: windowID)
-        if command != .general, let ownerPID = window.ownerPID {
-            var details = focusDeliveryActionDetails(activation, raiseAccepted: raised)
+        // The window server has already fronted the window; the raise only settles it within its
+        // app, so nothing here waits for the app's answer. The verification readback still
+        // records what arrived (KHA-856).
+        let reportsDelivery = command != .general && window.ownerPID != nil
+        windowService.raiseWindowDeferred(windowID: windowID) { [diag] raised in
+            guard reportsDelivery else { return }
+            var details = Self.focusDeliveryActionDetails(activation, raiseAccepted: raised)
             details.merge([
                 "command": command.rawValue,
                 "frontProcessPath": outcome.rawValue,
@@ -991,13 +986,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 "targetWindowID": "\(windowID)",
             ], uniquingKeysWith: { _, new in new })
             diag.report("window_focus_delivery_action", details: details)
-            reportFocusDeliveryObservation(
-                windowService.focusObservation(ownerPID: ownerPID),
-                phase: "after_request",
-                command: command,
-                sourceWindowID: sourceWindowID,
-                targetWindowID: windowID
-            )
         }
         // The MRU head is a claim that the window took focus. A refused activation produces no
         // report to correct that claim, so it leaves the order alone.
@@ -1016,7 +1004,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// callback has returned. A missed first delivery is retried once without advancing the MRU.
     private static let maximumFocusDeliveryAttempts = 2
 
-    private func focusDeliveryActionDetails(
+    private static func focusDeliveryActionDetails(
         _ activation: OwnerActivation,
         raiseAccepted: Bool
     ) -> [String: String] {
@@ -1271,20 +1259,21 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             focusRequest = (windowID: request.windowID, ownerPID: request.ownerPID, at: clock())
             scheduleFrontVerification(windowID: request.windowID, ownerPID: request.ownerPID)
         }
-        let raised = windowService.raiseWindow(windowID: request.windowID)
         if request.command == .commandBacktick { backtickCycleSteppedAt = clock() }
-        var details = focusDeliveryActionDetails(activation, raiseAccepted: raised)
-        details.merge([
-            "attempt": "\(request.attempt)",
-            "command": request.command.rawValue,
-            "frontmostPID": frontmostPID.map(String.init) ?? "none",
-            "focusedWindowID": focusedWindowID.map(String.init) ?? "none",
-            "visibleFrontWindowID": visibleFrontWindowID.map(String.init) ?? "none",
-            "reason": reason,
-            "via": outcome.rawValue,
-            "windowID": "\(request.windowID)",
-        ], uniquingKeysWith: { _, new in new })
-        diag.report("window_focus_delivery_retried", details: details)
+        windowService.raiseWindowDeferred(windowID: request.windowID) { [diag] raised in
+            var details = Self.focusDeliveryActionDetails(activation, raiseAccepted: raised)
+            details.merge([
+                "attempt": "\(request.attempt)",
+                "command": request.command.rawValue,
+                "frontmostPID": frontmostPID.map(String.init) ?? "none",
+                "focusedWindowID": focusedWindowID.map(String.init) ?? "none",
+                "visibleFrontWindowID": visibleFrontWindowID.map(String.init) ?? "none",
+                "reason": reason,
+                "via": outcome.rawValue,
+                "windowID": "\(request.windowID)",
+            ], uniquingKeysWith: { _, new in new })
+            diag.report("window_focus_delivery_retried", details: details)
+        }
         scheduleFocusDeliveryVerification(revision: request.revision)
     }
 
@@ -1355,7 +1344,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         case refused
     }
 
-    private struct OwnerActivation {
+    private struct OwnerActivation: Sendable {
         let outcome: ActivationOutcome
         let windowServerTrace: FrontWindowDeliveryTrace?
     }
