@@ -70,6 +70,35 @@ struct MoveFocusedWindowTests {
         #expect(spaces.switchRequests.isEmpty)
     }
 
+    /// A window zoomed to the display's size matches the frame heuristic for fullscreen, yet it
+    /// sits on an ordinary desktop. Only the window server's desktop location tells the two
+    /// apart (KHA-874).
+    @Test("A screen-sized window on a desktop moves; a window on no desktop does not")
+    func screenSizedWindowMoves() {
+        let windows = MockWindowService()
+        let spaces = MockSpaceSwitcher(desktops: 4)
+        spaces.switchChangesDesktop = false
+        let controller = SpaceController(windowService: windows, keyboardService: MockKeyboardService(),
+            focusedWindowSnapshotProvider: {
+                .init(windowID: 102, frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                      isFullscreen: true)
+            })
+        controller.spaceSwitcher = spaces
+        controller.reconcileSpacesWithDesktops()
+        controller.spaceManager.addWindow(.init(windowID: 102, ownerBundleID: "com.test.App",
+            ownerName: "App", windowTitle: "W102", ownerPID: 42),
+            toSpaceID: controller.spaceManager.spaces[0].id)
+        spaces.windowDesktops[102] = 0
+        controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1))
+        #expect(spaces.moveRequests.map(\.windowID) == [102])
+
+        let (fullscreen, _, fullscreenSpaces) = fixture()
+        fullscreenSpaces.windowDesktops[102] = nil
+        fullscreen.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1))
+        #expect(fullscreenSpaces.moveRequests.isEmpty)
+        #expect(fullscreenSpaces.switchRequests.isEmpty)
+    }
+
     @Test("A move targets actual focus and only focuses after its desktop arrives")
     func followsFocusedWindow() {
         let (controller, windows, spaces) = fixture()

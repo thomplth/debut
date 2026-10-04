@@ -2166,8 +2166,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
               switcher.canMoveWindows else { return }
 
         if followingWindowMove == nil {
-            let focused = probeFocusedWindow()
-            var focusedWindowID = focused.windowID
+            var focusedWindowID = probeFocusedWindow().windowID
             // The report is a cache, and it lags: behind the frontmost process, behind one of its
             // windows on another desktop, and behind a sibling on this one — a new window whose
             // admission is still pending, or a raise whose own report names the window it left
@@ -2187,7 +2186,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                     ignoredWindowMove(windowID: $0, ownerPID: ownerPID, offset: offset,
                                       switcher: switcher)
                 } }
-            } else if !focused.isFullscreen, let windowID = focusedWindowID {
+            } else if let windowID = focusedWindowID {
+                // A window on a fullscreen Space has no desktop location, so it refuses there.
+                // A frame the size of the screen is no evidence: a zoomed window on a desktop
+                // matches it too (KHA-874).
                 request = trackedWindowMove(windowID: windowID, offset: offset, switcher: switcher)
             } else {
                 request = nil
