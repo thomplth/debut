@@ -613,6 +613,50 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             desktopSwitchIndicatorTracker.seed(with: topology)
         }
         reconcileSpaces(with: topology)
+        fileAllDesktopsWindowsOnShowingDesktops(in: topology)
+    }
+
+    /// Re-reads the topology and files every window assigned to all desktops under the desktop
+    /// showing. For assignments made without a desktop event, such as a relaunched app's
+    /// windows restored to the spaces they were saved in.
+    public func fileAllDesktopsWindowsOnShowingDesktops() {
+        guard let topology = spaceSwitcher?.spaceTopology() else { return }
+        fileAllDesktopsWindowsOnShowingDesktops(in: topology)
+    }
+
+    /// A window assigned to All Desktops is on whichever desktop the user is looking at, so the
+    /// showing space of its stack claims it. Its activation stamp travels with it, which keeps
+    /// its one place in the global MRU order: Ctrl+number or a swipe leaves it exactly as far
+    /// forward as it was, and macOS agrees by keeping it focused across the switch (KHA-853).
+    private func fileAllDesktopsWindowsOnShowingDesktops(in topology: SpaceTopology) {
+        guard let switcher = spaceSwitcher else { return }
+        let showingSpaceIDs = Set(topology.stacks.compactMap { stack in
+            stack.currentDesktopIndex.flatMap { spaceManager.spaceID(stackID: stack.id, at: $0) }
+        })
+        let candidates = spaceManager.allSpaces
+            .filter { !showingSpaceIDs.contains($0.id) }
+            .flatMap(\.windows).map(\.windowID)
+        let locations = switcher.allDesktopsWindowLocations(among: candidates, in: topology)
+        var moved = false
+        for (windowID, location) in locations.sorted(by: { $0.key < $1.key }) {
+            guard let sourceID = spaceManager.spaceContainingWindow(windowID: windowID),
+                  let targetID = spaceManager.spaceID(stackID: location.stackID, at: location.index),
+                  sourceID != targetID,
+                  let window = spaceManager.allSpaces.lazy.flatMap(\.windows)
+                      .first(where: { $0.windowID == windowID })
+            else { continue }
+            spaceManager.refileWindowByActivation(windowID: windowID, toSpaceID: targetID)
+            diag.report("window_reassigned", details: [
+                "windowID": "\(windowID)",
+                "bundleID": window.ownerBundleID,
+                "windowTitle": window.windowTitle,
+                "fromSpace": spaceLabel(forID: sourceID),
+                "toSpace": spaceLabel(forID: targetID),
+                "reason": "all_desktops",
+            ])
+            moved = true
+        }
+        if moved { delegate?.spaceControllerDidMutateState(self) }
     }
 
     /// Presentation consumes the topology already refreshed by launch, desktop-change, and
@@ -681,6 +725,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let previousActiveSpaceID = spaceManager.activeSpaceID
         if let topology {
             reconcileSpaces(with: topology)
+            fileAllDesktopsWindowsOnShowingDesktops(in: topology)
         } else {
             reconcileSpacesWithDesktops()
         }
@@ -1600,7 +1645,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public func recordWindowActivation(windowID reportedWindowID: CGWindowID) {
         let windowID = creditedActivation(of: reportedWindowID)
         let ownerSpaceID = spaceOwningWindow(windowID: windowID)
-        let desktopLocation = spaceSwitcher?.desktopLocation(forWindow: windowID)
+        let desktopLocation = spaceSwitcher.flatMap { switcher in
+            switcher.desktopLocation(forWindow: windowID)
+                ?? switcher.allDesktopsWindowLocations(
+                    among: [windowID], in: switcher.spaceTopology())[windowID]
+        }
         let stackID = desktopLocation?.stackID ?? ownerSpaceID.flatMap {
             spaceManager.spaceStackID(containingSpaceID: $0)
         }
@@ -1678,10 +1727,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // and that fought the user in a loop: the switch changed the Space, the Space
         // change resynced the active space, and the next focus event switched back.
         //
-        // Only a positive answer moves a window that already belongs somewhere. A window on
-        // every desktop — Finder's, typically — resolves to no single one, and reading that
-        // silence as "the desktop showing" dragged its stage onto whichever space was last
-        // visited. Silence leaves the assignment for a later real answer to correct.
+        // Only a positive answer moves a window that already belongs somewhere, and silence
+        // is not one: a window SkyLight places on no desktop keeps its assignment for a later
+        // real answer to correct. A window on every desktop is a positive answer, though — it
+        // is on the one showing, and the user just focused it there (KHA-853).
         let desktopSpaceID = desktopLocation.flatMap {
             spaceManager.spaceID(stackID: $0.stackID, at: $0.index)
         }

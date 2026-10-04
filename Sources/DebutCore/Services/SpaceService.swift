@@ -1290,6 +1290,11 @@ public protocol SpaceSwitching: AnyObject, Sendable {
     /// difference between "on every desktop" and "on no desktop at all", which the location
     /// map alone collapses into the same missing key.
     func placedWindowIDs() -> Set<CGWindowID>
+    /// The showing desktop for each candidate assigned to all desktops, keyed by window ID;
+    /// candidates on a single desktop, or on none, are absent. See
+    /// `SpaceTopology.showingLocation(ofWindowOnSpaces:)`.
+    func allDesktopsWindowLocations(among candidates: [CGWindowID],
+                                    in topology: SpaceTopology) -> [CGWindowID: DesktopLocation]
     /// What the window server volunteers about a batch of surfaces. Empty means nothing is known,
     /// which is why the default conformance can return nothing without evicting.
     func windowServerVerdicts(among candidates: [CGWindowID]) -> WindowServerVerdicts
@@ -1334,6 +1339,12 @@ public extension SpaceSwitching {
         WindowServerVerdicts()
     }
     func placedWindowIDs() -> Set<CGWindowID> { Set(windowLocations().keys) }
+    func allDesktopsWindowLocations(among candidates: [CGWindowID],
+                                    in topology: SpaceTopology) -> [CGWindowID: DesktopLocation] {
+        candidates.reduce(into: [:]) { result, windowID in
+            result[windowID] = topology.showingLocation(ofWindowOnSpaces: spaces(forWindow: windowID))
+        }
+    }
     func isSwitchInFlight(stackID: String) -> Bool { false }
     func spaces(forWindow windowID: CGWindowID) -> [CGSSpaceID] { [] }
     func spaceDidChange() {}
@@ -1696,6 +1707,33 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     public func placedWindowIDs() -> Set<CGWindowID> {
         let enumeration = enumerateDesktopWindows()
         return Set(enumeration.locations.keys).union(enumeration.shared)
+    }
+
+    /// One enumeration per showing desktop narrows the candidates first: a window filed under
+    /// another desktop is usually just there, and only one also listed on the desktop showing
+    /// is worth the per-window Space lookup that tells "every desktop" from "moved here".
+    public func allDesktopsWindowLocations(
+        among candidates: [CGWindowID],
+        in topology: SpaceTopology
+    ) -> [CGWindowID: DesktopLocation] {
+        guard !candidates.isEmpty, let connection, let slsCopyWindowsWithOptionsAndTags
+        else { return [:] }
+        var showing: Set<CGWindowID> = []
+        for stack in topology.stacks {
+            guard let desktopID = stack.currentDesktopIndex.map({ stack.desktopIDs[$0] })
+            else { continue }
+            var setTags: UInt64 = 0
+            var clearTags: UInt64 = 0
+            let windowIDs = slsCopyWindowsWithOptionsAndTags(
+                connection, 0, [NSNumber(value: desktopID)] as CFArray,
+                kWindowEnumerationOptions, &setTags, &clearTags
+            )?.takeRetainedValue() as? [NSNumber] ?? []
+            showing.formUnion(windowIDs.map(\.uint32Value))
+        }
+        return candidates.reduce(into: [:]) { result, windowID in
+            guard showing.contains(windowID) else { return }
+            result[windowID] = topology.showingLocation(ofWindowOnSpaces: spaces(forWindow: windowID))
+        }
     }
 
     private func enumerateDesktopWindows()

@@ -368,6 +368,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                         "trigger": "app_launch",
                     ])
                     self.reportAssignmentEvents(result.events, trigger: "app_launch")
+                    // A relaunched app's windows are restored to the spaces they were saved in,
+                    // which for one on every desktop is wherever the user last left it.
+                    controller.fileAllDesktopsWindowsOnShowingDesktops()
                     self.debouncedSaver?.scheduleSave(controller.spaceManager)
                 }
                 self.publishTutorialTargetIfDiscovered()

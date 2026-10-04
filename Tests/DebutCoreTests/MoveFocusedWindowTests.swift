@@ -72,6 +72,18 @@ struct MoveFocusedWindowTests {
         return (controller, windows, spaces)
     }
 
+    /// It is already on every desktop, so there is nowhere to move it, and moving it through
+    /// the window server would quietly take the All Desktops assignment away (KHA-853).
+    @Test("A window on every desktop is not moved")
+    func allDesktopsWindowStays() {
+        let (controller, _, spaces) = fixture()
+        spaces.windowDesktops[102] = nil
+        spaces.allDesktopWindowIDs = [102]
+        controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1))
+        #expect(spaces.moveRequests.isEmpty)
+        #expect(spaces.switchRequests.isEmpty)
+    }
+
     @Test("A move targets actual focus and only focuses after its desktop arrives")
     func followsFocusedWindow() {
         let (controller, windows, spaces) = fixture()

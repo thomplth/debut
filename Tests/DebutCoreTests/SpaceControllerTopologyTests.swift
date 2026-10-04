@@ -104,6 +104,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
         if let desktop = windowDesktops[windowID] {
             return keys.indices.contains(desktop) ? [CGSSpaceID(keys[desktop] + 100)] : []
         }
+        if allDesktopWindowIDs.contains(windowID) { return keys.map { CGSSpaceID($0 + 100) } }
         return windowSpaceIDs[windowID] ?? []
     }
 

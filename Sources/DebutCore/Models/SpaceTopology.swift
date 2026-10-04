@@ -111,6 +111,23 @@ public struct SpaceTopology: Equatable, Sendable {
         }
         return nil
     }
+
+    /// The showing desktop, for a window the window server puts on that desktop and at least
+    /// one other of the same stack — which is what Dock → Options → Assign To: All Desktops
+    /// does. Such a window is wherever the user is, so the desktop showing is its one honest
+    /// location. A single Space, or none, is not this case and answers nil (KHA-853).
+    public func showingLocation(ofWindowOnSpaces spaceIDs: [CGSSpaceID]) -> DesktopLocation? {
+        let locations = Set(spaceIDs.compactMap(location(ofSpace:)))
+        for stack in stacks {
+            guard let index = stack.currentDesktopIndex,
+                  let showing = stack.location(at: index),
+                  locations.contains(showing),
+                  locations.contains(where: { $0.stackID == stack.id && $0 != showing })
+            else { continue }
+            return showing
+        }
+        return nil
+    }
 }
 
 public extension SpaceTopology {

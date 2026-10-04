@@ -666,6 +666,21 @@ public struct SpaceManager: Codable, Sendable {
             spaceStacks[destination.stack].spaces[destination.space].addWindow(window)
         }
     }
+    /// Re-files a window under another space at the place its activation stamp earns there,
+    /// so the space's own MRU order keeps agreeing with the global one. Used for a window on
+    /// every desktop, which moves with the user rather than being moved by them (KHA-853).
+    public mutating func refileWindowByActivation(windowID: CGWindowID, toSpaceID: UUID) {
+        guard let destination = spaceLocation(id: toSpaceID),
+              let sourceID = spaceContainingWindow(windowID: windowID), sourceID != toSpaceID,
+              let window = allSpaces.lazy.flatMap(\.windows).first(where: { $0.windowID == windowID })
+        else { return }
+        removeLiveWindowFromAllSpaces(windowID: windowID)
+        let windows = spaceStacks[destination.stack].spaces[destination.space].windows
+        let index = window.lastActivatedAt.flatMap { stamp in
+            windows.firstIndex { $0.lastActivatedAt.map { $0 < stamp } ?? true }
+        } ?? windows.count
+        spaceStacks[destination.stack].spaces[destination.space].insertWindow(window, at: index)
+    }
     func windowIDs(inSpaceID id: UUID) -> [CGWindowID]? {
         guard let location = spaceLocation(id: id) else { return nil }
         return spaceStacks[location.stack].spaces[location.space].windows.map(\.windowID)
