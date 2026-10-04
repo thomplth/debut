@@ -2206,7 +2206,12 @@ func scenario_overlay_pointer() {
         info("  Switch landed: \(landed)")
     }
 
-    let pointerTarget = firstWindowCenter(in: readState())
+    let hoverState = readState()
+    let pointerTarget = firstWindowCenter(in: hoverState)
+    info("  Hover layout inputs: activeSpaceIndex=\(hoverState["activeSpaceIndex"] ?? "nil")"
+        + " aspects=\(activeSpaceCardAspects(in: hoverState))"
+        + " windowIDs=\(hoverState["windowIDsBySpace"] ?? "nil")"
+        + " overlayBounds=\(overlayBounds)")
 
     // Hovering needs a window card under the pointer, so an active space with no windows is a
     // missing fixture rather than a broken affordance. Reporting it as a failure sent the whole
@@ -2358,6 +2363,7 @@ func scenario_window_drop() {
         events(since: moveEventsBefore) { $0["event"] == "window_move_previewed_by_drag" }.count
     }
     info("  Original drop state: spaces=\(originalSpaceCount), windows=\(originalWindowCounts)")
+    info("  Drop layout inputs: selected=\(stageActiveSpaceIndex) aspects=\(preparedCardAspects)")
     info("  Drop fixture: source=\(sourceSpaceIndex), destination=\(destinationSpaceIndex), windows=\(preparedWindowCounts)")
 
     postMouseMove(to: neutralPointerLocation)
@@ -2396,13 +2402,6 @@ func scenario_window_drop() {
             activeSpaceIndex: stageActiveSpaceIndex,
             inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
        ),
-       // Where the dropped card rests once the overlay is back to normal, focused on it.
-       let destinationPoint = stageCenter(
-            spaceIndex: destinationSpaceIndex,
-            cardAspects: preparedCardAspects,
-            activeSpaceIndex: stageActiveSpaceIndex,
-            inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
-       ),
        let dropPoint = dragViewDropPoint(
             cardAspects: preparedCardAspects,
             sourceSpaceIndex: sourceSpaceIndex,
@@ -2432,7 +2431,29 @@ func scenario_window_drop() {
         }
 
         wait(0.4)
-        if let returnedSpacePoint = dragViewDropPoint(
+        // Where the dropped card rests once the overlay is back to normal. Gaining the card
+        // resizes the destination stage and moves every stage after it, so the pickup has to
+        // come from the state after the drop: the layout from before it put this point on an
+        // empty stage further down, and the reverse drag picked up nothing (KHA-823).
+        let movedSelectedSpaceIndex = Int(movedDropState["selectedSpaceIndex"] ?? "")
+            ?? destinationSpaceIndex
+        let movedActiveSpaceIndex = Int(movedDropState["activeSpaceIndex"] ?? "")
+            ?? stageActiveSpaceIndex
+        let inactiveScale = CGFloat(interactionSettings.inactiveStageScale)
+        if let centered = windowCenter(
+            spaceIndex: destinationSpaceIndex,
+            windowIndex: 0,
+            cardAspects: movedCardAspects,
+            activeSpaceIndex: movedSelectedSpaceIndex,
+            inactiveScale: inactiveScale
+        ),
+           let offset = focusedStackOffset(
+            cardAspects: movedCardAspects,
+            activeSpaceIndex: movedActiveSpaceIndex,
+            focusedSpaceIndex: movedSelectedSpaceIndex,
+            inactiveScale: inactiveScale
+        ),
+           let returnedSpacePoint = dragViewDropPoint(
             cardAspects: movedCardAspects,
             sourceSpaceIndex: destinationSpaceIndex,
             sourceWindowIndex: 0,
@@ -2440,7 +2461,9 @@ func scenario_window_drop() {
         ) {
             // Pick the card up where the normal overlay rests it, then drop it on the source
             // stage as the drag view draws it.
-            info("  Reverse drag path: \(destinationPoint) -> \(returnedSpacePoint)")
+            let destinationPoint = CGPoint(x: centered.x, y: centered.y + offset)
+            info("  Reverse drag path: \(destinationPoint) -> \(returnedSpacePoint)"
+                + " (selected=\(movedSelectedSpaceIndex), active=\(movedActiveSpaceIndex))")
             postMouseDrag(from: destinationPoint, to: returnedSpacePoint)
             for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
                 if dragMovesSinceDropStarted() > 1 {
