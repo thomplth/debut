@@ -413,7 +413,6 @@ struct KeyboardServiceTests {
     @Test("Unconfigured app Ctrl digit shortcuts do not take priority over quick switch")
     func unconfiguredAppShortcutDoesNotTakePriority() {
         let service = EventTapKeyboardService()
-        service.updateFrontmostApp(bundleIdentifier: "com.example.Unconfigured")
         let keyDown = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_ANSI_1),
@@ -482,7 +481,6 @@ struct KeyboardServiceTests {
         let delegate = TestKeyboardDelegate()
         _ = service.start(delegate: delegate)
         defer { service.stop() }
-        service.updateFrontmostApp(bundleIdentifier: "com.example.Frontmost")
         let numberDown = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_ANSI_1),
@@ -572,25 +570,6 @@ struct KeyboardServiceTests {
         #expect(delegate.receivedEvents == [.nextWindowRepeat])
     }
 
-    @Test("Cmd+backtick auto-repeat is distinguished from a fresh press")
-    func cmdBacktickAutoRepeat() {
-        let service = EventTapKeyboardService()
-        let delegate = TestKeyboardDelegate()
-        #expect(service.start(delegate: delegate))
-        defer { service.stop() }
-
-        let repeatedBacktick = CGEvent(
-            keyboardEventSource: nil,
-            virtualKey: CGKeyCode(kVK_ANSI_Grave),
-            keyDown: true
-        )!
-        repeatedBacktick.flags = .maskCommand
-        repeatedBacktick.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
-
-        #expect(service.handleCGEvent(type: .keyDown, event: repeatedBacktick) == nil)
-        #expect(delegate.receivedEvents == [.cmdBacktickRepeat])
-    }
-
     @Test("Cmd+Shift+Tab auto-repeat is distinguished from a fresh press")
     func cmdShiftTabAutoRepeat() {
         let service = EventTapKeyboardService()
@@ -637,25 +616,6 @@ struct KeyboardServiceTests {
 
         #expect(service.handleCGEvent(type: .keyDown, event: repeatedBacktick) == nil)
         #expect(delegate.receivedEvents == [.cmdTabHold, .previousWindowRepeat])
-    }
-
-    @Test("Cmd+Shift+backtick auto-repeat is distinguished from a fresh press")
-    func cmdShiftBacktickAutoRepeat() {
-        let service = EventTapKeyboardService()
-        let delegate = TestKeyboardDelegate()
-        #expect(service.start(delegate: delegate))
-        defer { service.stop() }
-
-        let repeatedBacktick = CGEvent(
-            keyboardEventSource: nil,
-            virtualKey: CGKeyCode(kVK_ANSI_Grave),
-            keyDown: true
-        )!
-        repeatedBacktick.flags = [.maskCommand, .maskShift]
-        repeatedBacktick.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
-
-        #expect(service.handleCGEvent(type: .keyDown, event: repeatedBacktick) == nil)
-        #expect(delegate.receivedEvents == [.cmdShiftBacktickRepeat])
     }
 
     /// Builds a service whose held-cycle pacing is driven by `clock` rather than wall time.
@@ -923,34 +883,33 @@ struct KeyboardServiceTests {
         #expect(service.handleCGEvent(type: .keyDown, event: wDown) === wDown)
     }
 
-    @Test("Cmd-backtick passes through for excluded apps")
-    func commandBacktickPassesThroughForExcludedApp() {
+    /// Stages are real macOS Spaces, and macOS's own Command-backtick already cycles only the
+    /// windows on the current Space, so Debut leaves the shortcut to macOS (KHA-864).
+    @Test("Cmd-backtick passes through to macOS", arguments: [false, true], [false, true])
+    func commandBacktickPassesThrough(shift: Bool, autoRepeat: Bool) {
         let service = EventTapKeyboardService()
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
-        service.updateFrontmostApp(bundleIdentifier: "com.example.Excluded")
-        service.excludedBundleIDs = ["com.example.Excluded"]
 
         let backtick = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_ANSI_Grave),
             keyDown: true
         )!
-        backtick.flags = .maskCommand
+        backtick.flags = shift ? [.maskCommand, .maskShift] : .maskCommand
+        if autoRepeat { backtick.setIntegerValueField(.keyboardEventAutorepeat, value: 1) }
 
         #expect(service.handleCGEvent(type: .keyDown, event: backtick) === backtick)
         #expect(delegate.receivedEvents.isEmpty)
     }
 
-    @Test("Cmd-backtick stays in the overlay for excluded apps")
-    func commandBacktickControlsOverlayForExcludedApp() {
+    @Test("Cmd-backtick still steps backward inside the overlay")
+    func commandBacktickControlsOverlay() {
         let service = EventTapKeyboardService()
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
-        service.updateFrontmostApp(bundleIdentifier: "com.example.Excluded")
-        service.excludedBundleIDs = ["com.example.Excluded"]
 
         let tabDown = CGEvent(
             keyboardEventSource: nil,
@@ -977,26 +936,6 @@ struct KeyboardServiceTests {
         #expect(service.handleCGEvent(type: .keyDown, event: backtickDown) == nil)
         #expect(service.handleCGEvent(type: .keyUp, event: backtickUp) == nil)
         #expect(delegate.receivedEvents == [.cmdTabHold, .previousWindow])
-    }
-
-    @Test("Cmd-shift-backtick passes through for excluded apps")
-    func commandShiftBacktickPassesThroughForExcludedApp() {
-        let service = EventTapKeyboardService()
-        let delegate = TestKeyboardDelegate()
-        #expect(service.start(delegate: delegate))
-        defer { service.stop() }
-        service.updateFrontmostApp(bundleIdentifier: "com.example.Excluded")
-        service.excludedBundleIDs = ["com.example.Excluded"]
-
-        let backtick = CGEvent(
-            keyboardEventSource: nil,
-            virtualKey: CGKeyCode(kVK_ANSI_Grave),
-            keyDown: true
-        )!
-        backtick.flags = [.maskCommand, .maskShift]
-
-        #expect(service.handleCGEvent(type: .keyDown, event: backtick) === backtick)
-        #expect(delegate.receivedEvents.isEmpty)
     }
 
     // Command is still held, since a keystroke without it ends the session (KHA-787), but

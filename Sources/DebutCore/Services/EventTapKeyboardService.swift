@@ -22,7 +22,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private var sessionTriggerKeyCode: Int64?
     private var quickSwitchKeysDown: Set<Int64> = []
     private let configurationLock = NSLock()
-    private var cachedFrontmostAppBundleIdentifier: String?
     private var storedDesktopNavigationAvailable = true
     public var desktopNavigationAvailable: Bool {
         get { configurationLock.withLock { storedDesktopNavigationAvailable } }
@@ -35,7 +34,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     }
     private var storedOverlayVisible: Bool = false
     private var storedKeyBindings: KeyBindings = KeyBindings()
-    private var storedExcludedBundleIDs: Set<String> = []
     private var storedQuickSwitchModifiers: ShortcutModifiers = .control
     private var storedQuickSwitchSameApplicationModifiers = ShortcutModifiers(
         control: true,
@@ -58,10 +56,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     public var keyBindings: KeyBindings {
         get { configurationLock.withLock { storedKeyBindings } }
         set { configurationLock.withLock { storedKeyBindings = newValue } }
-    }
-    public var excludedBundleIDs: Set<String> {
-        get { configurationLock.withLock { storedExcludedBundleIDs } }
-        set { configurationLock.withLock { storedExcludedBundleIDs = newValue } }
     }
     public var quickSwitchModifiers: ShortcutModifiers {
         get { configurationLock.withLock { storedQuickSwitchModifiers } }
@@ -125,12 +119,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     public func endShortcutRecording() {
         configurationLock.withLock {
             shortcutRecordingHandler = nil
-        }
-    }
-
-    public func updateFrontmostApp(bundleIdentifier: String?) {
-        configurationLock.withLock {
-            cachedFrontmostAppBundleIdentifier = bundleIdentifier
         }
     }
 
@@ -395,18 +383,11 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
            let globalAction = configuredAction(keyCode: keyCode, flags: flags, scope: .global) {
             if globalAction.quickSwitchPosition != nil { return event }
             if !features.workspaceIsolation,
-               globalAction == .activateNextWindow || globalAction == .activatePreviousWindow || globalAction.isSameAppCycle {
+               globalAction == .activateNextWindow || globalAction == .activatePreviousWindow {
                 return event
             }
 
             if !features.optionTab, KeyAction.altTabActions.contains(globalAction) { return event }
-
-            // Same-app cycling is Debut's replacement for macOS's Cmd-` handling. Excluded
-            // apps have no tracked windows, so leave that shortcut untouched for macOS until
-            // Debut's overlay is visible and owns the keyboard session.
-            if globalAction.isSameAppCycle && isFrontmostAppExcluded && !overlayVisible {
-                return event
-            }
 
             if globalAction.isOverlayActivation {
                 beginSession(using: globalAction)
@@ -429,17 +410,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                     keyEvent,
                     asynchronously: deliverAsynchronously,
                     overlayPresentation: presentation
-                )
-                return nil
-            }
-
-            if globalAction.isSameAppCycle && !overlayVisible {
-                beginSession(using: globalAction)
-                let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-                if shouldPaceHeldCycle(globalAction, isAutoRepeat: isAutoRepeat) { return nil }
-                deliver(
-                    globalAction.toKeyEvent(autoRepeat: isAutoRepeat),
-                    asynchronously: deliverAsynchronously
                 )
                 return nil
             }
@@ -486,13 +456,6 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         spaceManagerActive = true
         sessionPrimaryModifier = Self.primaryModifier(for: combo)
         sessionTriggerKeyCode = sessionPrimaryModifier == nil ? Int64(combo.keyCode) : nil
-    }
-
-    private var isFrontmostAppExcluded: Bool {
-        configurationLock.withLock {
-            guard let bundleID = cachedFrontmostAppBundleIdentifier else { return false }
-            return storedExcludedBundleIDs.contains(bundleID)
-        }
     }
 
     private func configuredAction(

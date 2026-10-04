@@ -48,10 +48,6 @@ struct KeyboardShortcutCustomizationTests {
             command: true
         ))
         #expect(KeyAction.quickSwitchActions.allSatisfy { ($0.quickSwitchPosition ?? 10) <= 9 })
-        #expect(bindings.combo(for: .nextAppWindow) == KeyCombo(
-            keyCode: kVK_ANSI_Grave,
-            command: true
-        ))
         #expect(bindings.combo(for: .dismissOverlay) == KeyCombo(keyCode: kVK_Escape))
         // The Command modifier that opened the session is implicit here, so Return means
         // physical Command-Return while the stages are visible.
@@ -203,6 +199,40 @@ struct KeyboardShortcutCustomizationTests {
 
         #expect(decoded.combo(for: .moveWindowLeft) == KeyCombo(keyCode: kVK_ANSI_B))
         #expect(!decoded.bindings.values.contains(KeyCombo(keyCode: kVK_Space)))
+    }
+
+    /// macOS's Command-backtick already stays on the current Space, which is a stage (KHA-864).
+    @Test("Same-app cycling is retired and its saved choices are ignored")
+    func sameAppCycleActionsAreRetired() throws {
+        #expect(KeyAction(rawValue: "nextAppWindow") == nil)
+        #expect(KeyAction(rawValue: "previousAppWindow") == nil)
+
+        var saved = KeyBindings()
+        saved.bindings[.moveWindowLeft] = KeyCombo(keyCode: kVK_ANSI_B)
+        saved.clear(.quitSelectedApp)
+        var object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any]
+        )
+        var encodedBindings = try #require(object["bindings"] as? [Any])
+        encodedBindings.append("nextAppWindow")
+        encodedBindings.append(["keyCode": kVK_ANSI_Grave, "command": true])
+        object["bindings"] = encodedBindings
+        // A user who cleared the shortcut saved it as disabled; that must not sink the whole file.
+        var disabled = try #require(object["disabledActions"] as? [Any])
+        disabled.append("previousAppWindow")
+        object["disabledActions"] = disabled
+
+        let decoded = try JSONDecoder().decode(
+            KeyBindings.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        #expect(decoded.combo(for: .moveWindowLeft) == KeyCombo(keyCode: kVK_ANSI_B))
+        #expect(decoded.combo(for: .quitSelectedApp) == nil)
+        #expect(decoded.action(
+            for: KeyCombo(keyCode: kVK_ANSI_Grave, command: true),
+            scope: .global
+        ) == nil)
     }
 
     @Test("A custom global shortcut replaces Command-Tab activation")
@@ -516,27 +546,15 @@ struct KeyboardShortcutCustomizationTests {
         #expect(delegate.receivedEvents == [.cmdTabHold, .cmdRelease])
     }
 
-    @Test("Same-app cycling and overlay dismissal use configured bindings")
-    func remainingConfiguredBindings() {
+    @Test("Overlay dismissal uses its configured binding")
+    func configuredDismissBinding() {
         let service = EventTapKeyboardService()
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
-        bindings.bindings[.nextAppWindow] = KeyCombo(
-            keyCode: kVK_ANSI_B,
-            command: true
-        )
         bindings.bindings[.dismissOverlay] = KeyCombo(keyCode: kVK_ANSI_D)
         service.keyBindings = bindings
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
-
-        let commandB = keyEvent(keyCode: kVK_ANSI_B, flags: .maskCommand)
-        #expect(service.handleCGEvent(type: .keyDown, event: commandB) == nil)
-        #expect(delegate.receivedEvents == [.cmdBacktick])
-
-        let releaseCommand = keyEvent(keyCode: kVK_Command, flags: [])
-        #expect(service.handleCGEvent(type: .flagsChanged, event: releaseCommand) == nil)
-        #expect(delegate.receivedEvents == [.cmdBacktick, .cmdRelease])
 
         let commandTab = keyEvent(keyCode: kVK_Tab, flags: .maskCommand)
         #expect(service.handleCGEvent(type: .keyDown, event: commandTab) == nil)

@@ -244,7 +244,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         // Apply exclusion list
         discovery.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
-        keyboardService.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
 
         discovery.spaceSwitcher = spaceService
         windowService.spaceSwitcher = spaceService
@@ -446,8 +445,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 )
             }
         }
-        discovery.onFrontmostAppChanged = { [weak self, weak keyboardService] bundleID, source in
-            keyboardService?.updateFrontmostApp(bundleIdentifier: bundleID)
+        discovery.onFrontmostAppChanged = { [weak self] bundleID, source in
             guard let self else { return }
             self.spaceController?.updateFrontmostApp(bundleID: bundleID, source: source)
         }
@@ -1776,7 +1774,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         try? self.stateStore?.saveSettings(newSettings)
         self.windowDiscovery?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
-        self.keyboardService?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
         self.spaceController?.excludedBundleIDs = Set(newSettings.excludedBundleIDs)
         self.spaceController?.updateFrontmostApp(
             bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier

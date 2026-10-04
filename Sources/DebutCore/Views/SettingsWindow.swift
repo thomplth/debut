@@ -258,7 +258,7 @@ public struct SettingsView: View {
                     "Keep Command–Tab in the current desktop",
                     isOn: $viewModel.settings.features.workspaceIsolation
                 )
-                Text("Cycle windows on this desktop. Off restores native Command–Tab and Command–`.")
+                Text("Cycle windows on this desktop. Off restores native Command–Tab.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -681,18 +681,6 @@ public struct SettingsView: View {
                 .foregroundStyle(.secondary)
 
             ForEach(KeyAction.altTabActions, id: \.self) { action in
-                ShortcutRecorderRow(
-                    action: action,
-                    keyBindings: $viewModel.settings.keyBindings,
-                    recordingService: shortcutRecordingService
-                )
-            }
-
-            Text("Same-app window cycling")
-                .font(.headline)
-                .padding(.top, 4)
-
-            ForEach(KeyAction.sameAppActions, id: \.self) { action in
                 ShortcutRecorderRow(
                     action: action,
                     keyBindings: $viewModel.settings.keyBindings,

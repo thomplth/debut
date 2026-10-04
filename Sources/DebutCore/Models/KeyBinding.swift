@@ -17,10 +17,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case quickSwitchSpace4, quickSwitchSpace5, quickSwitchSpace6
     case quickSwitchSpace7, quickSwitchSpace8, quickSwitchSpace9
 
-    // Global same-app window cycling
-    case nextAppWindow
-    case previousAppWindow
-
     // Global focused-window movement between spaces
     case moveFocusedWindowToPreviousSpace
     case moveFocusedWindowToPreviousSpaceAlternate
@@ -67,8 +63,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .quickSwitchSpace7: "Quick switch to space 7"
         case .quickSwitchSpace8: "Quick switch to space 8"
         case .quickSwitchSpace9: "Quick switch to space 9"
-        case .nextAppWindow: "Next window in current app"
-        case .previousAppWindow: "Previous window in current app"
         case .moveFocusedWindowToPreviousSpace: "Move to previous stage"
         case .moveFocusedWindowToPreviousSpaceAlternate:
             "Move to previous stage (alternate)"
@@ -121,8 +115,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .quickSwitchSpace7: .switchToSpace(7)
         case .quickSwitchSpace8: .switchToSpace(8)
         case .quickSwitchSpace9: .switchToSpace(9)
-        case .nextAppWindow: .cmdBacktick
-        case .previousAppWindow: .cmdShiftBacktick
         case .moveFocusedWindowToPreviousSpace,
              .moveFocusedWindowToPreviousSpaceAlternate:
             .moveFocusedWindowToAdjacentSpace(-1)
@@ -166,8 +158,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .activateNextWindow, .nextWindow: .nextWindowRepeat
         case .activatePreviousWindow, .previousWindow, .previousWindowAlternate:
             .previousWindowRepeat
-        case .nextAppWindow: .cmdBacktickRepeat
-        case .previousAppWindow: .cmdShiftBacktickRepeat
         case .activateAltTabNext: .altTabHoldRepeat
         case .activateAltTabPrevious: .altTabShiftHoldRepeat
         default: toKeyEvent()
@@ -182,7 +172,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
              .quickSwitchSpace1, .quickSwitchSpace2, .quickSwitchSpace3,
              .quickSwitchSpace4, .quickSwitchSpace5, .quickSwitchSpace6,
              .quickSwitchSpace7, .quickSwitchSpace8, .quickSwitchSpace9,
-             .nextAppWindow, .previousAppWindow,
              .moveFocusedWindowToPreviousSpace,
              .moveFocusedWindowToPreviousSpaceAlternate,
              .moveFocusedWindowToNextSpace,
@@ -224,10 +213,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         }
     }
 
-    public var isSameAppCycle: Bool {
-        self == .nextAppWindow || self == .previousAppWindow
-    }
-
     public var movesFocusedWindowBetweenSpaces: Bool {
         focusedWindowMoveOffset != nil
     }
@@ -252,7 +237,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .activateNextWindow, .activatePreviousWindow,
              .activateNextSpace, .activatePreviousSpace, .activatePreviousSpaceAlternate,
              .activateAltTabNext, .activateAltTabPrevious,
-             .nextAppWindow, .previousAppWindow,
              .nextWindow, .previousWindow, .previousWindowAlternate,
              .selectLeft, .selectDown, .selectUp, .selectRight,
              .nextSpace, .previousSpace:
@@ -275,10 +259,6 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         .quickSwitchSpace7, .quickSwitchSpace8, .quickSwitchSpace9,
     ]
 
-    public static let sameAppActions: [KeyAction] = [
-        .nextAppWindow, .previousAppWindow,
-    ]
-
     public static let focusedWindowMoveActions: [KeyAction] = [
         .moveFocusedWindowToPreviousSpace,
         .moveFocusedWindowToPreviousSpaceAlternate,
@@ -295,8 +275,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     ]
 
     public static let globalActions =
-        activationActions + altTabActions + quickSwitchActions + sameAppActions
-            + focusedWindowMoveActions
+        activationActions + altTabActions + quickSwitchActions + focusedWindowMoveActions
     public static let sessionActions = allCases.filter { $0.shortcutScope == .session }
 
     public static func jumpAction(forSpaceIndex index: Int) -> KeyAction? {
@@ -463,12 +442,6 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .quickSwitchSpace7: KeyCombo(keyCode: kVK_ANSI_7, control: true),
             .quickSwitchSpace8: KeyCombo(keyCode: kVK_ANSI_8, control: true),
             .quickSwitchSpace9: KeyCombo(keyCode: kVK_ANSI_9, control: true),
-            .nextAppWindow: KeyCombo(keyCode: kVK_ANSI_Grave, command: true),
-            .previousAppWindow: KeyCombo(
-                keyCode: kVK_ANSI_Grave,
-                command: true,
-                shift: true
-            ),
             .moveFocusedWindowToPreviousSpace: KeyCombo(
                 keyCode: kVK_LeftArrow,
                 command: true,
@@ -541,9 +514,11 @@ public struct KeyBindings: Codable, Sendable, Equatable {
             DecodedKeyActionDictionary<KeyCombo>.self,
             forKey: .bindings
         )?.values ?? [:]
-        disabledActions = try container.decodeIfPresent(
-            Set<KeyAction>.self, forKey: .disabledActions
-        ) ?? []
+        // A retired action is dropped rather than failing the decode, which would discard
+        // every other saved setting along with it.
+        disabledActions = Set(try container.decodeIfPresent(
+            [String].self, forKey: .disabledActions
+        )?.compactMap(KeyAction.init(rawValue:)) ?? [])
         var defaults = KeyCombo.defaults()
         for action in KeyAction.overlaySelectionActions where saved[action] == nil {
             if let combo = defaults[action], saved.contains(where: { $0.key != action && $0.value == combo }) {

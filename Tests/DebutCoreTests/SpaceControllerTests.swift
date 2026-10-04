@@ -1737,32 +1737,6 @@ struct SpaceControllerTests {
         #expect(controller.selectedWindowIndex == 2) // a fresh press still wraps
     }
 
-    @Test("Held backward app-window shortcut stops at the first window")
-    func heldAppWindowCycleStopsAtStart() {
-        let (controller, windowService, keyboardService) = makeController()
-        let spaceID = controller.spaceManager.activeSpaceID
-        for windowID in [CGWindowID(101), 202, 303] {
-            controller.spaceManager.addWindow(
-                SpaceWindow(
-                    windowID: windowID,
-                    ownerBundleID: "com.example.App",
-                    ownerName: "App",
-                    windowTitle: "Window \(windowID)"
-                ),
-                toSpaceID: spaceID
-            )
-        }
-
-        keyboardService.simulateEvent(.cmdShiftBacktick) // wraps to the last window
-        #expect(windowService.raisedWindowID == 303)
-        keyboardService.simulateEvent(.cmdShiftBacktickRepeat)
-        #expect(windowService.raisedWindowID == 202)
-        keyboardService.simulateEvent(.cmdShiftBacktickRepeat)
-        keyboardService.simulateEvent(.cmdShiftBacktickRepeat)
-
-        #expect(windowService.raisedWindowID == 101)
-    }
-
     @Test("Quit keeps every window visible until process exit confirms removal")
     func quitSelectedApp() {
         let (controller, windowService, keyboardService) = makeController()
@@ -2115,29 +2089,6 @@ struct SpaceControllerTests {
         #expect(controller.selectedWindowIndex == 0)
     }
 
-    @Test("Held app-window shortcut stops at the last window")
-    func heldAppWindowCycleStopsAtEnd() {
-        let (controller, windowService, keyboardService) = makeController()
-        let spaceID = controller.spaceManager.activeSpaceID
-        for windowID in [CGWindowID(101), 202, 303] {
-            controller.spaceManager.addWindow(
-                SpaceWindow(
-                    windowID: windowID,
-                    ownerBundleID: "com.example.App",
-                    ownerName: "App",
-                    windowTitle: "Window \(windowID)"
-                ),
-                toSpaceID: spaceID
-            )
-        }
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        keyboardService.simulateEvent(.cmdBacktickRepeat)
-        keyboardService.simulateEvent(.cmdBacktickRepeat)
-
-        #expect(windowService.raisedWindowID == 303)
-    }
-
     /// G1, D1, G2, L1 — the interleaved layout the cycle has to survive, since the two
     /// same-app windows are not adjacent in the space's MRU.
     private func makeInterleavedAppCycleController()
@@ -2167,60 +2118,11 @@ struct SpaceControllerTests {
         controller.spaceManager.activeSpace.windows.map(\.windowID)
     }
 
-    @Test("Releasing Command leaves the cycle's MRU order in place")
-    func appWindowCycleSurvivesRelease() {
-        let (controller, _, keyboardService) = makeInterleavedAppCycleController()
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        keyboardService.simulateEvent(.cmdRelease)
-
-        #expect(activeWindowIDs(controller) == [303, 101, 202, 404])
-    }
-
-    /// Both shortcuts are held under Command, so opening the switcher without releasing it is
-    /// the ordinary way to reach the overlay after a cycle — and the overlay must not list the
-    /// order the cycle already moved away from.
-    @Test("The switcher opened mid-cycle lists the cycled order, not the stale head")
-    func appWindowCycleVisibleWhenOverlayOpens() {
-        let (controller, _, keyboardService) = makeInterleavedAppCycleController()
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        keyboardService.simulateEvent(.cmdTabHold)
-
-        #expect(activeWindowIDs(controller) == [303, 101, 202, 404])
-        #expect(controller.selectedWindowIndex == 1)
-    }
-
-    @Test("A Command-Tab tap mid-cycle steps back from the cycled window, not the stale head")
-    func appWindowCycleSteppedBeforeTabTap() {
-        let (controller, _, keyboardService) = makeInterleavedAppCycleController()
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        keyboardService.simulateEvent(.cmdTabTap)
-
-        #expect(activeWindowIDs(controller) == [101, 303, 202, 404])
-    }
-
-    /// A quick Command-backtick releases Command before anything else happens, so a cycle that
-    /// waits for a release to write its result depends on that release arriving. When it does not,
-    /// the model stands still while the screen moves, the next press re-enters the same
-    /// uncommitted cycle, and the step after that lands back on the window it started from.
-    @Test("Each app-window cycle step writes the MRU without waiting for a release")
-    func appWindowCycleWritesEachStep() {
-        let (controller, _, keyboardService) = makeInterleavedAppCycleController()
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        #expect(activeWindowIDs(controller) == [303, 101, 202, 404])
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        #expect(activeWindowIDs(controller) == [101, 303, 202, 404])
-    }
-
     /// The window server can accept a same-process front request while leaving the source
     /// window focused. The optimistic MRU write must not make the next discrete press walk back
     /// to that source; until the target is confirmed, another press retries the same target.
-    @Test("An unconfirmed app-window cycle retries its target")
-    func unconfirmedAppWindowCycleRetriesTarget() {
+    @Test("An unconfirmed same-app Command-Tab retries its target")
+    func unconfirmedSameAppCommandTabRetriesTarget() {
         let focusedWindowID = Locked<CGWindowID?>(101)
         let windowService = MockWindowService()
         let keyboardService = MockKeyboardService()
@@ -2245,16 +2147,16 @@ struct SpaceControllerTests {
             )
         }
 
-        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdTabTap)
         // The delayed focus report still names DevTools: the requested Browser window did not
         // take focus, even though the window-server request itself returned success.
         controller.recordWindowActivation(windowID: 101)
-        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdTabTap)
 
         #expect(windowService.frontedWindows.map(\.windowID) == [202, 202])
     }
 
-    @Test("A missed app-window focus is retried without another shortcut")
+    @Test("A missed same-app focus is retried without another shortcut")
     func missedAppWindowFocusRetriesAutomatically() {
         // Dia can update AXFocusedWindow to the requested browser window even while DevTools
         // remains visibly in front. The window server's front-to-back order is the outcome.
@@ -2283,13 +2185,13 @@ struct SpaceControllerTests {
             )
         }
 
-        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdTabTap)
         #expect(controller.verifyPendingFocusDelivery())
 
         #expect(windowService.frontedWindows.map(\.windowID) == [202, 202])
         windowService.visibleFrontWindowID = 202
         #expect(controller.verifyPendingFocusDelivery())
-        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdTabTap)
         #expect(windowService.frontedWindows.map(\.windowID) == [202, 202, 101])
     }
 
@@ -2314,7 +2216,7 @@ struct SpaceControllerTests {
             )
         }
 
-        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdTabTap)
         #expect(controller.verifyPendingFocusDelivery())
 
         #expect(!controller.verifyPendingFocusDelivery())
@@ -2342,7 +2244,7 @@ struct SpaceControllerTests {
             )
         }
 
-        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdTabTap)
         #expect(controller.verifyPendingFocusDelivery())
 
         #expect(windowService.frontedWindows.map(\.windowID) == [202, 202])
@@ -2413,7 +2315,7 @@ struct SpaceControllerTests {
         )
 
         windowService.holdsDeferredRaises = true
-        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdTabTap)
 
         #expect(windowService.frontedWindows.map(\.windowID) == [202])
         #expect(windowService.raisedWindowIDs.isEmpty)
@@ -2533,7 +2435,7 @@ struct SpaceControllerTests {
             )
         }
 
-        keyboardService.simulateEvent(.cmdBacktick)
+        keyboardService.simulateEvent(.cmdTabTap)
         #expect(controller.verifyPendingFocusDelivery())
         #expect(controller.verifyPendingFocusDelivery())
 
@@ -2544,98 +2446,6 @@ struct SpaceControllerTests {
         // must stay credited to the source instead of being rewritten to the failed target.
         controller.recordWindowActivation(windowID: 101)
         #expect(activeWindowIDs(controller) == [101, 202])
-    }
-
-    /// Each step rewrites the MRU, so the walk order cannot be re-derived from it — that would
-    /// bounce between the two most recent windows instead of visiting the third.
-    @Test("A held cycle walks every window although each step rewrites the MRU")
-    func heldAppWindowCycleWalksWholeSet() {
-        let (controller, _, keyboardService) = makeController()
-        let spaceID = controller.spaceManager.activeSpaceID
-        for windowID in [CGWindowID(101), 202, 303] {
-            controller.spaceManager.addWindow(
-                SpaceWindow(
-                    windowID: windowID,
-                    ownerBundleID: "com.example.App",
-                    ownerName: "App",
-                    windowTitle: "Window \(windowID)"
-                ),
-                toSpaceID: spaceID
-            )
-        }
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        #expect(activeWindowIDs(controller) == [202, 101, 303])
-
-        keyboardService.simulateEvent(.cmdBacktickRepeat)
-        #expect(activeWindowIDs(controller) == [303, 202, 101])
-    }
-
-    /// The cycle ignores the focus report answering its own raise, which must not outlive the
-    /// cycle: a click on one of the same app's windows minutes later is the user's choice.
-    @Test("A focus report after the cycle has gone quiet is recorded, not ignored")
-    func staleAppWindowCycleDoesNotIgnoreLaterActivation() {
-        let clock = TestClock()
-        let keyboardService = MockKeyboardService()
-        let controller = SpaceController(
-            windowService: MockWindowService(),
-            keyboardService: keyboardService,
-            focusedWindowSnapshotProvider: { .unfocused },
-            clock: { clock.now }
-        )
-        let spaceID = controller.spaceManager.activeSpaceID
-        for windowID in [CGWindowID(101), 202] {
-            controller.spaceManager.addWindow(
-                SpaceWindow(
-                    windowID: windowID,
-                    ownerBundleID: "com.example.App",
-                    ownerName: "App",
-                    windowTitle: "Window \(windowID)"
-                ),
-                toSpaceID: spaceID
-            )
-        }
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        #expect(activeWindowIDs(controller) == [202, 101])
-
-        clock.advance(by: 60)
-        controller.recordWindowActivation(windowID: 101)
-
-        #expect(activeWindowIDs(controller) == [101, 202])
-    }
-
-    @Test("Consecutive quick app-window cycles each write the MRU")
-    func consecutiveAppWindowCyclesCommit() {
-        let (controller, _, keyboardService) = makeInterleavedAppCycleController()
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        keyboardService.simulateEvent(.cmdRelease)
-        #expect(activeWindowIDs(controller) == [303, 101, 202, 404])
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        keyboardService.simulateEvent(.cmdRelease)
-        #expect(activeWindowIDs(controller) == [101, 303, 202, 404])
-
-        keyboardService.simulateEvent(.cmdTabTap)
-        #expect(activeWindowIDs(controller) == [303, 101, 202, 404])
-    }
-
-    /// The AX report answering the cycle's own raise is asynchronous, so it can land either side
-    /// of the Command release.
-    @Test("A cycle commits whichever side of the release its focus report lands on")
-    func appWindowCycleCommitsAroundFocusReport() {
-        let (controller, _, keyboardService) = makeInterleavedAppCycleController()
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        controller.recordWindowActivation(windowID: 303)
-        keyboardService.simulateEvent(.cmdRelease)
-        #expect(activeWindowIDs(controller) == [303, 101, 202, 404])
-
-        keyboardService.simulateEvent(.cmdBacktick)
-        keyboardService.simulateEvent(.cmdRelease)
-        controller.recordWindowActivation(windowID: 101)
-        #expect(activeWindowIDs(controller) == [101, 303, 202, 404])
     }
 
     @Test("MRU: recordWindowActivation brings to front")

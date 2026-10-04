@@ -38,11 +38,6 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case quitSelectedApp        // Cmd+Q — quit the app owning the selected window
     case closeSelectedWindow    // Cmd+W — close the selected window
 
-    case cmdBacktick            // Cmd+` — next same-app window in space
-    case cmdBacktickRepeat      // Held Cmd+` auto-repeat (stops at the last window)
-    case cmdShiftBacktick       // Cmd+Shift+` — previous same-app window in space
-    case cmdShiftBacktickRepeat // Held Cmd+Shift+` auto-repeat (stops at the first window)
-
     case escape
 }
 

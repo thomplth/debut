@@ -16,7 +16,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Setting | Default |
 | --- | --- |
 | Window previews | On |
-| Workspace isolation (Command-Tab and same-app cycling) | On |
+| Workspace isolation (Command-Tab) | On |
 | Option-Tab across all desktops | On |
 | Faster desktop transitions | On |
 | Numbered desktop shortcuts | On |
@@ -45,8 +45,9 @@ fallbacks, and [default bindings](../Sources/DebutCore/Models/KeyBinding.swift).
 
 ## Feature behavior and permissions
 
-Disabling workspace isolation returns Command-Tab and Command-backtick activation
-to macOS and disables the fixed focused-window move chords. Stage browsing and
+Disabling workspace isolation returns Command-Tab activation to macOS and disables
+the fixed focused-window move chords. Command-backtick is always left to macOS,
+whose own cycle already stays on the current desktop, which is a stage. Stage browsing and
 Option-Tab remain available. Option-Tab has its own enable control; disabling it
 passes its configured activation shortcuts through unchanged.
 Saved shortcuts are retained when a feature is off.

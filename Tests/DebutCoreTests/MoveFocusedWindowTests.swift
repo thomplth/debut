@@ -42,20 +42,6 @@ struct MoveFocusedWindowTests {
         }
     }
 
-    @Test("An ignored app in front still has the window-moving chord claimed for it")
-    func chordClaimedForIgnoredApp() {
-        let service = EventTapKeyboardService()
-        service.excludedBundleIDs = ["com.test.Excluded"]
-        service.updateFrontmostApp(bundleIdentifier: "com.test.Excluded")
-        let delegate = TestKeyboardDelegate()
-        #expect(service.start(delegate: delegate))
-        defer { service.stop() }
-        let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_RightArrow), keyDown: true)!
-        event.flags = [.maskCommand, .maskAlternate]
-        #expect(service.handleCGEvent(type: .keyDown, event: event) == nil)
-        #expect(delegate.receivedEvents == [.moveFocusedWindowToAdjacentSpace(1)])
-    }
-
     private func fixture() -> (SpaceController, MockWindowService, MockSpaceSwitcher) {
         let windows = MockWindowService()
         let spaces = MockSpaceSwitcher(desktops: 4)
@@ -260,30 +246,6 @@ struct MoveFocusedWindowTests {
         spaces.windowDesktops[201] = nil
         controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1))
         #expect(spaces.moveRequests.isEmpty)
-    }
-
-    @Test("A Command-backtick landing confirmed on screen becomes the cached focus")
-    func confirmedCycleLandingCachesFocus() {
-        let windows = MockWindowService()
-        let keyboard = MockKeyboardService()
-        let controller = SpaceController(windowService: windows, keyboardService: keyboard,
-                                         focusDeliveryVerificationDelay: 60)
-        for id in [101, 102] {
-            controller.spaceManager.addWindow(.init(windowID: CGWindowID(id), ownerBundleID: "com.test.App",
-                ownerName: "App", windowTitle: "W\(id)", ownerPID: 42), toSpaceID: controller.spaceManager.activeSpaceID)
-        }
-        controller.recordWindowActivation(windowID: 102)
-        #expect(controller.focusedWindowID == 102)
-
-        keyboard.simulateEvent(.cmdBacktick)
-        windows.frontmostPID = 42
-        windows.visibleFrontWindowID = 101
-        #expect(controller.verifyPendingFocusDelivery())
-        // The app's own report for the raise is suppressed during the cycle, so the
-        // confirmation is the only answer the cache will get.
-        controller.recordWindowActivation(windowID: 102)
-
-        #expect(controller.focusedWindowID == 101)
     }
 
     @Test("Desktop reconciliation can observe a relocation before its confirmation callback")

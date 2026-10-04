@@ -466,8 +466,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var preOverlaySpaceID: UUID?
     private var preOverlaySpaceStackID: String?
     private var previousSpaceID: UUID?
-    private var backtickCycleWindows: [CGWindowID] = []
-    private var backtickCycleSteppedAt: Date?
     private var overlayPresentationGeneration: UInt = 0
     private var isOverlayPresented: Bool = false
     private let focusedWindowSnapshotProvider: (() -> FocusedWindowSnapshot)?
@@ -511,7 +509,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     private enum FocusCommand: String {
         case commandTab = "command_tab"
-        case commandBacktick = "command_backtick"
         case moveFocusedWindow = "move_focused_window"
         case general
     }
@@ -1117,14 +1114,14 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             spaceID: spaceID,
             sourceWindowID: sourceWindowID,
             command: command,
-            requiresVisibleWindow: command == .commandBacktick || command == .moveFocusedWindow || sourceOwnerPID == ownerPID,
+            requiresVisibleWindow: command == .moveFocusedWindow || sourceOwnerPID == ownerPID,
             attempt: 1,
             revision: focusDeliveryRevision
         )
         diag.report("window_focus_delivery_requested", details: [
             "attempt": "1",
             "command": command.rawValue,
-            "requiresVisibleWindow": "\(command == .commandBacktick || command == .moveFocusedWindow || sourceOwnerPID == ownerPID)",
+            "requiresVisibleWindow": "\(command == .moveFocusedWindow || sourceOwnerPID == ownerPID)",
             "sourceWindowID": sourceWindowID.map(String.init) ?? "none",
             "windowID": "\(windowID)",
         ])
@@ -1191,9 +1188,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             if visibleWindowArrived, focusRequest?.windowID == request.windowID {
                 focusRequest = nil
             }
-            // A Command-backtick cycle suppresses the app's own report of this raise, so without
-            // this the cache kept naming the window the step left, and the next window move took
-            // it (KHA-837). The window server putting the target in front is the live answer.
+            // The app's own report of this raise can lag or name the window it left, and the
+            // next window move would take that one (KHA-837). The window server putting the
+            // target in front is the live answer.
             if visibleWindowArrived { cacheAcceptedFocus(windowID: request.windowID) }
             diag.report("window_focus_delivery_confirmed", details: [
                 "attempt": "\(request.attempt)",
@@ -1229,7 +1226,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 )
                 delegate?.spaceControllerDidMutateState(self)
             }
-            endBacktickCycle()
             diag.report("window_focus_delivery_failed", details: [
                 "attempts": "\(request.attempt)",
                 "command": request.command.rawValue,
@@ -1274,7 +1270,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             focusRequest = (windowID: request.windowID, ownerPID: request.ownerPID, at: clock())
             scheduleFrontVerification(windowID: request.windowID, ownerPID: request.ownerPID)
         }
-        if request.command == .commandBacktick { backtickCycleSteppedAt = clock() }
         windowService.raiseWindowDeferred(windowID: request.windowID) { [diag] raised in
             var details = Self.focusDeliveryActionDetails(activation, raiseAccepted: raised)
             details.merge([
@@ -1466,7 +1461,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         )
         let performanceID = PerformanceRecorder.shared.begin(.spaceSwitch, workload: workload)
         defer { PerformanceRecorder.shared.end(performanceID) }
-        endBacktickCycle()
 
         let previousID = spaceManager.activeSpaceID
         var desktopIsSettling = false
@@ -1714,19 +1708,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 "source": "focus_observer",
                 "windowID": "\(reportedWindowID)",
             ])
-        }
-
-        // A cycle step has already written its landing window to the MRU, so the app's own focus
-        // report answering that raise must not demote it — and for a same-app cycle that report
-        // regularly names the window the step moved away from. The suppression cannot outlive the
-        // cycle, though: a click on one of the same app's windows later is the user's own choice.
-        if !backtickCycleWindows.isEmpty {
-            if backtickCycleWindows.contains(windowID),
-               let steppedAt = backtickCycleSteppedAt,
-               clock().timeIntervalSince(steppedAt) < Self.focusRequestFailsafe {
-                return
-            }
-            endBacktickCycle()
         }
 
         // A window cannot take focus on a desktop that is not showing, so the desktop is
@@ -2035,7 +2016,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             case .quitSelectedApp, .closeSelectedWindow, .nextDisplayStack,
                  .switchAdjacentSpace, .switchToSpace, .switchToSpaceKeepingCurrentApplication,
                  .moveFocusedWindowToAdjacentSpace,
-                 .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick, .cmdShiftBacktickRepeat,
                  .moveWindowLeft, .moveWindowRight, .jumpToSpace, .jumpToLastSpace:
                 return
             default: break
@@ -2059,10 +2039,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             if keyboardTookOverlayOwnership {
                 overlayKeyboardInteractionSequence += 1
             }
-        }
-
-        if !Self.continuesBacktickCycle(event) {
-            endBacktickCycle()
         }
 
         switch event {
@@ -2100,14 +2076,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             cycleAltTab(forward: true, wraps: false)
         case .altTabShiftHoldRepeat:
             cycleAltTab(forward: false, wraps: false)
-        case .cmdBacktick:
-            handleCmdBacktick(reverse: false)
-        case .cmdBacktickRepeat:
-            handleCmdBacktick(reverse: false, wraps: false)
-        case .cmdShiftBacktick:
-            handleCmdBacktick(reverse: true)
-        case .cmdShiftBacktickRepeat:
-            handleCmdBacktick(reverse: true, wraps: false)
         case .cmdRelease:
             commitSelection()
         case .escape:
@@ -2202,9 +2170,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             var focusedWindowID = focused.windowID
             // The report is a cache, and it lags: behind the frontmost process, behind one of its
             // windows on another desktop, and behind a sibling on this one — a new window whose
-            // admission is still pending, or a Command-backtick landing whose own report the cycle
-            // suppresses (KHA-837). Moving the report's window then moves one the user is not
-            // looking at, so the visible WindowServer order for the process in front decides.
+            // admission is still pending, or a raise whose own report names the window it left
+            // (KHA-837). Moving the report's window then moves one the user is not looking at,
+            // so the visible WindowServer order for the process in front decides.
             // A front window Debut does not track yet, or none at all, refuses the move below
             // rather than falling back to the stale one.
             let frontmostPID = windowService.frontmostApplicationPID()
@@ -2373,8 +2341,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         guard !isStageStackCommitInFlight,
               spaceManager.spaces.indices.contains(index) else { return }
 
-        endBacktickCycle()
-
         // Space window order is MRU. Capture the active app before switching,
         // then prefer that app's most-recent window in the destination space.
         let activeBundleID = spaceManager.activeSpace.windows.first?.ownerBundleID
@@ -2403,73 +2369,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     // MARK: - Private
 
-    private func handleCmdBacktick(reverse: Bool, wraps: Bool = true) {
-        // A repeat event belongs to one held traversal and may advance immediately. A second
-        // discrete press after an unconfirmed delivery is a retry, not evidence that the model's
-        // optimistic landing actually became the front window.
-        if wraps, retryUnconfirmedFocusDelivery(for: .commandBacktick) { return }
-        let activeSpace = spaceManager.activeSpace
-        guard let frontWindow = activeSpace.windows.first else { return }
-
-        let bundleID = frontWindow.ownerBundleID
-        let sameAppWindows = activeSpace.windows.filter { $0.ownerBundleID == bundleID }
-        guard sameAppWindows.count >= 2 else { return }
-
-        let windowIDs = sameAppWindows.map(\.windowID)
-
-        // The walk order is frozen for as long as the cycle covers the same windows. Each step
-        // writes its landing window to the MRU, so re-deriving the order from the MRU would make
-        // the cycle bounce between the two most recent windows instead of visiting the rest.
-        if Set(backtickCycleWindows) != Set(windowIDs) {
-            backtickCycleWindows = windowIDs
-        }
-
-        // The step is taken from the window in front rather than a remembered index, so a cycle
-        // and the screen cannot drift apart however the cycle ends.
-        let position = backtickCycleWindows.firstIndex(of: frontWindow.windowID) ?? 0
-        let count = backtickCycleWindows.count
-        let destination: Int
-        if reverse {
-            destination = wraps ? (position - 1 + count) % count : max(0, position - 1)
-        } else {
-            destination = wraps ? (position + 1) % count : min(count - 1, position + 1)
-        }
-
-        let targetID = backtickCycleWindows[destination]
-        backtickCycleSteppedAt = clock()
-        focusWindow(targetID, inSpaceID: spaceManager.activeSpaceID, command: .commandBacktick)
-        // Nothing else reports this activation, so without it an MRU head the user moved by
-        // Command-backtick leaves no trace and a wrong order has to be reproduced live.
-        diag.report("same_app_cycle_stepped", details: [
-            "from": "\(frontWindow.windowID)",
-            "to": "\(targetID)",
-            "cycle": backtickCycleWindows.map(String.init).joined(separator: ","),
-            "space": spaceLabel(forID: spaceManager.activeSpaceID),
-        ])
-        delegate?.spaceControllerDidMutateState(self)
-    }
-
-    private static func continuesBacktickCycle(_ event: DebutKeyEvent) -> Bool {
-        switch event {
-        case .cmdBacktick, .cmdBacktickRepeat, .cmdShiftBacktick, .cmdShiftBacktickRepeat:
-            true
-        default:
-            false
-        }
-    }
-
     private func windowOrderDescription(spaceID: UUID) -> String {
         guard let space = spaceManager.allSpaces.first(where: { $0.id == spaceID }) else {
             return ""
         }
         return space.windows.map { "\($0.windowID)" }.joined(separator: ",")
-    }
-
-    /// Releases the frozen walk order. The MRU is already written, so ending a cycle costs
-    /// nothing and cannot be missed — only the order a further step would have walked is lost.
-    private func endBacktickCycle() {
-        backtickCycleWindows = []
-        backtickCycleSteppedAt = nil
     }
 
     private func handleCmdTabTap() {
@@ -2662,7 +2566,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             overlayPresentationRecorder.mark(.controllerAccepted, for: presentation)
         }
 
-        endBacktickCycle()
         stageStackTransaction.discard()
 
         // Removing an inactive desktop need not change the Space currently showing, so there
