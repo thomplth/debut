@@ -262,6 +262,86 @@ struct OverlayWindowTests {
         window.orderOut(nil)
     }
 
+    /// Escape closes the system switcher at once; only a release fades (KHA-856).
+    @Test("Hiding without a fade takes the overlay off screen before returning")
+    func hideIsImmediate() async {
+        let window = OverlayWindow()
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0
+        ))
+        await withCheckedContinuation { continuation in
+            window.showOverlay(revealDuration: 0) {
+                continuation.resume()
+            }
+        }
+
+        window.hideOverlay()
+
+        #expect(!window.isVisible)
+    }
+
+    /// The system switcher fades briefly when a selection is released. AppKit steps a window's
+    /// alpha animation on the main queue, where the commit goes on to front the chosen window, so
+    /// the fade is a layer animation the render server runs to the end (KHA-856).
+    @Test("A release fade runs in Core Animation and orders the overlay out when it ends")
+    func releaseFadeRunsInCoreAnimation() async throws {
+        let window = OverlayWindow()
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0
+        ))
+        window.showOverlay()
+
+        window.hideOverlay(fadeDuration: 0.1)
+
+        let layer = try #require(window.contentView?.layer)
+        #expect(window.isVisible)
+        #expect(window.alphaValue == 1)
+        #expect(layer.opacity == 0)
+        #expect(layer.animation(forKey: OverlayWindow.dismissFadeKey) != nil)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(!window.isVisible)
+    }
+
+    @Test("Showing again during a release fade keeps the overlay up")
+    func showCancelsReleaseFade() async throws {
+        let window = OverlayWindow()
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0
+        ))
+        window.showOverlay()
+        window.hideOverlay(fadeDuration: 0.1)
+
+        window.showOverlay()
+        try await Task.sleep(for: .milliseconds(300))
+
+        #expect(window.isVisible)
+        #expect(window.contentView?.layer?.opacity == 1)
+        #expect(window.hasRenderedContent)
+        window.orderOut(nil)
+    }
+
+    @Test("The overlay appears at full opacity, without a fade in")
+    func showIsImmediate() {
+        let window = OverlayWindow()
+        _ = window.update(viewModel: StageOverlayViewModel(
+            spaceManager: SpaceManager(),
+            activeSpaceIndex: 0,
+            selectedWindowIndex: 0
+        ))
+
+        window.showOverlay()
+
+        #expect(window.isVisible)
+        #expect(window.alphaValue == 1)
+        window.orderOut(nil)
+    }
+
     @Test("The overlay orders front without asking to become the key window")
     func showOrdersFrontWhileInactive() async {
         // Debut is an accessory app, so it is usually inactive when the overlay

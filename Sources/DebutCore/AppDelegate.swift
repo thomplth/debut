@@ -860,17 +860,39 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         _ controller: SpaceController,
         overlayPresentation: OverlayPresentationContext?
     ) {
+        spaceControllerDidCloseOverlay(
+            controller,
+            overlayPresentation: overlayPresentation,
+            fades: false
+        )
+    }
+
+    /// The system switcher's brief fade on release.
+    nonisolated private static let releaseFadeDuration: TimeInterval = 0.1
+
+    nonisolated public func spaceControllerDidCloseOverlay(
+        _ controller: SpaceController,
+        overlayPresentation: OverlayPresentationContext?,
+        fades: Bool
+    ) {
+        let fadeDuration = fades ? Self.releaseFadeDuration : 0
         // A commit closes the overlay and then fronts the chosen window in the same turn. A hop
         // queued the fade behind all of that, and the overlay sat opaque until it was done
         // (KHA-856).
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in
-                self?.hideSpaceManagerOverlay(overlayPresentation: overlayPresentation)
+                self?.hideSpaceManagerOverlay(
+                    overlayPresentation: overlayPresentation,
+                    fadeDuration: fadeDuration
+                )
             }
             return
         }
         MainActor.assumeIsolated {
-            hideSpaceManagerOverlay(overlayPresentation: overlayPresentation)
+            hideSpaceManagerOverlay(
+                overlayPresentation: overlayPresentation,
+                fadeDuration: fadeDuration
+            )
         }
     }
 
@@ -1089,7 +1111,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func hideSpaceManagerOverlay(
-        overlayPresentation: OverlayPresentationContext? = nil
+        overlayPresentation: OverlayPresentationContext? = nil,
+        fadeDuration: TimeInterval = 0
     ) {
         if let overlayPresentation {
             spaceController?.completeOverlayPresentation(
@@ -1097,7 +1120,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 outcome: .hiddenBeforeReveal
             )
         }
-        overlayWindow?.hideOverlay()
+        overlayWindow?.hideOverlay(fadeDuration: fadeDuration)
         diag.report("overlay_hidden")
         if hiddenIdlePerformanceID == nil {
             hiddenIdlePerformanceID = PerformanceRecorder.shared.begin(.hiddenIdle)

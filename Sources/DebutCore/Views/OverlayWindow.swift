@@ -52,6 +52,7 @@ private struct OverlayContentRootView: View {
 /// is not active — measured at every level and collection behaviour. A panel is let in either way.
 public final class OverlayWindow: NSPanel, @unchecked Sendable {
     private var hostingView: NSHostingView<OverlayContentRootView>?
+    var hasRenderedContent: Bool { hostingView != nil }
     private var contentState: OverlayContentState?
     private var renderedWindowIDs: Set<CGWindowID> = []
     private var renderGeneration = 0
@@ -96,6 +97,9 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         self.hasShadow = false
         self.ignoresMouseEvents = false
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // The release fade animates this layer, so the render server can finish it while the
+        // main queue fronts the chosen window.
+        contentView?.wantsLayer = true
     }
 
     @discardableResult
@@ -207,13 +211,16 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     }
 
     public func showOverlay(
-        revealDuration: TimeInterval = 0.15,
+        revealDuration: TimeInterval = 0,
         onRevealCompleted: @escaping @MainActor @Sendable () -> Void = {}
     ) {
         synchronizeFrameToTargetScreen(display: true)
         hostingView?.frame = contentView?.bounds ?? .zero
         startWatchingScroll()
-        alphaValue = 0
+        dismissalGeneration += 1
+        contentView?.layer?.removeAnimation(forKey: Self.dismissFadeKey)
+        contentView?.layer?.opacity = 1
+        alphaValue = revealDuration > 0 ? 0 : 1
         // An exclusive display capture places its shielding surface above ordinary AppKit
         // levels. Only raise the switcher when that surface belongs to the app receiving the
         // Command-Tab session; a shield owned by another process must not change its level.
@@ -315,24 +322,52 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         setFrame(frame, display: display)
     }
 
-    public func hideOverlay() {
-        // Before the fade, not on disappear: nothing held under a fading overlay may be accepted.
+    static let dismissFadeKey = "debut.dismissFade"
+    /// Advanced by every show, so a release fade still running cannot order out the next session.
+    private var dismissalGeneration = 0
+
+    /// - Parameter fadeDuration: Zero closes at once, as Escape does in the system switcher; a
+    ///   release fades briefly. The fade is a layer animation handed to the render server before
+    ///   returning, because the commit goes on to front the chosen window on the main queue, and
+    ///   AppKit's window alpha animation froze half transparent behind that work (KHA-856).
+    public func hideOverlay(fadeDuration: TimeInterval = 0) {
+        // Before ordering out, not on disappear: nothing held under a closing overlay may be accepted.
         compactDragSession.cancel(reason: "overlay hidden")
         stopWatchingScroll()
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.1
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            self.animator().alphaValue = 0.0
-        }, completionHandler: { [weak self] in
-            DispatchQueue.main.async {
-                self?.orderOut(nil)
-                // Remove the hosting view to stop SwiftUI layout passes
-                self?.hostingView?.removeFromSuperview()
-                self?.hostingView = nil
-                self?.contentState = nil
-                self?.renderedWindowIDs = []
-                self?.renderGeneration += 1
+        let generation = dismissalGeneration
+        guard fadeDuration > 0, let layer = contentView?.layer else {
+            orderOut(nil)
+            DispatchQueue.main.async { [weak self] in
+                guard self?.dismissalGeneration == generation else { return }
+                self?.releaseRenderedContent()
             }
-        })
+            return
+        }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = layer.presentation()?.opacity ?? layer.opacity
+        fade.toValue = 0
+        fade.duration = fadeDuration
+        fade.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 0
+        layer.add(fade, forKey: Self.dismissFadeKey)
+        CATransaction.commit()
+        // Committed now, not at the end of this turn, which is after the commit's main-queue work.
+        CATransaction.flush()
+        DispatchQueue.main.asyncAfter(deadline: .now() + fadeDuration) { [weak self] in
+            guard let self, self.dismissalGeneration == generation else { return }
+            self.orderOut(nil)
+            self.releaseRenderedContent()
+        }
+    }
+
+    /// Removes the hosting view to stop SwiftUI layout passes.
+    private func releaseRenderedContent() {
+        hostingView?.removeFromSuperview()
+        hostingView = nil
+        contentState = nil
+        renderedWindowIDs = []
+        renderGeneration += 1
     }
 }

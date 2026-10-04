@@ -156,6 +156,13 @@ public protocol SpaceControllerDelegate: AnyObject {
         _ controller: SpaceController,
         overlayPresentation: OverlayPresentationContext?
     )
+    /// `fades` is true for a released selection, which the system switcher fades out briefly;
+    /// every other close, Escape included, is immediate.
+    func spaceControllerDidCloseOverlay(
+        _ controller: SpaceController,
+        overlayPresentation: OverlayPresentationContext?,
+        fades: Bool
+    )
     func spaceControllerDidUpdateSelection(_ controller: SpaceController)
     func spaceControllerDidSwitchSpace(_ controller: SpaceController)
     func spaceControllerDidMutateState(_ controller: SpaceController)
@@ -192,6 +199,14 @@ public extension SpaceControllerDelegate {
         overlayPresentation: OverlayPresentationContext?
     ) {
         spaceControllerDidCloseOverlay(controller)
+    }
+
+    func spaceControllerDidCloseOverlay(
+        _ controller: SpaceController,
+        overlayPresentation: OverlayPresentationContext?,
+        fades: Bool
+    ) {
+        spaceControllerDidCloseOverlay(controller, overlayPresentation: overlayPresentation)
     }
 
     func spaceController(
@@ -2717,7 +2732,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func dismissOverlayPresentation(
-        beforePresentationOutcome: OverlayPresentationOutcome = .hiddenBeforeReveal
+        beforePresentationOutcome: OverlayPresentationOutcome = .hiddenBeforeReveal,
+        fades: Bool = false
     ) {
         overlayPresentationGeneration &+= 1
         guard isOverlayPresented else {
@@ -2733,7 +2749,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         isOverlayPresented = false
         delegate?.spaceControllerDidCloseOverlay(
             self,
-            overlayPresentation: activeOverlayPresentation
+            overlayPresentation: activeOverlayPresentation,
+            fades: fades
         )
     }
 
@@ -3012,7 +3029,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             tapService.overlayVisible = false
         }
 
-        dismissOverlayPresentation(beforePresentationOutcome: .releasedBeforePresentation)
+        dismissOverlayPresentation(beforePresentationOutcome: .releasedBeforePresentation,
+                                   fades: true)
 
         guard spaceManager.spaces.indices.contains(selectedSpaceIndex) else { return }
         let targetSpace = spaceManager.spaces[selectedSpaceIndex]
