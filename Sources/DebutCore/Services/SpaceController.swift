@@ -391,9 +391,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// Spaces separated by `;`, windows within one by `,`, an unmeasured window by `?`. A
     /// diagnostic value is a string, and an empty space has to survive the round trip as an
     /// empty space rather than disappearing from the list.
+    ///
+    /// Written exactly, not rounded: E2E lays these out with the overlay's own code to aim the
+    /// pointer, and a window as wide as the display rounded to four places came back a hair
+    /// narrower than its neighbours, which was enough to rebalance the rows (KHA-854).
     static func encode(_ aspects: [[CGFloat?]]) -> String {
         aspects
-            .map { $0.map { $0.map { String(format: "%.4f", $0) } ?? "?" }.joined(separator: ",") }
+            .map { $0.map { $0.map { "\(Double($0))" } ?? "?" }.joined(separator: ",") }
             .joined(separator: ";")
     }
 
