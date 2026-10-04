@@ -843,9 +843,10 @@ struct SpaceControllerTests {
         #expect(windowService.frontedWindows.map(\.windowID) == [202, 202])
     }
 
-    /// The system switcher fades briefly when a selection is released and vanishes on Escape.
-    @Test("Releasing a selection closes the overlay with a fade, Escape without one")
-    func releaseFadesAndEscapeDoesNot() {
+    /// The system switcher fades out only when a choice is committed — a released modifier or a
+    /// clicked card — and vanishes when cancelled, by Escape or a click on the backdrop.
+    @Test("Committing a selection closes the overlay with a fade, cancelling without one")
+    func commitFadesAndCancelDoesNot() {
         let keyboardService = MockKeyboardService()
         let controller = SpaceController(
             windowService: MockWindowService(),
@@ -874,7 +875,25 @@ struct SpaceControllerTests {
         #expect(delegate.overlayClosed.wait(timeout: .now()) == .success)
         keyboardService.simulateEvent(.cmdRelease)
 
-        #expect(delegate.closeFades == [true, false])
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        controller.commitOverlaySelection(spaceIndex: 0, windowIndex: 1)
+        #expect(delegate.overlayClosed.wait(timeout: .now()) == .success)
+        keyboardService.simulateEvent(.cmdRelease)
+
+        keyboardService.simulateEvent(.altTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        controller.commitAltTabSelection(index: 1)
+        #expect(delegate.overlayClosed.wait(timeout: .now()) == .success)
+        keyboardService.simulateEvent(.cmdRelease)
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        controller.dismissOverlayFromPointer()
+        #expect(delegate.overlayClosed.wait(timeout: .now()) == .success)
+        keyboardService.simulateEvent(.cmdRelease)
+
+        #expect(delegate.closeFades == [true, false, true, true, false])
     }
 
     @Test("Held Cmd+Tab presents overlay UI after a short delay")

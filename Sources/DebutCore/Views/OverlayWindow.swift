@@ -97,6 +97,9 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         self.hasShadow = false
         self.ignoresMouseEvents = false
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // The system switcher appears and vanishes in place. AppKit's own order-in and order-out
+        // animation scales and fades the window, and plays whenever it is ordered at full alpha.
+        self.animationBehavior = .none
         // The release fade animates this layer, so the render server can finish it while the
         // main queue fronts the chosen window.
         contentView?.wantsLayer = true

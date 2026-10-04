@@ -326,6 +326,13 @@ struct OverlayWindowTests {
         window.orderOut(nil)
     }
 
+    /// AppKit scales and fades a window it orders in or out. Hidden while the overlay faded its
+    /// own alpha to and from zero; once show and Escape became instant it played on both (KHA-856).
+    @Test("The overlay orders in and out without the system's window animation")
+    func noSystemWindowAnimation() {
+        #expect(OverlayWindow().animationBehavior == .none)
+    }
+
     @Test("The overlay appears at full opacity, without a fade in")
     func showIsImmediate() {
         let window = OverlayWindow()
