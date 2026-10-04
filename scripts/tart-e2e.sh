@@ -45,7 +45,8 @@ Usage: scripts/tart-e2e.sh <prepare|run|stop|status>
        scripts/tart-e2e.sh run [--groups <group,...>] [--scenarios <id,...>]
                                [--duration-profile ordinary|full] [--no-gallery]
 
-  prepare  Clone and configure the free Tahoe VM (one-time, about 27 GB download)
+  prepare  Clone and configure the free Tahoe VM (one-time, about 27 GB download),
+           then drop the downloaded image from the Tart cache
   run      Run every check in the headless guest
   stop     Stop the warm guest VM (refused while another task's run holds the queue;
            --force overrides)
@@ -339,7 +340,21 @@ prepare_vm() {
     fi
 
     tart set "$VM_NAME" --cpu 6 --memory 8192 --display 1440x900
+    drop_cached_image
     tart get "$VM_NAME"
+}
+
+# A clone copies the image rather than sharing its blocks, so the cached image (~33 GB) only
+# duplicates the VM. A later prepare re-pulls whatever the tag then names.
+drop_cached_image() {
+    local repository="${VM_IMAGE%:*}" entry entries
+    entries="$(tart list --source oci --quiet 2>/dev/null)" || return 0
+    while IFS= read -r entry; do
+        if [[ "$entry" == "$VM_IMAGE" || "$entry" == "$repository@"* ]]; then
+            echo "Removing cached image $entry..."
+            tart delete "$entry" || true
+        fi
+    done <<< "$entries"
 }
 
 # Builds in this checkout only, so it runs before the queue: a waiting task compiles while it

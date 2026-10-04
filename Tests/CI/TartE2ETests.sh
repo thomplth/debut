@@ -319,6 +319,39 @@ if [[ -f "$e2e_source" ]]; then
     fi
 fi
 
+# A clone copies the image rather than sharing its blocks, so the ~33 GB cached base image
+# only duplicates the VM. prepare must drop it, for a fresh clone and an existing VM alike,
+# and leave other images alone.
+prepare_scratch="$(mktemp -d)"
+mkdir -p "$prepare_scratch/bin"
+cat > "$prepare_scratch/bin/tart" <<'FAKE'
+#!/bin/bash
+echo "$*" >> "$TART_FAKE_LOG"
+case "$1" in
+    get) [[ -f "$TART_FAKE_DIR/vm" ]] ;;
+    clone) touch "$TART_FAKE_DIR/vm" ;;
+    list) printf '%s\n' ghcr.io/cirruslabs/macos-tahoe-base:latest \
+        ghcr.io/cirruslabs/macos-tahoe-base@sha256:1b09 ghcr.io/cirruslabs/macos-sequoia-base:latest ;;
+esac
+exit 0
+FAKE
+chmod +x "$prepare_scratch/bin/tart"
+for existing in no yes; do
+    rm -f "$prepare_scratch/log" "$prepare_scratch/vm"
+    [[ "$existing" == yes ]] && touch "$prepare_scratch/vm"
+    if PATH="$prepare_scratch/bin:$PATH" TART_FAKE_LOG="$prepare_scratch/log" TART_FAKE_DIR="$prepare_scratch" \
+        DEBUT_TART_SHARE="$prepare_scratch/share" "$host_runner" prepare >/dev/null 2>&1; then
+        grep -qx 'delete ghcr.io/cirruslabs/macos-tahoe-base:latest' "$prepare_scratch/log" \
+            && grep -qx 'delete ghcr.io/cirruslabs/macos-tahoe-base@sha256:1b09' "$prepare_scratch/log" \
+            || fail "prepare (existing VM: $existing) must drop the cached Tahoe base image"
+        expect_not_contains "$prepare_scratch/log" 'delete .*sequoia' \
+            "prepare must drop only the Tahoe base image from the Tart cache"
+    else
+        fail "prepare (existing VM: $existing) failed against a fake tart"
+    fi
+done
+rm -rf "$prepare_scratch"
+
 if (( failures > 0 )); then
     exit 1
 fi
