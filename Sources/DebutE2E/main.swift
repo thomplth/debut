@@ -207,6 +207,17 @@ func firstReconciliationContains(
     }
 }
 
+/// WindowServer can reach the desktop before the coalesced diagnostic snapshot is written.
+/// Both signals must arrive within the same bounded wait; checking the claim afterwards races
+/// a successful switch and reports it as a failure.
+func waitForClaimedNavigation(
+    isAtEndpoint: @escaping () -> Bool,
+    wasClaimed: @escaping () -> Bool,
+    waitUntil: (() -> Bool) -> Bool
+) -> Bool {
+    waitUntil { isAtEndpoint() && wasClaimed() }
+}
+
 // MARK: - Diagnostic file
 
 let diagnosticFile: URL = DebutCore.applicationSupportDirectory
@@ -273,6 +284,24 @@ if CommandLine.arguments.dropFirst().first == "--harness-self-check" {
            "startup evidence rejects a same-count replacement window")
     expect(!firstReconciliationContains(expected: [[10], [20]], event: ["windowIDsBySpace": "20;10"]),
            "startup evidence rejects windows on the wrong desktops")
+    var navigationSample = 0
+    expect(waitForClaimedNavigation(
+        isAtEndpoint: { true },
+        wasClaimed: { navigationSample >= 2 },
+        waitUntil: { condition in
+            for sample in 0..<3 {
+                navigationSample = sample
+                if condition() { return true }
+            }
+            return false
+        }
+    ), "navigation waits for a delayed diagnostic after the desktop arrives")
+    expect(!waitForClaimedNavigation(
+        isAtEndpoint: { true }, wasClaimed: { false }, waitUntil: { $0() }
+    ), "navigation rejects an endpoint without a claim from the tested input")
+    expect(!waitForClaimedNavigation(
+        isAtEndpoint: { false }, wasClaimed: { true }, waitUntil: { $0() }
+    ), "navigation rejects a claimed input that never reaches its endpoint")
     // Suite selection is parsed before anything touches the session, so these decide what runs.
     expect(parseE2EInvocation([]) == .success(.suite(groups: nil)),
            "no arguments runs every group in the legacy order")
@@ -2913,17 +2942,27 @@ func scenario_navigation_controls() {
         wait(0.5)
         // On macOS 26, session-posted keyboard events do not invoke Dock's symbolic-hotkey action,
         // so the native recovery chord above proves passthrough but cannot move the VM's desktop.
-        // On newer systems the first chord already moved; either way this next chord proves Debut
-        // did not leave recovery latched or its coordinator pending.
+        // On newer systems the first chord already moved. Return to desktop 0 so the next right
+        // chord has the same endpoint on both systems and must cause a new switch.
+        let resumedBaselineReady = quickSwitch(to: 0, using: featureSpaces)
         // Counted from just before this chord: on macOS 27 the recovery chord above is already
         // claimed, and must not stand in for this one.
         let resumedEventsBefore = eventCursor()
         postControlArrow(kVK_RightArrow)
         test("Faster desktop switching resumes after Mission Control recovery") {
-            waitFor { featureSpaces.currentDesktopIndex() == 1 }
-                && !events(since: resumedEventsBefore) {
-                    ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
-                }.isEmpty
+            let resumed = resumedBaselineReady && waitForClaimedNavigation(
+                isAtEndpoint: { featureSpaces.currentDesktopIndex() == 1 },
+                wasClaimed: { !events(since: resumedEventsBefore) {
+                    $0["keyEvent"] == "switchAdjacentSpace(1)"
+                }.isEmpty },
+                waitUntil: { waitFor($0) }
+            )
+            if !resumed {
+                info("  Resumed navigation: baseline=\(resumedBaselineReady) "
+                    + "desktop=\(String(describing: featureSpaces.currentDesktopIndex())) "
+                    + "events=\(events(since: resumedEventsBefore))")
+            }
+            return resumed
         }
 
     } else {
