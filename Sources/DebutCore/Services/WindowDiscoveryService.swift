@@ -1849,12 +1849,24 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // before falling back to CGWindowList's front-to-back order.
         let activatedWindows = liveWindows.filter { $0.ownerPID == pid }
         let activatedWindowIDs = Set(activatedWindows.map(\.windowID))
+        let liveDesktopLocations = desktopLocations(for: liveWindows)
         let focusedWindowID: CGWindowID?
         if let sampledFocusedWindowID,
            activatedWindowIDs.contains(sampledFocusedWindowID) {
             focusedWindowID = sampledFocusedWindowID
         } else if shouldTrackActivation {
-            focusedWindowID = activatedWindows.first?.windowID
+            // CGWindowList orders every desktop's windows together, so the app's first window
+            // can sit on a desktop that is not showing. Activation cannot have focused it there,
+            // and the controller defers such a report for a desktop change that never comes,
+            // which left the previous app at the head of the MRU (KHA-843).
+            let showingDesktopIDs = Set(
+                spaceSwitcher?.spaceTopology().stacks.compactMap(\.currentDesktopID) ?? []
+            )
+            focusedWindowID = activatedWindows.first(where: { window in
+                liveDesktopLocations[window.windowID].map {
+                    showingDesktopIDs.contains($0.desktopID)
+                } ?? true
+            })?.windowID ?? activatedWindows.first?.windowID
         } else {
             focusedWindowID = nil
         }
@@ -1875,8 +1887,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             allWindowIDs: windowService.listAllWindowIDs(),
             focusedWindowID: focusedWindowID,
             unarmedWindowIDs: unarmedWindowIDs,
-            desktopIndexes: desktopIndexes(for: liveWindows),
-            desktopLocations: desktopLocations(for: liveWindows),
+            desktopIndexes: liveDesktopLocations.mapValues(\.index),
+            desktopLocations: liveDesktopLocations,
             skyLightWindowIDs: skyLightWindowIDs()
         ))
         guard let focusedWindowID else { return }

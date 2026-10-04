@@ -159,6 +159,40 @@ struct WindowDiscoveryServiceTests {
         #expect(sources == [.startupSnapshot])
     }
 
+    @Test("Without an AX answer, activation credits the app's front window on the showing desktop")
+    func activationFallbackSkipsWindowsOnHiddenDesktops() {
+        // Dia often answers the focus probe with nothing. CGWindowList orders every desktop's
+        // windows together, so its first window can sit on a desktop that is not showing; the
+        // controller then defers that activation for a desktop change that never comes, and the
+        // app the user left stays at the head of the MRU (KHA-843).
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 27_155, isHidden: false),
+        ]
+        windowService.windowList = [
+            liveWindow(119_138, ownerPID: 27_155),
+            liveWindow(119_139, ownerPID: 27_155),
+            liveWindow(119_136, ownerPID: 27_155),
+        ]
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 1)
+        spaces.windowDesktops = [119_138: 0, 119_139: 1, 119_136: 1]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        service.armingOverride = { _, _ in .armed }
+        var activated: [CGWindowID] = []
+        service.onWindowActivated = { activated.append($0) }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 27_155, isHidden: false)
+        )
+
+        #expect(activated == [119_139])
+    }
+
     @Test("Debut in front at startup is seeded without probing itself")
     func startupDoesNotProbeDebut() {
         let service = WindowDiscoveryService(
