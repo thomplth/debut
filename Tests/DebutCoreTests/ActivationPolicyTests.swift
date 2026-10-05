@@ -111,4 +111,11 @@ struct MainMenuTests {
               let tutorial = titles.firstIndex(of: "Tutorial...") else { return }
         #expect(setup < tutorial)
     }
+
+    @Test("The status menu captures keyboard diagnostics without quitting")
+    func statusMenuCapturesKeyboardDiagnostics() {
+        let menu = AppDelegate.makeStatusMenu(target: nil)
+        let item = menu.items.first { $0.title == "Capture Keyboard Diagnostics" }
+        #expect(item?.action == #selector(AppDelegate.captureKeyboardDiagnostics(_:)))
+    }
 }

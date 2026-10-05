@@ -799,7 +799,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         if let keyboardService = MainActor.assumeIsolated({ self.keyboardService }) {
             DiagnosticReporter.shared.report(
                 "keyboard_state_at_quit",
-                details: keyboardService.diagnosticDetails()
+                details: Self.keyboardDiagnostics(keyboardService)
             )
             DiagnosticReporter.shared.flush()
         }
@@ -1232,9 +1232,35 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         )
         updateItem.target = target
         menu.addItem(updateItem)
+        let keyboardItem = NSMenuItem(
+            title: "Capture Keyboard Diagnostics",
+            action: #selector(captureKeyboardDiagnostics(_:)),
+            keyEquivalent: ""
+        )
+        keyboardItem.target = target
+        menu.addItem(keyboardItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Debut", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         return menu
+    }
+
+    /// Records the keyboard state while a key is misbehaving, before quitting Debut destroys it.
+    /// Capture, quit, then press the key: whether quitting cured it is the next piece of evidence.
+    @objc func captureKeyboardDiagnostics(_ sender: Any?) {
+        guard let keyboardService else { return }
+        diag.report("keyboard_diagnostics_captured", details: Self.keyboardDiagnostics(keyboardService))
+        diag.flush()
+    }
+
+    /// The tap's record, prefixed `tap.`, beside the WindowServer's (KHA-938).
+    nonisolated private static func keyboardDiagnostics(
+        _ keyboardService: EventTapKeyboardService
+    ) -> [String: String] {
+        var details = KeyboardSystemSnapshot.details()
+        for (key, value) in keyboardService.diagnosticDetails() {
+            details["tap.\(key)"] = value
+        }
+        return details
     }
 
     static let featureMenuTitles = ["Window previews", "Workspace Command–Tab", "Option–Tab", "Faster desktop transitions", "Numbered space shortcuts", "Control-arrow switching", "Trackpad desktop swipe"]

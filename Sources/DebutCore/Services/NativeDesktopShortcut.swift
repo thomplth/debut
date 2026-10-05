@@ -148,25 +148,56 @@ struct NativeDesktopShortcutSwitch {
 
     /// Posts a resolved shortcut. A shortcut that cannot be enabled posts nothing, so no
     /// keystroke reaches an app.
+    ///
+    /// Each keystroke and temporary enable is reported: they are the WindowServer state Debut
+    /// changes on the user's behalf, and the first suspects when a key misbehaves (KHA-938).
     @discardableResult
     func post(_ resolved: Resolved) -> Bool {
         let id = resolved.hotKeyID
         switch resolved.delivery {
         case .post(let binding):
-            return hotKeys.post(binding)
-        case .postTemporarilyEnabled(let binding):
-            guard hotKeys.setEnabled(true, hotKey: id) else { return false }
             let posted = hotKeys.post(binding)
+            Self.reportPost(id: id, binding: binding, temporarilyEnabled: false, posted: posted)
+            return posted
+        case .postTemporarilyEnabled(let binding):
+            guard hotKeys.setEnabled(true, hotKey: id) else {
+                Self.reportPost(id: id, binding: binding, temporarilyEnabled: true, posted: false)
+                return false
+            }
+            let posted = hotKeys.post(binding)
+            Self.reportPost(id: id, binding: binding, temporarilyEnabled: true, posted: posted)
             let hotKeys = hotKeys
             if posted {
                 scheduleRestore(Self.temporaryEnableDuration) {
-                    hotKeys.setEnabled(false, hotKey: id)
+                    Self.reportRestore(id: id, restored: hotKeys.setEnabled(false, hotKey: id))
                 }
             } else {
-                hotKeys.setEnabled(false, hotKey: id)
+                Self.reportRestore(id: id, restored: hotKeys.setEnabled(false, hotKey: id))
             }
             return posted
         }
+    }
+
+    private static func reportPost(
+        id: Int32,
+        binding: SymbolicHotKeyBinding,
+        temporarilyEnabled: Bool,
+        posted: Bool
+    ) {
+        DiagnosticReporter.shared.report("native_shortcut_posted", details: [
+            "hotKeyID": "\(id)",
+            "keyCode": "\(binding.keyCode)",
+            "flags": String(binding.flags.rawValue, radix: 16),
+            "temporarilyEnabled": "\(temporarilyEnabled)",
+            "posted": "\(posted)",
+        ])
+    }
+
+    private static func reportRestore(id: Int32, restored: Bool) {
+        DiagnosticReporter.shared.report("native_shortcut_restored", details: [
+            "hotKeyID": "\(id)",
+            "restored": "\(restored)",
+        ])
     }
 }
 

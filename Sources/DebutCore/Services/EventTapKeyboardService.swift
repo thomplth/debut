@@ -26,6 +26,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     /// What the tap held after its latest event, published for diagnostics on other threads.
     private let diagnosticsLock = NSLock()
     private var publishedConsumedPresses: [Int64: Int] = [:]
+    private var publishedLastKeys: [Int64: LastKeyDecisions] = [:]
     private var publishedClaims = KeyboardTapClaims()
     private let configurationLock = NSLock()
     private var storedDesktopNavigationAvailable = true
@@ -252,7 +253,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         // so holding the release back — as an overlay that opened mid-press used to — leaves
         // the key held for the whole session, and macOS turns its later presses into repeats.
         if type == .keyUp, passedKeysDown.remove(keyCode) != nil {
-            publishDiagnostics(consumedFreshPress: nil)
+            publishDiagnostics(type: type, keyCode: keyCode, passed: true, consumedFreshPress: false)
             return event
         }
         let result = route(
@@ -272,11 +273,22 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                 consumedFreshPress = true
             }
         }
-        publishDiagnostics(consumedFreshPress: consumedFreshPress ? keyCode : nil)
+        publishDiagnostics(
+            type: type,
+            keyCode: keyCode,
+            passed: result != nil,
+            consumedFreshPress: consumedFreshPress
+        )
         return result
     }
 
-    private func publishDiagnostics(consumedFreshPress keyCode: Int64?) {
+    private func publishDiagnostics(
+        type: CGEventType,
+        keyCode: Int64,
+        passed: Bool,
+        consumedFreshPress: Bool
+    ) {
+        let now = DispatchTime.now().uptimeNanoseconds
         let recordingKeys = configurationLock.withLock { shortcutRecordingKeysDown }
         let claims = KeyboardTapClaims(
             sessionActive: spaceManagerActive,
@@ -287,16 +299,24 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         )
         diagnosticsLock.withLock {
             publishedClaims = claims
-            if let keyCode { publishedConsumedPresses[keyCode, default: 0] += 1 }
+            if consumedFreshPress { publishedConsumedPresses[keyCode, default: 0] += 1 }
+            if type == .keyDown || type == .keyUp {
+                let decision = LastKeyDecisions.Decision(passed: passed, uptimeNanoseconds: now)
+                if type == .keyDown {
+                    publishedLastKeys[keyCode, default: LastKeyDecisions()].down = decision
+                } else {
+                    publishedLastKeys[keyCode, default: LastKeyDecisions()].up = decision
+                }
+            }
         }
     }
 
-    /// Which keys the tap is holding and which presses it has kept from the foreground app
-    /// since launch, by virtual keycode. Typed text never appears: a press reaches the count
-    /// only when Debut consumed it as a shortcut or while its overlay owned the keyboard.
+    /// Which keys the tap is holding, which presses it has kept from the foreground app since
+    /// launch, and each key's latest press and release decision, by virtual keycode. Typed text
+    /// cannot be rebuilt from it: only the newest event per key is kept, not their sequence.
     public func diagnosticDetails() -> [String: String] {
-        let (claims, consumed) = diagnosticsLock.withLock {
-            (publishedClaims, publishedConsumedPresses)
+        let (claims, consumed, lastKeys) = diagnosticsLock.withLock {
+            (publishedClaims, publishedConsumedPresses, publishedLastKeys)
         }
         func codes(_ keys: Set<Int64>) -> String { keys.sorted().map(String.init).joined(separator: ",") }
         return [
@@ -306,6 +326,9 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             "recordingKeys": codes(claims.recordingKeys),
             "quickSwitchKeys": codes(claims.quickSwitchKeys),
             "passedKeys": codes(claims.passedKeys),
+            "lastKeys": lastKeys.sorted { $0.key < $1.key }
+                .map { "\($0.key):\($0.value.description)" }
+                .joined(separator: ","),
             "consumedPresses": consumed.sorted { $0.key < $1.key }
                 .map { "\($0.key)x\($0.value)" }
                 .joined(separator: ","),
@@ -671,6 +694,29 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         case kVK_ANSI_9: return 9
         default: return nil
         }
+    }
+}
+
+/// Whether the tap passed or consumed a key's latest press and release, and when on the
+/// uptime clock, so a release Debut kept from an app that saw the press stands out.
+private struct LastKeyDecisions: CustomStringConvertible {
+    struct Decision {
+        let passed: Bool
+        let uptimeNanoseconds: UInt64
+
+        var text: String {
+            let seconds = String(format: "%.3f", Double(uptimeNanoseconds) / 1_000_000_000)
+            return "\(passed ? "passed" : "consumed")@\(seconds)"
+        }
+    }
+
+    var down: Decision?
+    var up: Decision?
+
+    var description: String {
+        [down.map { "down=\($0.text)" }, up.map { "up=\($0.text)" }]
+            .compactMap { $0 }
+            .joined(separator: "/")
     }
 }
 

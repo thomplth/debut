@@ -1190,4 +1190,36 @@ struct KeyboardServiceTests {
         #expect(service.handleCGEvent(type: .keyUp, event: Self.key(kVK_ANSI_D, down: false)) != nil)
         #expect(service.diagnosticDetails()["passedKeys"] == "")
     }
+
+    @Test("Each key's last press and release record whether the app received them")
+    func diagnosticsRecordLastDecisionPerKey() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) != nil)
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_Tab, down: true, flags: .maskCommand)
+        ) == nil)
+
+        let lastKeys = service.diagnosticDetails()["lastKeys"] ?? ""
+        #expect(lastKeys.contains("\(kVK_ANSI_D):down=passed@"))
+        #expect(lastKeys.contains("\(kVK_Tab):down=consumed@"))
+
+        #expect(service.handleCGEvent(type: .keyUp, event: Self.key(kVK_ANSI_D, down: false)) != nil)
+        #expect(service.diagnosticDetails()["lastKeys"]?.contains("up=passed@") == true)
+    }
+
+    @Test("Only symbolic hotkeys a bare keystroke can trigger are named")
+    func bareKeySymbolicHotKeysAreNamed() {
+        let bindings: [Int32: SymbolicHotKeyBinding] = [
+            70: SymbolicHotKeyBinding(keyCode: 2, flags: [.maskControl, .maskCommand], isEnabled: true),
+            36: SymbolicHotKeyBinding(keyCode: 103, flags: [], isEnabled: true),
+            90: SymbolicHotKeyBinding(keyCode: 2, flags: .maskShift, isEnabled: true),
+            91: SymbolicHotKeyBinding(keyCode: 3, flags: [], isEnabled: false),
+        ]
+        #expect(KeyboardSystemSnapshot.bareKeyHotKeys(bindings) == "36:103:0,90:2:20000")
+    }
 }
