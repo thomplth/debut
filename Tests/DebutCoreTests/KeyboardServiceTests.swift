@@ -1101,4 +1101,93 @@ struct KeyboardServiceTests {
             event: Self.key(kVK_ANSI_D, down: true, flags: .maskCommand)
         ) == nil)
     }
+
+    // MARK: - Releases of keys the app already saw (KHA-930)
+
+    @Test("A key held as the overlay opens still reaches the app when released")
+    func releaseOfKeyPressedBeforeOverlayPasses() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        // D goes down while typing, so the app saw it.
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) != nil)
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_Tab, down: true, flags: .maskCommand)
+        ) == nil)
+        service.overlayVisible = true
+
+        // The overlay owns D's repeats, but the release ends a press the app already has.
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_ANSI_D, down: true, flags: .maskCommand, autoRepeat: true)
+        ) == nil)
+        #expect(service.handleCGEvent(
+            type: .keyUp,
+            event: Self.key(kVK_ANSI_D, down: false, flags: .maskCommand)
+        ) != nil)
+
+        // Presses that begin inside the overlay still belong to it, both halves.
+        #expect(service.handleCGEvent(
+            type: .keyUp,
+            event: Self.key(kVK_Tab, down: false, flags: .maskCommand)
+        ) == nil)
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_ANSI_A, down: true, flags: .maskCommand)
+        ) == nil)
+        #expect(service.handleCGEvent(
+            type: .keyUp,
+            event: Self.key(kVK_ANSI_A, down: false, flags: .maskCommand)
+        ) == nil)
+    }
+
+    @Test("A key pressed again inside the overlay belongs to the overlay")
+    func keyRepressedInsideOverlayIsConsumed() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) != nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: Self.key(kVK_ANSI_D, down: false)) != nil)
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_Tab, down: true, flags: .maskCommand)
+        ) == nil)
+        service.overlayVisible = true
+
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_ANSI_D, down: true, flags: .maskCommand)
+        ) == nil)
+        #expect(service.handleCGEvent(
+            type: .keyUp,
+            event: Self.key(kVK_ANSI_D, down: false, flags: .maskCommand)
+        ) == nil)
+    }
+
+    @Test("The tap reports the keys it holds and the presses it consumed")
+    func diagnosticsNameHeldAndConsumedKeys() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) != nil)
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_Tab, down: true, flags: .maskCommand)
+        ) == nil)
+
+        let details = service.diagnosticDetails()
+        #expect(details["sessionActive"] == "true")
+        #expect(details["passedKeys"] == "\(kVK_ANSI_D)")
+        #expect(details["consumedPresses"] == "\(kVK_Tab)x1")
+
+        #expect(service.handleCGEvent(type: .keyUp, event: Self.key(kVK_ANSI_D, down: false)) != nil)
+        #expect(service.diagnosticDetails()["passedKeys"] == "")
+    }
 }

@@ -21,6 +21,12 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private var sessionPrimaryModifier: CGEventFlags?
     private var sessionTriggerKeyCode: Int64?
     private var quickSwitchKeysDown: Set<Int64> = []
+    /// Presses whose key-down reached the foreground app and whose release has not arrived yet.
+    private var passedKeysDown: Set<Int64> = []
+    /// What the tap held after its latest event, published for diagnostics on other threads.
+    private let diagnosticsLock = NSLock()
+    private var publishedConsumedPresses: [Int64: Int] = [:]
+    private var publishedClaims = KeyboardTapClaims()
     private let configurationLock = NSLock()
     private var storedDesktopNavigationAvailable = true
     public var desktopNavigationAvailable: Bool {
@@ -241,6 +247,78 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             return event
         }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+
+        // A release belongs to whoever received its press. The app already has this key down,
+        // so holding the release back — as an overlay that opened mid-press used to — leaves
+        // the key held for the whole session, and macOS turns its later presses into repeats.
+        if type == .keyUp, passedKeysDown.remove(keyCode) != nil {
+            publishDiagnostics(consumedFreshPress: nil)
+            return event
+        }
+        let result = route(
+            type: type,
+            event: event,
+            keyCode: keyCode,
+            performanceID: performanceID,
+            deliverAsynchronously: deliverAsynchronously
+        )
+        var consumedFreshPress = false
+        if type == .keyDown {
+            if result != nil {
+                passedKeysDown.insert(keyCode)
+            } else if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                // A fresh press Debut claimed; its release is Debut's too.
+                passedKeysDown.remove(keyCode)
+                consumedFreshPress = true
+            }
+        }
+        publishDiagnostics(consumedFreshPress: consumedFreshPress ? keyCode : nil)
+        return result
+    }
+
+    private func publishDiagnostics(consumedFreshPress keyCode: Int64?) {
+        let recordingKeys = configurationLock.withLock { shortcutRecordingKeysDown }
+        let claims = KeyboardTapClaims(
+            sessionActive: spaceManagerActive,
+            sessionModifier: sessionPrimaryModifier?.rawValue,
+            recordingKeys: recordingKeys,
+            quickSwitchKeys: quickSwitchKeysDown,
+            passedKeys: passedKeysDown
+        )
+        diagnosticsLock.withLock {
+            publishedClaims = claims
+            if let keyCode { publishedConsumedPresses[keyCode, default: 0] += 1 }
+        }
+    }
+
+    /// Which keys the tap is holding and which presses it has kept from the foreground app
+    /// since launch, by virtual keycode. Typed text never appears: a press reaches the count
+    /// only when Debut consumed it as a shortcut or while its overlay owned the keyboard.
+    public func diagnosticDetails() -> [String: String] {
+        let (claims, consumed) = diagnosticsLock.withLock {
+            (publishedClaims, publishedConsumedPresses)
+        }
+        func codes(_ keys: Set<Int64>) -> String { keys.sorted().map(String.init).joined(separator: ",") }
+        return [
+            "sessionActive": "\(claims.sessionActive)",
+            "sessionModifier": claims.sessionModifier.map { String($0, radix: 16) } ?? "none",
+            "overlayVisible": "\(overlayVisible)",
+            "recordingKeys": codes(claims.recordingKeys),
+            "quickSwitchKeys": codes(claims.quickSwitchKeys),
+            "passedKeys": codes(claims.passedKeys),
+            "consumedPresses": consumed.sorted { $0.key < $1.key }
+                .map { "\($0.key)x\($0.value)" }
+                .joined(separator: ","),
+        ]
+    }
+
+    private func route(
+        type: CGEventType,
+        event: CGEvent,
+        keyCode: Int64,
+        performanceID: UUID,
+        deliverAsynchronously: Bool
+    ) -> CGEvent? {
         let flags = event.flags
 
         // macOS drops events while it has the tap disabled, so a claimed press can lose its
@@ -594,6 +672,14 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         default: return nil
         }
     }
+}
+
+private struct KeyboardTapClaims {
+    var sessionActive = false
+    var sessionModifier: UInt64?
+    var recordingKeys: Set<Int64> = []
+    var quickSwitchKeys: Set<Int64> = []
+    var passedKeys: Set<Int64> = []
 }
 
 private func eventTapCallback(

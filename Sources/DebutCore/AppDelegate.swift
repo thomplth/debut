@@ -794,6 +794,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     nonisolated public func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { self.onboardingPermissionGuide.dismiss() }
         OverlayPresentationRecorder.shared.finalizeAll(outcome: .appTerminated)
+        // Quitting is how a user frees a key Debut appears to hold, so record what the tap
+        // held at that moment (KHA-930); flushed because the process exits right after.
+        if let keyboardService = MainActor.assumeIsolated({ self.keyboardService }) {
+            DiagnosticReporter.shared.report(
+                "keyboard_state_at_quit",
+                details: keyboardService.diagnosticDetails()
+            )
+            DiagnosticReporter.shared.flush()
+        }
         let spaceController = MainActor.assumeIsolated { self.spaceController }
         let debouncedSaver = MainActor.assumeIsolated { self.debouncedSaver }
         if let spaceController, let debouncedSaver {

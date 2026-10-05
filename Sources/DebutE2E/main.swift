@@ -5633,6 +5633,7 @@ let scenarioBodies: [String: @MainActor () -> Void] = [
     "recycled-window-id": scenario_recycled_window_id,
     "startup-discovery": scenario_startup_discovery,
     "launch-focus-and-resize": scenario_launch_focus_and_resize,
+    "held-key-across-overlay": scenario_held_key_across_overlay,
     "move-duration-sweep": scenario_move_duration_sweep,
 ]
 

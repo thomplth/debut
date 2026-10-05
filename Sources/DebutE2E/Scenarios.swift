@@ -52,6 +52,8 @@ let e2eScenarioCatalog: [E2EScenarioDescriptor] = [
           summary: "The overlay opens over and commits from a fullscreen Space"),
     .init(id: "custom-activation", group: .overlayInput, debut: .running,
           summary: "A persisted custom shortcut replaces Command-Tab"),
+    .init(id: "held-key-across-overlay", group: .overlayInput, debut: .running,
+          summary: "A key released while the overlay is open still types afterwards"),
     .init(id: "navigation-controls", group: .desktopNavigation, debut: .stopped,
           summary: "Control-arrow, swipes, bursts and Mission Control with faster switching on"),
     .init(id: "fullscreen-navigation", group: .fullscreen, debut: .stopped,
