@@ -44,7 +44,8 @@ tart_queue_live_tickets() {
     [[ -d "$TART_QUEUE_DIR" ]] || return 0
     for ticket in "$TART_QUEUE_DIR"/*.ticket; do
         [[ -e "$ticket" ]] || continue
-        if tart_queue_ticket_alive "$ticket"; then
+        # The caller is alive by definition; one bad `ps` read must not evict it.
+        if [[ "$ticket" == "$TART_QUEUE_TICKET" ]] || tart_queue_ticket_alive "$ticket"; then
             echo "$ticket"
         else
             rm -f "$ticket"
@@ -64,7 +65,7 @@ tart_queue_describe() {
 # tart_queue_enter <description>
 # Returns once this caller is at the head. Interrupting the wait removes the ticket.
 tart_queue_enter() {
-    local description="$1" pid start name tmp position total head waited_since last_report
+    local description="$1" pid start name tmp contents position total head waited_since last_report
     local previous_position=""
     tart_queue_current_pid
     pid="$TART_QUEUE_PID"
@@ -77,18 +78,21 @@ tart_queue_enter() {
     # Zero-padded microseconds then PID, so lexical order is arrival order and ties are stable.
     name="$(/usr/bin/perl -MTime::HiRes=time -e 'printf "%017.0f", time() * 1e6')-$(printf '%07d' "$pid")"
     tmp="$TART_QUEUE_DIR/.$name.tmp"
-    {
-        echo "pid=$pid"
-        echo "start=$start"
-        echo "created=$(date +%s)"
-        echo "owner=$description"
-    } > "$tmp"
+    contents="$(printf 'pid=%s\nstart=%s\ncreated=%s\nowner=%s' \
+        "$pid" "$start" "$(date +%s)" "$description")"
+    echo "$contents" > "$tmp"
     mv "$tmp" "$TART_QUEUE_DIR/$name.ticket"
     TART_QUEUE_TICKET="$TART_QUEUE_DIR/$name.ticket"
 
     waited_since="$(date +%s)"
     last_report=0
     while true; do
+        # Another process can misjudge this live caller dead and prune its ticket. Restore it
+        # under the same name, so the caller keeps its arrival position.
+        if [[ -n "$TART_QUEUE_TICKET" && ! -e "$TART_QUEUE_TICKET" ]]; then
+            echo "$contents" > "$tmp"
+            mv "$tmp" "$TART_QUEUE_TICKET"
+        fi
         position=0
         total=0
         head=""

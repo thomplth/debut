@@ -73,6 +73,23 @@ grep -q 'start victim' "$work/log" && fail "a killed waiter still ran"
 [[ "$(head -1 "$work/log")" == "start holder" ]] || fail "the head lost its turn to a waiter"
 grep -q 'start after' "$work/log" || fail "a killed waiter stranded the job behind it"
 
+# Another process can misjudge a live waiter dead from one bad `ps` read and prune its ticket.
+# The waiter keeps its place instead of abandoning the run.
+: > "$work/log"
+rm -f "$DEBUT_TART_QUEUE_DIR"/*.ticket
+queue_job holder 0.8 & sleep 0.2
+queue_job pruned 0.1 &
+for _ in {1..30}; do
+    (( $(ls "$DEBUT_TART_QUEUE_DIR"/*.ticket 2>/dev/null | wc -l) == 2 )) && break
+    sleep 0.1
+done
+pruned_ticket="$(ls "$DEBUT_TART_QUEUE_DIR"/*.ticket | tail -1)"
+rm -f "$pruned_ticket"
+wait 2>/dev/null || true
+expected=$'start holder\nend holder\nstart pruned\nend pruned'
+[[ "$(<"$work/log")" == "$expected" ]] \
+    || fail "a waiter whose ticket was pruned lost its run: $(tr '\n' ',' < "$work/log")"
+
 # Leaving removes only the caller's own ticket.
 (
     source "$queue_lib"
