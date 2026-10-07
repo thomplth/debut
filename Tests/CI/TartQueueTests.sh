@@ -84,7 +84,8 @@ for _ in {1..30}; do
     sleep 0.1
 done
 pruned_ticket="$(ls "$DEBUT_TART_QUEUE_DIR"/*.ticket | tail -1)"
-rm -f "$pruned_ticket"
+# Keep pruning for a while, so a removal also lands between the waiter's own checks.
+for _ in {1..50}; do rm -f "$pruned_ticket"; sleep 0.01; done
 wait 2>/dev/null || true
 expected=$'start holder\nend holder\nstart pruned\nend pruned'
 [[ "$(<"$work/log")" == "$expected" ]] \

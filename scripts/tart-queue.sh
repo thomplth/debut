@@ -87,12 +87,6 @@ tart_queue_enter() {
     waited_since="$(date +%s)"
     last_report=0
     while true; do
-        # Another process can misjudge this live caller dead and prune its ticket. Restore it
-        # under the same name, so the caller keeps its arrival position.
-        if [[ -n "$TART_QUEUE_TICKET" && ! -e "$TART_QUEUE_TICKET" ]]; then
-            echo "$contents" > "$tmp"
-            mv "$tmp" "$TART_QUEUE_TICKET"
-        fi
         position=0
         total=0
         head=""
@@ -103,9 +97,16 @@ tart_queue_enter() {
             [[ "$ticket" == "$TART_QUEUE_TICKET" ]] && position="$total"
         done
         if (( position == 0 )); then
-            echo "The Tart queue ticket disappeared: $TART_QUEUE_TICKET" >&2
-            TART_QUEUE_TICKET=""
-            return 1
+            if [[ -z "$TART_QUEUE_TICKET" ]]; then
+                echo "The Tart queue ticket was released while waiting." >&2
+                return 1
+            fi
+            # Another process can misjudge this live caller dead and prune its ticket, even
+            # between two of the caller's own checks. Restore it under the same name, so the
+            # caller keeps its arrival position, and look again.
+            echo "$contents" > "$tmp"
+            mv "$tmp" "$TART_QUEUE_TICKET"
+            continue
         fi
         if (( position == 1 )); then
             if [[ -n "$previous_position" ]]; then
