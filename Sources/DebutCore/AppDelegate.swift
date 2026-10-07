@@ -1704,9 +1704,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 switch destination {
                 case .tutorial: self?.showTutorial()
                 case .settings: self?.openSettings()
-                case .useDebut: self?.showMenuBarCoachmark()
+                case .useDebut: break
                 }
-            })
+            },
+            onMenuBarCoachmark: { [weak self] in self?.showMenuBarCoachmark() })
         model.onEnvironmentRefresh = { [weak self] in self?.refreshOnboardingEnvironment() }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 650),
             styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)

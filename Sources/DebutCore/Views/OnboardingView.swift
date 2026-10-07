@@ -173,12 +173,11 @@ public struct OnboardingView: View {
 
     private func commandTab(compact: Bool) -> some View {
         VStack(spacing: 16) {
-            heading("Command-Tab", "Your windows, organized by desktop.", shortcut: "⌘")
+            heading("Command-Tab", "Organize your windows by desktop")
             preview(viewModel.showsWindowPreviews ? "onboarding-workspace" : "onboarding-workspace-no-previews",
-                label: "Command-Tab groups windows by desktop",
+                label: "Command-Tab groups windows by desktop", keys: [OnboardingKeyboard.leftCommand, OnboardingKeyboard.tab],
                 height: compact ? 246 : 310, showsDesktopGuidance: viewModel.showsDesktopGuidance)
-            featureToggle("Enable Debut Command-Tab", detail: "Switch windows and manage desktops from one place.",
-                key: \.workspaceIsolation, id: "command-tab")
+            featureToggle("Enable Debut Command-Tab", key: \.workspaceIsolation, id: "command-tab")
         }
     }
 
@@ -199,25 +198,25 @@ public struct OnboardingView: View {
 
     private func optionTab(compact: Bool) -> some View {
         VStack(spacing: 16) {
-            heading("Option-Tab", "Every window. Every desktop. One list.", shortcut: "⌥")
+            heading("Option-Tab", "See all windows across desktops")
             preview(viewModel.showsWindowPreviews ? "onboarding-previews" : "onboarding-no-previews",
-                label: "Option-Tab brings windows from all desktops into one list", height: compact ? 246 : 310)
-            featureToggle("Enable Debut Option-Tab", detail: "Jump straight to any window, wherever it lives.",
-                key: \.optionTab, id: "option-tab")
+                label: "Option-Tab brings windows from all desktops into one list",
+                keys: [OnboardingKeyboard.leftOption, OnboardingKeyboard.tab], height: compact ? 246 : 310)
+            featureToggle("Enable Debut Option-Tab", key: \.optionTab, id: "option-tab")
         }
     }
 
     private func speed(compact: Bool) -> some View {
         VStack(spacing: compact ? 14 : 18) {
-            heading("Faster desktop switching", "Move between desktops without the wait.")
+            heading("Faster desktop switching", "Skip macOS’s 0.5-second transition every time you move across desktops")
             OnboardingSpeedVideo(directory: previewDirectory)
                 .frame(maxWidth: compact ? 560 : .infinity)
             VStack(spacing: 0) {
-                featureToggle("Enable faster desktop switching", detail: "Choose an instant jump or a shorter transition.",
+                featureToggle("Enable faster desktop switching",
                     key: \.fasterDesktopSwitching, id: "faster-desktop-switching", inset: true)
                 Rectangle().fill(border).frame(height: 1).padding(.horizontal, 17)
                 SwitchDurationControl(duration: Binding(
-                    get: { viewModel.spaceSwitchDuration }, set: { viewModel.setSpaceSwitchDuration($0) }))
+                    get: { viewModel.spaceSwitchDuration }, set: { viewModel.setSpaceSwitchDuration($0) }), showsCaption: false)
                     .disabled(!viewModel.features.fasterDesktopSwitching)
                     .padding(.horizontal, 17).padding(.vertical, 13)
             }
@@ -232,17 +231,13 @@ public struct OnboardingView: View {
                 Image(systemName: "checkmark").font(.system(size: 26, weight: .medium))
                     .foregroundStyle(Color.accentColor).frame(width: 64, height: 64)
                     .background(Color.accentColor.opacity(0.09), in: Circle()).accessibilityHidden(true)
-                VStack(spacing: 8) {
-                    Text("You’re ready").font(.system(size: 32, weight: .bold))
-                    Text("Your next workspace starts with a shortcut.")
-                        .font(.system(size: 16)).foregroundStyle(.secondary)
-                }
+                Text("You’re ready").font(.system(size: 32, weight: .bold))
             }.frame(maxWidth: .infinity)
             HStack(spacing: 16) {
                 destination("Start tutorial", detail: "Try a few guided exercises at your own pace.", icon: "keyboard") { viewModel.finish(.tutorial) }
-                destination("Open Settings", detail: "Make the shortcuts, look, and behavior yours.", icon: "slider.horizontal.3") { viewModel.finish(.settings) }
+                destination("Open Settings", detail: "Discover and configure shortcuts", icon: "slider.horizontal.3") { viewModel.finish(.settings) }
             }
-            Text("Tutorial and Settings are always in the Debut menu bar.")
+            Text("You can always find them in the Debut menu bar item")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
         }
     }
@@ -269,44 +264,24 @@ public struct OnboardingView: View {
         .disabled(!viewModel.canAdvance).accessibilityLabel(title)
     }
 
-    private func heading(_ title: String, _ subtitle: String, shortcut: String? = nil) -> some View {
-        HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title).font(.system(size: 29, weight: .bold))
-                Text(subtitle).font(.system(size: 15)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            if let shortcut {
-                HStack(spacing: 5) {
-                    keycap(shortcut)
-                    keycap("⇥")
-                }.accessibilityHidden(true)
-            }
+    private func heading(_ title: String, _ subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 29, weight: .bold))
+            Text(subtitle).font(.system(size: 15)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func keycap(_ symbol: String) -> some View {
-        Text(symbol).font(.system(size: 23, weight: .regular))
-            .foregroundStyle(.secondary).frame(width: 42, height: 42)
-            .background(card, in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(border))
-            .shadow(color: .black.opacity(0.035), radius: 0, y: 2)
-    }
-
-    private func featureToggle(_ title: String, detail: String, key: WritableKeyPath<FeatureSettings, Bool>, id: String, inset: Bool = false) -> some View {
+    private func featureToggle(_ title: String, key: WritableKeyPath<FeatureSettings, Bool>, id: String, inset: Bool = false) -> some View {
         Toggle(isOn: Binding(get: { viewModel.features[keyPath: key] }, set: {
             var features = viewModel.features
             features[keyPath: key] = $0
             viewModel.setFeatures(features)
         })) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.system(size: 14, weight: .semibold))
-                Text(detail).font(.system(size: 12)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }.frame(maxWidth: .infinity, alignment: .leading)
+            Text(title).font(.system(size: 14, weight: .semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .toggleStyle(.switch).padding(17)
+        .toggleStyle(.switch).padding(.horizontal, 17).padding(.vertical, 14)
         .background(inset ? Color.clear : card, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(inset ? Color.clear : border))
         .accessibilityIdentifier("onboarding-\(id)")
@@ -319,10 +294,14 @@ public struct OnboardingView: View {
             startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
-    @ViewBuilder private func preview(_ name: String, label: String, height: CGFloat, showsDesktopGuidance: Bool = false) -> some View {
+    @ViewBuilder private func preview(_ name: String, label: String, keys: Set<CGKeyCode>, height: CGFloat,
+                                      showsDesktopGuidance: Bool = false) -> some View {
         if let directory = previewDirectory, let image = NSImage(contentsOf: directory.appendingPathComponent("\(name).png")) {
-            HStack(spacing: 20) {
-                Image(nsImage: image).resizable().scaledToFit().frame(maxWidth: .infinity)
+            HStack(spacing: 24) {
+                OnboardingKeyboardView(highlighted: keys)
+                    .frame(width: showsDesktopGuidance ? 190 : 250)
+                    .padding(.leading, 16)
+                Image(nsImage: image).resizable().scaledToFit()
                     .accessibilityLabel(label)
                 if showsDesktopGuidance { desktopGuidance.padding(.trailing, 16) }
             }

@@ -210,3 +210,22 @@ struct SetupFlowTests {
     }
 
 }
+
+@MainActor
+@Suite("Setup completion")
+struct SetupCompletionTests {
+    @Test("Every way out of setup points at the menu bar item", arguments: [
+        OnboardingDestination.useDebut, .tutorial, .settings,
+    ])
+    func coachmarkAfterEveryDestination(_ destination: OnboardingDestination) {
+        let permissions = SetupFlowTests.Permissions()
+        permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: false)
+        var events: [String] = []
+        let model = OnboardingViewModel(permissionClient: permissions, checkpoint: .init(page: .ready),
+            onCompleted: { events.append("completed") },
+            onDestination: { _ in events.append("destination") },
+            onMenuBarCoachmark: { events.append("coachmark") })
+        model.finish(destination)
+        #expect(events == ["completed", "destination", "coachmark"])
+    }
+}

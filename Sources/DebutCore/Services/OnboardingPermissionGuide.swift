@@ -88,7 +88,9 @@ final class OnboardingPermissionGuide {
 
     private func positionOrShowPanel() {
         guard permission != nil, let frame = Self.systemSettingsFrame() else { return }
-        let targetFrame = Self.panelFrame(near: frame)
+        let screen = NSScreen.screens.first(where: { $0.frame.intersects(frame) }) ?? NSScreen.main
+        let targetFrame = Self.panelFrame(inside: frame,
+            visibleFrame: screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900))
         if panel == nil {
             let panel = NSPanel(
                 contentRect: targetFrame,
@@ -175,16 +177,25 @@ final class OnboardingPermissionGuide {
         return nil
     }
 
-    private static func panelFrame(near settingsFrame: CGRect) -> CGRect {
-        let size = CGSize(width: 420, height: 154)
-        let gap: CGFloat = 12
-        let screen = NSScreen.screens.first(where: { $0.frame.intersects(settingsFrame) }) ?? NSScreen.main
-        let visibleFrame = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let below = settingsFrame.minY - size.height - gap
-        let above = settingsFrame.maxY + gap
-        let y = below >= visibleFrame.minY + 12 ? below : min(above, visibleFrame.maxY - size.height - 12)
-        let x = min(max(settingsFrame.minX + 16, visibleFrame.minX + 12), visibleFrame.maxX - size.width - 12)
-        return CGRect(x: x, y: y, width: size.width, height: size.height)
+    /// Places the guide inside System Settings, at the bottom of its content pane
+    /// below the permission list, so it fits however little room the screen leaves.
+    static func panelFrame(inside settingsFrame: CGRect, visibleFrame: CGRect) -> CGRect {
+        let sidebarWidth: CGFloat = 215
+        let inset: CGFloat = 16
+        let width = min(420, settingsFrame.width - 2 * inset)
+        let size = CGSize(width: width, height: 154)
+        let contentWidth = settingsFrame.width - sidebarWidth
+        let x = contentWidth >= width + 2 * inset
+            ? settingsFrame.minX + sidebarWidth + (contentWidth - width) / 2
+            : settingsFrame.midX - width / 2
+        let y = settingsFrame.minY + inset
+        let bounds = settingsFrame.intersection(visibleFrame).insetBy(dx: 0, dy: inset / 2)
+        return CGRect(
+            x: min(max(x, bounds.minX), bounds.maxX - width),
+            y: min(max(y, bounds.minY), bounds.maxY - size.height),
+            width: width,
+            height: size.height
+        )
     }
 }
 
@@ -261,7 +272,7 @@ private struct PermissionGuideView: View {
             }
         }
         .padding(15)
-        .frame(width: 420, height: 154)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(.primary.opacity(0.12)))
     }

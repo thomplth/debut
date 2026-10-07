@@ -132,6 +132,7 @@ public final class OnboardingViewModel {
     private let onProgressChanged: @MainActor (OnboardingCheckpoint) -> Void
     private let onCompleted: @MainActor () -> Void
     private let onDestination: @MainActor (OnboardingDestination) -> Void
+    private let onMenuBarCoachmark: @MainActor () -> Void
     private var requestedScreenRecordingInThisProcess = false
 
     public init(
@@ -148,7 +149,8 @@ public final class OnboardingViewModel {
         checkpoint: OnboardingCheckpoint? = nil,
         onProgressChanged: @escaping @MainActor (OnboardingCheckpoint) -> Void = { _ in },
         onCompleted: @escaping @MainActor () -> Void = {},
-        onDestination: @escaping @MainActor (OnboardingDestination) -> Void = { _ in }
+        onDestination: @escaping @MainActor (OnboardingDestination) -> Void = { _ in },
+        onMenuBarCoachmark: @escaping @MainActor () -> Void = {}
     ) {
         self.permissionClient = permissionClient
         self.permissions = permissionClient.currentState()
@@ -165,6 +167,7 @@ public final class OnboardingViewModel {
         self.onProgressChanged = onProgressChanged
         self.onCompleted = onCompleted
         self.onDestination = onDestination
+        self.onMenuBarCoachmark = onMenuBarCoachmark
     }
 
     public var canAdvance: Bool { permissions.accessibilityGranted }
@@ -200,6 +203,8 @@ public final class OnboardingViewModel {
         // Persist completion and close setup before opening either destination.
         onCompleted()
         onDestination(destination)
+        // Whichever way setup ends, show where the tutorial and Settings live afterwards.
+        onMenuBarCoachmark()
     }
 
     public func setFeatures(_ features: FeatureSettings) {
