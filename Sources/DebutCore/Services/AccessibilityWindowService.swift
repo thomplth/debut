@@ -348,6 +348,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             axWindowIDsByPID: classification.axWindowIDsByPID,
             focusedWindowID: classification.focusedWindowID,
             focusedWindowPID: classification.focusedWindowPID,
+            unansweredPIDs: classification.unansweredPIDs,
             windowDesktops: windowDesktops,
             showingDesktop: showingDesktop
         )
@@ -577,6 +578,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         axWindowIDsByPID: [pid_t: Set<CGWindowID>],
         focusedWindowID: CGWindowID? = nil,
         focusedWindowPID: pid_t? = nil,
+        unansweredPIDs: Set<pid_t> = [],
         windowDesktops: [CGWindowID: Int],
         showingDesktop: Int?
     ) -> Set<pid_t> {
@@ -585,8 +587,11 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         if let focusedWindowID, let focusedWindowPID {
             confirmedWindowIDsByPID[focusedWindowPID, default: []].insert(focusedWindowID)
         }
+        // A read that timed out is a partial answer, and whatever part did arrive still names
+        // windows. Coverage is a claim about everything the app has here, so it abstains.
         return Set(confirmedWindowIDsByPID.compactMap { pid, windowIDs in
-            windowIDs.contains { windowDesktops[$0] == showingDesktop } ? pid : nil
+            !unansweredPIDs.contains(pid) &&
+                windowIDs.contains { windowDesktops[$0] == showingDesktop } ? pid : nil
         })
     }
 
@@ -635,6 +640,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             axWindowIDsByPID: classification.axWindowIDsByPID,
             focusedWindowID: classification.focusedWindowID,
             focusedWindowPID: classification.focusedWindowPID,
+            unansweredPIDs: classification.unansweredPIDs,
             windowDesktops: windowDesktops,
             showingDesktop: showingDesktop
         )
@@ -824,7 +830,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         untrackable: Set<CGWindowID>,
         axWindowIDsByPID: [pid_t: Set<CGWindowID>],
         focusedWindowID: CGWindowID?,
-        focusedWindowPID: pid_t?
+        focusedWindowPID: pid_t?,
+        unansweredPIDs: Set<pid_t>
     ) {
         var trackable = Set<CGWindowID>()
         var untrackable = Set<CGWindowID>()
@@ -841,37 +848,72 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         let ownerPIDs = runningApps.contains(where: { $0.processIdentifier <= 0 })
             ? Self.cgOwnerPIDs() : []
 
+        var unansweredApps: [pid_t: String] = [:]
         for app in runningApps {
             guard let pid = Self.processIdentifier(for: app, candidateOwnerPIDs: ownerPIDs) else {
                 continue
             }
             let axApp = AXUIElementCreateApplication(pid)
-            var windowsRef: CFTypeRef?
-            let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
-            guard result == .success, let axWindows = windowsRef as? [AXUIElement] else { continue }
+            AXUIElementSetMessagingTimeout(axApp, Self.sweepReadTimeout)
+            var timedOut = false
+            guard let axWindows = sweepAttribute(
+                kAXWindowsAttribute,
+                of: axApp,
+                timedOut: &timedOut
+            ) as? [AXUIElement] else {
+                if timedOut { unansweredApps[pid] = app.bundleIdentifier ?? "\(pid)" }
+                continue
+            }
 
+            var appWindowIDs = Set<CGWindowID>()
+            var appTrackable = Set<CGWindowID>()
+            var appUntrackable = Set<CGWindowID>()
             for axWindow in axWindows {
-                guard let role = stringAttribute(kAXRoleAttribute, of: axWindow),
-                      let subrole = stringAttribute(kAXSubroleAttribute, of: axWindow)
-                else { continue }
+                AXUIElementSetMessagingTimeout(axWindow, Self.sweepReadTimeout)
+                let role = sweepAttribute(kAXRoleAttribute, of: axWindow, timedOut: &timedOut)
+                let subrole = sweepAttribute(kAXSubroleAttribute, of: axWindow, timedOut: &timedOut)
+                guard !timedOut else { break }
+                guard let role = role as? String, let subrole = subrole as? String else { continue }
 
                 var cgWindowID: CGWindowID = 0
-                guard _AXUIElementGetWindow(axWindow, &cgWindowID) == .success,
-                      cgWindowID != 0
-                else { continue }
+                let windowResult = _AXUIElementGetWindow(axWindow, &cgWindowID)
+                if windowResult == .cannotComplete {
+                    timedOut = true
+                    break
+                }
+                guard windowResult == .success, cgWindowID != 0 else { continue }
 
-                axWindowIDsByPID[pid, default: []].insert(cgWindowID)
-                let isModal = boolAttribute(kAXModalAttribute, of: axWindow) ?? false
+                let modal = sweepAttribute(kAXModalAttribute, of: axWindow, timedOut: &timedOut)
+                guard !timedOut else { break }
+                appWindowIDs.insert(cgWindowID)
+                let isModal = modal as? Bool ?? false
                 if Self.isTrackableAXWindow(role: role, subrole: subrole, isModal: isModal) {
-                    trackable.insert(cgWindowID)
+                    appTrackable.insert(cgWindowID)
                 } else if Self.isPositivelyUntrackableAXWindow(
                     role: role,
                     subrole: subrole,
                     isModal: isModal
                 ) {
-                    untrackable.insert(cgWindowID)
+                    appUntrackable.insert(cgWindowID)
                 }
             }
+            // Half an answer is kept as none: the app stays AX-unknown for this pass, so its
+            // silence about a window can neither refuse nor evict it.
+            guard !timedOut else {
+                unansweredApps[pid] = app.bundleIdentifier ?? "\(pid)"
+                continue
+            }
+            if !appWindowIDs.isEmpty {
+                axWindowIDsByPID[pid, default: []].formUnion(appWindowIDs)
+            }
+            trackable.formUnion(appTrackable)
+            untrackable.formUnion(appUntrackable)
+        }
+        if !unansweredApps.isEmpty {
+            DiagnosticReporter.shared.report("ax_sweep_unanswered", details: [
+                "bundleIDs": unansweredApps.values.sorted().joined(separator: ","),
+                "timeoutMilliseconds": String(format: "%.0f", Self.sweepReadTimeout * 1000),
+            ])
         }
         let focusedWindowID: CGWindowID?
         let focusedWindowPID: pid_t?
@@ -888,12 +930,14 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             untrackable,
             axWindowIDsByPID,
             focusedWindowID,
-            focusedWindowPID
+            focusedWindowPID,
+            Set(unansweredApps.keys)
         )
     }
 
     private func focusedWindowID(for pid: pid_t) -> CGWindowID? {
         let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, Self.sweepReadTimeout)
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
             app,
@@ -908,6 +952,25 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
               windowID != 0
         else { return nil }
         return windowID
+    }
+
+    /// Bounds each read in the window sweep. macOS waits about six seconds by default, per
+    /// attribute, so one app that has stopped answering held its caller for seconds at a time.
+    /// Healthy apps answer well inside this even while activating: the slowest measured was
+    /// Codex at 577ms for a raise (KHA-856).
+    static let sweepReadTimeout: Float = 1
+
+    /// A read that reports whether it timed out, which `stringAttribute` cannot: a timeout
+    /// means the app did not answer, not that it has nothing to say.
+    private func sweepAttribute(
+        _ attribute: String,
+        of element: AXUIElement,
+        timedOut: inout Bool
+    ) -> CFTypeRef? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+        if result == .cannotComplete { timedOut = true }
+        return result == .success ? value : nil
     }
 
     private func stringAttribute(_ attribute: String, of element: AXUIElement) -> String? {

@@ -512,6 +512,28 @@ struct WindowServiceTests {
         ))
     }
 
+    // KHA-1000. AX reads are bounded, so under load an app's window list can time out while its
+    // focused-window read still answers. That partial answer names one window; counting it as
+    // coverage would contradict, and evict, every other window the app has on that desktop.
+    @Test("An app whose AX read timed out corroborates nothing, even through its focused window")
+    func timedOutAppCorroboratesNothing() {
+        let corroborated = AccessibilityWindowService.appPIDsWhoseAXAnswerCoversShowingDesktop(
+            axWindowIDsByPID: [:],
+            focusedWindowID: 4794,
+            focusedWindowPID: 40694,
+            unansweredPIDs: [40694],
+            windowDesktops: [4794: 0, 51100: 0],
+            showingDesktop: 0
+        )
+
+        #expect(corroborated.isEmpty)
+        #expect(!AccessibilityWindowService.accessibilityContradictsWindow(
+            windowDesktop: 0,
+            showingDesktop: 0,
+            appAXAnswerCoversShowingDesktop: corroborated.contains(40694)
+        ))
+    }
+
     @Test("With no showing desktop no AX answer corroborates")
     func noShowingDesktopCorroboratesNothing() {
         #expect(AccessibilityWindowService.appPIDsWhoseAXAnswerCoversShowingDesktop(
