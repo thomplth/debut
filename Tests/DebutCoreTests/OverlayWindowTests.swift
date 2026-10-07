@@ -133,7 +133,13 @@ struct OverlayWindowTests {
 
         #expect(window.contentView?.subviews.first === initialHostingView)
 
-        try await Task.sleep(for: .milliseconds(380))
+        // The rebase waits for AppKit's completion and a main-queue hop after the 0.36s spring.
+        // A loaded runner delays both, so a fixed sleep read the tree before it was replaced.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while window.contentView?.subviews.first === initialHostingView,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
 
         #expect(window.contentView?.subviews.first !== initialHostingView)
     }

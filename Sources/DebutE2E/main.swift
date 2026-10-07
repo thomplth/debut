@@ -2817,8 +2817,21 @@ func scenario_navigation_controls() {
         let controlArrowBefore = eventCursor()
         postControlArrow(kVK_RightArrow)
         test("Enabled Control-arrow reaches the adjacent real desktop through Debut") {
-            featureReady && baselineReady && waitFor { featureSpaces.currentDesktopIndex() == 1 }
-                && !events(since: controlArrowBefore) { $0["keyEvent"] == "switchAdjacentSpace(1)" }.isEmpty
+            // The desktop can land before the coalesced diagnostic write carries the claim, so
+            // both are awaited together rather than reading the events once at arrival.
+            let reached = featureReady && baselineReady && waitForClaimedNavigation(
+                isAtEndpoint: { featureSpaces.currentDesktopIndex() == 1 },
+                wasClaimed: { !events(since: controlArrowBefore) {
+                    $0["keyEvent"] == "switchAdjacentSpace(1)"
+                }.isEmpty },
+                waitUntil: { waitFor($0) }
+            )
+            if !reached {
+                info("  Control-arrow: ready=\(featureReady) baseline=\(baselineReady) "
+                    + "desktop=\(String(describing: featureSpaces.currentDesktopIndex())) "
+                    + "events=\(events(since: controlArrowBefore))")
+            }
+            return reached
         }
         wait(0.5)
         let swipeBefore = eventCursor()
