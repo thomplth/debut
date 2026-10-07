@@ -158,7 +158,9 @@ done
 # --- Child CPU is read in this shell; `times` in a subshell sees no children at all. ---
 run_report_children_cpu_seconds
 before_cpu="$RUN_REPORT_CPU"
-/usr/bin/perl -MTime::HiRes=time -e 'my $end = time + 1; 1 while time < $end'
+# Spin for CPU time, not wall time: a loaded host gives a wall-clock second less than half a CPU
+# second, which under-counted the child even though the accounting was right.
+/usr/bin/perl -e '1 while (times)[0] < 1'
 run_report_children_cpu_seconds
 after_cpu="$RUN_REPORT_CPU"
 awk -v a="$before_cpu" -v b="$after_cpu" 'BEGIN { exit !(b - a >= 0.5) }' \
