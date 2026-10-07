@@ -70,12 +70,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         ])
     }
 
+    nonisolated private let overlayVisibility = OverlayVisibilityRelay()
+
     public init(
         applicationUpdater: any ApplicationUpdating = DisabledApplicationUpdater(),
         crashReporter: any CrashReporting = DisabledCrashReporter()
     ) {
         self.applicationUpdater = applicationUpdater
         super.init()
+        overlayVisibility.bind(
+            isOpen: { [weak self] in self?.spaceController?.isSpaceManagerVisible ?? false },
+            show: { [weak self] overlayPresentation in
+                self?.showSpaceManagerOverlay(overlayPresentation: overlayPresentation)
+            },
+            hide: { [weak self] overlayPresentation, fadeDuration in
+                self?.hideSpaceManagerOverlay(
+                    overlayPresentation: overlayPresentation,
+                    fadeDuration: fadeDuration
+                )
+            }
+        )
         crashReports = CrashReportCoordinator(
             reporter: crashReporter,
             askToSend: { Self.askToSendCrashReport() },
@@ -854,9 +868,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         _ controller: SpaceController,
         overlayPresentation: OverlayPresentationContext?
     ) {
-        DispatchQueue.main.async { [weak self] in
-            self?.showSpaceManagerOverlay(overlayPresentation: overlayPresentation)
-        }
+        overlayVisibility.opened(overlayPresentation)
     }
 
     nonisolated public func spaceControllerDidCloseOverlay(_ controller: SpaceController) {
@@ -882,25 +894,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         overlayPresentation: OverlayPresentationContext?,
         fades: Bool
     ) {
-        let fadeDuration = fades ? Self.releaseFadeDuration : 0
-        // A commit closes the overlay and then fronts the chosen window in the same turn. A hop
-        // queued the fade behind all of that, and the overlay sat opaque until it was done
-        // (KHA-856).
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in
-                self?.hideSpaceManagerOverlay(
-                    overlayPresentation: overlayPresentation,
-                    fadeDuration: fadeDuration
-                )
-            }
-            return
-        }
-        MainActor.assumeIsolated {
-            hideSpaceManagerOverlay(
-                overlayPresentation: overlayPresentation,
-                fadeDuration: fadeDuration
-            )
-        }
+        overlayVisibility.closed(
+            overlayPresentation,
+            fadeDuration: fades ? Self.releaseFadeDuration : 0
+        )
     }
 
     nonisolated public func spaceControllerDidUpdateSelection(_ controller: SpaceController) {
