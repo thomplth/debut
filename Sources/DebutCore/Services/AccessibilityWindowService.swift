@@ -829,8 +829,13 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         var trackable = Set<CGWindowID>()
         var untrackable = Set<CGWindowID>()
         var axWindowIDsByPID: [pid_t: Set<CGWindowID>] = [:]
+        // AppKit answers Debut's own AX on the main thread, so asking from a background queue
+        // waits on main, and hung the app outright in KHA-856. Off main, Debut's windows stay
+        // AX-unknown, which admits nothing new and refuses nothing.
+        let ownPIDToSkip = Thread.isMainThread ? nil : ProcessInfo.processInfo.processIdentifier
         let runningApps = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular &&
+                $0.processIdentifier != ownPIDToSkip &&
                 (onlyOwnerPIDs == nil || onlyOwnerPIDs?.contains($0.processIdentifier) == true) }
 
         let ownerPIDs = runningApps.contains(where: { $0.processIdentifier <= 0 })

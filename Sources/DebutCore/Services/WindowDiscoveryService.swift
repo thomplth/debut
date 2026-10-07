@@ -39,6 +39,24 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         @escaping @Sendable (CGWindowID?) -> Void
     ) -> Void
 
+    /// What an app activation reads from WindowServer and Accessibility. Every field is a
+    /// cross-process answer, and the window list asks every running app, so it is captured away
+    /// from the main queue (KHA-999).
+    struct ActivationSnapshot: Sendable {
+        let runningPIDs: Set<pid_t>
+        let listedWindows: [WindowInfo]
+        let windowLocations: [CGWindowID: DesktopLocation]
+        let showingDesktopIDs: Set<CGSSpaceID>
+        let allWindowIDs: Set<CGWindowID>?
+        let skyLightWindowIDs: Set<CGWindowID>?
+        let captureNanoseconds: UInt64
+    }
+
+    typealias ActivationSnapshotScheduler = (
+        _ capture: @escaping @Sendable () -> ActivationSnapshot,
+        _ apply: @escaping @Sendable (ActivationSnapshot) -> Void
+    ) -> Void
+
     static let focusProbeTimeout: TimeInterval = 0.05
     static let windowCreationRetryDelays: [TimeInterval] = [0.05, 0.1, 0.25, 0.5]
     private static let windowCreationObserverRetryDelays: [TimeInterval] = [0.25, 0.5, 1, 2]
@@ -65,6 +83,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var spaceSwitcher: (any SpaceSwitching)?
 
     private let focusProbeScheduler: FocusProbeScheduler
+    private let activationSnapshotScheduler: ActivationSnapshotScheduler
     private let frontmostPIDProvider: @Sendable () -> pid_t?
     private let launchDiscoveryDelay: TimeInterval
     private let processExitMonitor: any ProcessExitMonitoring
@@ -267,6 +286,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         windowService: any WindowService,
         focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)? = nil,
         focusProbeScheduler: FocusProbeScheduler? = nil,
+        activationSnapshotScheduler: ActivationSnapshotScheduler? = nil,
         frontmostPIDProvider: (@Sendable () -> pid_t?)? = nil,
         launchDiscoveryDelay: TimeInterval = 0.5,
         processExitMonitor: any ProcessExitMonitoring,
@@ -274,6 +294,23 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     ) {
         self.diag = diagnosticReporter
         self.windowService = windowService
+        if let activationSnapshotScheduler {
+            self.activationSnapshotScheduler = activationSnapshotScheduler
+        } else if focusProbeScheduler != nil || focusedWindowProvider != nil {
+            // Tests that substitute the probe keep activation synchronous unless they also
+            // substitute this.
+            self.activationSnapshotScheduler = { capture, apply in apply(capture()) }
+        } else {
+            self.activationSnapshotScheduler = { capture, apply in
+                ExternalCallScheduler.shared.schedule(on: .windowServer) {
+                    let snapshot = capture()
+                    DispatchQueue.main.async(
+                        qos: EventTapKeyboardService.deliveryQualityOfService,
+                        flags: .enforceQoS
+                    ) { apply(snapshot) }
+                }
+            }
+        }
         if let focusProbeScheduler {
             self.focusProbeScheduler = focusProbeScheduler
         } else if let focusedWindowProvider {
@@ -1823,15 +1860,61 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         source: FrontmostAppObservationSource = .workspaceActivation
     ) {
         guard activationProbeGeneration == generation, activatedPID == app.pid else { return }
+        let windowService = windowService
+        let spaceSwitcher = spaceSwitcher
+        let excludedBundleIDs = excludedBundleIDs
+        activationSnapshotScheduler({
+            let startedAt = DispatchTime.now().uptimeNanoseconds
+            let listedWindows = windowService.listWindows().filter {
+                !excludedBundleIDs.contains($0.ownerBundleID)
+            }
+            let listedIDs = Set(listedWindows.map(\.windowID))
+            return ActivationSnapshot(
+                runningPIDs: Set(windowService.listRunningApps().map(\.pid)),
+                listedWindows: listedWindows,
+                windowLocations: spaceSwitcher?.windowLocations().filter {
+                    listedIDs.contains($0.key)
+                } ?? [:],
+                showingDesktopIDs: Set(
+                    spaceSwitcher?.spaceTopology().stacks.compactMap(\.currentDesktopID) ?? []
+                ),
+                allWindowIDs: windowService.listAllWindowIDs(),
+                skyLightWindowIDs: spaceSwitcher.map { $0.placedWindowIDs() },
+                captureNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt
+            )
+        }) { [weak self] snapshot in
+            self?.applyAppActivation(
+                app,
+                snapshot: snapshot,
+                sampledFocusedWindowID: sampledFocusedWindowID,
+                generation: generation,
+                focusDeliveries: focusDeliveries,
+                probeStartedAt: probeStartedAt,
+                source: source
+            )
+        }
+    }
+
+    private func applyAppActivation(
+        _ app: AppInfo,
+        snapshot: ActivationSnapshot,
+        sampledFocusedWindowID: CGWindowID?,
+        generation: Int,
+        focusDeliveries: Int?,
+        probeStartedAt: UInt64,
+        source: FrontmostAppObservationSource
+    ) {
+        // A newer activation may have started while this snapshot was being captured.
+        guard activationProbeGeneration == generation, activatedPID == app.pid else { return }
         let pid = app.pid
         let shouldTrackActivation = !excludedBundleIDs.contains(app.bundleID)
-        let runningApps = windowService.listRunningApps()
-        var runningPIDs = Set(runningApps.map(\.pid))
+        var runningPIDs = snapshot.runningPIDs
         // The activation notification is authoritative even if Launch Services has not
         // inserted the newly activated process into runningApplications yet.
         runningPIDs.insert(pid)
         pruneTracking(runningPIDs: runningPIDs)
-        let liveWindows = excludingRetired(windowService.listWindows()).filter {
+        // Retirement and creation holds are read at publication, not capture (KHA-789).
+        let liveWindows = excludingRetired(snapshot.listedWindows).filter {
             !excludedBundleIDs.contains($0.ownerBundleID)
         }
         reportWindowsDetectedByLaterScan(liveWindows, trigger: "app_activation")
@@ -1849,7 +1932,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // before falling back to CGWindowList's front-to-back order.
         let activatedWindows = liveWindows.filter { $0.ownerPID == pid }
         let activatedWindowIDs = Set(activatedWindows.map(\.windowID))
-        let liveDesktopLocations = desktopLocations(for: liveWindows)
+        let liveIDs = Set(liveWindows.map(\.windowID))
+        let liveDesktopLocations = snapshot.windowLocations.filter { liveIDs.contains($0.key) }
         let focusedWindowID: CGWindowID?
         if let sampledFocusedWindowID,
            activatedWindowIDs.contains(sampledFocusedWindowID) {
@@ -1859,12 +1943,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             // can sit on a desktop that is not showing. Activation cannot have focused it there,
             // and the controller defers such a report for a desktop change that never comes,
             // which left the previous app at the head of the MRU (KHA-843).
-            let showingDesktopIDs = Set(
-                spaceSwitcher?.spaceTopology().stacks.compactMap(\.currentDesktopID) ?? []
-            )
             focusedWindowID = activatedWindows.first(where: { window in
                 liveDesktopLocations[window.windowID].map {
-                    showingDesktopIDs.contains($0.desktopID)
+                    snapshot.showingDesktopIDs.contains($0.desktopID)
                 } ?? true
             })?.windowID ?? activatedWindows.first?.windowID
         } else {
@@ -1875,6 +1956,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             "bundleID": app.bundleID,
             "elapsedMilliseconds": String(format: "%.3f", Double(elapsedNanoseconds) / 1_000_000),
             "ownerPID": "\(pid)",
+            "snapshotMilliseconds": String(
+                format: "%.3f",
+                Double(snapshot.captureNanoseconds) / 1_000_000
+            ),
             "resolvedWindowID": focusedWindowID.map(String.init) ?? "none",
             "sampledWindowID": sampledFocusedWindowID.map(String.init) ?? "none",
             "source": source.rawValue,
@@ -1884,12 +1969,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
         onAppActivated?(RuntimeWindowSnapshot(
             liveWindows: liveWindows,
-            allWindowIDs: windowService.listAllWindowIDs(),
+            allWindowIDs: snapshot.allWindowIDs,
             focusedWindowID: focusedWindowID,
             unarmedWindowIDs: unarmedWindowIDs,
             desktopIndexes: liveDesktopLocations.mapValues(\.index),
             desktopLocations: liveDesktopLocations,
-            skyLightWindowIDs: skyLightWindowIDs()
+            skyLightWindowIDs: snapshot.skyLightWindowIDs
         ))
         guard let focusedWindowID else { return }
         if let focusDeliveries {

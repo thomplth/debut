@@ -68,6 +68,25 @@ final class DeferredFocusProbe: @unchecked Sendable {
     }
 }
 
+/// Holds activation snapshot captures, the way production holds them on the WindowServer lane.
+final class DeferredActivationSnapshotCapture: @unchecked Sendable {
+    private var pending: [() -> Void] = []
+
+    var pendingCount: Int { pending.count }
+
+    func schedule(
+        capture: @escaping @Sendable () -> WindowDiscoveryService.ActivationSnapshot,
+        apply: @escaping @Sendable (WindowDiscoveryService.ActivationSnapshot) -> Void
+    ) {
+        pending.append { apply(capture()) }
+    }
+
+    func runFirst() {
+        guard !pending.isEmpty else { return }
+        pending.removeFirst()()
+    }
+}
+
 final class DeferredWindowCreationRetryScheduler: @unchecked Sendable {
     private(set) var delays: [TimeInterval] = []
     private var pending: [() -> Void] = []
@@ -868,6 +887,68 @@ struct WindowDiscoveryServiceTests {
         probe.resolve(pid: 10, windowID: 1)
 
         #expect(callbackOrder == ["app", "snapshot", "focus"])
+    }
+
+    // KHA-999. The activation snapshot reads every app's Accessibility window list; on the main
+    // queue a slow app froze Debut for seconds per switch.
+    @Test("App activation reads no window list until its snapshot capture runs")
+    func activationSnapshotIsCapturedOffTheCallingTurn() {
+        let windowService = MockWindowService()
+        windowService.apps = [AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)]
+        windowService.windowList = [liveWindow(1)]
+        let probe = DeferredFocusProbe()
+        let capture = DeferredActivationSnapshotCapture()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusProbeScheduler: probe.schedule,
+            activationSnapshotScheduler: capture.schedule,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var callbackOrder: [String] = []
+        service.onAppActivated = { _ in callbackOrder.append("snapshot") }
+        service.onWindowActivated = { callbackOrder.append("focus \($0)") }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)
+        )
+        probe.resolve(pid: 10, windowID: 1)
+
+        #expect(windowService.listWindowsCount == 0)
+        #expect(callbackOrder.isEmpty)
+
+        capture.runFirst()
+
+        #expect(windowService.listWindowsCount == 1)
+        #expect(callbackOrder == ["snapshot", "focus 1"])
+    }
+
+    @Test("A snapshot captured for a superseded activation is not published")
+    func supersededActivationSnapshotIsDropped() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "app.a", name: "A", pid: 10, isHidden: false),
+            AppInfo(bundleID: "app.b", name: "B", pid: 20, isHidden: false),
+        ]
+        windowService.windowList = [liveWindow(1, ownerPID: 10), liveWindow(2, ownerPID: 20)]
+        let probe = DeferredFocusProbe()
+        let capture = DeferredActivationSnapshotCapture()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusProbeScheduler: probe.schedule,
+            activationSnapshotScheduler: capture.schedule,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var focusedWindowIDs: [CGWindowID?] = []
+        service.onAppActivated = { focusedWindowIDs.append($0.focusedWindowID) }
+
+        service.handleAppActivation(AppInfo(bundleID: "app.a", name: "A", pid: 10, isHidden: false))
+        probe.resolve(pid: 10, windowID: 1)
+        service.handleAppActivation(AppInfo(bundleID: "app.b", name: "B", pid: 20, isHidden: false))
+        probe.resolve(pid: 20, windowID: 2)
+        capture.runFirst()
+        capture.runFirst()
+
+        #expect(focusedWindowIDs == [2])
     }
 
     @Test("App activation diagnostics bracket the focused-window probe")

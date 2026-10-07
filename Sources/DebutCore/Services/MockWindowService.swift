@@ -60,7 +60,12 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public init() {}
 
     public func listRunningApps() -> [AppInfo] { apps }
-    public func listWindows() -> [WindowInfo] { windowList }
+    /// How often the full window list was read, so a test can prove a caller deferred the read.
+    public private(set) var listWindowsCount = 0
+    public func listWindows() -> [WindowInfo] {
+        listWindowsCount += 1
+        return windowList
+    }
     public func listUntrackableWindowIDs() -> Set<CGWindowID> { untrackableWindowIDList }
     public func listDisqualifiedWindows() -> [CGWindowID: WindowDisqualification] {
         var result = Dictionary(uniqueKeysWithValues: undersizedWindowIDList.map { ($0, WindowDisqualification.smallWidth) })
