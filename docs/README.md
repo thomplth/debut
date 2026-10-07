@@ -16,6 +16,8 @@ select windows across desktops, and navigate desktops faster.
 
 - [Contributing](../CONTRIBUTING.md): setup, verification, and pull requests.
 - [Agent guidance](../AGENTS.md): concise architectural constraints.
+- [Test reliability](test-reliability.md): rules for tests that wait, read
+  asynchronous evidence, or coordinate processes, so they hold on slow CI runners.
 - [Performance observability](performance-observability.md): local measurements
   and benchmark commands.
 - [README media capture](readme-capture.md): visual baseline, scoped capture in a

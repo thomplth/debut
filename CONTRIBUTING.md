@@ -17,7 +17,8 @@ for test in Tests/CI/*.sh; do bash "$test" || exit; done
 The Swift suite includes screenshot tests. Serial execution is required because
 several suites block the main thread while other checks need main-queue work.
 Add a failing regression test before changing behavior, then run the relevant
-checks and the complete suite before submitting your pull request.
+checks and the complete suite before submitting your pull request. Tests that wait
+or read asynchronous evidence must follow [test reliability](docs/test-reliability.md).
 
 The build is at `.build/Debut.app`. The build script selects a local signing
 identity when available and otherwise signs ad hoc. Distribution credentials are

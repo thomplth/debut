@@ -32,3 +32,18 @@ part of ordinary contribution work.
   saved choices.
 - Keep development versions at `0.0.0-dev`. Release workflows stamp versions for
   packaging; stable and nightly feeds and signing identities remain separate.
+
+## Tests
+
+Before adding or changing a test that waits, reads diagnostic evidence, or
+coordinates processes, read [test reliability](docs/test-reliability.md). Hosted
+runners are far slower than a development Mac, so a timing margin that always
+passes locally can fail in CI.
+
+- Wait for conditions with a deadline, never a fixed sleep followed by one check.
+  The product's no-polling rule does not apply to tests waiting for an outcome.
+- Await every signal a check combines in one wait; diagnostic events trail effects.
+- Never let one read of another process's state abort or evict a participant.
+- Log every input of a failing check, and stress timing-sensitive tests under
+  saturated CPU before landing.
+- A check that fails in more than one CI run is a bug, even when a rerun passes.
