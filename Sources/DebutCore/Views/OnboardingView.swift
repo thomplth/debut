@@ -297,12 +297,20 @@ public struct OnboardingView: View {
     @ViewBuilder private func preview(_ name: String, label: String, keys: Set<CGKeyCode>, height: CGFloat,
                                       showsDesktopGuidance: Bool = false) -> some View {
         if let directory = previewDirectory, let image = NSImage(contentsOf: directory.appendingPathComponent("\(name).png")) {
-            HStack(spacing: 24) {
-                OnboardingKeyboardView(highlighted: keys)
-                    .frame(width: showsDesktopGuidance ? 190 : 250)
-                    .padding(.leading, 16)
-                Image(nsImage: image).resizable().scaledToFit()
-                    .accessibilityLabel(label)
+            let keyboardWidth: CGFloat = showsDesktopGuidance ? 190 : 250
+            HStack(spacing: 20) {
+                // The keyboard keeps one anchor on every page; a wider demo grows leftward
+                // over the keyboard's faded edge instead of pushing it aside.
+                ZStack(alignment: .leading) {
+                    OnboardingKeyboardView(highlighted: keys)
+                        .frame(width: keyboardWidth)
+                        .padding(.leading, 16)
+                    Image(nsImage: image).resizable().scaledToFit()
+                        .accessibilityLabel(label)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.leading, 16 + keyboardWidth * 0.62)
+                        .padding(.trailing, showsDesktopGuidance ? 0 : 16)
+                }
                 if showsDesktopGuidance { desktopGuidance.padding(.trailing, 16) }
             }
             .padding(8).frame(height: height).frame(maxWidth: .infinity)

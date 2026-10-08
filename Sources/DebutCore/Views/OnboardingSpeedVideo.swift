@@ -27,7 +27,6 @@ struct OnboardingSpeedVideo: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Side-by-side video: macOS default desktop switching and Debut Instant")
             HStack {
-                Text("Same shortcut. Actual speed.").foregroundStyle(.secondary)
                 Spacer()
                 Button { paused.toggle() } label: {
                     Label(paused ? "Play comparison" : "Pause comparison", systemImage: paused ? "play.fill" : "pause.fill")
