@@ -512,6 +512,61 @@ struct WindowDiscoveryServiceTests {
         #expect(manager.spaceContainingWindow(windowID: 7) != nil)
     }
 
+    // KHA-1044. The new window's app is busy creating it, so these reads used the ~6s default
+    // and held the main queue for up to 8.2s. Each element is bounded before it is asked, and
+    // the first read that times out ends the attempt rather than paying for the rest.
+    @Test("Creation metadata bounds every element it asks and stops at the first timeout")
+    func creationMetadataReadsAreBounded() {
+        let created = AXUIElementCreateApplication(91_001)
+        let focused = AXUIElementCreateApplication(91_002)
+        var timeouts: [(pid_t, Float)] = []
+        var reads: [(pid_t, String)] = []
+        let reader = WindowDiscoveryService.AXCreationReader(
+            setTimeout: { element, seconds in
+                var pid: pid_t = 0
+                AXUIElementGetPid(element, &pid)
+                timeouts.append((pid, seconds))
+            },
+            copy: { element, attribute in
+                var pid: pid_t = 0
+                AXUIElementGetPid(element, &pid)
+                reads.append((pid, attribute))
+                switch (pid, attribute) {
+                case (91_001, kAXRoleAttribute): return (.success, kAXApplicationRole as CFString)
+                case (91_001, kAXFocusedWindowAttribute): return (.success, focused)
+                default: return (.cannotComplete, nil)
+                }
+            }
+        )
+
+        #expect(WindowDiscoveryService.windowCreationMetadata(for: created, reader: reader) == nil)
+        let bound = AccessibilityWindowService.sweepReadTimeout
+        #expect(timeouts.map(\.0) == [91_001, 91_002])
+        #expect(timeouts.allSatisfy { $0.1 == bound })
+        #expect(reads.map(\.0) == [91_001, 91_001, 91_002])
+        #expect(reads.map(\.1) == [
+            kAXRoleAttribute, kAXFocusedWindowAttribute, kAXRoleAttribute,
+        ])
+    }
+
+    @Test("A creation element that times out at once is asked nothing else")
+    func creationMetadataStopsAtFirstTimeout() {
+        var reads: [String] = []
+        let reader = WindowDiscoveryService.AXCreationReader(
+            setTimeout: { _, _ in },
+            copy: { _, attribute in
+                reads.append(attribute)
+                return (.cannotComplete, nil)
+            }
+        )
+
+        #expect(WindowDiscoveryService.windowCreationMetadata(
+            for: AXUIElementCreateApplication(91_001),
+            reader: reader
+        ) == nil)
+        #expect(reads == [kAXRoleAttribute])
+    }
+
     @Test("An AX-unknown creation whose element dies stays refused after the probe")
     func creationWhoseElementDiesStaysRefused() {
         let (service, _, retry) = pendingDiaFixture()

@@ -1086,59 +1086,70 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             subrole == kAXSystemDialogSubrole as String
     }
 
-    private static func windowCreationMetadata(
-        for element: AXUIElement
+    /// How creation metadata asks Accessibility, replaceable so tests can answer for an app.
+    struct AXCreationReader {
+        var setTimeout: (AXUIElement, Float) -> Void
+        var copy: (AXUIElement, String) -> (AXError, CFTypeRef?)
+
+        static var live: AXCreationReader {
+            AXCreationReader(
+                setTimeout: { AXUIElementSetMessagingTimeout($0, $1) },
+                copy: { element, attribute in
+                    var value: CFTypeRef?
+                    let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+                    return (result, value)
+                }
+            )
+        }
+    }
+
+    /// The app is busy creating the window it just announced, so it is slow to answer about it;
+    /// with the ~6s default these reads held their caller for up to 8.2s (KHA-1044). Each element
+    /// is bounded before it is asked, and a read that times out ends the attempt as unresolved,
+    /// which the probe already retries, rather than paying the bound again for each attribute.
+    static func windowCreationMetadata(
+        for element: AXUIElement,
+        reader: AXCreationReader = .live
     ) -> AXWindowCreationMetadata? {
+        var timedOut = false
+        func read(_ attribute: String, of element: AXUIElement) -> CFTypeRef? {
+            guard !timedOut else { return nil }
+            let (result, value) = reader.copy(element, attribute)
+            if result == .cannotComplete { timedOut = true }
+            return result == .success ? value : nil
+        }
+
+        reader.setTimeout(element, AccessibilityWindowService.sweepReadTimeout)
         let candidate: AXUIElement
-        var roleRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(
-            element,
-            kAXRoleAttribute as CFString,
-            &roleRef
-        ) == .success,
-           let role = roleRef as? String,
+        if let role = read(kAXRoleAttribute, of: element) as? String,
            role == kAXWindowRole as String || role == kAXSheetRole as String {
             candidate = element
         } else {
-            var focusedRef: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(
-                element,
-                kAXFocusedWindowAttribute as CFString,
-                &focusedRef
-            ) == .success,
-                  let focused = focusedRef,
+            guard !timedOut,
+                  let focused = read(kAXFocusedWindowAttribute, of: element),
                   CFGetTypeID(focused) == AXUIElementGetTypeID()
             else { return nil }
             candidate = unsafeDowncast(focused, to: AXUIElement.self)
+            reader.setTimeout(candidate, AccessibilityWindowService.sweepReadTimeout)
         }
 
-        func stringAttribute(_ name: String) -> String? {
-            var value: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(candidate, name as CFString, &value) == .success
-            else { return nil }
-            return value as? String
-        }
-        func boolAttribute(_ name: String) -> Bool {
-            var value: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(candidate, name as CFString, &value) == .success
-            else { return false }
-            return value as? Bool ?? false
-        }
         var ownerPID: pid_t = 0
         var windowID: CGWindowID = 0
-        guard let role = stringAttribute(kAXRoleAttribute),
-              let subrole = stringAttribute(kAXSubroleAttribute),
+        guard let role = read(kAXRoleAttribute, of: candidate) as? String,
+              let subrole = read(kAXSubroleAttribute, of: candidate) as? String,
               AXUIElementGetPid(candidate, &ownerPID) == .success,
               _AXUIElementGetWindow(candidate, &windowID) == .success,
               ownerPID > 0,
               windowID > 0
         else { return nil }
+        let isModal = read(kAXModalAttribute, of: candidate) as? Bool ?? false
+        guard !timedOut else { return nil }
         return AXWindowCreationMetadata(
             windowID: windowID,
             ownerPID: ownerPID,
             role: role,
             subrole: subrole,
-            isModal: boolAttribute(kAXModalAttribute)
+            isModal: isModal
         )
     }
 
