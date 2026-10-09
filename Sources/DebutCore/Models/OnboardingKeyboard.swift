@@ -33,9 +33,9 @@ public enum OnboardingKeyboard {
         [.init(57, "caps lock", symbol: "⇪", width: 1.8), .init(0, "A"), .init(1, "S"), .init(2, "D"),
          .init(3, "F"), .init(5, "G"), .init(4, "H"), .init(38, "J"), .init(40, "K")],
         [.init(56, "shift", symbol: "⇧", width: 2.3), .init(6, "Z"), .init(7, "X"), .init(8, "C"),
-         .init(9, "V"), .init(11, "B"), .init(45, "N"), .init(46, "M")],
+         .init(9, "V"), .init(11, "B"), .init(45, "N"), .init(46, "M"), .init(43, ",")],
         [.init(63, "fn"), .init(59, "control", symbol: "⌃"), .init(leftOption, "option", symbol: "⌥"),
-         .init(leftCommand, "command", symbol: "⌘", width: 1.25), .init(49, "", width: 5)],
+         .init(leftCommand, "command", symbol: "⌘", width: 1.25), .init(49, "", width: 6)],
     ]
 
     /// Device-dependent modifier bits from IOLLEvent.h, which tell left from right.
@@ -104,8 +104,13 @@ public struct OnboardingDemoLayout: Equatable, Sendable {
     public static let margin: CGFloat = 32
     /// Width of the progressive blur at the keyboard's cropped edge.
     public static let fadeUnits: CGFloat = 2.2
-    /// Longest crop; every row runs past it so the fade never reveals a row's end.
+    /// Longest crop before the reach; every row runs past both so the fade never
+    /// reveals a row's end.
     public static let maximumUnits: CGFloat = 8.5
+    /// How far the keyboard's faded tail reaches into the gap before the plate. The
+    /// tail is nearly transparent, so the gap still reads as one margin, and the
+    /// keys before the fade gain a key of room.
+    public static let reachUnits: CGFloat = 1
 
     public let keyboardMinX: CGFloat
     public let keyboardWidth: CGFloat
@@ -120,9 +125,10 @@ public struct OnboardingDemoLayout: Equatable, Sendable {
         let plateWidth = max(0, min((height - 2 * margin) * aspect, available - minimumKeyboard))
         keyboardMinX = margin
         // A short window can leave more room than the rows fill; the right margin takes it.
-        keyboardWidth = min(Self.maximumUnits * unit, available - plateWidth)
+        let spacedWidth = min(Self.maximumUnits * unit, available - plateWidth)
+        keyboardWidth = spacedWidth + Self.reachUnits * unit
         let plateHeight = plateWidth / aspect
-        plate = CGRect(x: 2 * margin + keyboardWidth, y: (height - plateHeight) / 2,
+        plate = CGRect(x: 2 * margin + spacedWidth, y: (height - plateHeight) / 2,
                        width: plateWidth, height: plateHeight)
     }
 }

@@ -112,7 +112,7 @@ struct OnboardingKeyboardView: View {
 
     /// Blur radii in key units, sharpest first, and where along the fade (0...1) each
     /// layer hands over to the next.
-    private static let blurRadii: [CGFloat] = [0, 0.04, 0.09, 0.15, 0.23]
+    private static let blurRadii: [CGFloat] = [0, 0.015, 0.035, 0.06, 0.09]
     private static let handovers: [CGFloat] = [0.1, 0.28, 0.48, 0.68]
     private static let crossfade: CGFloat = 0.07
 
