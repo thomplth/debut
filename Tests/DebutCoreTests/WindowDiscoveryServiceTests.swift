@@ -1855,6 +1855,20 @@ struct WindowDiscoveryServiceTests {
         #expect(spaceManager.dormantWindowAssignments.map(\.window.windowID) == [17776])
     }
 
+    @Test("Reconciliation reads every Accessibility-derived answer inside one shared sweep")
+    func reconciliationSharesOneAccessibilitySweep() {
+        let windowService = MockWindowService()
+        var spaceManager = SpaceManager()
+
+        WindowDiscoveryService(
+            windowService: windowService,
+            processExitMonitor: MockProcessExitMonitor()
+        ).reconcileWindows(&spaceManager)
+
+        #expect(windowService.sharedSweepCount == 1)
+        #expect(windowService.sweepReadsOutsideSharedPass.isEmpty)
+    }
+
     // The counterpart guard. A window can drop out of `listWindows()` for reasons that say
     // nothing about it — macOS reports no single desktop for an all-Spaces or fullscreen
     // window — and parking on that would strand real windows every time one goes fullscreen.

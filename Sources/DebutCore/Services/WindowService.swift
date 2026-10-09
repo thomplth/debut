@@ -280,6 +280,10 @@ public protocol WindowService: Sendable {
     /// hidden apps have been removed, so every member is refusable on its own.
     func listWindowServerVerdicts() -> WindowServerVerdicts
     func listAllWindowIDs() -> Set<CGWindowID>?
+    /// Runs `body` as one pass over a single Accessibility sweep. Every listing inside it that
+    /// would classify all apps' AX windows reuses the first classification taken in the pass,
+    /// so a caller asking several questions of the same moment pays for one sweep, not one each.
+    func withSharedAccessibilitySweep<T>(_ body: () -> T) -> T
     /// `onEnumerated` reports which requested windows the shareable-content
     /// snapshot actually matched, before any of them is captured. Without it a
     /// caller cannot tell the shared enumeration wait apart from capture time.
@@ -334,6 +338,8 @@ public protocol WindowService: Sendable {
 }
 
 public extension WindowService {
+    func withSharedAccessibilitySweep<T>(_ body: () -> T) -> T { body() }
+
     /// Conformers that keep no elements have no cheaper path than their ordinary raise.
     func raiseTrackedWindow(windowID: CGWindowID) -> Bool {
         raiseWindow(windowID: windowID)

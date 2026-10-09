@@ -94,6 +94,9 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     /// Replaces the running-app scan in tests. Production leaves this nil.
     var elementScanOverride: ((CGWindowID) -> AXUIElement?)?
 
+    /// Called each time every app's AX windows are actually swept, so a test can count them.
+    var onFullAccessibilitySweep: (() -> Void)?
+
     /// Where a window's desktop comes from. `kAXWindows` only reports windows on the active
     /// Space, so an AX-unknown window on another desktop still needs a way to resolve to
     /// exactly one desktop before the CG heuristic in `listWindows()` will trust it.
@@ -825,20 +828,51 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return !isTrackableAXWindow(role: role, subrole: subrole, isModal: isModal)
     }
 
-    private func classifyAXWindowIDs(onlyOwnerPIDs: Set<pid_t>? = nil) -> (
+    typealias AXClassification = (
         trackable: Set<CGWindowID>,
         untrackable: Set<CGWindowID>,
         axWindowIDsByPID: [pid_t: Set<CGWindowID>],
         focusedWindowID: CGWindowID?,
         focusedWindowPID: pid_t?,
         unansweredPIDs: Set<pid_t>
-    ) {
+    )
+
+    /// The classification a shared pass has taken so far. Held per thread, so only the caller
+    /// that opened the pass reuses it; a sweep on another queue still asks the apps itself.
+    private final class SharedSweep {
+        var classification: AXClassification?
+    }
+
+    private var sharedSweepKey: String {
+        "com.thomplth.Debut.sharedAccessibilitySweep.\(ObjectIdentifier(self).hashValue)"
+    }
+
+    public func withSharedAccessibilitySweep<T>(_ body: () -> T) -> T {
+        let threadStorage = Thread.current.threadDictionary
+        guard threadStorage[sharedSweepKey] == nil else { return body() }
+        threadStorage[sharedSweepKey] = SharedSweep()
+        defer { threadStorage.removeObject(forKey: sharedSweepKey) }
+        return body()
+    }
+
+    private func classifyAXWindowIDs(onlyOwnerPIDs: Set<pid_t>? = nil) -> AXClassification {
+        guard onlyOwnerPIDs == nil,
+              let pass = Thread.current.threadDictionary[sharedSweepKey] as? SharedSweep
+        else { return sweepAXWindowIDs(onlyOwnerPIDs: onlyOwnerPIDs) }
+        if let classification = pass.classification { return classification }
+        let classification = sweepAXWindowIDs(onlyOwnerPIDs: nil)
+        pass.classification = classification
+        return classification
+    }
+
+    private func sweepAXWindowIDs(onlyOwnerPIDs: Set<pid_t>?) -> AXClassification {
         var trackable = Set<CGWindowID>()
         var untrackable = Set<CGWindowID>()
         var axWindowIDsByPID: [pid_t: Set<CGWindowID>] = [:]
         // AppKit answers Debut's own AX on the main thread, so asking from a background queue
         // waits on main, and hung the app outright in KHA-856. Off main, Debut's windows stay
         // AX-unknown, which admits nothing new and refuses nothing.
+        if onlyOwnerPIDs == nil { onFullAccessibilitySweep?() }
         let ownPIDToSkip = Thread.isMainThread ? nil : ProcessInfo.processInfo.processIdentifier
         let runningApps = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular &&

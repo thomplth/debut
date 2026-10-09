@@ -441,15 +441,28 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Unmatched live windows go to the first space.
     public func reconcileWindows(_ spaceManager: inout SpaceManager) {
         let discoveryID = PerformanceRecorder.shared.begin(.windowDiscovery)
-        let liveWindows = excludingRetired(windowService.listWindows()).filter {
-            !excludedBundleIDs.contains($0.ownerBundleID)
+        // Each of these answers used to sweep every app's AX windows again, and a launch soon
+        // after boot spent 19s here waiting on apps that were still starting (KHA-1047).
+        let (
+            liveWindows,
+            untrackableWindowIDs,
+            disqualifiedWindows,
+            axContradictedWindowIDs,
+            windowServerVerdicts,
+            runningApps
+        ) = windowService.withSharedAccessibilitySweep {
+            (
+                excludingRetired(windowService.listWindows()).filter {
+                    !excludedBundleIDs.contains($0.ownerBundleID)
+                },
+                windowService.listUntrackableWindowIDs(),
+                windowService.listDisqualifiedWindows(),
+                windowService.listAXContradictedWindowIDs(),
+                windowService.listWindowServerVerdicts(),
+                windowService.listRunningApps()
+            )
         }
-        let untrackableWindowIDs = windowService.listUntrackableWindowIDs()
-        let disqualifiedWindows = windowService.listDisqualifiedWindows()
         let disqualifiedWindowIDs = Set(disqualifiedWindows.keys)
-        let axContradictedWindowIDs = windowService.listAXContradictedWindowIDs()
-        let windowServerVerdicts = windowService.listWindowServerVerdicts()
-        let runningApps = windowService.listRunningApps()
         _ = PerformanceRecorder.shared.end(discoveryID)
 
         // Explicit AX classification identifies modal, floating, and other

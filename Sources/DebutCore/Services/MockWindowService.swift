@@ -64,17 +64,39 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public private(set) var listWindowsCount = 0
     public func listWindows() -> [WindowInfo] {
         listWindowsCount += 1
+        noteSweepRead("listWindows")
         return windowList
     }
-    public func listUntrackableWindowIDs() -> Set<CGWindowID> { untrackableWindowIDList }
+    public func listUntrackableWindowIDs() -> Set<CGWindowID> {
+        noteSweepRead("listUntrackableWindowIDs")
+        return untrackableWindowIDList
+    }
+
+    /// How many shared passes were opened, and which AX-sweeping reads ran outside one.
+    public private(set) var sharedSweepCount = 0
+    public private(set) var sweepReadsOutsideSharedPass: [String] = []
+    private var sharedSweepDepth = 0
+    private func noteSweepRead(_ name: String) {
+        if sharedSweepDepth == 0 { sweepReadsOutsideSharedPass.append(name) }
+    }
+    public func withSharedAccessibilitySweep<T>(_ body: () -> T) -> T {
+        sharedSweepCount += 1
+        sharedSweepDepth += 1
+        defer { sharedSweepDepth -= 1 }
+        return body()
+    }
     public func listDisqualifiedWindows() -> [CGWindowID: WindowDisqualification] {
         var result = Dictionary(uniqueKeysWithValues: undersizedWindowIDList.map { ($0, WindowDisqualification.smallWidth) })
         for windowID in disqualifiedWindowIDList { result[windowID] = .nonApplicationLayer }
         return result
     }
-    public func listAXContradictedWindowIDs() -> Set<CGWindowID> { axContradictedWindowIDList }
+    public func listAXContradictedWindowIDs() -> Set<CGWindowID> {
+        noteSweepRead("listAXContradictedWindowIDs")
+        return axContradictedWindowIDList
+    }
     public func listWindowServerVerdicts() -> WindowServerVerdicts {
-        WindowServerVerdicts(parented: parentedWindowIDList, orderedOut: orderedOutWindowIDList)
+        noteSweepRead("listWindowServerVerdicts")
+        return WindowServerVerdicts(parented: parentedWindowIDList, orderedOut: orderedOutWindowIDList)
     }
     public func listAllWindowIDs() -> Set<CGWindowID>? { allWindowIDList }
 

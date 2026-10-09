@@ -630,6 +630,30 @@ struct WindowServiceTests {
         ).refuses(windowID: 17776, owner: 89895))
     }
 
+    // KHA-1047. Reconcile asks four questions of one moment, and each used to sweep every app's
+    // AX windows again: 19s at a launch shortly after boot, with apps still answering slowly.
+    @Test("A shared sweep asks every app for its AX windows once")
+    func sharedSweepAsksAccessibilityOnce() {
+        let service = AccessibilityWindowService(windowCaptureEnabled: false)
+        let sweeps = CaptureCounter()
+        service.onFullAccessibilitySweep = { sweeps.increment() }
+
+        _ = service.listWindows()
+        _ = service.listUntrackableWindowIDs()
+        #expect(sweeps.value == 2)
+
+        service.withSharedAccessibilitySweep {
+            _ = service.listWindows()
+            _ = service.listUntrackableWindowIDs()
+            _ = service.listWindows()
+        }
+        #expect(sweeps.value == 3)
+
+        // The pass ends with its closure; a later read sees the apps as they are then.
+        _ = service.listUntrackableWindowIDs()
+        #expect(sweeps.value == 4)
+    }
+
     @Test("Disabled live previews neither enumerate nor capture")
     func disabledLivePreviewsAvoidCapture() async {
         let service = AccessibilityWindowService(windowCaptureEnabled: false)
