@@ -94,34 +94,54 @@ final class OnboardingKeyboardMonitor {
 /// highlighted and live presses mirrored.
 struct OnboardingKeyboardView: View {
     let highlighted: Set<CGKeyCode>
+    /// Key pitch in points, fixed so the keyboard looks the same on every page.
+    let unit: CGFloat
+    /// Visible crop width; rows continue past it under the progressive blur.
+    let width: CGFloat
     @State private var monitor = OnboardingKeyboardMonitor()
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Visible width in key units; rows continue past it under the fade.
-    private static let visibleUnits: CGFloat = 6.2
-    private static let rows = CGFloat(OnboardingKeyboard.leftHalf.count)
+    static func height(unit: CGFloat) -> CGFloat {
+        CGFloat(OnboardingKeyboard.leftHalf.count) * unit + gap(unit: unit)
+    }
+
+    private static func gap(unit: CGFloat) -> CGFloat { max(3, unit * 0.1) }
 
     var body: some View {
-        GeometryReader { geometry in
-            let unit = geometry.size.width / Self.visibleUnits
-            let gap = max(3, unit * 0.1)
-            VStack(alignment: .leading, spacing: gap) {
-                ForEach(OnboardingKeyboard.leftHalf.indices, id: \.self) { row in
-                    HStack(spacing: gap) {
-                        ForEach(OnboardingKeyboard.leftHalf[row], id: \.keyCode) { key in
-                            keyView(key, unit: unit, gap: gap)
-                        }
+        let gap = Self.gap(unit: unit)
+        let height = Self.height(unit: unit)
+        let fadeStart = max(0, (width - OnboardingDemoLayout.fadeUnits * unit) / max(width, 1))
+        let keys = VStack(alignment: .leading, spacing: gap) {
+            ForEach(OnboardingKeyboard.leftHalf.indices, id: \.self) { row in
+                HStack(spacing: gap) {
+                    ForEach(OnboardingKeyboard.leftHalf[row], id: \.keyCode) { key in
+                        keyView(key, unit: unit, gap: gap)
                     }
-                    .fixedSize()
                 }
+                .fixedSize()
             }
-            .padding(gap)
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
-            .clipped()
-            .mask(LinearGradient(stops: [.init(color: .black, location: 0.72), .init(color: .clear, location: 1)],
-                                 startPoint: .leading, endPoint: .trailing))
         }
-        .aspectRatio(Self.visibleUnits / (Self.rows + 0.1), contentMode: .fit)
+        .padding(.vertical, gap)
+        .frame(width: width, height: height, alignment: .topLeading)
+        // Sharp keys fade out while a blurred copy takes over, so the crop dissolves
+        // progressively instead of ending at a hard edge.
+        ZStack {
+            keys.mask(LinearGradient(stops: [.init(color: .black, location: fadeStart),
+                                             .init(color: .clear, location: fadeStart + (1 - fadeStart) * 0.4)],
+                                     startPoint: .leading, endPoint: .trailing))
+            keys.blur(radius: unit * 0.12)
+                .mask(LinearGradient(stops: [.init(color: .clear, location: fadeStart),
+                                             .init(color: .black, location: fadeStart + (1 - fadeStart) * 0.3),
+                                             .init(color: .clear, location: fadeStart + (1 - fadeStart) * 0.65)],
+                                     startPoint: .leading, endPoint: .trailing))
+            keys.blur(radius: unit * 0.3)
+                .mask(LinearGradient(stops: [.init(color: .clear, location: fadeStart + (1 - fadeStart) * 0.3),
+                                             .init(color: .black.opacity(0.8), location: fadeStart + (1 - fadeStart) * 0.6),
+                                             .init(color: .clear, location: 1)],
+                                     startPoint: .leading, endPoint: .trailing))
+        }
+        .frame(width: width, height: height)
+        .clipped()
         .onAppear { monitor.start() }
         .onDisappear { monitor.stop() }
         .accessibilityElement(children: .ignore)

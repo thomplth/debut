@@ -80,3 +80,44 @@ struct PermissionGuidePlacementTests {
         #expect(settings.contains(frame))
     }
 }
+
+@MainActor
+@Suite("Onboarding keyboard and demo layout")
+struct OnboardingDemoLayoutTests {
+    nonisolated static let commandTab: Set<CGKeyCode> = [OnboardingKeyboard.leftCommand, OnboardingKeyboard.tab]
+    nonisolated static let optionTab: Set<CGKeyCode> = [OnboardingKeyboard.leftOption, OnboardingKeyboard.tab]
+
+    @Test("The demo never covers the keyboard, whatever its width", arguments: [
+        (2108.0 / 1490, commandTab), (3036.0 / 1309, optionTab), (4.0, optionTab),
+    ])
+    func noOverlap(_ aspect: Double, _ keys: Set<CGKeyCode>) {
+        let layout = OnboardingDemoLayout(width: 724, height: 294, imageAspect: aspect, unit: 40, highlighted: keys)
+        #expect(layout.keyboardMinX + layout.keyboardWidth + OnboardingDemoLayout.gap <= layout.imageMinX + 0.001)
+        #expect(layout.imageMinX + layout.imageSize.width <= 724 - OnboardingDemoLayout.inset + 0.001)
+        #expect(layout.imageSize.height <= 294 + 0.001)
+    }
+
+    @Test("Highlighted keys stay sharp, left of the fade")
+    func highlightedKeysVisible() {
+        for keys in [Self.commandTab, Self.optionTab] {
+            let layout = OnboardingDemoLayout(width: 724, height: 294, imageAspect: 4, unit: 40, highlighted: keys)
+            let sharp = layout.keyboardWidth - OnboardingDemoLayout.fadeUnits * 40
+            #expect(sharp + 0.001 >= OnboardingKeyboard.rightEdge(of: keys) * 40)
+        }
+    }
+
+    @Test("The keyboard keeps one anchor and key size across both switcher pages")
+    func anchored() {
+        let command = OnboardingDemoLayout(width: 724, height: 294, imageAspect: 2108.0 / 1490, unit: 40, highlighted: Self.commandTab)
+        let option = OnboardingDemoLayout(width: 724, height: 294, imageAspect: 3036.0 / 1309, unit: 40, highlighted: Self.optionTab)
+        #expect(command.keyboardMinX == option.keyboardMinX)
+    }
+
+    @Test("Right edges are measured in key units along the key's row")
+    func rightEdges() {
+        // fn, control, option: option ends three keys in; command adds 1.25 more.
+        #expect(OnboardingKeyboard.rightEdge(of: [OnboardingKeyboard.leftOption]) == 3)
+        #expect(OnboardingKeyboard.rightEdge(of: [OnboardingKeyboard.leftCommand]) == 4.25)
+        #expect(OnboardingKeyboard.rightEdge(of: [OnboardingKeyboard.tab]) == 1.5)
+    }
+}

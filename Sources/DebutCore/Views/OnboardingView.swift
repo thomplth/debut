@@ -297,19 +297,23 @@ public struct OnboardingView: View {
     @ViewBuilder private func preview(_ name: String, label: String, keys: Set<CGKeyCode>, height: CGFloat,
                                       showsDesktopGuidance: Bool = false) -> some View {
         if let directory = previewDirectory, let image = NSImage(contentsOf: directory.appendingPathComponent("\(name).png")) {
-            let keyboardWidth: CGFloat = showsDesktopGuidance ? 190 : 250
             HStack(spacing: 20) {
-                // The keyboard keeps one anchor on every page; a wider demo grows leftward
-                // over the keyboard's faded edge instead of pushing it aside.
-                ZStack(alignment: .leading) {
-                    OnboardingKeyboardView(highlighted: keys)
-                        .frame(width: keyboardWidth)
-                        .padding(.leading, 16)
-                    Image(nsImage: image).resizable().scaledToFit()
-                        .accessibilityLabel(label)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.leading, 16 + keyboardWidth * 0.62)
-                        .padding(.trailing, showsDesktopGuidance ? 0 : 16)
+                GeometryReader { geometry in
+                    // One key size and anchor on every page; a wider demo shortens the
+                    // keyboard's crop instead of covering it.
+                    let unit = min(showsDesktopGuidance ? 31 : 40, geometry.size.height / 5.6)
+                    let layout = OnboardingDemoLayout(width: geometry.size.width, height: geometry.size.height,
+                        imageAspect: image.size.height > 0 ? image.size.width / image.size.height : 1,
+                        unit: unit, highlighted: keys)
+                    ZStack(alignment: .topLeading) {
+                        OnboardingKeyboardView(highlighted: keys, unit: unit, width: layout.keyboardWidth)
+                            .offset(x: layout.keyboardMinX,
+                                    y: (geometry.size.height - OnboardingKeyboardView.height(unit: unit)) / 2)
+                        Image(nsImage: image).resizable()
+                            .frame(width: layout.imageSize.width, height: layout.imageSize.height)
+                            .accessibilityLabel(label)
+                            .offset(x: layout.imageMinX, y: (geometry.size.height - layout.imageSize.height) / 2)
+                    }
                 }
                 if showsDesktopGuidance { desktopGuidance.padding(.trailing, 16) }
             }

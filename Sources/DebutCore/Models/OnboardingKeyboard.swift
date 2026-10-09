@@ -79,3 +79,44 @@ public struct OnboardingKeyPresses: Equatable, Sendable {
         }
     }
 }
+
+extension OnboardingKeyboard {
+    /// The right edge, in key units from the row start, of the furthest of these keys.
+    public static func rightEdge(of keyCodes: Set<CGKeyCode>) -> CGFloat {
+        leftHalf.reduce(0) { edge, row in
+            var x: CGFloat = 0
+            var rowEdge: CGFloat = 0
+            for key in row {
+                x += key.width
+                if keyCodes.contains(key.keyCode) { rowEdge = x }
+            }
+            return max(edge, rowEdge)
+        }
+    }
+}
+
+/// Splits a switcher page's gallery between the keyboard and the demo image. The
+/// keyboard keeps one anchor and key size on every page; a wider demo shortens
+/// the keyboard's visible crop rather than covering it, never past the shortcut.
+public struct OnboardingDemoLayout: Equatable, Sendable {
+    public static let inset: CGFloat = 16
+    public static let gap: CGFloat = 20
+    /// Width of the progressive fade at the keyboard's cropped edge.
+    public static let fadeUnits: CGFloat = 1.2
+    public static let maximumUnits: CGFloat = 6.2
+
+    public let keyboardMinX: CGFloat
+    public let keyboardWidth: CGFloat
+    public let imageMinX: CGFloat
+    public let imageSize: CGSize
+
+    public init(width: CGFloat, height: CGFloat, imageAspect: CGFloat, unit: CGFloat, highlighted: Set<CGKeyCode>) {
+        let available = max(0, width - 2 * Self.inset - Self.gap)
+        let minimumKeyboard = (OnboardingKeyboard.rightEdge(of: highlighted) + Self.fadeUnits) * unit
+        let imageWidth = max(0, min(height * imageAspect, available - minimumKeyboard))
+        keyboardMinX = Self.inset
+        keyboardWidth = min(Self.maximumUnits * unit, available - imageWidth)
+        imageMinX = width - Self.inset - imageWidth
+        imageSize = CGSize(width: imageWidth, height: imageAspect > 0 ? imageWidth / imageAspect : 0)
+    }
+}
