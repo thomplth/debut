@@ -389,6 +389,71 @@ struct WindowDiscoveryServiceTests {
             $0["event"] == "window_creation_detection_attempted"
         }
         #expect(attempts.map { $0["result"] } == ["window_not_listed", "detected"])
+        #expect(attempts.first?["refusal"] == "absent")
+    }
+
+    // KHA-1046. Over 48 hours, retries 2-5 never found a window: 135 creations, almost all
+    // non-modal AXDialog popups, exhausted every retry and never appeared anywhere later. A
+    // window the window server attaches to another, or puts on a non-application layer, stays
+    // that way, so the probe ends on the first such answer instead of sweeping four more times.
+    @Test("A creation the window server refuses for good is not retried",
+          arguments: [WindowListingRefusal.parented, .nonApplicationLayer])
+    func finallyRefusedCreationIsNotRetried(refusal: WindowListingRefusal) throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let retry = DeferredWindowCreationRetryScheduler()
+        let windowService = MockWindowService()
+        windowService.listingRefusals = [143_677: refusal]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: reporter
+        )
+        service.spaceSwitcher = MockSpaceSwitcher(desktops: 2, current: 0)
+        service.windowCreationRetryScheduler = retry.schedule
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 143_677,
+            ownerPID: 44_685,
+            role: kAXWindowRole as String,
+            subrole: kAXDialogSubrole as String,
+            isModal: false
+        ))
+        reporter.flush()
+
+        #expect(retry.delays.isEmpty)
+        let attempts = durableDiagnosticEvents(in: directory).filter {
+            $0["event"] == "window_creation_detection_attempted" && $0["windowID"] == "143677"
+        }
+        #expect(attempts.compactMap { $0["result"] }.last == "window_server_refused")
+        #expect(attempts.last?["refusal"] == refusal.rawValue)
+    }
+
+    // Listed but refused on evidence that can still change — no desktop yet, too small while
+    // it lays out — keeps the bounded retries, like a window Core Graphics has not listed yet.
+    @Test("A creation refused only on changeable evidence is still retried")
+    func changeablyRefusedCreationIsRetried() {
+        let retry = DeferredWindowCreationRetryScheduler()
+        let windowService = MockWindowService()
+        windowService.listingRefusals = [143_677: .unadmitted]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.windowCreationRetryScheduler = retry.schedule
+
+        service.handleWindowCreated(AXWindowCreationMetadata(
+            windowID: 143_677,
+            ownerPID: 44_685,
+            role: kAXWindowRole as String,
+            subrole: kAXDialogSubrole as String,
+            isModal: false
+        ))
+
+        #expect(retry.delays.count == 1)
     }
 
     // Dia emits AXWindowCreated for short-lived internal surfaces that look like full-size,

@@ -326,6 +326,19 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             as? pid_t
     }
 
+    public func listingRefusal(windowID: CGWindowID) -> WindowListingRefusal {
+        guard let info = (CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID)
+            as? [[CFString: Any]])?.first(where: {
+                $0[kCGWindowNumber] as? CGWindowID == windowID
+            })
+        else { return .absent }
+        if let layer = info[kCGWindowLayer] as? Int, layer != 0 { return .nonApplicationLayer }
+        if spaceSwitcher?.windowServerVerdicts(among: [windowID]).parented.contains(windowID) == true {
+            return .parented
+        }
+        return .unadmitted
+    }
+
     /// With a scope, Accessibility is asked only of those owners and only their windows are
     /// returned. Every other read here is a window-server read, cheap enough to take whole, and
     /// taking it whole keeps each verdict computed exactly as the full listing computes it.

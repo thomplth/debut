@@ -1381,9 +1381,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             })
             let locations = info == nil ? [:] :
                 spaceSwitcher?.desktopLocations(forWindows: [metadata.windowID]) ?? [:]
+            let refusal = info == nil
+                ? windowService.listingRefusal(windowID: metadata.windowID) : nil
             return { [weak self] in
                 self?.publishCreatedWindow(
                     info,
+                    refusal: refusal,
                     locations: locations,
                     metadata: metadata,
                     probeID: probeID,
@@ -1395,6 +1398,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     private func publishCreatedWindow(
         _ listedInfo: WindowInfo?,
+        refusal: WindowListingRefusal?,
         locations: [CGWindowID: DesktopLocation],
         metadata: AXWindowCreationMetadata,
         probeID: UUID,
@@ -1414,11 +1418,28 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             return
         }
         guard let info = listedInfo else {
+            let refusalDetail = ["refusal": refusal?.rawValue ?? "unknown"]
+            // Over 48 hours no retry ever found a window the first attempt missed (KHA-1046).
+            // A popup the window server parents, or a surface on a non-application layer, stays
+            // that way, so only an answer that can still change is worth asking again.
+            if let refusal, refusal.isFinal {
+                reportWindowCreationAttempt(
+                    metadata: metadata,
+                    probeID: probeID,
+                    attempt: attempt,
+                    result: "window_server_refused",
+                    extra: refusalDetail
+                )
+                creationDetectionFailures[identity] = ("window_server_refused", attempt)
+                pendingWindowCreations.removeValue(forKey: probeID)
+                return
+            }
             retryWindowCreationDetection(
                 probeID: probeID,
                 attempt: attempt,
                 reason: "window_not_listed",
-                metadata: metadata
+                metadata: metadata,
+                extra: refusalDetail
             )
             return
         }
@@ -1517,14 +1538,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         probeID: UUID,
         attempt: Int,
         reason: String,
-        metadata: AXWindowCreationMetadata?
+        metadata: AXWindowCreationMetadata?,
+        extra: [String: String] = [:]
     ) {
         if let metadata {
             reportWindowCreationAttempt(
                 metadata: metadata,
                 probeID: probeID,
                 attempt: attempt,
-                result: reason
+                result: reason,
+                extra: extra
             )
         } else {
             diag.report("window_creation_detection_attempted", details: [

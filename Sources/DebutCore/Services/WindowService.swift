@@ -259,6 +259,21 @@ enum WindowImageStatistics {
     }
 }
 
+/// Why a window is missing from `listWindows()`, as far as the window server can say without
+/// asking the app. Only the final reasons are grounds for giving up on a new window.
+public enum WindowListingRefusal: String, Sendable, CaseIterable {
+    /// Core Graphics does not list the window, possibly not yet.
+    case absent
+    /// The window server attaches it to another window: a sheet or one of the app's popups.
+    case parented
+    /// It is drawn on a layer no application window uses.
+    case nonApplicationLayer
+    /// Listed, and refused on evidence that can still change, such as size or desktop.
+    case unadmitted
+
+    public var isFinal: Bool { self == .parented || self == .nonApplicationLayer }
+}
+
 public protocol WindowService: Sendable {
     func listRunningApps() -> [AppInfo]
     func listWindows() -> [WindowInfo]
@@ -267,6 +282,8 @@ public protocol WindowService: Sendable {
     func listWindows(ownerPIDs: Set<pid_t>) -> [WindowInfo]
     /// The process Core Graphics says owns a window, without asking any app.
     func windowOwnerPID(windowID: CGWindowID) -> pid_t?
+    /// Why a window `listWindows(ownerPIDs:)` left out was left out. Asks no app.
+    func listingRefusal(windowID: CGWindowID) -> WindowListingRefusal
     func listUntrackableWindowIDs() -> Set<CGWindowID>
     /// Windows Core Graphics positively contradicts being user-manageable right now, with the
     /// reason — a stronger claim than merely failing `listWindows()` admission. Only some
@@ -350,6 +367,8 @@ public extension WindowService {
     func windowOwnerPID(windowID: CGWindowID) -> pid_t? {
         listWindows().first { $0.windowID == windowID }?.ownerPID
     }
+
+    func listingRefusal(windowID: CGWindowID) -> WindowListingRefusal { .unadmitted }
 
     func withSharedAccessibilitySweep<T>(_ body: () -> T) -> T { body() }
 

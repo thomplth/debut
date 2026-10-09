@@ -73,6 +73,11 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
         scopedListRequests.append(ownerPIDs)
         return windowList.filter { ownerPIDs.contains($0.ownerPID) }
     }
+    /// Unlisted windows are absent unless a test says why else they were left out.
+    public var listingRefusals: [CGWindowID: WindowListingRefusal] = [:]
+    public func listingRefusal(windowID: CGWindowID) -> WindowListingRefusal {
+        listingRefusals[windowID] ?? .absent
+    }
     public func windowOwnerPID(windowID: CGWindowID) -> pid_t? {
         windowList.first { $0.windowID == windowID }?.ownerPID
     }
