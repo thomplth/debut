@@ -1057,13 +1057,15 @@ struct WindowDiscoveryServiceTests {
         })
 
         #expect(metadataReads == 0)
-        #expect(windowService.listWindowsCount == 0)
+        #expect(windowService.scopedListRequests.isEmpty)
         #expect(created.isEmpty)
 
         reads.runAll()
 
+        // KHA-1045: only the new window's owner is asked, never every app.
         #expect(metadataReads == 1)
-        #expect(windowService.listWindowsCount == 1)
+        #expect(windowService.listWindowsCount == 0)
+        #expect(windowService.scopedListRequests == [[10]])
         #expect(created == [5])
     }
 
@@ -1087,12 +1089,13 @@ struct WindowDiscoveryServiceTests {
             AppInfo(bundleID: "notion.id", name: "Notion", pid: 30, isHidden: false)
         )
 
-        #expect(windowService.listWindowsCount == 0)
+        #expect(windowService.scopedListRequests.isEmpty)
         #expect(discovered.isEmpty)
 
         reads.runAll()
 
-        #expect(windowService.listWindowsCount == 1)
+        #expect(windowService.listWindowsCount == 0)
+        #expect(windowService.scopedListRequests == [[30]])
         #expect(discovered == [3])
     }
 
@@ -1124,11 +1127,13 @@ struct WindowDiscoveryServiceTests {
 
         service.handleWindowDestroyed(element: destroyedElement)
 
-        #expect(windowService.listWindowsCount == 0)
+        #expect(windowService.scopedListRequests.isEmpty)
         #expect(activatedWindowIDs.isEmpty)
 
         reads.runAll()
 
+        #expect(windowService.listWindowsCount == 0)
+        #expect(windowService.scopedListRequests == [[10]])
         #expect(activatedWindowIDs == [8])
     }
 

@@ -262,6 +262,11 @@ enum WindowImageStatistics {
 public protocol WindowService: Sendable {
     func listRunningApps() -> [AppInfo]
     func listWindows() -> [WindowInfo]
+    /// `listWindows()` limited to the given owners, asking only them over Accessibility. The
+    /// admission rules are the same ones, so a window admitted here is admitted there.
+    func listWindows(ownerPIDs: Set<pid_t>) -> [WindowInfo]
+    /// The process Core Graphics says owns a window, without asking any app.
+    func windowOwnerPID(windowID: CGWindowID) -> pid_t?
     func listUntrackableWindowIDs() -> Set<CGWindowID>
     /// Windows Core Graphics positively contradicts being user-manageable right now, with the
     /// reason — a stronger claim than merely failing `listWindows()` admission. Only some
@@ -338,6 +343,14 @@ public protocol WindowService: Sendable {
 }
 
 public extension WindowService {
+    func listWindows(ownerPIDs: Set<pid_t>) -> [WindowInfo] {
+        listWindows().filter { ownerPIDs.contains($0.ownerPID) }
+    }
+
+    func windowOwnerPID(windowID: CGWindowID) -> pid_t? {
+        listWindows().first { $0.windowID == windowID }?.ownerPID
+    }
+
     func withSharedAccessibilitySweep<T>(_ body: () -> T) -> T { body() }
 
     /// Conformers that keep no elements have no cheaper path than their ordinary raise.

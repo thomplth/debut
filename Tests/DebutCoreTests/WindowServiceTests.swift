@@ -654,6 +654,24 @@ struct WindowServiceTests {
         #expect(sweeps.value == 4)
     }
 
+    // KHA-1045. A lookup for one app's windows runs the full admission pipeline but asks only
+    // that app over Accessibility, so it answers what the full listing answers for that app.
+    @Test("An owner-scoped listing asks no other app and admits what the full listing does")
+    func ownerScopedListingMatchesFullListing() {
+        let service = AccessibilityWindowService(windowCaptureEnabled: false)
+        let sweeps = CaptureCounter()
+        service.onFullAccessibilitySweep = { sweeps.increment() }
+
+        let full = service.listWindows()
+        #expect(sweeps.value == 1)
+        for ownerPID in Set(full.map(\.ownerPID)) {
+            let scoped = service.listWindows(ownerPIDs: [ownerPID])
+            #expect(scoped.map(\.windowID) == full.filter { $0.ownerPID == ownerPID }.map(\.windowID))
+        }
+        #expect(service.listWindows(ownerPIDs: [ProcessInfo.processInfo.processIdentifier]).isEmpty)
+        #expect(sweeps.value == 1)
+    }
+
     @Test("Disabled live previews neither enumerate nor capture")
     func disabledLivePreviewsAvoidCapture() async {
         let service = AccessibilityWindowService(windowCaptureEnabled: false)

@@ -67,6 +67,15 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
         noteSweepRead("listWindows")
         return windowList
     }
+    /// The owner sets each scoped listing asked for, in call order.
+    public private(set) var scopedListRequests: [Set<pid_t>] = []
+    public func listWindows(ownerPIDs: Set<pid_t>) -> [WindowInfo] {
+        scopedListRequests.append(ownerPIDs)
+        return windowList.filter { ownerPIDs.contains($0.ownerPID) }
+    }
+    public func windowOwnerPID(windowID: CGWindowID) -> pid_t? {
+        windowList.first { $0.windowID == windowID }?.ownerPID
+    }
     public func listUntrackableWindowIDs() -> Set<CGWindowID> {
         noteSweepRead("listUntrackableWindowIDs")
         return untrackableWindowIDList

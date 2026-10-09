@@ -1800,6 +1800,27 @@ struct SpaceControllerTests {
         #expect(windowService.frontedWindows == [FrontWindowRequest(windowID: 202, ownerPID: 22)])
     }
 
+    // KHA-1045. Admitting one unknown window swept every app's AX windows on the main queue.
+    // Only its owner's answer bears on it, so only its owner is asked.
+    @Test("Activating an unknown window asks only its owner's Accessibility")
+    func unknownWindowActivationAsksOnlyItsOwner() {
+        let (controller, windowService, _) = makeController()
+        windowService.windowList = [
+            WindowInfo(windowID: 555, ownerBundleID: "com.x", ownerName: "X", ownerPID: 77,
+                       title: "New", bounds: CGRect(x: 0, y: 0, width: 800, height: 600),
+                       isOnScreen: true),
+            WindowInfo(windowID: 666, ownerBundleID: "com.y", ownerName: "Y", ownerPID: 88,
+                       title: "Other", bounds: CGRect(x: 0, y: 0, width: 800, height: 600),
+                       isOnScreen: true),
+        ]
+
+        controller.recordWindowActivation(windowID: 555)
+
+        #expect(controller.spaceManager.activeSpace.windows.map(\.windowID) == [555])
+        #expect(windowService.listWindowsCount == 0)
+        #expect(windowService.scopedListRequests == [[77]])
+    }
+
     @Test("Ordinary activation does not manufacture a quit outcome")
     func activationDoesNotResolvePendingQuit() {
         let (controller, _, keyboardService) = makeController()

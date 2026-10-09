@@ -1761,7 +1761,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             ])
             spaceManager.removeLiveWindowFromAllSpaces(windowID: windowID)
             spaceManager.addWindow(window, toSpaceID: targetSpaceID)
-        } else if let info = windowService.listWindows().first(where: { $0.windowID == windowID }),
+        } else if let ownerPID = windowService.windowOwnerPID(windowID: windowID),
+                  let info = windowService.listWindows(ownerPIDs: [ownerPID])
+                      .first(where: { $0.windowID == windowID }),
                   !excludedBundleIDs.contains(info.ownerBundleID) {
             // A destroy notification is the strongest evidence Debut ever gets, and CG keeps the
             // dead window's surface listed for the rest of its process's life, so a focus report

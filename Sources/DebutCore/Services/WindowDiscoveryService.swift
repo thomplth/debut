@@ -1068,7 +1068,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                   focusedWindowID != windowID
             else { return }
             self.scheduleDiscoveryRead {
-                let listed = windowService.listWindows().first(where: {
+                let listed = windowService.listWindows(ownerPIDs: [ownerPID]).first(where: {
                     $0.windowID == focusedWindowID && $0.ownerPID == ownerPID
                 })
                 return { [weak self] in
@@ -1375,7 +1375,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let windowService = windowService
         let spaceSwitcher = spaceSwitcher
         scheduleDiscoveryRead(onMain: pending.readsOnMain) {
-            let info = windowService.listWindows().first(where: {
+            // Only the new window's owner bears on it; sweeping every app cost 175ms a retry.
+            let info = windowService.listWindows(ownerPIDs: [metadata.ownerPID]).first(where: {
                 $0.windowID == metadata.windowID && $0.ownerPID == metadata.ownerPID
             })
             let locations = info == nil ? [:] :
@@ -1838,7 +1839,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let pid = app.pid
         let windowService = windowService
         scheduleDiscoveryRead {
-            let listedWindows = windowService.listWindows().filter { $0.ownerPID == pid }
+            let listedWindows = windowService.listWindows(ownerPIDs: [pid])
             return { [weak self] in
                 self?.applyLaunchedWindows(listedWindows, pid: pid)
             }

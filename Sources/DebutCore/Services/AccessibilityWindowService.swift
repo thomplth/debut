@@ -312,7 +312,25 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     private static let minimumPlausibleWindowDimension: CGFloat = 40
 
     public func listWindows() -> [WindowInfo] {
-        let classification = classifyAXWindowIDs()
+        listWindows(scope: nil)
+    }
+
+    public func listWindows(ownerPIDs: Set<pid_t>) -> [WindowInfo] {
+        listWindows(scope: ownerPIDs)
+    }
+
+    public func windowOwnerPID(windowID: CGWindowID) -> pid_t? {
+        let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID)
+            as? [[CFString: Any]]
+        return info?.first { $0[kCGWindowNumber] as? CGWindowID == windowID }?[kCGWindowOwnerPID]
+            as? pid_t
+    }
+
+    /// With a scope, Accessibility is asked only of those owners and only their windows are
+    /// returned. Every other read here is a window-server read, cheap enough to take whole, and
+    /// taking it whole keeps each verdict computed exactly as the full listing computes it.
+    private func listWindows(scope: Set<pid_t>?) -> [WindowInfo] {
+        let classification = classifyAXWindowIDs(onlyOwnerPIDs: scope)
         let shieldingWindows = Self.currentShieldingWindows()
         let axFullscreens = Self.currentAXCorroboratedFullscreens(
             axWindowIDsByPID: classification.axWindowIDsByPID
@@ -386,6 +404,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return infoList.compactMap { dict in
             guard let windowID = dict[kCGWindowNumber] as? CGWindowID,
                   let ownerPID = dict[kCGWindowOwnerPID] as? pid_t,
+                  scope?.contains(ownerPID) ?? true,
                   let boundsDict = dict[kCGWindowBounds] as? [String: CGFloat],
                   let bundleID = pidToBundleID[ownerPID]
             else { return nil }
@@ -951,9 +970,13 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         }
         let focusedWindowID: CGWindowID?
         let focusedWindowPID: pid_t?
-        if onlyOwnerPIDs == nil, let frontmost = NSWorkspace.shared.frontmostApplication {
-            let pid = Self.processIdentifier(for: frontmost, candidateOwnerPIDs: ownerPIDs)
-            focusedWindowID = pid.flatMap { self.focusedWindowID(for: $0) }
+        // A scoped sweep that includes the frontmost app reads its focused window too, so the
+        // owner's AX answer corroborates its showing desktop exactly as in a full sweep.
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           let pid = Self.processIdentifier(for: frontmost, candidateOwnerPIDs: ownerPIDs),
+           pid != ownPIDToSkip,
+           onlyOwnerPIDs?.contains(pid) ?? true {
+            focusedWindowID = self.focusedWindowID(for: pid)
             focusedWindowPID = focusedWindowID == nil ? nil : pid
         } else {
             focusedWindowID = nil
