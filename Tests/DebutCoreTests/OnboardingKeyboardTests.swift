@@ -86,31 +86,51 @@ struct PermissionGuidePlacementTests {
 struct OnboardingDemoLayoutTests {
     nonisolated static let commandTab: Set<CGKeyCode> = [OnboardingKeyboard.leftCommand, OnboardingKeyboard.tab]
     nonisolated static let optionTab: Set<CGKeyCode> = [OnboardingKeyboard.leftOption, OnboardingKeyboard.tab]
+    // Visible plate aspects of the bundled Command-Tab and Option-Tab demos.
+    nonisolated static let commandPlate = 1630.0 / 1168
+    nonisolated static let optionPlate = 2548.0 / 828
 
-    @Test("The demo never covers the keyboard, whatever its width", arguments: [
-        (2108.0 / 1490, commandTab), (3036.0 / 1309, optionTab), (4.0, optionTab),
-    ])
-    func noOverlap(_ aspect: Double, _ keys: Set<CGKeyCode>) {
-        let layout = OnboardingDemoLayout(width: 724, height: 294, imageAspect: aspect, unit: 40, highlighted: keys)
-        #expect(layout.keyboardMinX + layout.keyboardWidth + OnboardingDemoLayout.gap <= layout.imageMinX + 0.001)
-        #expect(layout.imageMinX + layout.imageSize.width <= 724 - OnboardingDemoLayout.inset + 0.001)
-        #expect(layout.imageSize.height <= 294 + 0.001)
+    static func layout(_ aspect: Double, _ keys: Set<CGKeyCode>, height: CGFloat = 310) -> OnboardingDemoLayout {
+        OnboardingDemoLayout(width: 740, height: height, plateAspect: aspect, unit: 40, highlighted: keys)
     }
 
-    @Test("Highlighted keys stay sharp, left of the fade")
+    @Test("Margin, keyboard-to-demo gap and right margin are equal", arguments: [
+        (commandPlate, commandTab), (optionPlate, optionTab),
+    ])
+    func equalSpacing(_ aspect: Double, _ keys: Set<CGKeyCode>) {
+        let layout = Self.layout(aspect, keys)
+        let gap = layout.plate.minX - (layout.keyboardMinX + layout.keyboardWidth)
+        let right = 740 - layout.plate.maxX
+        #expect(abs(gap - layout.keyboardMinX) < 0.5)
+        #expect(abs(right - layout.keyboardMinX) < 0.5)
+        #expect(layout.plate.minY >= 0 && layout.plate.maxY <= 310)
+    }
+
+    @Test("The keyboard keeps one anchor across both switcher pages")
+    func anchored() {
+        #expect(Self.layout(Self.commandPlate, Self.commandTab).keyboardMinX
+            == Self.layout(Self.optionPlate, Self.optionTab).keyboardMinX)
+    }
+
+    @Test("Highlighted keys stay sharp, left of the fade, even beside a very wide demo")
     func highlightedKeysVisible() {
         for keys in [Self.commandTab, Self.optionTab] {
-            let layout = OnboardingDemoLayout(width: 724, height: 294, imageAspect: 4, unit: 40, highlighted: keys)
+            let layout = Self.layout(5, keys)
             let sharp = layout.keyboardWidth - OnboardingDemoLayout.fadeUnits * 40
             #expect(sharp + 0.001 >= OnboardingKeyboard.rightEdge(of: keys) * 40)
+            #expect(layout.plate.minX >= layout.keyboardMinX + layout.keyboardWidth)
         }
     }
 
-    @Test("The keyboard keeps one anchor and key size across both switcher pages")
-    func anchored() {
-        let command = OnboardingDemoLayout(width: 724, height: 294, imageAspect: 2108.0 / 1490, unit: 40, highlighted: Self.commandTab)
-        let option = OnboardingDemoLayout(width: 724, height: 294, imageAspect: 3036.0 / 1309, unit: 40, highlighted: Self.optionTab)
-        #expect(command.keyboardMinX == option.keyboardMinX)
+    @Test("A short window keeps the anchor and gap, and never reveals the rows' ends")
+    func compact() {
+        let layout = Self.layout(Self.commandPlate, Self.commandTab, height: 246)
+        #expect(layout.keyboardMinX == Self.layout(Self.optionPlate, Self.optionTab).keyboardMinX)
+        #expect(abs(layout.plate.minX - layout.keyboardMinX - layout.keyboardWidth - layout.keyboardMinX) < 0.5)
+        #expect(layout.keyboardWidth <= OnboardingDemoLayout.maximumUnits * 40)
+        for row in OnboardingKeyboard.leftHalf {
+            #expect(row.reduce(0) { $0 + $1.width } >= OnboardingDemoLayout.maximumUnits)
+        }
     }
 
     @Test("Right edges are measured in key units along the key's row")

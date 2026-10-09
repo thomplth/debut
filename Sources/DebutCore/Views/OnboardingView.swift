@@ -297,27 +297,33 @@ public struct OnboardingView: View {
     @ViewBuilder private func preview(_ name: String, label: String, keys: Set<CGKeyCode>, height: CGFloat,
                                       showsDesktopGuidance: Bool = false) -> some View {
         if let directory = previewDirectory, let image = NSImage(contentsOf: directory.appendingPathComponent("\(name).png")) {
-            HStack(spacing: 20) {
+            let plateBounds = OnboardingDemoPlate.bounds(of: image, named: name)
+            HStack(spacing: 0) {
                 GeometryReader { geometry in
-                    // One key size and anchor on every page; a wider demo shortens the
-                    // keyboard's crop instead of covering it.
-                    let unit = min(showsDesktopGuidance ? 31 : 40, geometry.size.height / 5.6)
+                    // One margin before the keyboard, between its dissolved edge and the
+                    // demo's plate, and after the plate; the plate's shadow spills past it.
+                    let unit = min(showsDesktopGuidance ? 31 : 40, (geometry.size.height - 2 * OnboardingDemoLayout.margin) / 5.2)
                     let layout = OnboardingDemoLayout(width: geometry.size.width, height: geometry.size.height,
-                        imageAspect: image.size.height > 0 ? image.size.width / image.size.height : 1,
+                        plateAspect: plateBounds.width * image.size.width / max(1, plateBounds.height * image.size.height),
                         unit: unit, highlighted: keys)
+                    let imageWidth = layout.plate.width / max(plateBounds.width, 0.01)
+                    let imageHeight = imageWidth * image.size.height / max(image.size.width, 1)
                     ZStack(alignment: .topLeading) {
                         OnboardingKeyboardView(highlighted: keys, unit: unit, width: layout.keyboardWidth)
                             .offset(x: layout.keyboardMinX,
-                                    y: (geometry.size.height - OnboardingKeyboardView.height(unit: unit)) / 2)
+                                    y: (geometry.size.height - OnboardingKeyboardView.height(unit: unit)) / 2
+                                        - OnboardingKeyboardView.blurRoom(unit: unit))
                         Image(nsImage: image).resizable()
-                            .frame(width: layout.imageSize.width, height: layout.imageSize.height)
+                            .frame(width: imageWidth, height: imageHeight)
                             .accessibilityLabel(label)
-                            .offset(x: layout.imageMinX, y: (geometry.size.height - layout.imageSize.height) / 2)
+                            .offset(x: layout.plate.minX - plateBounds.minX * imageWidth,
+                                    y: layout.plate.minY - plateBounds.minY * imageHeight)
                     }
                 }
-                if showsDesktopGuidance { desktopGuidance.padding(.trailing, 16) }
+                if showsDesktopGuidance { desktopGuidance.padding(.trailing, 24) }
             }
-            .padding(8).frame(height: height).frame(maxWidth: .infinity)
+            .frame(height: height).frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
             .background(gallery, in: RoundedRectangle(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).stroke(border))
         }
@@ -332,5 +338,41 @@ private struct OnboardingCardButtonStyle: ButtonStyle {
         configuration.label
             .background(configuration.isPressed ? Color.accentColor.opacity(0.1) : fill, in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(configuration.isPressed ? Color.accentColor.opacity(0.4) : border))
+    }
+}
+
+/// Finds a captured demo's opaque plate inside its transparent shadow margin, as a
+/// unit rect with a top-left origin, so layout can space the plate itself.
+@MainActor
+enum OnboardingDemoPlate {
+    private static var cache: [String: CGRect] = [:]
+
+    static func bounds(of image: NSImage, named name: String) -> CGRect {
+        if let cached = cache[name] { return cached }
+        let full = CGRect(x: 0, y: 0, width: 1, height: 1)
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return full }
+        // A quarter-size alpha scan is plenty for a plate edge, and cheap enough for main.
+        let width = max(1, cgImage.width / 4), height = max(1, cgImage.height / 4)
+        var alpha = [UInt8](repeating: 0, count: width * height)
+        let found: CGRect? = alpha.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(),
+                                          bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue) else { return nil }
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            let pixels = buffer.bindMemory(to: UInt8.self)
+            var minX = width, maxX = -1, minY = height, maxY = -1
+            for y in 0..<height {
+                for x in 0..<width where pixels[y * width + x] > 128 {
+                    minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+                }
+            }
+            guard maxX >= minX, maxY >= minY else { return nil }
+            // Bitmap rows run top-down in memory for this context.
+            return CGRect(x: CGFloat(minX) / CGFloat(width), y: CGFloat(minY) / CGFloat(height),
+                          width: CGFloat(maxX - minX + 1) / CGFloat(width), height: CGFloat(maxY - minY + 1) / CGFloat(height))
+        }
+        let bounds = found ?? full
+        cache[name] = bounds
+        return bounds
     }
 }

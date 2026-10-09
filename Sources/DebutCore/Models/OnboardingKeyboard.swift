@@ -27,13 +27,13 @@ public enum OnboardingKeyboard {
     public static let leftHalf: [[OnboardingKey]] = [
         [.init(50, "`", symbol: "~"), .init(18, "1", symbol: "!"), .init(19, "2", symbol: "@"),
          .init(20, "3", symbol: "#"), .init(21, "4", symbol: "$"), .init(23, "5", symbol: "%"),
-         .init(22, "6", symbol: "^")],
+         .init(22, "6", symbol: "^"), .init(26, "7"), .init(28, "8"), .init(25, "9")],
         [.init(tab, "tab", symbol: "⇥", width: 1.5), .init(12, "Q"), .init(13, "W"), .init(14, "E"),
-         .init(15, "R"), .init(17, "T"), .init(16, "Y")],
+         .init(15, "R"), .init(17, "T"), .init(16, "Y"), .init(32, "U"), .init(34, "I")],
         [.init(57, "caps lock", symbol: "⇪", width: 1.8), .init(0, "A"), .init(1, "S"), .init(2, "D"),
-         .init(3, "F"), .init(5, "G"), .init(4, "H")],
+         .init(3, "F"), .init(5, "G"), .init(4, "H"), .init(38, "J"), .init(40, "K")],
         [.init(56, "shift", symbol: "⇧", width: 2.3), .init(6, "Z"), .init(7, "X"), .init(8, "C"),
-         .init(9, "V"), .init(11, "B")],
+         .init(9, "V"), .init(11, "B"), .init(45, "N"), .init(46, "M")],
         [.init(63, "fn"), .init(59, "control", symbol: "⌃"), .init(leftOption, "option", symbol: "⌥"),
          .init(leftCommand, "command", symbol: "⌘", width: 1.25), .init(49, "", width: 5)],
     ]
@@ -95,28 +95,34 @@ extension OnboardingKeyboard {
     }
 }
 
-/// Splits a switcher page's gallery between the keyboard and the demo image. The
-/// keyboard keeps one anchor and key size on every page; a wider demo shortens
-/// the keyboard's visible crop rather than covering it, never past the shortcut.
+/// Splits a switcher page's gallery between the keyboard and the demo's visible
+/// plate with one margin repeated three times: before the keyboard, between the
+/// keyboard's dissolved edge and the plate, and after the plate. The margin and
+/// key size never change, so the keyboard keeps its anchor; the keyboard's crop
+/// absorbs the difference, never shorter than the highlighted shortcut.
 public struct OnboardingDemoLayout: Equatable, Sendable {
-    public static let inset: CGFloat = 16
-    public static let gap: CGFloat = 20
-    /// Width of the progressive fade at the keyboard's cropped edge.
-    public static let fadeUnits: CGFloat = 1.2
-    public static let maximumUnits: CGFloat = 6.2
+    public static let margin: CGFloat = 32
+    /// Width of the progressive blur at the keyboard's cropped edge.
+    public static let fadeUnits: CGFloat = 2.2
+    /// Longest crop; every row runs past it so the fade never reveals a row's end.
+    public static let maximumUnits: CGFloat = 8.5
 
     public let keyboardMinX: CGFloat
     public let keyboardWidth: CGFloat
-    public let imageMinX: CGFloat
-    public let imageSize: CGSize
+    /// Where the demo's opaque plate lands, excluding its transparent shadow margin.
+    public let plate: CGRect
 
-    public init(width: CGFloat, height: CGFloat, imageAspect: CGFloat, unit: CGFloat, highlighted: Set<CGKeyCode>) {
-        let available = max(0, width - 2 * Self.inset - Self.gap)
+    public init(width: CGFloat, height: CGFloat, plateAspect: CGFloat, unit: CGFloat, highlighted: Set<CGKeyCode>) {
+        let margin = Self.margin
+        let available = max(0, width - 3 * margin)
         let minimumKeyboard = (OnboardingKeyboard.rightEdge(of: highlighted) + Self.fadeUnits) * unit
-        let imageWidth = max(0, min(height * imageAspect, available - minimumKeyboard))
-        keyboardMinX = Self.inset
-        keyboardWidth = min(Self.maximumUnits * unit, available - imageWidth)
-        imageMinX = width - Self.inset - imageWidth
-        imageSize = CGSize(width: imageWidth, height: imageAspect > 0 ? imageWidth / imageAspect : 0)
+        let aspect = max(plateAspect, 0.01)
+        let plateWidth = max(0, min((height - 2 * margin) * aspect, available - minimumKeyboard))
+        keyboardMinX = margin
+        // A short window can leave more room than the rows fill; the right margin takes it.
+        keyboardWidth = min(Self.maximumUnits * unit, available - plateWidth)
+        let plateHeight = plateWidth / aspect
+        plate = CGRect(x: 2 * margin + keyboardWidth, y: (height - plateHeight) / 2,
+                       width: plateWidth, height: plateHeight)
     }
 }

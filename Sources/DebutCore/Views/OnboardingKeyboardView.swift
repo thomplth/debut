@@ -105,12 +105,23 @@ struct OnboardingKeyboardView: View {
         CGFloat(OnboardingKeyboard.leftHalf.count) * unit + gap(unit: unit)
     }
 
+    /// Transparent room above and below the keys so the blur's halo is never clipped.
+    static func blurRoom(unit: CGFloat) -> CGFloat { unit * 0.5 }
+
     private static func gap(unit: CGFloat) -> CGFloat { max(3, unit * 0.1) }
+
+    /// Blur radii in key units, sharpest first, and where along the fade (0...1) each
+    /// layer hands over to the next.
+    private static let blurRadii: [CGFloat] = [0, 0.04, 0.09, 0.15, 0.23]
+    private static let handovers: [CGFloat] = [0.1, 0.28, 0.48, 0.68]
+    private static let crossfade: CGFloat = 0.07
 
     var body: some View {
         let gap = Self.gap(unit: unit)
-        let height = Self.height(unit: unit)
+        let room = Self.blurRoom(unit: unit)
+        let height = Self.height(unit: unit) + 2 * room
         let fadeStart = max(0, (width - OnboardingDemoLayout.fadeUnits * unit) / max(width, 1))
+        let at = { (t: CGFloat) in min(1, max(0, fadeStart + t * (1 - fadeStart))) }
         let keys = VStack(alignment: .leading, spacing: gap) {
             ForEach(OnboardingKeyboard.leftHalf.indices, id: \.self) { row in
                 HStack(spacing: gap) {
@@ -121,27 +132,38 @@ struct OnboardingKeyboardView: View {
                 .fixedSize()
             }
         }
-        .padding(.vertical, gap)
+        .padding(.vertical, gap + room)
         .frame(width: width, height: height, alignment: .topLeading)
-        // Sharp keys fade out while a blurred copy takes over, so the crop dissolves
-        // progressively instead of ending at a hard edge.
+        // A progressive blur: each layer is a little blurrier than the one above it and
+        // takes over as the sharper one fades out, while the whole edge fades away. A
+        // layer is fully drawn before the one above starts fading, so coverage never dips.
         ZStack {
-            keys.mask(LinearGradient(stops: [.init(color: .black, location: fadeStart),
-                                             .init(color: .clear, location: fadeStart + (1 - fadeStart) * 0.4)],
-                                     startPoint: .leading, endPoint: .trailing))
-            keys.blur(radius: unit * 0.12)
-                .mask(LinearGradient(stops: [.init(color: .clear, location: fadeStart),
-                                             .init(color: .black, location: fadeStart + (1 - fadeStart) * 0.3),
-                                             .init(color: .clear, location: fadeStart + (1 - fadeStart) * 0.65)],
-                                     startPoint: .leading, endPoint: .trailing))
-            keys.blur(radius: unit * 0.3)
-                .mask(LinearGradient(stops: [.init(color: .clear, location: fadeStart + (1 - fadeStart) * 0.3),
-                                             .init(color: .black.opacity(0.8), location: fadeStart + (1 - fadeStart) * 0.6),
-                                             .init(color: .clear, location: 1)],
-                                     startPoint: .leading, endPoint: .trailing))
+            ForEach(Array(Self.blurRadii.indices.reversed()), id: \.self) { layer in
+                let starts = layer == 0 ? nil : Self.handovers[layer - 1]
+                let ends = layer < Self.handovers.count ? Self.handovers[layer] : nil
+                var stops: [Gradient.Stop] = []
+                if let starts {
+                    stops.append(.init(color: .clear, location: at(starts - 2 * Self.crossfade)))
+                    stops.append(.init(color: .black, location: at(starts - Self.crossfade)))
+                } else {
+                    stops.append(.init(color: .black, location: 0))
+                }
+                if let ends {
+                    stops.append(.init(color: .black, location: at(ends - Self.crossfade)))
+                    stops.append(.init(color: .clear, location: at(ends + Self.crossfade)))
+                } else {
+                    stops.append(.init(color: .black, location: 1))
+                }
+                return keys.blur(radius: Self.blurRadii[layer] * unit)
+                    .mask(LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing))
+            }
         }
+        .mask(LinearGradient(stops: [
+            .init(color: .black, location: at(0.3)), .init(color: .black.opacity(0.82), location: at(0.5)),
+            .init(color: .black.opacity(0.48), location: at(0.68)), .init(color: .black.opacity(0.18), location: at(0.85)),
+            .init(color: .clear, location: 1),
+        ], startPoint: .leading, endPoint: .trailing))
         .frame(width: width, height: height)
-        .clipped()
         .onAppear { monitor.start() }
         .onDisappear { monitor.stop() }
         .accessibilityElement(children: .ignore)
@@ -160,7 +182,9 @@ struct OnboardingKeyboardView: View {
         let isWide = key.width > 1 || key.label.count > 2
         return ZStack(alignment: isWide ? .bottomLeading : .center) {
             RoundedRectangle(cornerRadius: unit * 0.16)
-                .fill(fill(highlighted: isHighlighted, pressed: isPressed))
+                .fill(base)
+            RoundedRectangle(cornerRadius: unit * 0.16)
+                .fill(tint(highlighted: isHighlighted, pressed: isPressed))
             RoundedRectangle(cornerRadius: unit * 0.16)
                 .strokeBorder(isHighlighted ? Color.accentColor.opacity(isPressed ? 0 : 0.7) : Color.primary.opacity(0.1),
                               lineWidth: isHighlighted ? 1.5 : 1)
@@ -190,9 +214,14 @@ struct OnboardingKeyboardView: View {
         }
     }
 
-    private func fill(highlighted: Bool, pressed: Bool) -> Color {
+    /// Opaque, so the stacked blur layers cannot add up translucent fills into bright keys.
+    private var base: Color {
+        colorScheme == .dark ? Color(red: 0.215, green: 0.23, blue: 0.262) : Color.white
+    }
+
+    private func tint(highlighted: Bool, pressed: Bool) -> Color {
         if pressed { return highlighted ? Color.accentColor : Color.primary.opacity(0.16) }
         if highlighted { return Color.accentColor.opacity(colorScheme == .dark ? 0.2 : 0.12) }
-        return colorScheme == .dark ? Color.white.opacity(0.07) : Color.white
+        return .clear
     }
 }
