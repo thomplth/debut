@@ -87,6 +87,24 @@ final class DeferredActivationSnapshotCapture: @unchecked Sendable {
     }
 }
 
+/// Holds discovery reads, the way production holds them on an external-call lane. Running one
+/// performs its cross-process read, then the main-queue step that read handed back.
+final class DeferredDiscoveryRead: @unchecked Sendable {
+    private var pending: [@Sendable () -> @Sendable () -> Void] = []
+
+    var pendingCount: Int { pending.count }
+
+    func schedule(_ read: @escaping @Sendable () -> @Sendable () -> Void) {
+        pending.append(read)
+    }
+
+    func runAll() {
+        while !pending.isEmpty {
+            pending.removeFirst()()()
+        }
+    }
+}
+
 final class DeferredWindowCreationRetryScheduler: @unchecked Sendable {
     private(set) var delays: [TimeInterval] = []
     private var pending: [() -> Void] = []
@@ -949,6 +967,114 @@ struct WindowDiscoveryServiceTests {
         capture.runFirst()
 
         #expect(focusedWindowIDs == [2])
+    }
+
+    // KHA-1043. A new window's AX element and the window list were read on the main queue; while
+    // Xcode relaunched one creation held Debut for 2.5s.
+    @Test("Window creation reads Accessibility and the window list only off the calling turn")
+    func creationDetectionReadsOffTheCallingTurn() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(5, ownerPID: 10)]
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.windowDesktops = [5: 0]
+        let reads = DeferredDiscoveryRead()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            discoveryReadScheduler: reads.schedule,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.spaceSwitcher = spaces
+        service.armingOverride = { _, _ in .armed }
+        var metadataReads = 0
+        var created: [CGWindowID] = []
+        service.onWindowCreated = { created += $0.liveWindows.map(\.windowID) }
+
+        service.handleWindowCreated(resolvingMetadata: {
+            metadataReads += 1
+            return AXWindowCreationMetadata(
+                windowID: 5,
+                ownerPID: 10,
+                role: kAXWindowRole as String,
+                subrole: kAXStandardWindowSubrole as String,
+                isModal: false
+            )
+        })
+
+        #expect(metadataReads == 0)
+        #expect(windowService.listWindowsCount == 0)
+        #expect(created.isEmpty)
+
+        reads.runAll()
+
+        #expect(metadataReads == 1)
+        #expect(windowService.listWindowsCount == 1)
+        #expect(created == [5])
+    }
+
+    @Test("Launch discovery reads the window list only off the calling turn")
+    func launchDiscoveryReadsOffTheCallingTurn() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(3, ownerPID: 30)]
+        let reads = DeferredDiscoveryRead()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 3 },
+            discoveryReadScheduler: reads.schedule,
+            frontmostPIDProvider: { 30 },
+            launchDiscoveryDelay: 0,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        var discovered: [CGWindowID] = []
+        service.onWindowsDiscovered = { discovered = $0.map(\.windowID) }
+
+        service.handleAppLaunch(
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 30, isHidden: false)
+        )
+
+        #expect(windowService.listWindowsCount == 0)
+        #expect(discovered.isEmpty)
+
+        reads.runAll()
+
+        #expect(windowService.listWindowsCount == 1)
+        #expect(discovered == [3])
+    }
+
+    @Test("Destroy focus recovery reads the window list only off the calling turn")
+    func destroyFocusRecoveryReadsOffTheCallingTurn() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(7), liveWindow(8)]
+        windowService.apps = [
+            AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false),
+        ]
+        let reads = DeferredDiscoveryRead()
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 8 },
+            discoveryReadScheduler: reads.schedule,
+            frontmostPIDProvider: { 10 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        let destroyedElement = AXUIElementCreateApplication(70)
+        let survivingElement = AXUIElementCreateApplication(80)
+        service.windowElementOverride = { windowID, _ in
+            windowID == 7 ? destroyedElement : survivingElement
+        }
+        service.armingOverride = { _, _ in .armed }
+        service.registerTracking(windowID: 7, pid: 10)
+        service.registerTracking(windowID: 8, pid: 10)
+        var activatedWindowIDs: [CGWindowID] = []
+        service.onWindowActivated = { activatedWindowIDs.append($0) }
+
+        service.handleWindowDestroyed(element: destroyedElement)
+
+        #expect(windowService.listWindowsCount == 0)
+        #expect(activatedWindowIDs.isEmpty)
+
+        reads.runAll()
+
+        #expect(activatedWindowIDs == [8])
     }
 
     @Test("App activation diagnostics bracket the focused-window probe")

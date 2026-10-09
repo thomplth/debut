@@ -33,6 +33,13 @@ struct RetiredWindowRecord: Codable, Equatable, Sendable {
     let ownerBundleID: String
 }
 
+/// Carries a value the compiler cannot prove Sendable onto a discovery read's queue. Only for
+/// values the read uses alone: an AX element, or a closure that reads one.
+private struct UncheckedSendable<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
+}
+
 public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     typealias FocusProbeScheduler = @Sendable (
         pid_t,
@@ -56,6 +63,29 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         _ capture: @escaping @Sendable () -> ActivationSnapshot,
         _ apply: @escaping @Sendable (ActivationSnapshot) -> Void
     ) -> Void
+
+    /// Runs a cross-process read away from the caller, then the main-queue step the read hands
+    /// back. Window creation, launch discovery and focus recovery each ask Accessibility, and the
+    /// window list asks every running app; on the main queue a slow app froze Debut (KHA-1043).
+    typealias DiscoveryReadScheduler = (
+        _ read: @escaping @Sendable () -> @Sendable () -> Void
+    ) -> Void
+
+    /// Production's lane for discovery reads. Tests construct the service through the internal
+    /// initializer, which keeps these reads synchronous unless a test substitutes its own.
+    static func scheduleDiscoveryReadOffMain(
+        _ read: @escaping @Sendable () -> @Sendable () -> Void
+    ) {
+        // The WindowServer lane, like the activation and desktop snapshots: a slow app can hold
+        // a worker for a full read, and the focus probes' lane must stay free for activation.
+        ExternalCallScheduler.shared.schedule(on: .windowServer) {
+            let apply = read()
+            DispatchQueue.main.async(
+                qos: EventTapKeyboardService.deliveryQualityOfService,
+                flags: .enforceQoS
+            ) { apply() }
+        }
+    }
 
     static let focusProbeTimeout: TimeInterval = 0.05
     static let windowCreationRetryDelays: [TimeInterval] = [0.05, 0.1, 0.25, 0.5]
@@ -84,6 +114,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     private let focusProbeScheduler: FocusProbeScheduler
     private let activationSnapshotScheduler: ActivationSnapshotScheduler
+    private let discoveryReadScheduler: DiscoveryReadScheduler
     private let frontmostPIDProvider: @Sendable () -> pid_t?
     private let launchDiscoveryDelay: TimeInterval
     private let processExitMonitor: any ProcessExitMonitoring
@@ -236,6 +267,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         var systemAttentionRequested: Bool
         /// The latest AX answer was AXUnknown: not yet a window, not yet ruled out.
         var awaitingClassification = false
+        /// AppKit answers Debut's own AX on the main thread, so a read of one of Debut's own
+        /// elements from a background queue waits on main, and hung the app in KHA-856.
+        var readsOnMain = false
     }
 
     private var pendingWindowCreations: [UUID: PendingWindowCreation] = [:]
@@ -276,6 +310,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         self.init(
             windowService: windowService,
             focusedWindowProvider: focusedWindowProvider,
+            discoveryReadScheduler: { read in Self.scheduleDiscoveryReadOffMain(read) },
             frontmostPIDProvider: frontmostPIDProvider,
             launchDiscoveryDelay: launchDiscoveryDelay,
             processExitMonitor: ProcessExitMonitor()
@@ -287,6 +322,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         focusedWindowProvider: (@Sendable (pid_t) -> CGWindowID?)? = nil,
         focusProbeScheduler: FocusProbeScheduler? = nil,
         activationSnapshotScheduler: ActivationSnapshotScheduler? = nil,
+        discoveryReadScheduler: DiscoveryReadScheduler? = nil,
         frontmostPIDProvider: (@Sendable () -> pid_t?)? = nil,
         launchDiscoveryDelay: TimeInterval = 0.5,
         processExitMonitor: any ProcessExitMonitoring,
@@ -294,6 +330,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     ) {
         self.diag = diagnosticReporter
         self.windowService = windowService
+        self.discoveryReadScheduler = discoveryReadScheduler ?? { read in read()() }
         if let activationSnapshotScheduler {
             self.activationSnapshotScheduler = activationSnapshotScheduler
         } else if focusProbeScheduler != nil || focusedWindowProvider != nil {
@@ -1003,24 +1040,39 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let generation = destructionProbeGeneration
         let activationGeneration = activationProbeGeneration
         let focusGeneration = focusChangeProbeGeneration
+        let isCurrent: @Sendable () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return self.destructionProbeGeneration == generation &&
+                self.activationProbeGeneration == activationGeneration &&
+                self.focusChangeProbeGeneration == focusGeneration &&
+                self.frontmostPIDProvider() == ownerPID
+        }
+        let windowService = windowService
         focusProbeScheduler(ownerPID) { [weak self] focusedWindowID in
             guard let self,
-                  self.destructionProbeGeneration == generation,
-                  self.activationProbeGeneration == activationGeneration,
-                  self.focusChangeProbeGeneration == focusGeneration,
-                  self.frontmostPIDProvider() == ownerPID,
+                  isCurrent(),
                   let focusedWindowID,
-                  focusedWindowID != windowID,
-                  let focusedWindow = self.excludingRetired(self.windowService.listWindows())
-                    .first(where: {
-                        $0.windowID == focusedWindowID &&
-                            $0.ownerPID == ownerPID &&
-                            !self.excludedBundleIDs.contains($0.ownerBundleID)
-                    })
+                  focusedWindowID != windowID
             else { return }
-
-            self.trackAndRegister(windowID: focusedWindow.windowID, pid: focusedWindow.ownerPID)
-            self.onWindowActivated?(focusedWindow.windowID)
+            self.scheduleDiscoveryRead {
+                let listed = windowService.listWindows().first(where: {
+                    $0.windowID == focusedWindowID && $0.ownerPID == ownerPID
+                })
+                return { [weak self] in
+                    // Focus may have moved on while the list was read.
+                    guard let self,
+                          isCurrent(),
+                          let focusedWindow = listed,
+                          !self.excludingRetired([focusedWindow]).isEmpty,
+                          !self.excludedBundleIDs.contains(focusedWindow.ownerBundleID)
+                    else { return }
+                    self.trackAndRegister(
+                        windowID: focusedWindow.windowID,
+                        pid: focusedWindow.ownerPID
+                    )
+                    self.onWindowActivated?(focusedWindow.windowID)
+                }
+            }
         }
     }
 
@@ -1112,10 +1164,15 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     fileprivate func handleWindowCreated(element: AXUIElement, notification: String) {
+        var elementPID: pid_t = 0
+        // Answered locally from the element itself; it sends nothing to the app.
+        let isOwnElement = AXUIElementGetPid(element, &elementPID) == .success &&
+            elementPID == ProcessInfo.processInfo.processIdentifier
         beginWindowCreationProbe(
             resolveMetadata: { Self.windowCreationMetadata(for: element) },
             fixedMetadata: nil,
-            notification: notification
+            notification: notification,
+            readsOnMain: isOwnElement
         )
     }
 
@@ -1140,14 +1197,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private func beginWindowCreationProbe(
         resolveMetadata: @escaping () -> AXWindowCreationMetadata?,
         fixedMetadata: AXWindowCreationMetadata?,
-        notification: String
+        notification: String,
+        readsOnMain: Bool = false
     ) {
         let probeID = UUID()
         pendingWindowCreations[probeID] = PendingWindowCreation(
             resolveMetadata: resolveMetadata,
             startedAt: DispatchTime.now().uptimeNanoseconds,
             identity: nil,
-            systemAttentionRequested: false
+            systemAttentionRequested: false,
+            readsOnMain: readsOnMain
         )
         var details = [
             "notification": notification,
@@ -1161,9 +1220,36 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         attemptWindowCreationDetection(probeID: probeID, attempt: 1)
     }
 
+    private func scheduleDiscoveryRead(
+        onMain: Bool = false,
+        _ read: @escaping @Sendable () -> @Sendable () -> Void
+    ) {
+        if onMain {
+            read()()
+        } else {
+            discoveryReadScheduler(read)
+        }
+    }
+
     private func attemptWindowCreationDetection(probeID: UUID, attempt: Int) {
+        guard let pending = pendingWindowCreations[probeID] else { return }
+        let resolveMetadata = UncheckedSendable(pending.resolveMetadata)
+        scheduleDiscoveryRead(onMain: pending.readsOnMain) {
+            let metadata = resolveMetadata.value()
+            return { [weak self] in
+                self?.applyWindowCreationMetadata(metadata, probeID: probeID, attempt: attempt)
+            }
+        }
+    }
+
+    private func applyWindowCreationMetadata(
+        _ resolvedMetadata: AXWindowCreationMetadata?,
+        probeID: UUID,
+        attempt: Int
+    ) {
+        // The process may have exited, or another probe settled this one, during the read.
         guard var pending = pendingWindowCreations[probeID] else { return }
-        guard let metadata = pending.resolveMetadata() else {
+        guard let metadata = resolvedMetadata else {
             retryWindowCreationDetection(
                 probeID: probeID,
                 attempt: attempt,
@@ -1262,9 +1348,47 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             return
         }
 
-        guard let info = windowService.listWindows().first(where: {
-            $0.windowID == metadata.windowID && $0.ownerPID == metadata.ownerPID
-        }) else {
+        let windowService = windowService
+        let spaceSwitcher = spaceSwitcher
+        scheduleDiscoveryRead(onMain: pending.readsOnMain) {
+            let info = windowService.listWindows().first(where: {
+                $0.windowID == metadata.windowID && $0.ownerPID == metadata.ownerPID
+            })
+            let locations = info == nil ? [:] :
+                spaceSwitcher?.desktopLocations(forWindows: [metadata.windowID]) ?? [:]
+            return { [weak self] in
+                self?.publishCreatedWindow(
+                    info,
+                    locations: locations,
+                    metadata: metadata,
+                    probeID: probeID,
+                    attempt: attempt
+                )
+            }
+        }
+    }
+
+    private func publishCreatedWindow(
+        _ listedInfo: WindowInfo?,
+        locations: [CGWindowID: DesktopLocation],
+        metadata: AXWindowCreationMetadata,
+        probeID: UUID,
+        attempt: Int
+    ) {
+        guard let pending = pendingWindowCreations[probeID] else { return }
+        let identity = WindowOwnerIdentity(windowID: metadata.windowID, ownerPID: metadata.ownerPID)
+        // Activation or a desktop scan may have armed the window while the list was read.
+        if windowOwnerPIDs[metadata.windowID] == metadata.ownerPID {
+            reportWindowCreationAttempt(
+                metadata: metadata,
+                probeID: probeID,
+                attempt: attempt,
+                result: "already_detected"
+            )
+            pendingWindowCreations.removeValue(forKey: probeID)
+            return
+        }
+        guard let info = listedInfo else {
             retryWindowCreationDetection(
                 probeID: probeID,
                 attempt: attempt,
@@ -1296,7 +1420,6 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             return
         }
 
-        let locations = spaceSwitcher?.desktopLocations(forWindows: [metadata.windowID]) ?? [:]
         if spaceSwitcher != nil, locations[metadata.windowID] == nil {
             retryWindowCreationDetection(
                 probeID: probeID,
@@ -1689,8 +1812,18 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     private func discoverLaunchedWindows(for app: AppInfo) {
         let pid = app.pid
-        let windows = excludingRetired(windowService.listWindows())
-            .filter { $0.ownerPID == pid }
+        let windowService = windowService
+        scheduleDiscoveryRead {
+            let listedWindows = windowService.listWindows().filter { $0.ownerPID == pid }
+            return { [weak self] in
+                self?.applyLaunchedWindows(listedWindows, pid: pid)
+            }
+        }
+    }
+
+    private func applyLaunchedWindows(_ listedWindows: [WindowInfo], pid: pid_t) {
+        // Retirement is read at publication, not capture (KHA-789).
+        let windows = excludingRetired(listedWindows)
         // Matching by window ID alone would trust stale bookkeeping from a process whose
         // exit was missed, so a reused ID for a different PID must still be (re-)tracked.
         for info in windows where windowOwnerPIDs[info.windowID] != pid {
