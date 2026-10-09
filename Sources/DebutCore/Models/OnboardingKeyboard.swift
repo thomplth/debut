@@ -103,14 +103,11 @@ extension OnboardingKeyboard {
 public struct OnboardingDemoLayout: Equatable, Sendable {
     public static let margin: CGFloat = 32
     /// Width of the progressive blur at the keyboard's cropped edge.
-    public static let fadeUnits: CGFloat = 2.2
-    /// Longest crop before the reach; every row runs past both so the fade never
-    /// reveals a row's end.
+    public static let fadeUnits: CGFloat = 1.8
+    /// Longest crop; every row runs past it so the fade never reveals a row's end.
     public static let maximumUnits: CGFloat = 8.5
-    /// How far the keyboard's faded tail reaches into the gap before the plate. The
-    /// tail is nearly transparent, so the gap still reads as one margin, and the
-    /// keys before the fade gain a key of room.
-    public static let reachUnits: CGFloat = 1
+    /// Kept sharp on every page, highlighted or not, so the modifier row reads whole.
+    public static let sharpKeys: Set<CGKeyCode> = [OnboardingKeyboard.leftCommand]
 
     public let keyboardMinX: CGFloat
     public let keyboardWidth: CGFloat
@@ -120,15 +117,14 @@ public struct OnboardingDemoLayout: Equatable, Sendable {
     public init(width: CGFloat, height: CGFloat, plateAspect: CGFloat, unit: CGFloat, highlighted: Set<CGKeyCode>) {
         let margin = Self.margin
         let available = max(0, width - 3 * margin)
-        let minimumKeyboard = (OnboardingKeyboard.rightEdge(of: highlighted) + Self.fadeUnits) * unit
+        let minimumKeyboard = (OnboardingKeyboard.rightEdge(of: highlighted.union(Self.sharpKeys)) + Self.fadeUnits) * unit
         let aspect = max(plateAspect, 0.01)
         let plateWidth = max(0, min((height - 2 * margin) * aspect, available - minimumKeyboard))
         keyboardMinX = margin
         // A short window can leave more room than the rows fill; the right margin takes it.
-        let spacedWidth = min(Self.maximumUnits * unit, available - plateWidth)
-        keyboardWidth = spacedWidth + Self.reachUnits * unit
+        keyboardWidth = min(Self.maximumUnits * unit, available - plateWidth)
         let plateHeight = plateWidth / aspect
-        plate = CGRect(x: 2 * margin + spacedWidth, y: (height - plateHeight) / 2,
+        plate = CGRect(x: 2 * margin + keyboardWidth, y: (height - plateHeight) / 2,
                        width: plateWidth, height: plateHeight)
     }
 }

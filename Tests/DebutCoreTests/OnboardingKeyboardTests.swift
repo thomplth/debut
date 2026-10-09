@@ -94,14 +94,14 @@ struct OnboardingDemoLayoutTests {
         OnboardingDemoLayout(width: 740, height: height, plateAspect: aspect, unit: 40, highlighted: keys)
     }
 
-    @Test("Margin, gap and right margin are equal, with the keyboard's faded tail one key into the gap", arguments: [
+    @Test("The keyboard ends one margin before the demo, and both margins match it", arguments: [
         (commandPlate, commandTab), (optionPlate, optionTab),
     ])
     func equalSpacing(_ aspect: Double, _ keys: Set<CGKeyCode>) {
         let layout = Self.layout(aspect, keys)
         let tailEnd = layout.keyboardMinX + layout.keyboardWidth
         let right = 740 - layout.plate.maxX
-        #expect(abs(layout.plate.minX - tailEnd - (layout.keyboardMinX - OnboardingDemoLayout.reachUnits * 40)) < 0.5)
+        #expect(abs(layout.plate.minX - tailEnd - layout.keyboardMinX) < 0.5)
         #expect(abs(right - layout.keyboardMinX) < 0.5)
         #expect(layout.plate.minY >= 0 && layout.plate.maxY <= 310)
     }
@@ -118,27 +118,27 @@ struct OnboardingDemoLayoutTests {
             let layout = Self.layout(5, keys)
             let sharp = layout.keyboardWidth - OnboardingDemoLayout.fadeUnits * 40
             #expect(sharp + 0.001 >= OnboardingKeyboard.rightEdge(of: keys) * 40)
-            #expect(layout.plate.minX >= layout.keyboardMinX + layout.keyboardWidth
-                - OnboardingDemoLayout.reachUnits * 40)
+            #expect(layout.plate.minX >= layout.keyboardMinX + layout.keyboardWidth)
         }
     }
 
-    @Test("Beside the wide Option-Tab demo, Command sits left of the fade")
-    func commandStaysSharpOnOptionTab() {
-        let layout = Self.layout(Self.optionPlate, Self.optionTab)
+    @Test("Command stays sharp on both pages, even beside the wide Option-Tab demo", arguments: [
+        (optionPlate, optionTab), (commandPlate, commandTab), (5.0, optionTab),
+    ])
+    func commandStaysSharp(_ aspect: Double, _ keys: Set<CGKeyCode>) {
+        let layout = Self.layout(aspect, keys)
         let sharp = layout.keyboardWidth - OnboardingDemoLayout.fadeUnits * 40
-        #expect(sharp + 0.001 >= OnboardingKeyboard.rightEdge(of: [OnboardingKeyboard.leftCommand]) * 40 - 10)
+        #expect(sharp + 0.001 >= OnboardingKeyboard.rightEdge(of: [OnboardingKeyboard.leftCommand]) * 40)
     }
 
     @Test("A short window keeps the anchor and gap, and never reveals the rows' ends")
     func compact() {
         let layout = Self.layout(Self.commandPlate, Self.commandTab, height: 246)
         #expect(layout.keyboardMinX == Self.layout(Self.optionPlate, Self.optionTab).keyboardMinX)
-        let reach = OnboardingDemoLayout.reachUnits * 40
-        #expect(abs(layout.plate.minX - layout.keyboardMinX - layout.keyboardWidth - (layout.keyboardMinX - reach)) < 0.5)
-        #expect(layout.keyboardWidth <= (OnboardingDemoLayout.maximumUnits + OnboardingDemoLayout.reachUnits) * 40)
+        #expect(abs(layout.plate.minX - layout.keyboardMinX - layout.keyboardWidth - layout.keyboardMinX) < 0.5)
+        #expect(layout.keyboardWidth <= OnboardingDemoLayout.maximumUnits * 40)
         for row in OnboardingKeyboard.leftHalf {
-            #expect(row.reduce(0) { $0 + $1.width } >= OnboardingDemoLayout.maximumUnits + OnboardingDemoLayout.reachUnits)
+            #expect(row.reduce(0) { $0 + $1.width } >= OnboardingDemoLayout.maximumUnits)
         }
     }
 
