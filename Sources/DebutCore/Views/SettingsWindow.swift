@@ -85,6 +85,8 @@ public struct SettingsView: View {
                     case .appearance:
                         appearanceSection
                         Divider()
+                        liquidGlassSection
+                        Divider()
                         selectorSection
                     case .shortcuts: keyboardShortcutsSection
                     case .support: supportSection
@@ -380,22 +382,6 @@ public struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Glass style")
-                    Spacer()
-                    Picker("", selection: $viewModel.settings.glassStyle) {
-                        Text("Clear").tag(GlassStyle.clear)
-                        Text("Regular").tag(GlassStyle.regular)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 150)
-                }
-                Text("Regular adds contrast over busy wallpapers.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
                     Text("Stage corner radius")
                     Spacer()
                     Text("\(Int(viewModel.settings.stageCornerRadius)) pt")
@@ -465,6 +451,84 @@ public struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var liquidGlassSection: some View {
+        let usesNativeGlass = viewModel.settings.glassStyle.usesDockGlass
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Liquid Glass")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Material")
+                    Spacer()
+                    Picker("", selection: $viewModel.settings.glassStyle) {
+                        Text("Native").tag(GlassStyle.native)
+                        Text("Clear").tag(GlassStyle.clear)
+                        Text("Regular").tag(GlassStyle.regular)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 220)
+                }
+                Text("Native matches the macOS app switcher. Regular adds contrast over busy wallpapers.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            percentSlider(
+                "Rim",
+                value: $viewModel.settings.glassRimStrength,
+                in: AppSettings.minimumGlassRimStrength...AppSettings.maximumGlassRimStrength
+            )
+            .disabled(!usesNativeGlass)
+
+            percentSlider(
+                "Edge refraction",
+                value: $viewModel.settings.glassEdgeRefraction,
+                in: AppSettings.minimumGlassEdgeRefraction...AppSettings.maximumGlassEdgeRefraction
+            )
+            .disabled(!usesNativeGlass)
+
+            VStack(alignment: .leading, spacing: 4) {
+                settingsToggle(
+                    "Follow system tint",
+                    isOn: $viewModel.settings.followsSystemGlassTint
+                )
+                if !viewModel.settings.followsSystemGlassTint {
+                    percentSlider("Tint", value: $viewModel.settings.glassTintAmount, in: 0...1)
+                }
+                Text("System Settings › Appearance › Liquid Glass sets the system tint.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .disabled(!usesNativeGlass)
+
+            if !usesNativeGlass {
+                Text("Rim, edge refraction and tint apply to the Native material.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func percentSlider(
+        _ title: String,
+        value: Binding<Double>,
+        in range: ClosedRange<Double>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(Int((value.wrappedValue * 100).rounded()))%")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: value, in: range, step: 0.05)
         }
     }
 

@@ -28,7 +28,9 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Adaptive card sizing | On |
 | Window size / inactive stage scale | 150% / 70% |
 | Preview card spacing | 12 pt; adjustable from 0 to 36 pt |
-| Glass / stage corner radius | Clear / 30 pt |
+| Glass / stage corner radius | Native / 30 pt |
+| Liquid Glass rim / edge refraction | 100% / 100% of the native switcher's fitted look |
+| Liquid Glass tint | Follows System Settings; a fixed 0–100% tint is optional |
 | Selection appearance | Filled; 6 pt outset, 12 pt radius |
 | Alternative magnify appearance | 106% size, 100% shadow strength |
 | Overlay hold delay / held cycling pace | 100 ms / 60 ms minimum between repeats |
@@ -88,7 +90,7 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | General | Login launch, Dock visibility, automatic crash reports, Reduce Motion guidance, and a running-app picker for applications ignored by window management. The menu-bar item remains available with the Dock icon off. |
 | Desktops | Faster switching and its number-key, Control-arrow, and trackpad methods, followed by transition duration and the desktop-change indicator. |
 | Switcher | Command-Tab desktop isolation, Option-Tab activation, window previews, display placement, preview freshness, overlay hold delay, and held cycling pace. |
-| Appearance | Glass and card layout, adaptive preview sizing, inactive-stage scale, and selected-window treatment. |
+| Appearance | Card layout, adaptive preview sizing, inactive-stage scale, Liquid Glass (material, rim, edge refraction, tint), and selected-window treatment. |
 | Shortcuts | Activation and Space Manager session bindings including H/J/K/L selector movement, numbered modifier sets with a Disabled choice, a confirmed restore-defaults action, and reference for fixed move chords. Pressing Delete while recording clears a binding. An open session handles its own keys before global shortcuts, and Debut binding conflicts are checked within each context. |
 | Support | Bug reporting through a public GitHub issue form (requires a GitHub account), diagnostic export, a confirmed window-cache reset that preserves settings, and a confirmed reset of all settings that preserves window assignments. |
 | About | Debut icon and version, update checks, and links to the GitHub repository and creator's Twitter profile. |
@@ -98,6 +100,11 @@ are in General; desktop navigation and feedback are in Desktops; overlay behavio
 content, placement, freshness, and held-key timing are in Switcher; visual layout and selection are
 in Appearance; and all key assignments are in Shortcuts.
 Support contains actions rather than preferences.
+
+Native glass matches the macOS Command-Tab switcher through DockGlass. It follows the
+system Liquid Glass tint live unless a fixed tint is chosen. Under Reduce Transparency,
+Increase Contrast, or a macOS version without a fitted look it shows the system's own clear
+glass and reports why in diagnostics.
 
 The menu-bar item provides feature toggles, Settings, Setup, Tutorial, update
 checks, and Quit. System Reduce Motion changes overlay animation; it is not a separate

@@ -36,6 +36,9 @@ public enum SettingsSection: String, CaseIterable, Sendable {
         case .appearance:
             [
                 .glassStyle,
+                .glassRimStrength,
+                .glassEdgeRefraction,
+                .glassTint,
                 .stageCornerRadius,
                 .stageScale,
                 .previewCardSpacing,
@@ -76,6 +79,9 @@ enum SettingsOption: String, CaseIterable, Sendable {
     case windowPreviews
     case mainDisplayOnly
     case glassStyle
+    case glassRimStrength
+    case glassEdgeRefraction
+    case glassTint
     case stageCornerRadius
     case stageScale
     case previewCardSpacing

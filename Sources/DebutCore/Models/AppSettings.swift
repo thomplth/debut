@@ -1,8 +1,13 @@
 import Foundation
 
 public enum GlassStyle: String, Codable, Sendable, CaseIterable {
+    /// Clear glass tuned to match the native Dock and Command-Tab switcher (DockGlass).
+    case native = "Native"
     case clear = "Clear"
     case regular = "Regular"
+
+    /// Whether surfaces draw through DockGlass rather than SwiftUI's glass directly.
+    public var usesDockGlass: Bool { self == .native }
 }
 
 public enum WindowSelectionStyle: String, Codable, Sendable, CaseIterable {
@@ -138,7 +143,21 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let minimumMagnifyShadowStrength: Double = 0
     public static let maximumMagnifyShadowStrength: Double = 2
 
+    // Liquid Glass. Each strength scales DockGlass's fitted native look, so 1 is native.
+    public static let minimumGlassRimStrength: Double = 0
+    public static let maximumGlassRimStrength: Double = 2
+    public static let minimumGlassEdgeRefraction: Double = 0
+    public static let maximumGlassEdgeRefraction: Double = 2
+
     public var glassStyle: GlassStyle
+    /// Opacity of the hairline rim along the native glass's outline, relative to native.
+    public var glassRimStrength: Double
+    /// How far the native glass bends its backdrop at the edges, relative to native.
+    public var glassEdgeRefraction: Double
+    /// Follow System Settings › Appearance › Liquid Glass tint, as the native switcher does.
+    public var followsSystemGlassTint: Bool
+    /// The tint used when not following the system, from 0 (clear) to 1 (tinted).
+    public var glassTintAmount: Double
     public var stageCornerRadius: Double
     public var inactiveStageScale: Double
     public var stageScale: Double
@@ -179,7 +198,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.excludedBundleIDs = []
         self.sendsCrashReportsAutomatically = false
 
-        self.glassStyle = .clear
+        self.glassStyle = .native
+        self.glassRimStrength = 1
+        self.glassEdgeRefraction = 1
+        self.followsSystemGlassTint = true
+        self.glassTintAmount = 0
         self.stageCornerRadius = 30
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
@@ -220,6 +243,22 @@ public struct AppSettings: Codable, Sendable, Equatable {
             forKey: .sendsCrashReportsAutomatically
         ) ?? false
         glassStyle = try container.decode(GlassStyle.self, forKey: .glassStyle)
+        glassRimStrength = min(Self.maximumGlassRimStrength, max(
+            Self.minimumGlassRimStrength,
+            try container.decodeIfPresent(Double.self, forKey: .glassRimStrength) ?? 1
+        ))
+        glassEdgeRefraction = min(Self.maximumGlassEdgeRefraction, max(
+            Self.minimumGlassEdgeRefraction,
+            try container.decodeIfPresent(Double.self, forKey: .glassEdgeRefraction) ?? 1
+        ))
+        followsSystemGlassTint = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .followsSystemGlassTint
+        ) ?? true
+        glassTintAmount = min(1, max(
+            0,
+            try container.decodeIfPresent(Double.self, forKey: .glassTintAmount) ?? 0
+        ))
         stageCornerRadius = try container.decode(Double.self, forKey: .stageCornerRadius)
         inactiveStageScale = try container.decode(Double.self, forKey: .inactiveStageScale)
         let savedStageScale = try container.decodeIfPresent(

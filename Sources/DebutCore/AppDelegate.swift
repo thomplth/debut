@@ -1,4 +1,5 @@
 import AppKit
+import DockGlass
 import QuartzCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -550,6 +551,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             object: nil
         )
 
+        // Native glass silently becomes stock glass on an unverified macOS, under Reduce
+        // Transparency or Increase Contrast, or when an update changes the glass filter.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(dockGlassStatusDidChange(_:)),
+            name: DockGlass.statusDidChange,
+            object: nil
+        )
+
         // Reordering desktops changes no active space, so no AppKit notification reports it.
         NotificationCenter.default.addObserver(
             self,
@@ -689,7 +699,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         window.present(
             presentation,
             on: screen,
-            glassStyle: currentSettings.glassStyle
+            glassStyle: currentSettings.glassStyle,
+            dockGlassStyle: currentSettings.dockGlassStyle
         )
         diag.report("desktop_switch_indicator_shown", level: .transient, details: [
             "desktopCount": "\(presentation.desktopCount)",
@@ -742,6 +753,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             as? NSRunningApplication
         guard app?.bundleIdentifier == "com.apple.dock" else { return }
         overviewWindowProbe?.invalidate()
+    }
+
+    @objc private func dockGlassStatusDidChange(_ notification: Notification) {
+        let status: String = switch DockGlass.status {
+        case .tuned: "tuned"
+        case .stock(let reason): "stock: \(reason)"
+        }
+        diag.report("dock_glass_status", details: ["status": status])
     }
 
     @objc private func screenParametersDidChange(_ notification: Notification) {

@@ -1579,7 +1579,8 @@ public struct StageOverlayView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .modifier(OverlayGlassCapsuleModifier(
-                        glassStyle: viewModel.appearance.glassStyle
+                        glassStyle: viewModel.appearance.glassStyle,
+                        dockGlassStyle: viewModel.appearance.dockGlassStyle
                     ))
                     .frame(width: geo.size.width)
                     .padding(.top, 18)
@@ -2485,11 +2486,12 @@ struct LiquidGlassModifier: ViewModifier {
     let appearance: AppSettings
 
     func body(content: Content) -> some View {
-        content
-            .glassEffect(
-                appearance.glassStyle.overlayGlass,
-                in: .rect(cornerRadius: cornerRadius)
-            )
+        // Continuous, like the native switcher's plate; the glass honours the squircle.
+        content.modifier(OverlayGlassModifier(
+            shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
+            glassStyle: appearance.glassStyle,
+            dockGlassStyle: appearance.dockGlassStyle
+        ))
     }
 }
 

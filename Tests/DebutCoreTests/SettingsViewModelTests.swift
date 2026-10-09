@@ -12,7 +12,11 @@ struct SettingsViewModelTests {
         #expect(vm.settings.features.fasterDesktopSwitching)
         #expect(vm.settings.features.controlArrows)
         #expect(vm.settings.features.trackpadSwipes)
-        #expect(vm.settings.glassStyle == .clear)
+        #expect(vm.settings.glassStyle == .native)
+        #expect(vm.settings.glassRimStrength == 1)
+        #expect(vm.settings.glassEdgeRefraction == 1)
+        #expect(vm.settings.followsSystemGlassTint)
+        #expect(vm.settings.glassTintAmount == 0)
         #expect(vm.settings.stageCornerRadius == 30)
         #expect(vm.settings.inactiveStageScale == 0.7)
         #expect(vm.settings.stageScale == 1.5)
@@ -116,6 +120,9 @@ struct SettingsViewModelTests {
         ])
         #expect(SettingsSection.appearance.options == [
             .glassStyle,
+            .glassRimStrength,
+            .glassEdgeRefraction,
+            .glassTint,
             .stageCornerRadius,
             .stageScale,
             .previewCardSpacing,

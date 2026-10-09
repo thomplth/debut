@@ -1,6 +1,7 @@
 import CoreGraphics
 import Testing
 import Foundation
+import DockGlass
 @testable import DebutCore
 
 @Suite("StateStore")
@@ -522,7 +523,57 @@ struct StateStoreTests {
         let store = StateStore(directory: dir)
         let settings = try store.loadSettings()
         #expect(settings.launchAtLogin == true)
-        #expect(settings.glassStyle == .clear)
+        #expect(settings.glassStyle == .native)
         #expect(settings.windowSelectionStyle == .filled)
+    }
+
+    @Test("Settings written before Liquid Glass tuning use the native look")
+    func legacySettingsDefaultLiquidGlass() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        for key in ["glassRimStrength", "glassEdgeRefraction", "followsSystemGlassTint", "glassTintAmount"] {
+            object.removeValue(forKey: key)
+        }
+        object["glassStyle"] = "Native"
+        let data = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: data)
+
+        #expect(decoded.glassStyle == .native)
+        #expect(decoded.glassRimStrength == 1)
+        #expect(decoded.glassEdgeRefraction == 1)
+        #expect(decoded.followsSystemGlassTint)
+        #expect(decoded.dockGlassStyle == .native)
+    }
+
+    @Test("Liquid Glass settings map onto the DockGlass style and clamp")
+    func liquidGlassSettingsMapToDockGlassStyle() throws {
+        var settings = AppSettings()
+        settings.glassRimStrength = 0.5
+        settings.glassEdgeRefraction = 1.5
+        settings.followsSystemGlassTint = false
+        settings.glassTintAmount = 0.25
+        #expect(settings.dockGlassStyle == DockGlassStyle(
+            rimStrength: 0.5,
+            edgeRefraction: 1.5,
+            tint: .fixed(0.25)
+        ))
+
+        let encoded = try JSONEncoder().encode(settings)
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object["glassRimStrength"] = 9
+        object["glassEdgeRefraction"] = -1
+        object["glassTintAmount"] = 4
+        let decoded = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        #expect(decoded.glassRimStrength == AppSettings.maximumGlassRimStrength)
+        #expect(decoded.glassEdgeRefraction == AppSettings.minimumGlassEdgeRefraction)
+        #expect(decoded.glassTintAmount == 1)
     }
 }
