@@ -59,7 +59,10 @@ Without previews, whether the toggle is off or Screen Recording is not granted,
 both switchers draw each window as a native Command-Tab icon slot with its title,
 at a separate icon size (default 100%, the native switcher) that the same size
 slider edits. A window whose capture failed keeps its card with the app's icon at
-the native 102 pt. Screen Recording enables screenshot previews and
+the native 102 pt.
+Every card in both switchers is titled in the native label style at full strength, a
+fixed 13.5 pt at every size, centred between the card's lower edge and the plate's,
+with a tight halo in the opposite colour for legibility on clear glass. Screen Recording enables screenshot previews and
 can affect title availability. Debut no longer captures or paints desktop
 wallpaper. Accessibility is required for global input and window control.
 

@@ -2472,12 +2472,19 @@ struct WindowPreviewView: View {
                 }
             }
 
-            Text(window.displayTitle)
-                .dockGlassLabel(fontSize: metrics.titleFontSize, prominent: isWindowSelected)
-                .lineLimit(1)
+            // Holds the title's place in the grid; the title itself is centred in its band below.
+            Color.clear
                 .frame(width: metrics.thumbnailWidth + metrics.titleWidthAllowance, height: metrics.titleHeight)
         }
         .padding(metrics.cardPadding)
+        .overlay(alignment: .bottom) {
+            WindowTitleLabel(title: window.displayTitle, fontSize: metrics.titleFontSize)
+                .frame(
+                    width: metrics.thumbnailWidth + metrics.titleWidthAllowance,
+                    height: metrics.titleBandHeight
+                )
+                .allowsHitTesting(false)
+        }
         .scaleEffect(StageMotion.windowScale(
             isSelected: isWindowSelected,
             isDragging: isDragging,
@@ -2520,6 +2527,37 @@ private struct IconSlotView: View {
                     .offset(native.iconCanvasOffset)
                 }
             }
+    }
+}
+
+/// A window title in the native label style, always at full strength. Every card is titled,
+/// not only the selected one as natively, so each title also carries a tight halo in the
+/// opposite colour to stay legible over clear glass: white behind black text, black behind
+/// white. Chosen over outlines and softer halos on real glass (KHA-1057).
+struct WindowTitleLabel: View {
+    let title: String
+    let fontSize: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    static let haloRadius: CGFloat = 1
+    static let haloOpacity: Double = 0.95
+    /// Room for the halo inside the flattened image, so the blur is not clipped.
+    static let haloInset: CGFloat = 3
+
+    var body: some View {
+        Text(title)
+            .dockGlassLabel(fontSize: fontSize)
+            .lineLimit(1)
+            .shadow(
+                color: (colorScheme == .dark ? Color.black : Color.white).opacity(Self.haloOpacity),
+                radius: Self.haloRadius
+            )
+            // Flattened into one image, the halo is blurred once per title. Left live, it was
+            // re-blurred on every frame the stage animates: 3.6ms a cycling frame against
+            // 0.54ms without it, and 0.59ms flattened (KHA-1057).
+            .padding(Self.haloInset)
+            .drawingGroup()
+            .padding(-Self.haloInset)
     }
 }
 

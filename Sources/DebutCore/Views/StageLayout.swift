@@ -241,7 +241,14 @@ public struct StageMetrics: Equatable, Sendable {
     /// independently of the display or window shape, and keep a readability floor when automatic
     /// fitting shrinks a crowded overlay.
     public var titleFontSize: CGFloat {
-        max(9, DockGlass.Label.standardFontSize * scale.squareRoot())
+        DockGlass.Label.standardFontSize
+    }
+
+    /// The band a title is centred in: from the preview's lower edge to the plate's lower edge,
+    /// which is the card's own lower edge. Native centres its label there without counting the
+    /// highlight, which only the selected card draws.
+    public var titleBandHeight: CGFloat {
+        titleSpacing + titleHeight + cardPadding
     }
 
     /// The icon a failed capture's card shows: the native switcher's 102-point artwork, drawn

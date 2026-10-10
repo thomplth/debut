@@ -2,6 +2,7 @@ import Testing
 import AppKit
 import SwiftUI
 import Foundation
+import DockGlass
 @testable import DebutCore
 
 @MainActor
@@ -799,57 +800,74 @@ struct ScreenshotTests {
         #expect(abs(enlarged.height - expected.cardHeight) < 0.5)
     }
 
-    @Test("Rendered title glyphs grow more gently than previews")
-    func windowTitleSizeGrowsGently() throws {
-        let size = NSSize(width: 600, height: 500)
+    /// Every card is titled, not only the selected one as natively, so a title must read as
+    /// clearly unselected as selected: full strength, one fixed size at every window size, and
+    /// centred between the card's lower edge and the plate's, not around a highlight only the
+    /// selected card draws (KHA-1057).
+    @Test("Titles render full-strength at one size, centred below the card")
+    func windowTitlesAreUniformAndCentred() throws {
+        let size = NSSize(width: 700, height: 600)
         var appearance = AppSettings()
         appearance.windowSelectionStyle = .filled
         let window = StageWindowData(
             id: 1, windowID: 1, ownerBundleID: "com.apple.finder",
             ownerName: "Finder", windowTitle: "Hg Title", previewImage: nil
         )
-        func glyphSize(_ bitmap: NSBitmapImageRep, rows: Range<Int>) -> CGSize {
+        struct Glyphs { var box: CGRect; var peak: CGFloat }
+        func glyphs(_ bitmap: NSBitmapImageRep, rows: Range<Int>) -> Glyphs? {
             var minX = bitmap.pixelsWide, minY = bitmap.pixelsHigh
             var maxX = -1, maxY = -1
+            var peak: CGFloat = 0
             for y in rows {
                 for x in 0..<bitmap.pixelsWide {
-                    guard let color = bitmap.colorAt(x: x, y: y),
-                          min(color.redComponent, color.greenComponent, color.blueComponent) > 0.7
-                    else { continue }
+                    guard let color = bitmap.colorAt(x: x, y: y) else { continue }
+                    let level = min(color.redComponent, color.greenComponent, color.blueComponent)
+                    guard level > 0.5 else { continue }
+                    peak = max(peak, level)
                     minX = min(minX, x); maxX = max(maxX, x)
                     minY = min(minY, y); maxY = max(maxY, y)
                 }
             }
-            #expect(maxX >= minX && maxY >= minY)
-            return CGSize(width: maxX - minX + 1, height: maxY - minY + 1)
+            guard maxX >= minX, maxY >= minY else { return nil }
+            return Glyphs(box: CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1), peak: peak)
         }
-        for scale: CGFloat in [1, 1.5, 2, 2.5] {
-            let fontSize = 13.5 * scale.squareRoot()
-            let metrics = StageMetrics.standard.scaled(by: scale)
-            let image = try #require(renderSwiftUI(
-                WindowPreviewView(window: window, isWindowSelected: true,
-                    metrics: metrics, appearance: appearance)
-                    .environment(\.colorScheme, .dark), size: size
-            ))
-            try saveImage(image, name: "06_gentle_title_\(scale)")
-            let bitmap = try #require(normalizedBitmap(image, size: size))
-            // Only the title region, below the preview: measure actual bright glyph pixels,
-            // rather than a frame that would pass even if the text were scaled or clipped.
-            let top = size.height / 2 - metrics.cardHeight / 2
-                + metrics.cardPadding + metrics.thumbnailHeight + metrics.titleSpacing
-            let bottom = top + metrics.titleHeight
-            let measured = glyphSize(bitmap, rows: Int(top * 2)..<Int(bottom * 2))
-            // Compare against text rendered at the intended point size. System-font optical
-            // sizing changes glyph proportions, so multiplying baseline pixels is not a reference.
-            let referenceSize = NSSize(width: 200, height: 60)
-            let reference = try #require(renderSwiftUI(
-                Text("Hg Title").font(.system(size: fontSize, weight: .bold)).foregroundStyle(.white),
-                size: referenceSize
-            ))
-            let referenceBitmap = try #require(normalizedBitmap(reference, size: referenceSize))
-            let expected = glyphSize(referenceBitmap, rows: 0..<referenceBitmap.pixelsHigh)
-            #expect(abs(measured.width - expected.width) <= 2)
-            #expect(abs(measured.height - expected.height) <= 2)
+
+        // The same title on its own, centred in a frame, gives the glyphs' size and how far
+        // their ink sits from a centred text box (descenders pull it down).
+        let referenceSize = NSSize(width: 300, height: 80)
+        let reference = try #require(renderSwiftUI(
+            Text("Hg Title")
+                .font(.system(size: DockGlass.Label.standardFontSize, weight: DockGlass.Label.weight))
+                .foregroundStyle(.white)
+                .frame(width: referenceSize.width, height: referenceSize.height),
+            size: referenceSize
+        ))
+        let referenceBitmap = try #require(normalizedBitmap(reference, size: referenceSize))
+        let expected = try #require(glyphs(referenceBitmap, rows: 0..<referenceBitmap.pixelsHigh))
+        let inkOffset = expected.box.midY - referenceSize.height
+
+        for scale: CGFloat in [1, 1.45, 2, 2.5] {
+            for selected in [false, true] {
+                let metrics = StageMetrics.standard.scaled(by: scale)
+                let image = try #require(renderSwiftUI(
+                    WindowPreviewView(window: window, isWindowSelected: selected,
+                        metrics: metrics, appearance: appearance)
+                        .environment(\.colorScheme, .dark), size: size
+                ))
+                try saveImage(image, name: "06_title_\(scale)_\(selected)")
+                let bitmap = try #require(normalizedBitmap(image, size: size))
+                // Only the band below the preview, which ends at the card's (and plate's) edge.
+                let cardTop = size.height / 2 - metrics.cardHeight / 2
+                let bandTop = cardTop + metrics.cardPadding + metrics.thumbnailHeight
+                let bandBottom = cardTop + metrics.cardHeight
+                let measured = try #require(glyphs(bitmap, rows: Int(bandTop * 2)..<Int(bandBottom * 2)))
+
+                #expect(abs(measured.box.width - expected.box.width) <= 2, "scale \(scale)")
+                #expect(abs(measured.box.height - expected.box.height) <= 2, "scale \(scale)")
+                #expect(measured.peak > 0.95, "an unselected title is as strong as a selected one")
+                let bandCentre = (bandTop + bandBottom) // in pixels at 2x
+                #expect(abs((measured.box.midY - bandCentre) - inkOffset) <= 2, "scale \(scale) selected \(selected)")
+            }
         }
     }
 
@@ -894,14 +912,14 @@ struct ScreenshotTests {
 
         let difference = screenshotDifference(originalBitmap, normalizedEnlarged)
         #expect(difference.comparedPixelCount > 10_000)
-        // Placeholder icons are the native switcher's 102-point icon at every scale, so they
-        // alone do not scale with the rest of the composition.
+        // Placeholder icons are the native switcher's 102-point icon and titles the native
+        // 13.5-point label at every scale, so those two do not scale with the rest.
         #expect(
             difference.meanChannelDifference < 0.045,
             "mean normalized screenshot difference was \(difference.meanChannelDifference)"
         )
         #expect(
-            difference.changedPixelRatio < 0.12,
+            difference.changedPixelRatio < 0.14,
             "normalized screenshot changed-pixel ratio was \(difference.changedPixelRatio)"
         )
     }

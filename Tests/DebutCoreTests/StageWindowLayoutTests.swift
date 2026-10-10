@@ -174,14 +174,25 @@ struct StageWindowLayoutTests {
 
         #expect(scaled.cardWidth == metrics.cardWidth * 1.5)
         #expect(scaled.cardHeight == metrics.cardHeight * 1.5)
-        #expect(abs(scaled.titleFontSize - 13.5 * 1.5.squareRoot()) < 0.001)
+        #expect(scaled.titleFontSize == metrics.titleFontSize)
         #expect(scaled.thumbnailCornerRadius == metrics.thumbnailCornerRadius * 1.5)
         #expect(metrics.scaled(by: 1) == metrics)
     }
 
-    @Test("Titles follow the approved gentle curve", arguments: [1.0, 1.5, 2.0, 2.5])
-    func gentleTitleScale(scale: Double) {
-        #expect(abs(metrics.scaled(by: scale).titleFontSize - 13.5 * scale.squareRoot()) < 0.0001)
+    @Test("Titles stay the native label size at every window size", arguments: [0.5, 1.0, 1.45, 2.0, 2.5])
+    func fixedTitleSize(scale: Double) {
+        #expect(metrics.scaled(by: scale).titleFontSize == 13.5)
+        #expect(StageMetrics.icons.scaled(by: scale).titleFontSize == 13.5)
+    }
+
+    @Test("A title's band runs from the card's lower edge to the plate's", arguments: [1.0, 1.45, 2.5])
+    func titleBandSpansCardToPlateEdge(scale: Double) {
+        for base in [StageMetrics.standard, StageMetrics.icons] {
+            let scaled = base.scaled(by: scale)
+            let stage = StageWindowLayout(windowCount: 2, availableWidth: 10_000, metrics: scaled)
+            let cardBottom = scaled.topPadding + scaled.cardPadding + scaled.thumbnailHeight
+            #expect(abs(scaled.titleBandHeight - (stage.stageSize.height - cardBottom)) < 1e-9)
+        }
     }
 
     @Test("A thumbnail's corner is cut like the app icon badged over it")
