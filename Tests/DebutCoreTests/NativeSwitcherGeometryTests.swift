@@ -84,6 +84,9 @@ struct NativeSwitcherGeometryTests {
     @Test("Titles use the native label size at 100%")
     func titleUsesNativeLabelSize() {
         #expect(StageMetrics.standard.titleFontSize == DockGlass.Label.standardFontSize)
+        // Fitted against native Command-Tab label ink on macOS 27 (DockGlass 0.3.0); the
+        // earlier 13.5pt bold read larger than native.
+        #expect(StageMetrics.standard.titleFontSize == 12.8125)
     }
 
     @Test("A failed capture's placeholder icon is the native 102-point artwork")

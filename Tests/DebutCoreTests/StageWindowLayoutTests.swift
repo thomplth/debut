@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import DockGlass
 @testable import DebutCore
 
 @Suite("StageWindowLayout")
@@ -181,8 +182,8 @@ struct StageWindowLayoutTests {
 
     @Test("Titles stay the native label size at every window size", arguments: [0.5, 1.0, 1.45, 2.0, 2.5])
     func fixedTitleSize(scale: Double) {
-        #expect(metrics.scaled(by: scale).titleFontSize == 13.5)
-        #expect(StageMetrics.icons.scaled(by: scale).titleFontSize == 13.5)
+        #expect(metrics.scaled(by: scale).titleFontSize == DockGlass.Label.standardFontSize)
+        #expect(StageMetrics.icons.scaled(by: scale).titleFontSize == DockGlass.Label.standardFontSize)
     }
 
     @Test("A title's band runs from the card's lower edge to the plate's", arguments: [1.0, 1.45, 2.5])

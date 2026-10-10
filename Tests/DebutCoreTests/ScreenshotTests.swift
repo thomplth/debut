@@ -837,7 +837,7 @@ struct ScreenshotTests {
         let referenceSize = NSSize(width: 300, height: 80)
         let reference = try #require(renderSwiftUI(
             Text("Hg Title")
-                .font(.system(size: DockGlass.Label.standardFontSize, weight: DockGlass.Label.weight))
+                .font(DockGlass.Label.font(size: DockGlass.Label.standardFontSize))
                 .foregroundStyle(.white)
                 .frame(width: referenceSize.width, height: referenceSize.height),
             size: referenceSize
