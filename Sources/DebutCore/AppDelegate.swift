@@ -305,9 +305,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         spaceManager.activateLaunchSpace(focusedWindowID: focusedWindowID)
 
+        AppIconCache.shared.iconScale = currentSettings.iconScale
         AppIconCache.shared.warm(
             bundleIDs: spaceManager.allWindowOwnerBundleIDs,
-            sizes: AppIconCache.overlayIconSizes,
+            sizes: AppIconCache.shared.warmSizes,
             badgeSizes: AppIconCache.overlayBadgeIconSizes
         )
 
@@ -1175,6 +1176,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             appearance: currentSettings, forceDisplayStackIndicator: forceDisplayStackIndicator,
             keyboardWindowMoveAnimation: spaceController.keyboardWindowMoveAnimation,
             overlayKeyboardInteractionSequence: spaceController.overlayKeyboardInteractionSequence)
+        vm.cardStyle = OverlayCardStyle(previewsAvailable: spaceController.windowPreviewsEnabled)
         vm.tutorialScope = spaceController.activeTutorialScope
         vm.tutorialCoachmark = spaceController.tutorialCoachmark
         return vm
@@ -1185,6 +1187,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             selectedIndex: spaceController.altTabSelectionIndex, windowPreviews: spaceController.windowPreviews,
             windowSizes: spaceController.windowSizes, appearance: currentSettings,
             overlayKeyboardInteractionSequence: spaceController.overlayKeyboardInteractionSequence)
+        vm.cardStyle = OverlayCardStyle(previewsAvailable: spaceController.windowPreviewsEnabled)
         vm.tutorialScope = spaceController.activeTutorialScope
         vm.tutorialCoachmark = spaceController.tutorialCoachmark
         return vm
@@ -1852,6 +1855,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             diag.report("desktop_swipe_tap_failed")
         }
         keyboardService?.features = newSettings.features
+        if AppIconCache.shared.iconScale != newSettings.iconScale {
+            AppIconCache.shared.iconScale = newSettings.iconScale
+            // Off the main thread, before an overlay asks for the size.
+            AppIconCache.shared.warm(
+                bundleIDs: spaceController?.spaceManager.allWindowOwnerBundleIDs ?? [],
+                sizes: AppIconCache.shared.warmSizes
+            )
+        }
         spaceController?.windowPreviewsEnabled = OnboardingCapturePolicy.isEnabled(
             previewsRequested: newSettings.features.windowPreviews,
             screenRecordingGranted: onboardingPermissionClient.currentState().screenRecordingGranted
@@ -1884,6 +1895,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             spaceManager: currentSpaceManager
         )
         vm.crashReportingAvailable = crashReports.isAvailable
+        vm.screenRecordingGranted = onboardingPermissionClient.currentState().screenRecordingGranted
+            && onboardingViewModel?.screenRecordingRequiresRelaunch != true
         vm.onSettingsChanged = { [weak self] newSettings in
             DispatchQueue.main.async {
                 guard let self else { return }

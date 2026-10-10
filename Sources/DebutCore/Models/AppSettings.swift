@@ -120,6 +120,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Enlarge the complete presentation proportionally while retaining the original size as
     /// the lower end of the user-selectable range.
     public static let defaultStageScale: Double = 1.45
+    public static let defaultIconScale: Double = 1
     /// The user-selectable range. Automatic viewport fitting has its own lower floor.
     public static let minimumStageScale: Double = 1.0
     public static let maximumStageScale: Double = 2.5
@@ -174,6 +175,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var stageCornerRadius: Double
     public var inactiveStageScale: Double
     public var stageScale: Double
+    /// The same size, for the icon cards drawn without previews. 100% is the native switcher.
+    public var iconScale: Double
     /// Space between preview card frames before the overlay's automatic scale is applied.
     public var previewCardSpacing: Double
     /// Whether each card takes its own window's shape rather than the display's.
@@ -220,6 +223,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.stageCornerRadius = Self.defaultStageCornerRadius
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
+        self.iconScale = Self.defaultIconScale
         self.previewCardSpacing = Self.defaultPreviewCardSpacing
         self.adaptiveCardSizing = true
         self.overlayOnMainDisplayOnly = true
@@ -284,6 +288,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
             forKey: .stageScale
         ) ?? Self.defaultStageScale
         stageScale = min(Self.maximumStageScale, max(Self.minimumStageScale, savedStageScale))
+        iconScale = min(Self.maximumStageScale, max(
+            Self.minimumStageScale,
+            try container.decodeIfPresent(Double.self, forKey: .iconScale) ?? Self.defaultIconScale
+        ))
         let savedPreviewCardSpacing = try container.decodeIfPresent(
             Double.self,
             forKey: .previewCardSpacing
@@ -353,5 +361,12 @@ public struct AppSettings: Codable, Sendable, Equatable {
             TimeInterval.self,
             forKey: .previewCacheTTL
         ) ?? Self.defaultPreviewCacheTTL
+    }
+}
+
+extension AppSettings {
+    /// The size the switchers draw at for a card style: previews and icons are sized apart.
+    public func overlayScale(for cardStyle: OverlayCardStyle) -> Double {
+        cardStyle == .icons ? iconScale : stageScale
     }
 }

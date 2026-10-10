@@ -105,6 +105,8 @@ public struct StageOverlayViewModel: Sendable {
     /// from a preview, which arrives asynchronously and would reshape the grid mid-overlay.
     public let windowSizes: [CGWindowID: CGSize]
     public var appearance: AppSettings
+    /// Icons when previews are off or Screen Recording is not granted.
+    public var cardStyle: OverlayCardStyle = .previews
     /// Test-only presentation mode used by the single-display Tart guest so screenshots can
     /// review the display indicator without changing normal display-stack behavior.
     public var forceDisplayStackIndicator: Bool

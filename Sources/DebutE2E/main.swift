@@ -1106,6 +1106,9 @@ func spaceWindowCounts(in state: [String: String]) -> [Int] {
 /// width, so the counts alone no longer say where one is. A window the running app never
 /// measured, or a session with the setting off, leaves the card on the display's own shape.
 func spaceCardAspects(in state: [String: String]) -> [[CGFloat?]] {
+    // Every geometry helper reads card aspects first, so this is where the drawn card style is
+    // learned: without Screen Recording the overlay draws icon slots, not preview cards.
+    reportedCardStyle = OverlayCardStyle(rawValue: state["overlayCardStyle"] ?? "") ?? .previews
     let counts = spaceWindowCounts(in: state)
     let uniform = counts.map { [CGFloat?](repeating: nil, count: $0) }
     guard interactionSettings.adaptiveCardSizing else { return uniform }
@@ -1116,6 +1119,9 @@ func spaceCardAspects(in state: [String: String]) -> [[CGFloat?]] {
 // Read before any geometry helper runs: top-level declarations in main.swift initialize in
 // source order, so the hit tests below cannot reach a setting declared beneath them.
 let interactionSettings = (try? StateStore().loadSettings()) ?? AppSettings()
+/// The card style the running overlay last reported. Declared beside the settings for the same
+/// initialization-order reason.
+nonisolated(unsafe) var reportedCardStyle = OverlayCardStyle.previews
 
 /// The rectangle the overlay actually occupies, which stops short of the menu bar and any camera
 /// housing. Every card coordinate below is measured in it and then translated back to the screen,
@@ -1131,9 +1137,11 @@ let overlayBounds = OverlayDisplayResolver.overlayBounds(
 /// setting and how many windows the display has to hold.
 func drawnMetrics(cardAspects: [[CGFloat?]]) -> StageMetrics {
     StageConstants.drawnMetrics(
-        stageScale: CGFloat(interactionSettings.stageScale),
+        stageScale: CGFloat(interactionSettings.overlayScale(for: reportedCardStyle)),
         contentAspects: cardAspects,
-        containerSize: overlayBounds.size
+        containerSize: overlayBounds.size,
+        cardSpacing: CGFloat(interactionSettings.previewCardSpacing),
+        cardStyle: reportedCardStyle
     )
 }
 
@@ -1179,13 +1187,14 @@ func dragViewDropPoint(
         || NSScreen.screens.count > 1
     return StageConstants.dragViewDropPoint(
         contentAspects: cardAspects,
-        stageScale: CGFloat(interactionSettings.stageScale),
+        stageScale: CGFloat(interactionSettings.overlayScale(for: reportedCardStyle)),
         cardSpacing: CGFloat(interactionSettings.previewCardSpacing),
         containerSize: overlayBounds.size,
         reservesDisplayIndicator: reservesIndicator,
         sourceSpaceIndex: sourceSpaceIndex,
         sourceWindowIndex: sourceWindowIndex,
-        destinationSpaceIndex: destinationSpaceIndex
+        destinationSpaceIndex: destinationSpaceIndex,
+        cardStyle: reportedCardStyle
     ).map { CGPoint(x: overlayBounds.minX + $0.x, y: overlayBounds.minY + $0.y) }
 }
 

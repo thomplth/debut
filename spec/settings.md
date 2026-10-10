@@ -54,8 +54,12 @@ Option-Tab remain available. Option-Tab has its own enable control; disabling it
 passes its configured activation shortcuts through unchanged.
 Saved shortcuts are retained when a feature is off.
 
-Disabling previews stops window screenshot capture and clears cached images;
-cards show icons and titles. Screen Recording enables screenshot previews and
+Disabling previews stops window screenshot capture and clears cached images.
+Without previews, whether the toggle is off or Screen Recording is not granted,
+both switchers draw each window as a native Command-Tab icon slot with its title,
+at a separate icon size (default 100%, the native switcher) that the same size
+slider edits. A window whose capture failed keeps its card with the app's icon at
+the native 102 pt. Screen Recording enables screenshot previews and
 can affect title availability. Debut no longer captures or paints desktop
 wallpaper. Accessibility is required for global input and window control.
 

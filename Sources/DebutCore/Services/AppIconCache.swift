@@ -21,7 +21,34 @@ public final class AppIconCache: @unchecked Sendable {
     public static let badgeRasterSize = StageMetrics.standard
         .scaled(by: CGFloat(AppSettings.maximumStageScale)).badgeSize
 
+    /// An icon card at native size draws the same 128-point canvas as the placeholder, so the
+    /// two share one warmed raster and the default costs nothing extra.
+    public static let nativeIconSlotRasterSize = placeholderIconRasterSize
+    /// Larger icon cards downsample one raster at the largest size. Warmed only once the icon
+    /// size is set above native: it is a 640-pixel bitmap per app.
+    public static let largeIconSlotRasterSize = StageMetrics.placeholderIconCanvasSize
+        * CGFloat(AppSettings.maximumStageScale)
+
     public static let overlayIconSizes: [CGFloat] = [placeholderIconRasterSize]
+
+    /// The raster icon cards draw from at an icon size.
+    public static func iconSlotRasterSize(iconScale: Double) -> CGFloat {
+        iconScale > 1 ? largeIconSlotRasterSize : nativeIconSlotRasterSize
+    }
+
+    /// Every size to warm for an app, given the icon size icon cards are drawn at.
+    public static func overlayIconSizes(iconScale: Double) -> [CGFloat] {
+        Array(Set(overlayIconSizes + [iconSlotRasterSize(iconScale: iconScale)])).sorted()
+    }
+
+    /// The icon size icon cards draw at, which decides what launches warm.
+    public var iconScale: Double {
+        get { lock.lock(); defer { lock.unlock() }; return storedIconScale }
+        set { lock.lock(); storedIconScale = newValue; lock.unlock() }
+    }
+
+    /// The sizes to warm for a newly seen app.
+    public var warmSizes: [CGFloat] { Self.overlayIconSizes(iconScale: iconScale) }
 
     /// Warmed apart from the plain sizes because the badge's bitmap carries a baked drop shadow.
     public static let overlayBadgeIconSizes: [CGFloat] = [badgeRasterSize]
@@ -117,6 +144,7 @@ public final class AppIconCache: @unchecked Sendable {
     private let lock = NSLock()
     private var icons: [Key: NSImage] = [:]
     private var requested: Set<Key> = []
+    private var storedIconScale: Double = AppSettings.defaultIconScale
 
     public init(rasterize: @escaping (String, CGFloat) -> NSImage? = AppIconCache.rasterizeApplicationIcon) {
         self.rasterize = rasterize

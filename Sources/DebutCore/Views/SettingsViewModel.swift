@@ -113,6 +113,24 @@ public struct SettingsViewModel: Sendable {
     public var onCheckForUpdates: (@Sendable () -> Void)?
     /// Hides the crash report preference in builds that have nowhere to send reports.
     public var crashReportingAvailable = false
+    /// Without it the switchers draw icons, so the size slider edits the icon size.
+    public var screenRecordingGranted = true
+
+    /// What the switchers are drawing with the current settings and permission.
+    public var overlayCardStyle: OverlayCardStyle {
+        OverlayCardStyle(previewsAvailable: settings.features.windowPreviews && screenRecordingGranted)
+    }
+
+    /// The one size slider: the preview size, or the icon size while icons are drawn.
+    public var overlaySize: Double {
+        get { settings.overlayScale(for: overlayCardStyle) }
+        set {
+            switch overlayCardStyle {
+            case .previews: settings.stageScale = newValue
+            case .icons: settings.iconScale = newValue
+            }
+        }
+    }
 
     public init(settings: AppSettings = AppSettings(), spaceManager: SpaceManager = SpaceManager()) {
         self.settings = settings

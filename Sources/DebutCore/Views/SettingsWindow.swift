@@ -397,18 +397,20 @@ public struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Window size")
+                    Text(viewModel.overlayCardStyle == .icons ? "Icon size" : "Window size")
                     Spacer()
-                    Text("\(Int((viewModel.settings.stageScale * 100).rounded()))%")
+                    Text("\(Int((viewModel.overlaySize * 100).rounded()))%")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(
-                    value: $viewModel.settings.stageScale,
+                    value: $viewModel.overlaySize,
                     in: AppSettings.minimumStageScale...AppSettings.maximumStageScale,
                     step: AppSettings.stageScaleStep
                 )
-                Text("Large workspaces scale down automatically to fit.")
+                Text(viewModel.overlayCardStyle == .icons
+                    ? "Without window previews, windows show as app icons. 100% matches the macOS app switcher."
+                    : "100% matches the macOS app switcher. Large workspaces scale down automatically to fit.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

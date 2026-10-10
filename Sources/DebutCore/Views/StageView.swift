@@ -956,9 +956,10 @@ public struct StageConstants {
         contentAspects: [[CGFloat?]],
         containerSize: CGSize,
         cardSpacing: CGFloat? = nil,
-        rowSpacing: CGFloat? = nil
+        rowSpacing: CGFloat? = nil,
+        cardStyle: OverlayCardStyle = .previews
     ) -> CGFloat {
-        let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize)
+        let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize, cardStyle: cardStyle)
         let cardMetrics = cardSpacing.map(shapedMetrics.withCardSpacing) ?? shapedMetrics
         let metrics = rowSpacing.map(cardMetrics.withRowSpacing) ?? cardMetrics
         let floor = minimumFittedStageScale
@@ -1005,9 +1006,10 @@ public struct StageConstants {
         contentAspects: [[CGFloat?]],
         containerSize: CGSize,
         cardSpacing: CGFloat? = nil,
-        rowSpacing: CGFloat? = nil
+        rowSpacing: CGFloat? = nil,
+        cardStyle: OverlayCardStyle = .previews
     ) -> StageMetrics {
-        let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize)
+        let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize, cardStyle: cardStyle)
         let cardMetrics = cardSpacing.map(shapedMetrics.withCardSpacing) ?? shapedMetrics
         let metrics = rowSpacing.map(cardMetrics.withRowSpacing) ?? cardMetrics
         return metrics.scaled(by: fittedStageScale(
@@ -1015,7 +1017,8 @@ public struct StageConstants {
             contentAspects: contentAspects,
             containerSize: containerSize,
             cardSpacing: cardSpacing,
-            rowSpacing: rowSpacing
+            rowSpacing: rowSpacing,
+            cardStyle: cardStyle
         ))
     }
 
@@ -1148,7 +1151,8 @@ public struct StageConstants {
         reservesDisplayIndicator: Bool,
         sourceSpaceIndex: Int,
         sourceWindowIndex: Int,
-        destinationSpaceIndex: Int
+        destinationSpaceIndex: Int,
+        cardStyle: OverlayCardStyle = .previews
     ) -> CGPoint? {
         var nextWindowID: CGWindowID = 1
         let fingerprint = StageStructureFingerprint(stages: contentAspects.map { aspects in
@@ -1161,7 +1165,8 @@ public struct StageConstants {
             stageScale: stageScale,
             contentAspects: contentAspects,
             containerSize: containerSize,
-            cardSpacing: cardSpacing
+            cardSpacing: cardSpacing,
+            cardStyle: cardStyle
         )
         guard let snapshot = CompactDragSnapshot.make(
             sessionID: UUID(),
@@ -1336,10 +1341,11 @@ public struct StageOverlayView: View {
             // moves a card between spaces must not resize every other card while it is in
             // flight.
             let metrics = StageConstants.drawnMetrics(
-                stageScale: CGFloat(viewModel.appearance.stageScale),
+                stageScale: CGFloat(viewModel.appearance.overlayScale(for: viewModel.cardStyle)),
                 contentAspects: restingAspects,
                 containerSize: geo.size,
-                cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing)
+                cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
+                cardStyle: viewModel.cardStyle
             )
             // The resting grids. A compact drag freezes their rows at pickup rather than
             // rewrapping them while the pointer moves.
@@ -1788,10 +1794,11 @@ public struct StageOverlayView: View {
             move: move
         )
         let sourceMetrics = StageConstants.drawnMetrics(
-            stageScale: CGFloat(viewModel.appearance.stageScale),
+            stageScale: CGFloat(viewModel.appearance.overlayScale(for: viewModel.cardStyle)),
             contentAspects: beforeAspects,
             containerSize: containerSize,
-            cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing)
+            cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
+            cardStyle: viewModel.cardStyle
         )
         let inactiveScale = CGFloat(viewModel.appearance.inactiveStageScale)
         guard let source = StageConstants.windowCardCenter(
@@ -1892,10 +1899,11 @@ public struct StageOverlayView: View {
     ) -> CompactDragSnapshot? {
         let aspects = viewModel.stages.map { $0.windows.map(\.contentAspect) }
         let metrics = StageConstants.drawnMetrics(
-            stageScale: CGFloat(viewModel.appearance.stageScale),
+            stageScale: CGFloat(viewModel.appearance.overlayScale(for: viewModel.cardStyle)),
             contentAspects: aspects,
             containerSize: containerSize,
-            cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing)
+            cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
+            cardStyle: viewModel.cardStyle
         )
         return CompactDragSnapshot.make(
             sessionID: sessionID,
@@ -2338,7 +2346,14 @@ struct WindowPreviewView: View {
         return VStack(spacing: metrics.titleSpacing) {
             ZStack(alignment: .topLeading) {
                 Group {
-                    if let cgImage = window.previewImage {
+                    if metrics.cardStyle == .icons {
+                        IconSlotView(
+                            window: window,
+                            isSelected: isWindowSelected,
+                            metrics: metrics,
+                            iconScale: appearance.iconScale
+                        )
+                    } else if let cgImage = window.previewImage {
                         Image(decorative: cgImage, scale: 1.0)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
@@ -2405,8 +2420,9 @@ struct WindowPreviewView: View {
                 }
                 .frame(width: metrics.thumbnailWidth, height: metrics.thumbnailHeight)
 
-                if StageMotion.showsAppIcon(bundleID: window.ownerBundleID) &&
-                    StageMotion.showsAppIconBadge(hasPreview: window.previewImage != nil) {
+                if metrics.cardStyle == .previews,
+                   StageMotion.showsAppIcon(bundleID: window.ownerBundleID),
+                   StageMotion.showsAppIconBadge(hasPreview: window.previewImage != nil) {
                     // The badge's shadow is in its bitmap, which is therefore padded and draws
                     // past the badge's box on every side. Framing that padded image directly
                     // would widen the card, so the box keeps the badge's size and the picture
@@ -2441,12 +2457,17 @@ struct WindowPreviewView: View {
                     // Blends with the stage's glass, so nothing between the two may form a
                     // compositing group: the card's lift shadow is applied only for Magnify.
                     DockGlassSelectionHighlight(RoundedRectangle(
-                        cornerRadius: CGFloat(appearance.selectorCornerRadius)
-                            * metrics.scaleFactor,
+                        cornerRadius: metrics.selectorCornerRadius(
+                            userRadius: appearance.selectorCornerRadius
+                        ),
                         style: .continuous
                     ))
                     .dockGlassStyle(appearance.dockGlassStyle)
                     .frame(width: selectorSize.width, height: selectorSize.height)
+                    // Native nudges an icon's highlight with the icon itself.
+                    .offset(metrics.cardStyle == .icons
+                        ? DockGlass.Metrics(iconSize: metrics.thumbnailHeight).iconCanvasOffset
+                        : .zero)
                     .allowsHitTesting(false)
                 }
             }
@@ -2470,6 +2491,35 @@ struct WindowPreviewView: View {
         ))
         .animation(.spring(duration: 0.18, bounce: 0.08), value: isWindowSelected)
         .animation(.easeOut(duration: 0.12), value: isDragging)
+    }
+}
+
+/// An app icon in a native switcher slot, drawn as `DockGlass.CartoucheIcon` draws it: the full
+/// icon canvas, nudged as native places it, and the selected icon very slightly smaller and darker.
+/// The bitmap comes from the warmed cache, never from a lazy NSWorkspace icon (KHA-481).
+private struct IconSlotView: View {
+    let window: StageWindowData
+    let isSelected: Bool
+    let metrics: StageMetrics
+    let iconScale: Double
+
+    var body: some View {
+        let native = DockGlass.Metrics(iconSize: metrics.thumbnailHeight)
+        Color.clear
+            .overlay {
+                if StageMotion.showsAppIcon(bundleID: window.ownerBundleID) {
+                    AppIconImage(
+                        bundleID: window.ownerBundleID,
+                        name: window.ownerName,
+                        iconSize: AppIconCache.iconSlotRasterSize(iconScale: iconScale),
+                        fallbackBaseSize: StageMetrics.placeholderIconCanvasSize
+                    )
+                    .frame(width: native.iconCanvasSize, height: native.iconCanvasSize)
+                    .brightness(isSelected ? -0.0225 : 0)
+                    .scaleEffect(isSelected ? 0.985 : 1)
+                    .offset(native.iconCanvasOffset)
+                }
+            }
     }
 }
 

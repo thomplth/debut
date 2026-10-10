@@ -10,6 +10,8 @@ public struct AltTabOverlayViewModel: Sendable {
     public let windows: [StageWindowData]
     public var selectedIndex: Int
     public var appearance: AppSettings
+    /// Icons when previews are off or Screen Recording is not granted.
+    public var cardStyle: OverlayCardStyle = .previews
     public var overlayKeyboardInteractionSequence: Int
 
     public init(
@@ -51,7 +53,8 @@ public struct AltTabOverlayViewModel: Sendable {
         Self.drawnMetrics(
             appearance: appearance,
             contentAspects: windows.map(\.contentAspect),
-            containerSize: containerSize
+            containerSize: containerSize,
+            cardStyle: cardStyle
         )
     }
 
@@ -59,13 +62,15 @@ public struct AltTabOverlayViewModel: Sendable {
     static func drawnMetrics(
         appearance: AppSettings,
         contentAspects: [CGFloat?],
-        containerSize: CGSize
+        containerSize: CGSize,
+        cardStyle: OverlayCardStyle = .previews
     ) -> StageMetrics {
         StageConstants.drawnMetrics(
-            stageScale: CGFloat(appearance.stageScale),
+            stageScale: CGFloat(appearance.overlayScale(for: cardStyle)),
             contentAspects: [contentAspects],
             containerSize: containerSize,
-            cardSpacing: CGFloat(appearance.previewCardSpacing)
+            cardSpacing: CGFloat(appearance.previewCardSpacing),
+            cardStyle: cardStyle
         )
     }
 

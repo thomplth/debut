@@ -1,6 +1,17 @@
 import CoreGraphics
 import DockGlass
 
+/// What a card shows: a window's preview, or — when previews are off or Screen Recording is not
+/// granted — the native switcher's icon for the window's app.
+public enum OverlayCardStyle: String, Sendable, Equatable {
+    case previews
+    case icons
+
+    public init(previewsAvailable: Bool) {
+        self = previewsAvailable ? .previews : .icons
+    }
+}
+
 /// The sizes every window card on one display is drawn at.
 ///
 /// Cards never shrink to fit: a space with more windows than fit across the display wraps into
@@ -30,6 +41,9 @@ public struct StageMetrics: Equatable, Sendable {
     /// thumbnail's width also moves with the display's shape and so cannot stand in for it.
     public let scale: CGFloat
 
+    /// Icon slots are square and never take a window's or a display's shape.
+    public internal(set) var cardStyle: OverlayCardStyle = .previews
+
     /// The native Command-Tab switcher (`DockGlass.Metrics.standard`) with a preview in each
     /// 102-point icon slot. The card is the slot plus the 9-point selection highlight around it
     /// and the title below, so the plate's insets are native's slot insets less that padding:
@@ -52,6 +66,26 @@ public struct StageMetrics: Equatable, Sendable {
         bottomPadding: 0,
         minStageWidth: 300,
         scale: 1
+    )
+
+    /// The native switcher exactly: an app icon in each square 102-point slot, on native's
+    /// 134-point pitch, with everything around the slot the same as a preview card's.
+    public static let icons = StageMetrics(
+        thumbnailWidth: DockGlass.Metrics.standard.iconSize,
+        thumbnailHeight: DockGlass.Metrics.standard.iconSize,
+        cardPadding: standard.cardPadding,
+        titleWidthAllowance: standard.titleWidthAllowance,
+        titleSpacing: standard.titleSpacing,
+        titleHeight: standard.titleHeight,
+        badgeSize: standard.badgeSize,
+        windowSpacing: standard.windowSpacing,
+        rowSpacing: standard.rowSpacing,
+        padding: standard.padding,
+        topPadding: standard.topPadding,
+        bottomPadding: standard.bottomPadding,
+        minStageWidth: standard.minStageWidth,
+        scale: 1,
+        cardStyle: .icons
     )
 
     /// The cards the tutorial was laid out for, before stages took the native switcher's
@@ -79,7 +113,11 @@ public struct StageMetrics: Equatable, Sendable {
     /// make a 9:16 monitor's card 284 points tall, which `fittedStageScale` then has to shrink
     /// the whole overlay to absorb; holding the area instead gives a portrait card the same
     /// visual weight as a landscape one, so only the shape changes.
-    public static func shaped(forDisplay displaySize: CGSize) -> StageMetrics {
+    public static func shaped(
+        forDisplay displaySize: CGSize,
+        cardStyle: OverlayCardStyle = .previews
+    ) -> StageMetrics {
+        if cardStyle == .icons { return icons }
         let standard = Self.standard
         guard displaySize.width > 0, displaySize.height > 0 else { return standard }
 
@@ -117,7 +155,7 @@ public struct StageMetrics: Equatable, Sendable {
     /// less horizontal room than the widest one beside it. An aspect of `nil` is a window whose
     /// size has not been discovered, and the display's shape is the honest answer for it.
     public func adapted(toContentAspect aspect: CGFloat?) -> StageMetrics {
-        guard let aspect, aspect > 0, thumbnailWidth > 0 else { return self }
+        guard cardStyle == .previews, let aspect, aspect > 0, thumbnailWidth > 0 else { return self }
         return withThumbnailWidth(max(
             min(thumbnailHeight * aspect, thumbnailWidth),
             minimumAdaptiveWidth
@@ -141,7 +179,8 @@ public struct StageMetrics: Equatable, Sendable {
             topPadding: topPadding,
             bottomPadding: bottomPadding,
             minStageWidth: minStageWidth,
-            scale: scale
+            scale: scale,
+            cardStyle: cardStyle
         )
     }
 
@@ -162,7 +201,8 @@ public struct StageMetrics: Equatable, Sendable {
             topPadding: topPadding,
             bottomPadding: bottomPadding,
             minStageWidth: minStageWidth,
-            scale: scale
+            scale: scale,
+            cardStyle: cardStyle
         )
     }
 
@@ -184,7 +224,8 @@ public struct StageMetrics: Equatable, Sendable {
             topPadding: topPadding,
             bottomPadding: bottomPadding,
             minStageWidth: minStageWidth,
-            scale: scale
+            scale: scale,
+            cardStyle: cardStyle
         )
     }
 
@@ -219,7 +260,27 @@ public struct StageMetrics: Equatable, Sendable {
     /// Cut like the app icon badged over the thumbnail's top-left corner, since the badge's
     /// offset puts the icon body's own corner there. A shallower cut hugs the corner point more
     /// closely than the icon's does, leaving the thumbnail showing past the icon covering it.
-    public var thumbnailCornerRadius: CGFloat { badgeSize * Self.appIconCornerRadiusRatio }
+    public var thumbnailCornerRadius: CGFloat {
+        switch cardStyle {
+        case .previews: badgeSize * Self.appIconCornerRadiusRatio
+        // The icon's own corner, which native's highlight is concentric with.
+        case .icons: (DockGlass.Metrics.standard.selectionCornerRadius
+            - DockGlass.Metrics.standard.selectionPadding) * scale
+        }
+    }
+
+    /// The selection highlight's corner radius for the user's setting, which is tuned for
+    /// preview cards. Icons keep the user's change from the default on top of native's own
+    /// concentric radius, so the default draws exactly native's highlight.
+    public func selectorCornerRadius(userRadius: Double) -> CGFloat {
+        switch cardStyle {
+        case .previews:
+            return CGFloat(userRadius) * scale
+        case .icons:
+            let change = CGFloat(userRadius - AppSettings.defaultSelectorCornerRadius)
+            return (DockGlass.Metrics.standard.selectionCornerRadius + change) * scale
+        }
+    }
 
     /// The visual scale represented by these metrics. Rendering code uses this for the few
     /// non-layout details that belong to a stage, such as its corner radius and command hints.
@@ -242,7 +303,8 @@ public struct StageMetrics: Equatable, Sendable {
             topPadding: topPadding * scale,
             bottomPadding: bottomPadding * scale,
             minStageWidth: minStageWidth * scale,
-            scale: self.scale * scale
+            scale: self.scale * scale,
+            cardStyle: cardStyle
         )
     }
 }
