@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import DockGlass
 import Testing
 @testable import DebutCore
@@ -9,40 +10,64 @@ import Testing
 struct BadgeAndRowTests {
     private let display = CGSize(width: 2560, height: 1600)
 
-    private func drawn(_ scale: CGFloat) -> StageMetrics {
+    private func drawn(_ scale: CGFloat, badgeGrowth: Double = AppSettings.defaultBadgeGrowth) -> StageMetrics {
         StageConstants.drawnMetrics(
             stageScale: scale,
             contentAspects: [[nil, nil]],
             containerSize: display,
-            cardSpacing: CGFloat(AppSettings.defaultPreviewCardSpacing)
+            cardSpacing: CGFloat(AppSettings.defaultPreviewCardSpacing),
+            badgeGrowth: CGFloat(badgeGrowth)
         )
     }
 
-    /// The badge grows gently, with the square root of the preview's size, so a large preview
-    /// does not carry an oversized icon.
-    @Test("The badge grows gently with the preview, and the preview's corner with the badge")
-    func badgeGrowsWithPreview() {
-        let native = drawn(1)
-        let enlarged = drawn(1.45)
-        let growth = CGFloat(1.45).squareRoot()
-        #expect(abs(enlarged.badgeSize - native.badgeSize * growth) < 1e-9)
-        #expect(abs(drawn(2.5).badgeSize - native.badgeSize * CGFloat(2.5).squareRoot()) < 1e-9)
-        #expect(abs(enlarged.badgeOffset - native.badgeOffset * growth) < 1e-9)
-        #expect(abs(enlarged.thumbnailCornerRadius - native.thumbnailCornerRadius * growth) < 1e-9)
-        // The highlight stays concentric with the preview's grown corner.
+    /// The badge grows with the preview on an adjustable curve: the preview's size raised to
+    /// the badge growth setting (KHA-1062). 0 keeps it at native size, 1 grows it in proportion.
+    @Test("The badge grows on the configured curve, and the preview's corner with it",
+          arguments: [0.0, 0.5, 0.8, 1.0])
+    func badgeGrowsOnTheConfiguredCurve(growth: Double) {
+        let native = drawn(1, badgeGrowth: growth)
+        let enlarged = drawn(1.45, badgeGrowth: growth)
+        let factor = pow(CGFloat(1.45), CGFloat(growth))
+        #expect(abs(native.badgeSize - StageMetrics.standard.badgeSize) < 1e-9)
+        #expect(abs(enlarged.badgeSize - native.badgeSize * factor) < 1e-9)
+        #expect(abs(enlarged.thumbnailCornerRadius - native.thumbnailCornerRadius * factor) < 1e-9)
         let user = AppSettings().selectorCornerRadius
-        #expect(abs(native.selectorCornerRadius(userRadius: user) - CGFloat(user)) < 1e-9)
         #expect(abs(enlarged.selectorCornerRadius(userRadius: user)
-            - (CGFloat(user) + native.thumbnailCornerRadius * (growth - 1))) < 1e-9)
-        // The chrome around the preview still keeps native points.
+            - (CGFloat(user) + native.thumbnailCornerRadius * (factor - 1))) < 1e-9)
         #expect(enlarged.cardPadding == native.cardPadding)
         #expect(enlarged.titleFontSize == native.titleFontSize)
+    }
+
+    @Test("The default curve is 0.8")
+    func defaultBadgeGrowth() {
+        #expect(AppSettings().badgeGrowth == 0.8)
+        #expect(abs(drawn(1.45).badgeSize - 40 * pow(1.45, 0.8)) < 1e-9)
+    }
+
+    /// Mission Control's placement: centred, just inside the preview's lower edge, so it never
+    /// meets the title below (KHA-1062).
+    @Test("The badge sits at the bottom centre, inside the preview's edge", arguments: [1.0, 1.45, 2.5])
+    func badgeSitsBottomCentre(scale: Double) {
+        let metrics = drawn(CGFloat(scale))
+        #expect(abs(metrics.drawnBadgeSize - metrics.badgeSize * 1.15) < 1e-9)
+        let centre = metrics.badgeCentre(in: metrics.previewImageRect(forImageAspect: nil))
+        #expect(abs(centre.x - metrics.thumbnailWidth / 2) < 1e-9)
+        #expect(abs(centre.y + metrics.drawnBadgeSize / 2 - (metrics.thumbnailHeight - 6)) < 1e-9)
     }
 
     @Test("A failed capture's icon is the badge's size", arguments: [1.0, 1.45, 2.5])
     func placeholderIconMatchesBadge(scale: Double) {
         let metrics = drawn(CGFloat(scale))
-        #expect(metrics.placeholderIconSize == metrics.badgeSize)
+        #expect(metrics.placeholderIconSize == metrics.drawnBadgeSize)
+    }
+
+    @Test("The narrowest card still holds the centred badge")
+    func narrowestCardHoldsBadge() {
+        for growth in [0.0, 0.8, 1.0] {
+            let metrics = drawn(2.5, badgeGrowth: growth)
+            let narrow = metrics.adapted(toContentAspect: 0.05)
+            #expect(narrow.thumbnailWidth >= metrics.drawnBadgeSize + 12)
+        }
     }
 
     @Test("A wrapped row's title sits midway between its previews and the next row's")

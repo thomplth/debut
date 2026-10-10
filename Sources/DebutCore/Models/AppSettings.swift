@@ -157,6 +157,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let minimumStageCornerRadius: Double = 0
     /// Room above the native switcher's 57.5-point plate corner.
     public static let maximumStageCornerRadius: Double = 72
+    /// How the app badge grows with the preview: the preview's size raised to this power.
+    /// 0 keeps it at native size, 1 grows it in proportion.
+    public static let defaultBadgeGrowth: Double = 0.8
+    public static let minimumBadgeGrowth: Double = 0
+    public static let maximumBadgeGrowth: Double = 1
+    /// The title halo's blur radius in points, and its strength (0 turns it off).
+    public static let minimumTitleHaloSize: Double = 0.5
+    public static let maximumTitleHaloSize: Double = 3
     /// The native switcher plate's continuous corner at 100%.
     public static let defaultStageCornerRadius: Double = 57.5
 
@@ -172,11 +180,17 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// How strongly the native selection highlight darkens or lightens the glass, relative to
     /// the native switcher.
     public var selectionHighlightStrength: Double
+    /// The halo behind every title, from 0 (off) to 1 (two full-strength passes).
+    public var titleHaloStrength: Double
+    /// The halo's blur radius in points.
+    public var titleHaloSize: Double
     public var stageCornerRadius: Double
     public var inactiveStageScale: Double
     public var stageScale: Double
     /// The same size, for the icon cards drawn without previews. 100% is the native switcher.
     public var iconScale: Double
+    /// How the app badge grows with the preview; see `defaultBadgeGrowth`.
+    public var badgeGrowth: Double
     /// Space between preview card frames before the overlay's automatic scale is applied.
     public var previewCardSpacing: Double
     /// Whether each card takes its own window's shape rather than the display's.
@@ -220,10 +234,13 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.followsSystemGlassTint = true
         self.glassTintAmount = 0
         self.selectionHighlightStrength = 1
+        self.titleHaloStrength = 1
+        self.titleHaloSize = 1
         self.stageCornerRadius = Self.defaultStageCornerRadius
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
         self.iconScale = Self.defaultIconScale
+        self.badgeGrowth = Self.defaultBadgeGrowth
         self.previewCardSpacing = Self.defaultPreviewCardSpacing
         self.adaptiveCardSizing = true
         self.overlayOnMainDisplayOnly = true
@@ -288,6 +305,18 @@ public struct AppSettings: Codable, Sendable, Equatable {
             forKey: .stageScale
         ) ?? Self.defaultStageScale
         stageScale = min(Self.maximumStageScale, max(Self.minimumStageScale, savedStageScale))
+        badgeGrowth = min(Self.maximumBadgeGrowth, max(
+            Self.minimumBadgeGrowth,
+            try container.decodeIfPresent(Double.self, forKey: .badgeGrowth) ?? Self.defaultBadgeGrowth
+        ))
+        titleHaloStrength = min(1, max(
+            0,
+            try container.decodeIfPresent(Double.self, forKey: .titleHaloStrength) ?? 1
+        ))
+        titleHaloSize = min(Self.maximumTitleHaloSize, max(
+            Self.minimumTitleHaloSize,
+            try container.decodeIfPresent(Double.self, forKey: .titleHaloSize) ?? 1
+        ))
         iconScale = min(Self.maximumStageScale, max(
             Self.minimumStageScale,
             try container.decodeIfPresent(Double.self, forKey: .iconScale) ?? Self.defaultIconScale

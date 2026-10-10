@@ -31,6 +31,8 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Glass / stage corner radius | Native / 57.5 pt continuous (0–72 pt) |
 | Liquid Glass rim / edge refraction | 100% / 100% of the native switcher's fitted look |
 | Liquid Glass tint | Follows System Settings; a fixed 0–100% tint is optional |
+| Title halo / size | 100% / 1 pt; 0% turns the halo off |
+| App icon growth | 0.80: the badge grows with the preview size raised to this power (0 fixed, 1 proportional) |
 | Selection appearance | Filled with the native switcher highlight; 9 pt outset, 16 pt radius, 100% strength |
 | Alternative magnify appearance | 106% size, 100% shadow strength |
 | Overlay hold delay / held cycling pace | 100 ms / 60 ms minimum between repeats |
@@ -59,7 +61,8 @@ Without previews, whether the toggle is off or Screen Recording is not granted,
 both switchers draw each window as a native Command-Tab icon slot with its title,
 at a separate icon size (default 100%, the native switcher) that the same size
 slider edits. A window whose capture failed keeps its card with the app's icon at
-the badge's size and no halo; the badge grows with the square root of the preview's size.
+the badge's size and no halo. The badge sits at the bottom centre of the preview, just inside
+its lower edge, and grows on the App icon growth curve.
 Every card in both switchers is titled in the native label style at full strength, a
 fixed 12.8 pt (the native label, at SF weight 680) at every size, centred between the card's lower edge and the plate's,
 with a tight halo in the opposite colour for legibility on clear glass. Screen Recording enables screenshot previews and
@@ -97,7 +100,7 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | General | Login launch, Dock visibility, automatic crash reports, Reduce Motion guidance, and a running-app picker for applications ignored by window management. The menu-bar item remains available with the Dock icon off. |
 | Desktops | Faster switching and its number-key, Control-arrow, and trackpad methods, followed by transition duration and the desktop-change indicator. |
 | Switcher | Command-Tab desktop isolation, Option-Tab activation, window previews, display placement, preview freshness, overlay hold delay, and held cycling pace. |
-| Appearance | Card layout, adaptive preview sizing, inactive-stage scale, Liquid Glass (material, rim, edge refraction, tint), and selected-window treatment. |
+| Appearance | Card layout, adaptive preview sizing, inactive-stage scale, app icon growth, Liquid Glass (material, rim, edge refraction, selection highlight, title halo, tint), and selected-window treatment. |
 | Shortcuts | Activation and Space Manager session bindings including H/J/K/L selector movement, numbered modifier sets with a Disabled choice, a confirmed restore-defaults action, and reference for fixed move chords. Pressing Delete while recording clears a binding. An open session handles its own keys before global shortcuts, and Debut binding conflicts are checked within each context. |
 | Support | Bug reporting through a public GitHub issue form (requires a GitHub account), diagnostic export, a confirmed window-cache reset that preserves settings, and a confirmed reset of all settings that preserves window assignments. |
 | About | Debut icon and version, update checks, and links to the GitHub repository and creator's Twitter profile. |

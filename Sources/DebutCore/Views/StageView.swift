@@ -957,7 +957,8 @@ public struct StageConstants {
         containerSize: CGSize,
         cardSpacing: CGFloat? = nil,
         rowSpacing: CGFloat? = nil,
-        cardStyle: OverlayCardStyle = .previews
+        cardStyle: OverlayCardStyle = .previews,
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
     ) -> CGFloat {
         let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize, cardStyle: cardStyle)
         let cardMetrics = cardSpacing.map(shapedMetrics.withCardSpacing) ?? shapedMetrics
@@ -975,7 +976,7 @@ public struct StageConstants {
             let fits = stageLayouts(
                 forContentAspects: contentAspects,
                 screenWidth: containerSize.width,
-                metrics: metrics.withPreviewScale(candidate)
+                metrics: metrics.withPreviewScale(candidate, badgeGrowth: badgeGrowth)
             ).allSatisfy {
                 $0.stageSize.width <= availableWidth && $0.stageSize.height <= availableHeight
             }
@@ -1007,7 +1008,8 @@ public struct StageConstants {
         containerSize: CGSize,
         cardSpacing: CGFloat? = nil,
         rowSpacing: CGFloat? = nil,
-        cardStyle: OverlayCardStyle = .previews
+        cardStyle: OverlayCardStyle = .previews,
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
     ) -> StageMetrics {
         let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize, cardStyle: cardStyle)
         let cardMetrics = cardSpacing.map(shapedMetrics.withCardSpacing) ?? shapedMetrics
@@ -1018,8 +1020,9 @@ public struct StageConstants {
             containerSize: containerSize,
             cardSpacing: cardSpacing,
             rowSpacing: rowSpacing,
-            cardStyle: cardStyle
-        ))
+            cardStyle: cardStyle,
+            badgeGrowth: badgeGrowth
+        ), badgeGrowth: badgeGrowth)
     }
 
     public static func drawnMetrics(
@@ -1152,7 +1155,8 @@ public struct StageConstants {
         sourceSpaceIndex: Int,
         sourceWindowIndex: Int,
         destinationSpaceIndex: Int,
-        cardStyle: OverlayCardStyle = .previews
+        cardStyle: OverlayCardStyle = .previews,
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
     ) -> CGPoint? {
         var nextWindowID: CGWindowID = 1
         let fingerprint = StageStructureFingerprint(stages: contentAspects.map { aspects in
@@ -1166,7 +1170,8 @@ public struct StageConstants {
             contentAspects: contentAspects,
             containerSize: containerSize,
             cardSpacing: cardSpacing,
-            cardStyle: cardStyle
+            cardStyle: cardStyle,
+            badgeGrowth: badgeGrowth
         )
         guard let snapshot = CompactDragSnapshot.make(
             sessionID: UUID(),
@@ -1345,7 +1350,8 @@ public struct StageOverlayView: View {
                 contentAspects: restingAspects,
                 containerSize: geo.size,
                 cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
-                cardStyle: viewModel.cardStyle
+                cardStyle: viewModel.cardStyle,
+                badgeGrowth: CGFloat(viewModel.appearance.badgeGrowth)
             )
             // The resting grids. A compact drag freezes their rows at pickup rather than
             // rewrapping them while the pointer moves.
@@ -1798,7 +1804,8 @@ public struct StageOverlayView: View {
             contentAspects: beforeAspects,
             containerSize: containerSize,
             cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
-            cardStyle: viewModel.cardStyle
+            cardStyle: viewModel.cardStyle,
+            badgeGrowth: CGFloat(viewModel.appearance.badgeGrowth)
         )
         let inactiveScale = CGFloat(viewModel.appearance.inactiveStageScale)
         guard let source = StageConstants.windowCardCenter(
@@ -1903,7 +1910,8 @@ public struct StageOverlayView: View {
             contentAspects: aspects,
             containerSize: containerSize,
             cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
-            cardStyle: viewModel.cardStyle
+            cardStyle: viewModel.cardStyle,
+            badgeGrowth: CGFloat(viewModel.appearance.badgeGrowth)
         )
         return CompactDragSnapshot.make(
             sessionID: sessionID,
@@ -2415,11 +2423,19 @@ struct WindowPreviewView: View {
                     // past the badge's box on every side. Framing that padded image directly
                     // would widen the card, so the box keeps the badge's size and the picture
                     // overflows it.
-                    let padded = metrics.badgeSize
+                    let badge = metrics.drawnBadgeSize
+                    let padded = badge
                         * (AppIconCache.badgeRasterSize + AppIconCache.BakedBadgeShadow.padding * 2)
                         / AppIconCache.badgeRasterSize
+                    // Centred at the bottom of the image as drawn, which a window of another
+                    // shape letterboxes inside the card.
+                    let centre = metrics.badgeCentre(in: metrics.previewImageRect(
+                        forImageAspect: window.previewImage.map {
+                            CGFloat($0.width) / CGFloat(max(1, $0.height))
+                        }
+                    ))
                     Color.clear
-                        .frame(width: metrics.badgeSize, height: metrics.badgeSize)
+                        .frame(width: badge, height: badge)
                         .overlay {
                             AppIconImage(
                                 bundleID: window.ownerBundleID,
@@ -2430,7 +2446,7 @@ struct WindowPreviewView: View {
                             )
                             .frame(width: padded, height: padded)
                         }
-                        .offset(x: -metrics.badgeOffset, y: -metrics.badgeOffset)
+                        .offset(x: centre.x - badge / 2, y: centre.y - badge / 2)
                 }
             }
             .background {
@@ -2466,7 +2482,12 @@ struct WindowPreviewView: View {
         }
         .padding(metrics.cardPadding)
         .overlay(alignment: .bottom) {
-            WindowTitleLabel(title: window.displayTitle, fontSize: metrics.titleFontSize)
+            WindowTitleLabel(
+                title: window.displayTitle,
+                fontSize: metrics.titleFontSize,
+                haloStrength: appearance.titleHaloStrength,
+                haloSize: CGFloat(appearance.titleHaloSize) * metrics.scaleFactor
+            )
                 .frame(
                     width: metrics.thumbnailWidth + metrics.titleWidthAllowance,
                     height: metrics.titleBandHeight
@@ -2525,27 +2546,36 @@ private struct IconSlotView: View {
 struct WindowTitleLabel: View {
     let title: String
     let fontSize: CGFloat
+    /// 0 turns the halo off; 1 is two full-strength passes.
+    var haloStrength: Double = 1
+    /// The halo's blur radius in points.
+    var haloSize: CGFloat = 1
     @Environment(\.colorScheme) private var colorScheme
 
-    static let haloRadius: CGFloat = 1
     static let haloOpacity: Double = 0.95
-    /// Room for the halo inside the flattened image, so the blur is not clipped.
-    static let haloInset: CGFloat = 3
 
     var body: some View {
-        let halo = (colorScheme == .dark ? Color.black : Color.white).opacity(Self.haloOpacity)
-        Text(title)
+        let text = Text(title)
             .dockGlassLabel(fontSize: fontSize)
             .lineLimit(1)
-            // Two passes: one tight 1pt halo spreads too thin to see on busy glass.
-            .shadow(color: halo, radius: Self.haloRadius)
-            .shadow(color: halo, radius: Self.haloRadius)
-            // Flattened into one image, the halo is blurred once per title. Left live, it was
-            // re-blurred on every frame the stage animates: 3.6ms a cycling frame against
-            // 0.54ms without it, and 0.59ms flattened (KHA-1057).
-            .padding(Self.haloInset)
-            .drawingGroup()
-            .padding(-Self.haloInset)
+        if haloStrength > 0 {
+            let halo = (colorScheme == .dark ? Color.black : Color.white)
+                .opacity(Self.haloOpacity * min(1, haloStrength))
+            // Room for the halo inside the flattened image, so the blur is not clipped.
+            let inset = haloSize * 3
+            text
+                // Two passes: one tight halo spreads too thin to see on busy glass.
+                .shadow(color: halo, radius: haloSize)
+                .shadow(color: halo, radius: haloSize)
+                // Flattened into one image, the halo is blurred once per title. Left live, it
+                // was re-blurred on every frame the stage animates: 3.6ms a cycling frame
+                // against 0.54ms without it, and 0.59ms flattened (KHA-1057).
+                .padding(inset)
+                .drawingGroup()
+                .padding(-inset)
+        } else {
+            text
+        }
     }
 }
 

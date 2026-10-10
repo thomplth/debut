@@ -1141,7 +1141,8 @@ func drawnMetrics(cardAspects: [[CGFloat?]]) -> StageMetrics {
         contentAspects: cardAspects,
         containerSize: overlayBounds.size,
         cardSpacing: CGFloat(interactionSettings.previewCardSpacing),
-        cardStyle: reportedCardStyle
+        cardStyle: reportedCardStyle,
+        badgeGrowth: CGFloat(interactionSettings.badgeGrowth)
     )
 }
 
@@ -1194,7 +1195,8 @@ func dragViewDropPoint(
         sourceSpaceIndex: sourceSpaceIndex,
         sourceWindowIndex: sourceWindowIndex,
         destinationSpaceIndex: destinationSpaceIndex,
-        cardStyle: reportedCardStyle
+        cardStyle: reportedCardStyle,
+        badgeGrowth: CGFloat(interactionSettings.badgeGrowth)
     ).map { CGPoint(x: overlayBounds.minX + $0.x, y: overlayBounds.minY + $0.y) }
 }
 

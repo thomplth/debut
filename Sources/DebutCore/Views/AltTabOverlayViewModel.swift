@@ -70,7 +70,8 @@ public struct AltTabOverlayViewModel: Sendable {
             contentAspects: [contentAspects],
             containerSize: containerSize,
             cardSpacing: CGFloat(appearance.previewCardSpacing),
-            cardStyle: cardStyle
+            cardStyle: cardStyle,
+            badgeGrowth: CGFloat(appearance.badgeGrowth)
         )
     }
 

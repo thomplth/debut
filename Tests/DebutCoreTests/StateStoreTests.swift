@@ -533,7 +533,8 @@ struct StateStoreTests {
         var object = try #require(
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
-        for key in ["glassRimStrength", "glassEdgeRefraction", "followsSystemGlassTint", "glassTintAmount"] {
+        for key in ["glassRimStrength", "glassEdgeRefraction", "followsSystemGlassTint", "glassTintAmount",
+                    "badgeGrowth", "titleHaloStrength", "titleHaloSize"] {
             object.removeValue(forKey: key)
         }
         object["glassStyle"] = "Native"
@@ -546,6 +547,27 @@ struct StateStoreTests {
         #expect(decoded.glassEdgeRefraction == 1)
         #expect(decoded.followsSystemGlassTint)
         #expect(decoded.dockGlassStyle == .native)
+        #expect(decoded.badgeGrowth == AppSettings.defaultBadgeGrowth)
+        #expect(decoded.titleHaloStrength == 1)
+        #expect(decoded.titleHaloSize == 1)
+    }
+
+    @Test("Badge growth and title halo settings clamp to their ranges")
+    func badgeAndHaloSettingsClamp() throws {
+        let encoded = try JSONEncoder().encode(AppSettings())
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object["badgeGrowth"] = 3
+        object["titleHaloStrength"] = -1
+        object["titleHaloSize"] = 99
+        let decoded = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        #expect(decoded.badgeGrowth == AppSettings.maximumBadgeGrowth)
+        #expect(decoded.titleHaloStrength == 0)
+        #expect(decoded.titleHaloSize == AppSettings.maximumTitleHaloSize)
     }
 
     @Test("Liquid Glass settings map onto the DockGlass style and clamp")

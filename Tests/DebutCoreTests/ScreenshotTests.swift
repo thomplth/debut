@@ -394,6 +394,33 @@ struct ScreenshotTests {
         try measure(Text("Meeting Notes").dockGlassLabel(fontSize: 12.8125).environment(\.colorScheme, .light), "none")
     }
 
+    /// The title halo is adjustable (KHA-1062): at strength 0 nothing lights the backdrop around
+    /// a light-mode title, and at the default it visibly does.
+    @Test("The title halo follows its strength setting")
+    func titleHaloFollowsStrength() throws {
+        let size = NSSize(width: 240, height: 60)
+        func brightest(strength: Double) throws -> CGFloat {
+            let label = WindowTitleLabel(
+                title: "Meeting Notes",
+                fontSize: DockGlass.Label.standardFontSize,
+                haloStrength: strength,
+                haloSize: 1
+            )
+            .frame(width: size.width, height: size.height)
+            .environment(\.colorScheme, .light)
+            let image = try #require(renderSwiftUI(label, size: size, background: 0.5))
+            let bitmap = try #require(normalizedBitmap(image, size: size))
+            var peak: CGFloat = 0
+            for y in 0..<bitmap.pixelsHigh { for x in 0..<bitmap.pixelsWide {
+                peak = max(peak, bitmap.colorAt(x: x, y: y)!.redComponent)
+            }}
+            return peak
+        }
+        let off = try brightest(strength: 0)
+        let on = try brightest(strength: 1)
+        #expect(on - off > 0.15, "halo on \(on), off \(off)")
+    }
+
     @Test("Actual previews cast a shadow beyond their image bounds",
           arguments: [CGFloat(0.5), 1, 2.5], [CGFloat(0.3), 1.6, 4])
     func previewDropShadow(scale: CGFloat, aspect: CGFloat) throws {

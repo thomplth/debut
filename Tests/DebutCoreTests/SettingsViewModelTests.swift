@@ -26,6 +26,9 @@ struct SettingsViewModelTests {
         #expect(vm.settings.selectorOutset == 9)
         #expect(vm.settings.selectorCornerRadius == 16)
         #expect(vm.settings.selectionHighlightStrength == 1)
+        #expect(vm.settings.badgeGrowth == 0.8)
+        #expect(vm.settings.titleHaloStrength == 1)
+        #expect(vm.settings.titleHaloSize == 1)
         #expect(vm.settings.magnifyScale == 1.06)
         #expect(vm.settings.magnifyShadowStrength == 1)
         #expect(vm.settings.showsDesktopSwitchIndicator)
@@ -125,8 +128,11 @@ struct SettingsViewModelTests {
             .glassEdgeRefraction,
             .selectionHighlightStrength,
             .glassTint,
+            .titleHaloStrength,
+            .titleHaloSize,
             .stageCornerRadius,
             .stageScale,
+            .badgeGrowth,
             .previewCardSpacing,
             .adaptiveCardSizing,
             .inactiveStageScale,

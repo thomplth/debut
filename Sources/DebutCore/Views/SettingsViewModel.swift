@@ -40,8 +40,11 @@ public enum SettingsSection: String, CaseIterable, Sendable {
                 .glassEdgeRefraction,
                 .selectionHighlightStrength,
                 .glassTint,
+                .titleHaloStrength,
+                .titleHaloSize,
                 .stageCornerRadius,
                 .stageScale,
+                .badgeGrowth,
                 .previewCardSpacing,
                 .adaptiveCardSizing,
                 .inactiveStageScale,
@@ -84,6 +87,9 @@ enum SettingsOption: String, CaseIterable, Sendable {
     case glassEdgeRefraction
     case selectionHighlightStrength
     case glassTint
+    case titleHaloStrength
+    case titleHaloSize
+    case badgeGrowth
     case stageCornerRadius
     case stageScale
     case previewCardSpacing

@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import DockGlass
 
 /// What a card shows: a window's preview, or — when previews are off or Screen Recording is not
@@ -153,7 +154,7 @@ public struct StageMetrics: Equatable, Sendable {
     /// which app the window belongs to, which is the icon badged over its top-left corner. A
     /// fraction of the display's card was the earlier floor and had nothing to do with what a
     /// narrow card still has to show.
-    public var minimumAdaptiveWidth: CGFloat { badgeSize + cardPadding * 2 }
+    public var minimumAdaptiveWidth: CGFloat { drawnBadgeSize + badgeInset * 2 }
 
     /// These metrics with the card narrowed to one window's shape when it fits.
     ///
@@ -265,11 +266,38 @@ public struct StageMetrics: Equatable, Sendable {
     /// app icon bitmaps carry. Icon cards draw it; one raster of it serves every app icon.
     public static let nativeIconCanvasSize: CGFloat = 128
 
-    /// A failed capture shows the app's icon at the badge's size, with nothing around it.
-    public var placeholderIconSize: CGFloat { badgeSize }
+    /// The app badge as drawn: centred at the bottom of the preview, like Mission Control's
+    /// icons, a little larger than the badge size that sets the preview's corner.
+    public var drawnBadgeSize: CGFloat { badgeSize * Self.drawnBadgeRatio }
+    static let drawnBadgeRatio: CGFloat = 1.15
 
-    /// How far the badge sits outside the preview's top-left corner: a tenth of its size.
-    public var badgeOffset: CGFloat { badgeSize / 10 }
+    /// The gap between the badge and the preview's lower edge.
+    public var badgeInset: CGFloat { 6 * scale }
+
+    /// Where the badge's centre sits for a preview image drawn in `imageRect`: centred, just
+    /// inside its lower edge, so it never meets the title below.
+    public func badgeCentre(in imageRect: CGRect) -> CGPoint {
+        CGPoint(x: imageRect.midX, y: imageRect.maxY - badgeInset - drawnBadgeSize / 2)
+    }
+
+    /// Where a preview image of the given shape is drawn inside the card's thumbnail: fitted and
+    /// centred, as the card draws it. No shape fills the thumbnail.
+    public func previewImageRect(forImageAspect aspect: CGFloat?) -> CGRect {
+        let frame = CGRect(x: 0, y: 0, width: thumbnailWidth, height: thumbnailHeight)
+        guard let aspect, aspect > 0, thumbnailHeight > 0 else { return frame }
+        let size = aspect > thumbnailWidth / thumbnailHeight
+            ? CGSize(width: thumbnailWidth, height: thumbnailWidth / aspect)
+            : CGSize(width: thumbnailHeight * aspect, height: thumbnailHeight)
+        return CGRect(
+            x: (thumbnailWidth - size.width) / 2,
+            y: (thumbnailHeight - size.height) / 2,
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    /// A failed capture shows the app's icon at the badge's size, with nothing around it.
+    public var placeholderIconSize: CGFloat { drawnBadgeSize }
 
     /// A macOS app icon's body is a continuous-corner squircle with a 185.4-point corner drawn
     /// on a 1024-point canvas.
@@ -291,9 +319,12 @@ public struct StageMetrics: Equatable, Sendable {
         - DockGlass.Metrics.standard.selectionPadding) / DockGlass.Metrics.standard.iconSize
 
     /// These metrics with only the preview (or icon) enlarged: the size setting. The badge grows
-    /// with the square root of it; margins, gaps, titles and the highlight's padding keep native
-    /// points.
-    public func withPreviewScale(_ factor: CGFloat) -> StageMetrics {
+    /// with it raised to `badgeGrowth`; margins, gaps, titles and the highlight's padding keep
+    /// native points.
+    public func withPreviewScale(
+        _ factor: CGFloat,
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
+    ) -> StageMetrics {
         var metrics = StageMetrics(
             thumbnailWidth: thumbnailWidth * factor,
             thumbnailHeight: thumbnailHeight * factor,
@@ -301,9 +332,9 @@ public struct StageMetrics: Equatable, Sendable {
             titleWidthAllowance: titleWidthAllowance,
             titleSpacing: titleSpacing,
             titleHeight: titleHeight,
-            // The badge belongs to the preview, but grows gently with it, as titles once did:
-            // in proportion it would be 100 points on a 250% preview.
-            badgeSize: badgeSize * factor.squareRoot(),
+            // The badge belongs to the preview but grows on its own curve (a setting): in
+            // proportion it would be 100 points on a 250% preview.
+            badgeSize: badgeSize * pow(factor, badgeGrowth),
             windowSpacing: windowSpacing,
             rowSpacing: rowSpacing,
             padding: padding,

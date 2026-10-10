@@ -416,6 +416,25 @@ public struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("App icon growth")
+                    Spacer()
+                    Text(viewModel.settings.badgeGrowth.formatted(.number.precision(.fractionLength(2))))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: $viewModel.settings.badgeGrowth,
+                    in: AppSettings.minimumBadgeGrowth...AppSettings.maximumBadgeGrowth,
+                    step: 0.05
+                )
+                Text("How the app icon on each preview grows with the window size: 0 keeps it at its native size, 1 grows it with the preview.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
                 settingsToggle(
                     "Match each preview to its window",
                     isOn: $viewModel.settings.adaptiveCardSizing
@@ -503,6 +522,27 @@ public struct SettingsView: View {
                 value: $viewModel.settings.selectionHighlightStrength,
                 in: AppSettings.minimumSelectionHighlightStrength...AppSettings.maximumSelectionHighlightStrength
             )
+
+            VStack(alignment: .leading, spacing: 4) {
+                percentSlider("Title halo", value: $viewModel.settings.titleHaloStrength, in: 0...1)
+                HStack {
+                    Text("Title halo size")
+                    Spacer()
+                    Text("\(viewModel.settings.titleHaloSize.formatted(.number.precision(.fractionLength(0...2)))) pt")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: $viewModel.settings.titleHaloSize,
+                    in: AppSettings.minimumTitleHaloSize...AppSettings.maximumTitleHaloSize,
+                    step: 0.25
+                )
+                .disabled(viewModel.settings.titleHaloStrength == 0)
+                Text("A glow behind window titles in the opposite colour, so they stay legible over clear glass.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 settingsToggle(

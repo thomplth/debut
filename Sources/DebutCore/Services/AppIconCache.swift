@@ -20,7 +20,7 @@ public final class AppIconCache: @unchecked Sendable {
     /// and a native-size icon card.
     public static let placeholderIconRasterSize = StageMetrics.nativeIconCanvasSize
     public static let badgeRasterSize = StageMetrics.standard
-        .scaled(by: CGFloat(AppSettings.maximumStageScale)).badgeSize
+        .scaled(by: CGFloat(AppSettings.maximumStageScale)).drawnBadgeSize
 
     /// An icon card at native size draws the same 128-point canvas as the placeholder, so the
     /// two share one warmed raster and the default costs nothing extra.
