@@ -17,14 +17,15 @@ struct SettingsViewModelTests {
         #expect(vm.settings.glassEdgeRefraction == 1)
         #expect(vm.settings.followsSystemGlassTint)
         #expect(vm.settings.glassTintAmount == 0)
-        #expect(vm.settings.stageCornerRadius == 30)
+        #expect(vm.settings.stageCornerRadius == 57.5)
         #expect(vm.settings.inactiveStageScale == 0.7)
-        #expect(vm.settings.stageScale == 1.5)
-        #expect(vm.settings.previewCardSpacing == 12)
+        #expect(vm.settings.stageScale == 1.45)
+        #expect(vm.settings.previewCardSpacing == 14)
         #expect(vm.settings.overlayOnMainDisplayOnly)
         #expect(vm.settings.windowSelectionStyle == .filled)
-        #expect(vm.settings.selectorOutset == 6)
-        #expect(vm.settings.selectorCornerRadius == 12)
+        #expect(vm.settings.selectorOutset == 9)
+        #expect(vm.settings.selectorCornerRadius == 16)
+        #expect(vm.settings.selectionHighlightStrength == 1)
         #expect(vm.settings.magnifyScale == 1.06)
         #expect(vm.settings.magnifyShadowStrength == 1)
         #expect(vm.settings.showsDesktopSwitchIndicator)
@@ -122,6 +123,7 @@ struct SettingsViewModelTests {
             .glassStyle,
             .glassRimStrength,
             .glassEdgeRefraction,
+            .selectionHighlightStrength,
             .glassTint,
             .stageCornerRadius,
             .stageScale,
@@ -168,7 +170,7 @@ struct SettingsViewModelTests {
         #expect(normalized["shareAnonymousTelemetry"] == nil)
     }
 
-    @Test("Preview card spacing persists and old settings keep the current gap")
+    @Test("Preview card spacing persists and settings without it use the default gap")
     func previewCardSpacingPersistence() throws {
         var settings = AppSettings()
         settings.previewCardSpacing = 24
@@ -178,7 +180,7 @@ struct SettingsViewModelTests {
         var object = try #require(try JSONSerialization.jsonObject(with: saved) as? [String: Any])
         object.removeValue(forKey: "previewCardSpacing")
         let oldData = try JSONSerialization.data(withJSONObject: object)
-        #expect(try JSONDecoder().decode(AppSettings.self, from: oldData).previewCardSpacing == 12)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: oldData).previewCardSpacing == AppSettings.defaultPreviewCardSpacing)
     }
 
     @Test("Troubleshooting actions are forwarded to the app")

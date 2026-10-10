@@ -1,4 +1,5 @@
 import AppKit
+import DockGlass
 import SwiftUI
 import CoreGraphics
 
@@ -39,11 +40,6 @@ struct WindowLift: Equatable {
     let shadowOpacity: Double
     let shadowRadius: CGFloat
     let shadowY: CGFloat
-}
-
-struct WindowSelectorFill: Equatable {
-    let white: Double
-    let opacity: Double
 }
 
 struct StageStackLayout: Equatable {
@@ -402,16 +398,6 @@ enum StageMotion {
     /// empty instead of inventing an icon from the process name.
     static func showsAppIcon(bundleID: String) -> Bool {
         !TransientWindowIdentity.isTransient(bundleID)
-    }
-
-    static func windowSelectorFill(isDarkMode: Bool) -> WindowSelectorFill {
-        // The screenshots show white at 30% over the dark desktop and black at 25% over
-        // the light desktop. Keeping the overlay translucent lets the desktop material show
-        // through instead of baking its sampled gray into the selector.
-        WindowSelectorFill(
-            white: isDarkMode ? 1 : 0,
-            opacity: isDarkMode ? 0.30 : 0.25
-        )
     }
 
     static func windowSelectorSize(thumbnailSize: CGSize, outset: CGFloat) -> CGSize {
@@ -2310,7 +2296,12 @@ private struct StageSurfaceView: View {
                 cornerRadius: cornerRadius,
                 appearance: appearance
             ))
-            .shadow(color: .black.opacity(shadow.opacity), radius: shadow.radius, y: shadow.y)
+            .modifier(PlateShadow(
+                opacity: shadow.opacity,
+                radius: shadow.radius,
+                y: shadow.y,
+                glassStyle: appearance.glassStyle
+            ))
             .background {
                 GeometryReader { geometry in
                     Color.clear.preference(
@@ -2386,20 +2377,20 @@ struct WindowPreviewView: View {
                                 // drawn one, so moving the stage scale never invalidates the
                                 // warmed icons.
                                 if StageMotion.showsAppIcon(bundleID: window.ownerBundleID) {
+                                    let iconSize = StageMetrics.placeholderIconCanvasSize(
+                                        fittingThumbnailHeight: metrics.thumbnailHeight
+                                    )
                                     AppIconImage(
                                         bundleID: window.ownerBundleID,
                                         name: window.ownerName,
                                         iconSize: AppIconCache.placeholderIconRasterSize,
-                                        fallbackBaseSize: StageMetrics.standard.previewPlaceholderIconSize
+                                        fallbackBaseSize: StageMetrics.placeholderIconCanvasSize
                                     )
-                                    .frame(
-                                        width: metrics.previewPlaceholderIconSize,
-                                        height: metrics.previewPlaceholderIconSize
-                                    )
+                                    .frame(width: iconSize, height: iconSize)
                                     .background {
                                         // Overflow the icon's layout box with a shared bitmap. No
                                         // alpha-derived shadow filter follows the changing cards.
-                                        let padded = metrics.previewPlaceholderIconSize
+                                        let padded = iconSize
                                             * (AppIconCache.BakedIconShadow.iconSide
                                                 + AppIconCache.BakedIconShadow.padding * 2)
                                             / AppIconCache.BakedIconShadow.iconSide
@@ -2440,7 +2431,6 @@ struct WindowPreviewView: View {
             }
             .background {
                 if showsSelector {
-                    let fill = StageMotion.windowSelectorFill(isDarkMode: colorScheme == .dark)
                     let selectorSize = StageMotion.windowSelectorSize(
                         thumbnailSize: CGSize(
                             width: metrics.thumbnailWidth,
@@ -2448,19 +2438,21 @@ struct WindowPreviewView: View {
                         ),
                         outset: CGFloat(appearance.selectorOutset) * metrics.scaleFactor
                     )
-                    RoundedRectangle(
+                    // Blends with the stage's glass, so nothing between the two may form a
+                    // compositing group: the card's lift shadow is applied only for Magnify.
+                    DockGlassSelectionHighlight(RoundedRectangle(
                         cornerRadius: CGFloat(appearance.selectorCornerRadius)
-                            * metrics.scaleFactor
-                    )
-                    .fill(Color(white: fill.white, opacity: fill.opacity))
+                            * metrics.scaleFactor,
+                        style: .continuous
+                    ))
+                    .dockGlassStyle(appearance.dockGlassStyle)
                     .frame(width: selectorSize.width, height: selectorSize.height)
                     .allowsHitTesting(false)
                 }
             }
 
             Text(window.displayTitle)
-                .font(.system(size: metrics.titleFontSize))
-                .foregroundStyle(isWindowSelected ? .primary : .secondary)
+                .dockGlassLabel(fontSize: metrics.titleFontSize, prominent: isWindowSelected)
                 .lineLimit(1)
                 .frame(width: metrics.thumbnailWidth + metrics.titleWidthAllowance, height: metrics.titleHeight)
         }
@@ -2471,13 +2463,51 @@ struct WindowPreviewView: View {
             style: appearance.windowSelectionStyle,
             magnifyScale: CGFloat(appearance.magnifyScale)
         ))
-        .shadow(
-            color: .black.opacity(lift.shadowOpacity),
-            radius: lift.shadowRadius * metrics.scaleFactor,
-            y: lift.shadowY * metrics.scaleFactor
-        )
+        .modifier(WindowLiftShadow(
+            lift: lift,
+            scale: metrics.scaleFactor,
+            isEnabled: appearance.windowSelectionStyle == .magnify
+        ))
         .animation(.spring(duration: 0.18, bounce: 0.08), value: isWindowSelected)
         .animation(.easeOut(duration: 0.12), value: isDragging)
+    }
+}
+
+/// The Magnify style's lift. Any shadow, even a clear one, renders the card as its own group,
+/// which would cut the Filled style's highlight off from the glass it blends with — so the
+/// modifier is absent unless it can cast something.
+struct WindowLiftShadow: ViewModifier {
+    let lift: WindowLift
+    let scale: CGFloat
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.shadow(
+                color: .black.opacity(lift.shadowOpacity),
+                radius: lift.shadowRadius * scale,
+                y: lift.shadowY * scale
+            )
+        } else {
+            content
+        }
+    }
+}
+
+/// The native switcher's plate casts no shadow on macOS 27, so the Native material drops the
+/// stage lift's shadow; Clear and Regular keep it.
+struct PlateShadow: ViewModifier {
+    let opacity: Double
+    let radius: CGFloat
+    let y: CGFloat
+    let glassStyle: GlassStyle
+
+    func body(content: Content) -> some View {
+        if glassStyle.usesDockGlass {
+            content
+        } else {
+            content.shadow(color: .black.opacity(opacity), radius: radius, y: y)
+        }
     }
 }
 

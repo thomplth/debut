@@ -15,6 +15,7 @@ extension AppSettings {
         DockGlassStyle(
             rimStrength: glassRimStrength,
             edgeRefraction: glassEdgeRefraction,
+            selectionStrength: selectionHighlightStrength,
             tint: followsSystemGlassTint ? .system : .fixed(glassTintAmount)
         )
     }

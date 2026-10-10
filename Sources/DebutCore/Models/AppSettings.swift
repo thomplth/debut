@@ -119,20 +119,23 @@ public struct AppSettings: Codable, Sendable, Equatable {
     // Appearance
     /// Enlarge the complete presentation proportionally while retaining the original size as
     /// the lower end of the user-selectable range.
-    public static let defaultStageScale: Double = 1.5
+    public static let defaultStageScale: Double = 1.45
     /// The user-selectable range. Automatic viewport fitting has its own lower floor.
     public static let minimumStageScale: Double = 1.0
     public static let maximumStageScale: Double = 2.5
     public static let stageScaleStep: Double = 0.05
-    public static let defaultPreviewCardSpacing: Double = 12
+    public static let defaultPreviewCardSpacing: Double = 14
     public static let minimumPreviewCardSpacing: Double = 0
     public static let maximumPreviewCardSpacing: Double = 36
 
-    public static let defaultSelectorOutset: Double = 6
+    /// Native's highlight padding around its icon.
+    public static let defaultSelectorOutset: Double = 9
     public static let minimumSelectorOutset: Double = 2
     /// The fill stays inside the card's reserved preview outset, clear of the title.
-    public static let maximumSelectorOutset: Double = 6
-    public static let defaultSelectorCornerRadius: Double = 12
+    public static let maximumSelectorOutset: Double = 9
+    /// Concentric with the preview's 7.2-point corner at the default outset, as native's
+    /// highlight is with the icon's.
+    public static let defaultSelectorCornerRadius: Double = 16
     public static let minimumSelectorCornerRadius: Double = 0
     public static let maximumSelectorCornerRadius: Double = 24
     public static let defaultMagnifyScale: Double = 1.06
@@ -148,6 +151,13 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let maximumGlassRimStrength: Double = 2
     public static let minimumGlassEdgeRefraction: Double = 0
     public static let maximumGlassEdgeRefraction: Double = 2
+    public static let minimumSelectionHighlightStrength: Double = 0
+    public static let maximumSelectionHighlightStrength: Double = 2
+    public static let minimumStageCornerRadius: Double = 0
+    /// Room above the native switcher's 57.5-point plate corner.
+    public static let maximumStageCornerRadius: Double = 72
+    /// The native switcher plate's continuous corner at 100%.
+    public static let defaultStageCornerRadius: Double = 57.5
 
     public var glassStyle: GlassStyle
     /// Opacity of the hairline rim along the native glass's outline, relative to native.
@@ -158,6 +168,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var followsSystemGlassTint: Bool
     /// The tint used when not following the system, from 0 (clear) to 1 (tinted).
     public var glassTintAmount: Double
+    /// How strongly the native selection highlight darkens or lightens the glass, relative to
+    /// the native switcher.
+    public var selectionHighlightStrength: Double
     public var stageCornerRadius: Double
     public var inactiveStageScale: Double
     public var stageScale: Double
@@ -203,7 +216,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.glassEdgeRefraction = 1
         self.followsSystemGlassTint = true
         self.glassTintAmount = 0
-        self.stageCornerRadius = 30
+        self.selectionHighlightStrength = 1
+        self.stageCornerRadius = Self.defaultStageCornerRadius
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
         self.previewCardSpacing = Self.defaultPreviewCardSpacing
@@ -258,6 +272,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
         glassTintAmount = min(1, max(
             0,
             try container.decodeIfPresent(Double.self, forKey: .glassTintAmount) ?? 0
+        ))
+        selectionHighlightStrength = min(Self.maximumSelectionHighlightStrength, max(
+            Self.minimumSelectionHighlightStrength,
+            try container.decodeIfPresent(Double.self, forKey: .selectionHighlightStrength) ?? 1
         ))
         stageCornerRadius = try container.decode(Double.self, forKey: .stageCornerRadius)
         inactiveStageScale = try container.decode(Double.self, forKey: .inactiveStageScale)

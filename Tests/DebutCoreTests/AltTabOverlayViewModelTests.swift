@@ -146,10 +146,10 @@ struct AltTabOverlayViewModelTests {
         #expect(layout.rowSizes == [3, 2])
     }
 
-    /// Each card already contributes its own six-point inset above and below its content. An
-    /// additional row gap doubles that separation, so the flat plate should stack card frames
-    /// directly and let their existing edge insets provide the whitespace between rows.
-    @Test("Wrapped rows use only the cards' edge insets for spacing")
+    /// A title ends one card padding above its card's lower edge, so rows add only what makes
+    /// the gap below a title equal the gap between neighbouring highlights — the same rule a
+    /// Command-Tab stage wraps by.
+    @Test("Wrapped rows leave a title the same gap as neighbouring highlights")
     func wrappedRowsUseCardEdgeInsets() {
         let space = UUID()
         let model = AltTabOverlayViewModel(
@@ -160,12 +160,14 @@ struct AltTabOverlayViewModelTests {
         let layout = model.layout(containerSize: container)
 
         #expect(layout.rowCount > 1)
-        #expect(layout.metrics.rowSpacing == 0)
-        #expect(
+        let scale = layout.metrics.scaleFactor
+        let rowGap = (AppSettings.defaultPreviewCardSpacing - StageMetrics.standard.cardPadding) * scale
+        #expect(abs(layout.metrics.rowSpacing - rowGap) < 1e-9)
+        #expect(abs(
             layout.cardOffsetFromCenter(at: layout.rowStartIndex(1)).height
                 - layout.cardOffsetFromCenter(at: 0).height
-                == layout.metrics.cardHeight
-        )
+                - (layout.metrics.cardHeight + rowGap)
+        ) < 1e-9)
     }
 
     @Test("Configured preview card spacing changes the flat grid")
@@ -178,7 +180,7 @@ struct AltTabOverlayViewModelTests {
         let layout = model.layout(containerSize: CGSize(width: 900, height: 600))
 
         #expect(layout.metrics.windowSpacing == 24 * layout.metrics.scaleFactor)
-        #expect(layout.metrics.rowSpacing == 12 * layout.metrics.scaleFactor)
+        #expect(layout.metrics.rowSpacing == 15 * layout.metrics.scaleFactor)
     }
 
     /// A global list is far longer than any one space's, so it is the first thing in the app that

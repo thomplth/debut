@@ -131,7 +131,8 @@ struct AppIconCacheTests {
         // whenever the slider moved and put the KHA-481 rasterize back on the main thread.
         let largest = StageMetrics.standard.scaled(by: CGFloat(AppSettings.maximumStageScale))
         #expect(AppIconCache.badgeRasterSize == largest.badgeSize)
-        #expect(AppIconCache.placeholderIconRasterSize == largest.previewPlaceholderIconSize)
+        // The placeholder is native's icon at every scale, so it has one size to warm.
+        #expect(AppIconCache.placeholderIconRasterSize == StageMetrics.placeholderIconCanvasSize)
         #expect(AppIconCache.overlayIconSizes == [AppIconCache.placeholderIconRasterSize])
         #expect(AppIconCache.overlayBadgeIconSizes == [AppIconCache.badgeRasterSize])
     }

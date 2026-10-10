@@ -384,11 +384,15 @@ public struct SettingsView: View {
                 HStack {
                     Text("Stage corner radius")
                     Spacer()
-                    Text("\(Int(viewModel.settings.stageCornerRadius)) pt")
+                    Text("\(viewModel.settings.stageCornerRadius.formatted(.number.precision(.fractionLength(0...1)))) pt")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                Slider(value: $viewModel.settings.stageCornerRadius, in: 0...40, step: 1)
+                Slider(
+                    value: $viewModel.settings.stageCornerRadius,
+                    in: AppSettings.minimumStageCornerRadius...AppSettings.maximumStageCornerRadius,
+                    step: 0.5
+                )
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -491,6 +495,12 @@ public struct SettingsView: View {
                 in: AppSettings.minimumGlassEdgeRefraction...AppSettings.maximumGlassEdgeRefraction
             )
             .disabled(!usesNativeGlass)
+
+            percentSlider(
+                "Selection highlight",
+                value: $viewModel.settings.selectionHighlightStrength,
+                in: AppSettings.minimumSelectionHighlightStrength...AppSettings.maximumSelectionHighlightStrength
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 settingsToggle(

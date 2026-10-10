@@ -406,7 +406,7 @@ struct StateStoreTests {
         #expect(decoded.stageScale == min(2.5, max(1, scale)))
     }
 
-    @Test("Settings written before the stage scale existed use the 150 percent default")
+    @Test("Settings written before the stage scale existed use the 145 percent default")
     func legacySettingsDefaultStageScale() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
@@ -418,7 +418,7 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.stageScale == AppSettings.defaultStageScale)
-        #expect(AppSettings.defaultStageScale == 1.5)
+        #expect(AppSettings.defaultStageScale == 1.45)
     }
 
     @Test("Settings written before selector customization use the macOS filled defaults")

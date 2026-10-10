@@ -391,7 +391,10 @@ struct ScreenshotTests {
         // The shadow must follow the visible image, not the surrounding layout frame.
         let imageWidth = min(metrics.thumbnailWidth, metrics.thumbnailHeight * aspect)
         let centerY = size.height / 2 - (metrics.titleSpacing + metrics.titleHeight) / 2
-        for selected in [false, true] {
+        // The shadow does not depend on selection, and native's 9-point highlight would put a
+        // sample past it beyond the shadow's reach; offscreen rendering also draws that
+        // highlight without the glass it blends with. Sample unselected cards only.
+        for selected in [false] {
             for dark in [false, true] {
                 let background: CGFloat = dark ? 0.25 : 0.9
                 let card = WindowPreviewView(
@@ -497,7 +500,10 @@ struct ScreenshotTests {
         // The title is empty. Require a larger difference than the card's existing shadow
         // alone (0.024), so removing the halo fails at every scale.
         let iconCenterY = size.height / 2 - (metrics.titleSpacing + metrics.titleHeight) / 2
-        let y = Int((iconCenterY + metrics.previewPlaceholderIconSize / 2 + 4 * scale) * 2)
+        let iconSize = StageMetrics.placeholderIconCanvasSize(
+            fittingThumbnailHeight: metrics.thumbnailHeight
+        )
+        let y = Int((iconCenterY + iconSize / 2 + 4 * scale) * 2)
         let shadow = try #require(bitmap.colorAt(x: Int(size.width), y: y))
         let bare = try #require(bitmap.colorAt(x: Int((size.width / 2 + 90 * scale) * 2), y: y))
         #expect(bare.redComponent - shadow.redComponent > 0.05)
@@ -817,7 +823,8 @@ struct ScreenshotTests {
             #expect(maxX >= minX && maxY >= minY)
             return CGSize(width: maxX - minX + 1, height: maxY - minY + 1)
         }
-        for (scale, fontSize): (CGFloat, CGFloat) in [(1, 10.4), (1.5, 12.73734666), (2, 14.70782105), (2.5, 16.44384383)] {
+        for scale: CGFloat in [1, 1.5, 2, 2.5] {
+            let fontSize = 13.5 * scale.squareRoot()
             let metrics = StageMetrics.standard.scaled(by: scale)
             let image = try #require(renderSwiftUI(
                 WindowPreviewView(window: window, isWindowSelected: true,
@@ -836,7 +843,7 @@ struct ScreenshotTests {
             // sizing changes glyph proportions, so multiplying baseline pixels is not a reference.
             let referenceSize = NSSize(width: 200, height: 60)
             let reference = try #require(renderSwiftUI(
-                Text("Hg Title").font(.system(size: fontSize)).foregroundStyle(.white),
+                Text("Hg Title").font(.system(size: fontSize, weight: .bold)).foregroundStyle(.white),
                 size: referenceSize
             ))
             let referenceBitmap = try #require(normalizedBitmap(reference, size: referenceSize))
@@ -887,8 +894,10 @@ struct ScreenshotTests {
 
         let difference = screenshotDifference(originalBitmap, normalizedEnlarged)
         #expect(difference.comparedPixelCount > 10_000)
+        // Placeholder icons are the native switcher's 102-point icon at every scale, so they
+        // alone do not scale with the rest of the composition.
         #expect(
-            difference.meanChannelDifference < 0.035,
+            difference.meanChannelDifference < 0.045,
             "mean normalized screenshot difference was \(difference.meanChannelDifference)"
         )
         #expect(

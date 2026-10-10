@@ -26,12 +26,12 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Desktop switch indicator | On |
 | Overlay on main display only | On |
 | Adaptive card sizing | On |
-| Window size / inactive stage scale | 150% / 70% |
-| Preview card spacing | 12 pt; adjustable from 0 to 36 pt |
-| Glass / stage corner radius | Native / 30 pt |
+| Window size / inactive stage scale | 145% / 70%; 100% is the native Command-Tab switcher plate (102 pt slots, 176 pt one-row plate) |
+| Preview card spacing | 14 pt between selection highlights, as native; adjustable from 0 to 36 pt. Rows in both switchers leave a title the same gap |
+| Glass / stage corner radius | Native / 57.5 pt continuous (0–72 pt) |
 | Liquid Glass rim / edge refraction | 100% / 100% of the native switcher's fitted look |
 | Liquid Glass tint | Follows System Settings; a fixed 0–100% tint is optional |
-| Selection appearance | Filled; 6 pt outset, 12 pt radius |
+| Selection appearance | Filled with the native switcher highlight; 9 pt outset, 16 pt radius, 100% strength |
 | Alternative magnify appearance | 106% size, 100% shadow strength |
 | Overlay hold delay / held cycling pace | 100 ms / 60 ms minimum between repeats |
 | Preview refresh / cache age | Only windows that may have changed / 60 seconds |

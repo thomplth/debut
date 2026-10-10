@@ -26,7 +26,7 @@ struct TutorialSwitcherView: View {
                         Spacer(minLength: 0)
                         ForEach(stage.windows) { window in
                             WindowPreviewView(window: window, isWindowSelected: window.windowID == selectedWindowID,
-                                              metrics: StageMetrics.standard, appearance: appearance)
+                                              metrics: StageMetrics.tutorial, appearance: appearance)
                                 .accessibilityLabel(window.displayTitle)
                         }
                         if stage.windows.isEmpty {

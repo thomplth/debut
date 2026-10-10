@@ -38,6 +38,7 @@ public enum SettingsSection: String, CaseIterable, Sendable {
                 .glassStyle,
                 .glassRimStrength,
                 .glassEdgeRefraction,
+                .selectionHighlightStrength,
                 .glassTint,
                 .stageCornerRadius,
                 .stageScale,
@@ -81,6 +82,7 @@ enum SettingsOption: String, CaseIterable, Sendable {
     case glassStyle
     case glassRimStrength
     case glassEdgeRefraction
+    case selectionHighlightStrength
     case glassTint
     case stageCornerRadius
     case stageScale

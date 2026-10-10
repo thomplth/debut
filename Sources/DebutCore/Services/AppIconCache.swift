@@ -16,8 +16,8 @@ public final class AppIconCache: @unchecked Sendable {
     /// by size, so tracking the scale would throw the whole warmed set away every time the slider
     /// moved and put the rasterize back on the main thread. An image view downsamples the
     /// oversized bitmap for free.
-    public static let placeholderIconRasterSize = StageMetrics.standard
-        .scaled(by: CGFloat(AppSettings.maximumStageScale)).previewPlaceholderIconSize
+    /// The placeholder does not follow the stage scale: it is always native's icon size.
+    public static let placeholderIconRasterSize = StageMetrics.placeholderIconCanvasSize
     public static let badgeRasterSize = StageMetrics.standard
         .scaled(by: CGFloat(AppSettings.maximumStageScale)).badgeSize
 
@@ -32,8 +32,9 @@ public final class AppIconCache: @unchecked Sendable {
     /// badge shadow, its blur scales with the icon instead of being rebuilt during animation.
     struct BakedIconShadow {
         static let iconSide = placeholderIconRasterSize
-        static let blur: CGFloat = 36 * CGFloat(AppSettings.maximumStageScale)
-        static let dy: CGFloat = 8 * CGFloat(AppSettings.maximumStageScale)
+        // Proportional to the icon, which no longer follows the stage scale.
+        static let blur: CGFloat = iconSide * 0.2
+        static let dy: CGFloat = iconSide * 0.05
         static let opacity: CGFloat = 0.22
         static let padding: CGFloat = blur * 2
     }
