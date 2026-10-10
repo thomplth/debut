@@ -2533,13 +2533,13 @@ struct WindowTitleLabel: View {
     static let haloInset: CGFloat = 3
 
     var body: some View {
+        let halo = (colorScheme == .dark ? Color.black : Color.white).opacity(Self.haloOpacity)
         Text(title)
             .dockGlassLabel(fontSize: fontSize)
             .lineLimit(1)
-            .shadow(
-                color: (colorScheme == .dark ? Color.black : Color.white).opacity(Self.haloOpacity),
-                radius: Self.haloRadius
-            )
+            // Two passes: one tight 1pt halo spreads too thin to see on busy glass.
+            .shadow(color: halo, radius: Self.haloRadius)
+            .shadow(color: halo, radius: Self.haloRadius)
             // Flattened into one image, the halo is blurred once per title. Left live, it was
             // re-blurred on every frame the stage animates: 3.6ms a cycling frame against
             // 0.54ms without it, and 0.59ms flattened (KHA-1057).

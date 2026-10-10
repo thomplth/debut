@@ -18,18 +18,22 @@ struct BadgeAndRowTests {
         )
     }
 
-    @Test("The badge grows with the preview, and the preview's corner with the badge")
+    /// The badge grows gently, with the square root of the preview's size, so a large preview
+    /// does not carry an oversized icon.
+    @Test("The badge grows gently with the preview, and the preview's corner with the badge")
     func badgeGrowsWithPreview() {
         let native = drawn(1)
         let enlarged = drawn(1.45)
-        #expect(abs(enlarged.badgeSize - native.badgeSize * 1.45) < 1e-9)
-        #expect(abs(enlarged.badgeOffset - native.badgeOffset * 1.45) < 1e-9)
-        #expect(abs(enlarged.thumbnailCornerRadius - native.thumbnailCornerRadius * 1.45) < 1e-9)
+        let growth = CGFloat(1.45).squareRoot()
+        #expect(abs(enlarged.badgeSize - native.badgeSize * growth) < 1e-9)
+        #expect(abs(drawn(2.5).badgeSize - native.badgeSize * CGFloat(2.5).squareRoot()) < 1e-9)
+        #expect(abs(enlarged.badgeOffset - native.badgeOffset * growth) < 1e-9)
+        #expect(abs(enlarged.thumbnailCornerRadius - native.thumbnailCornerRadius * growth) < 1e-9)
         // The highlight stays concentric with the preview's grown corner.
         let user = AppSettings().selectorCornerRadius
         #expect(abs(native.selectorCornerRadius(userRadius: user) - CGFloat(user)) < 1e-9)
         #expect(abs(enlarged.selectorCornerRadius(userRadius: user)
-            - (CGFloat(user) + native.thumbnailCornerRadius * 0.45)) < 1e-9)
+            - (CGFloat(user) + native.thumbnailCornerRadius * (growth - 1))) < 1e-9)
         // The chrome around the preview still keeps native points.
         #expect(enlarged.cardPadding == native.cardPadding)
         #expect(enlarged.titleFontSize == native.titleFontSize)

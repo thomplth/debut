@@ -291,7 +291,8 @@ public struct StageMetrics: Equatable, Sendable {
         - DockGlass.Metrics.standard.selectionPadding) / DockGlass.Metrics.standard.iconSize
 
     /// These metrics with only the preview (or icon) enlarged: the size setting. The badge grows
-    /// with the preview; margins, gaps, titles and the highlight's padding keep native points.
+    /// with the square root of it; margins, gaps, titles and the highlight's padding keep native
+    /// points.
     public func withPreviewScale(_ factor: CGFloat) -> StageMetrics {
         var metrics = StageMetrics(
             thumbnailWidth: thumbnailWidth * factor,
@@ -300,8 +301,9 @@ public struct StageMetrics: Equatable, Sendable {
             titleWidthAllowance: titleWidthAllowance,
             titleSpacing: titleSpacing,
             titleHeight: titleHeight,
-            // The badge belongs to the preview, so it grows with it.
-            badgeSize: badgeSize * factor,
+            // The badge belongs to the preview, but grows gently with it, as titles once did:
+            // in proportion it would be 100 points on a 250% preview.
+            badgeSize: badgeSize * factor.squareRoot(),
             windowSpacing: windowSpacing,
             rowSpacing: rowSpacing,
             padding: padding,

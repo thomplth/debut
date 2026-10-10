@@ -59,7 +59,7 @@ Without previews, whether the toggle is off or Screen Recording is not granted,
 both switchers draw each window as a native Command-Tab icon slot with its title,
 at a separate icon size (default 100%, the native switcher) that the same size
 slider edits. A window whose capture failed keeps its card with the app's icon at
-the badge's size and no halo; the badge grows with the preview.
+the badge's size and no halo; the badge grows with the square root of the preview's size.
 Every card in both switchers is titled in the native label style at full strength, a
 fixed 12.8 pt (the native label, at SF weight 680) at every size, centred between the card's lower edge and the plate's,
 with a tight halo in the opposite colour for legibility on clear glass. Screen Recording enables screenshot previews and

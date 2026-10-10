@@ -375,6 +375,25 @@ struct ScreenshotTests {
         #expect(viewModel.selectedWindow?.windowID == entries[2].window.windowID)
     }
 
+    @Test("halo probe", .enabled(if: ProcessInfo.processInfo.environment["DEBUT_HALO_PROBE"] != nil))
+    func haloProbe() throws {
+        let size = NSSize(width: 240, height: 60)
+        func measure(_ view: some View, _ name: String) throws {
+            let image = try #require(renderSwiftUI(view.frame(width: size.width, height: size.height), size: size, background: 0.5))
+            try saveImage(image, name: "halo_\(name)")
+            let bitmap = try #require(normalizedBitmap(image, size: size))
+            var brightest: CGFloat = 0, count = 0
+            for y in 0..<bitmap.pixelsHigh { for x in 0..<bitmap.pixelsWide {
+                let c = bitmap.colorAt(x: x, y: y)!.redComponent
+                brightest = max(brightest, c); if c > 0.55 { count += 1 }
+            }}
+            print("HALO \(name): brightest \(brightest) pixels>0.55: \(count)")
+        }
+        try measure(WindowTitleLabel(title: "Meeting Notes", fontSize: 12.8125).environment(\.colorScheme, .light), "flattened")
+        try measure(Text("Meeting Notes").dockGlassLabel(fontSize: 12.8125).shadow(color: .white.opacity(0.95), radius: 1).environment(\.colorScheme, .light), "live")
+        try measure(Text("Meeting Notes").dockGlassLabel(fontSize: 12.8125).environment(\.colorScheme, .light), "none")
+    }
+
     @Test("Actual previews cast a shadow beyond their image bounds",
           arguments: [CGFloat(0.5), 1, 2.5], [CGFloat(0.3), 1.6, 4])
     func previewDropShadow(scale: CGFloat, aspect: CGFloat) throws {
