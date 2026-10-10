@@ -146,10 +146,9 @@ struct AltTabOverlayViewModelTests {
         #expect(layout.rowSizes == [3, 2])
     }
 
-    /// A title ends one card padding above its card's lower edge, so rows add only what makes
-    /// the gap below a title equal the gap between neighbouring highlights — the same rule a
-    /// Command-Tab stage wraps by.
-    @Test("Wrapped rows leave a title the same gap as neighbouring highlights")
+    /// Rows overlap their cards' outer padding so each title sits midway between its row's
+    /// previews and the next row's — the same rule a Command-Tab stage wraps by (KHA-1060).
+    @Test("Wrapped rows centre each title between its previews and the next row's")
     func wrappedRowsUseCardEdgeInsets() {
         let space = UUID()
         let model = AltTabOverlayViewModel(
@@ -161,7 +160,7 @@ struct AltTabOverlayViewModelTests {
 
         #expect(layout.rowCount > 1)
         let scale = layout.metrics.scaleFactor
-        let rowGap = (AppSettings.defaultPreviewCardSpacing - StageMetrics.standard.cardPadding) * scale
+        let rowGap = -StageMetrics.standard.cardPadding * scale
         #expect(abs(layout.metrics.rowSpacing - rowGap) < 1e-9)
         #expect(abs(
             layout.cardOffsetFromCenter(at: layout.rowStartIndex(1)).height
@@ -180,7 +179,8 @@ struct AltTabOverlayViewModelTests {
         let layout = model.layout(containerSize: CGSize(width: 900, height: 600))
 
         #expect(layout.metrics.windowSpacing == 24 * layout.metrics.scaleFactor)
-        #expect(layout.metrics.rowSpacing == 15 * layout.metrics.scaleFactor)
+        // Rows follow the title band, not the card spacing.
+        #expect(layout.metrics.rowSpacing == -StageMetrics.standard.cardPadding * layout.metrics.scaleFactor)
     }
 
     /// A global list is far longer than any one space's, so it is the first thing in the app that

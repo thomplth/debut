@@ -2392,28 +2392,16 @@ struct WindowPreviewView: View {
                                 // drawn one, so moving the stage scale never invalidates the
                                 // warmed icons.
                                 if StageMotion.showsAppIcon(bundleID: window.ownerBundleID) {
-                                    let iconSize = StageMetrics.placeholderIconCanvasSize(
-                                        fittingThumbnailHeight: metrics.thumbnailHeight
-                                    )
                                     AppIconImage(
                                         bundleID: window.ownerBundleID,
                                         name: window.ownerName,
                                         iconSize: AppIconCache.placeholderIconRasterSize,
-                                        fallbackBaseSize: StageMetrics.placeholderIconCanvasSize
+                                        fallbackBaseSize: StageMetrics.nativeIconCanvasSize
                                     )
-                                    .frame(width: iconSize, height: iconSize)
-                                    .background {
-                                        // Overflow the icon's layout box with a shared bitmap. No
-                                        // alpha-derived shadow filter follows the changing cards.
-                                        let padded = iconSize
-                                            * (AppIconCache.BakedIconShadow.iconSide
-                                                + AppIconCache.BakedIconShadow.padding * 2)
-                                            / AppIconCache.BakedIconShadow.iconSide
-                                        Image(nsImage: AppIconCache.iconShadow)
-                                            .resizable()
-                                            .frame(width: padded, height: padded)
-                                            .allowsHitTesting(false)
-                                    }
+                                    .frame(
+                                        width: metrics.placeholderIconSize,
+                                        height: metrics.placeholderIconSize
+                                    )
                                 }
                             }
                     }
@@ -2442,7 +2430,7 @@ struct WindowPreviewView: View {
                             )
                             .frame(width: padded, height: padded)
                         }
-                        .offset(x: -4 * metrics.scaleFactor, y: -4 * metrics.scaleFactor)
+                        .offset(x: -metrics.badgeOffset, y: -metrics.badgeOffset)
                 }
             }
             .background {
@@ -2519,7 +2507,7 @@ private struct IconSlotView: View {
                         bundleID: window.ownerBundleID,
                         name: window.ownerName,
                         iconSize: AppIconCache.iconSlotRasterSize(iconScale: iconScale),
-                        fallbackBaseSize: StageMetrics.placeholderIconCanvasSize
+                        fallbackBaseSize: StageMetrics.nativeIconCanvasSize
                     )
                     .frame(width: native.iconCanvasSize, height: native.iconCanvasSize)
                     .brightness(isSelected ? -0.0225 : 0)

@@ -27,7 +27,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Overlay on main display only | On |
 | Adaptive card sizing | On |
 | Window size / inactive stage scale | 145% / 70%; 100% is the native Command-Tab switcher plate (102 pt slots, 176 pt one-row plate). The size enlarges only previews or icons; titles, plate margins, card gaps, highlight padding and corners keep native points |
-| Preview card spacing | 14 pt between selection highlights, as native; adjustable from 0 to 36 pt. Rows in both switchers leave a title the same gap |
+| Preview card spacing | 14 pt between selection highlights, as native; adjustable from 0 to 36 pt. Wrapped rows in both switchers put each title midway between its previews and the next row's |
 | Glass / stage corner radius | Native / 57.5 pt continuous (0–72 pt) |
 | Liquid Glass rim / edge refraction | 100% / 100% of the native switcher's fitted look |
 | Liquid Glass tint | Follows System Settings; a fixed 0–100% tint is optional |
@@ -59,7 +59,7 @@ Without previews, whether the toggle is off or Screen Recording is not granted,
 both switchers draw each window as a native Command-Tab icon slot with its title,
 at a separate icon size (default 100%, the native switcher) that the same size
 slider edits. A window whose capture failed keeps its card with the app's icon at
-the native 102 pt.
+the badge's size and no halo; the badge grows with the preview.
 Every card in both switchers is titled in the native label style at full strength, a
 fixed 12.8 pt (the native label, at SF weight 680) at every size, centred between the card's lower edge and the plate's,
 with a tight halo in the opposite colour for legibility on clear glass. Screen Recording enables screenshot previews and

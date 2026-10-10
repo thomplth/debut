@@ -64,7 +64,9 @@ public struct StageMetrics: Equatable, Sendable {
         badgeSize: 40,
         // Neighbouring highlights sit 14 points apart: native's 32-point slot gap less both paddings.
         windowSpacing: 14,
-        rowSpacing: 5,
+        // Rows overlap their cards' outer padding, so a wrapped row's title sits midway between
+        // its previews and the next row's, in the same band it has above the plate's edge.
+        rowSpacing: -9,
         padding: 28.5,
         topPadding: 26,
         bottomPadding: 0,
@@ -212,9 +214,8 @@ public struct StageMetrics: Equatable, Sendable {
         )
     }
 
-    /// Space between neighbouring cards. Rows follow from it: a title ends one card padding above
-    /// its card's lower edge, so the gap from a title to the highlight below it equals the gap
-    /// between neighbouring highlights.
+    /// Space between neighbouring cards in a row. Rows do not follow it: each wrapped row's
+    /// title sits midway between its previews and the next row's (KHA-1060).
     func withCardSpacing(_ spacing: CGFloat) -> StageMetrics {
         StageMetrics(
             thumbnailWidth: thumbnailWidth,
@@ -225,7 +226,7 @@ public struct StageMetrics: Equatable, Sendable {
             titleHeight: titleHeight,
             badgeSize: badgeSize,
             windowSpacing: spacing,
-            rowSpacing: max(0, spacing - cardPadding),
+            rowSpacing: -cardPadding,
             padding: padding,
             topPadding: topPadding,
             bottomPadding: bottomPadding,
@@ -260,14 +261,15 @@ public struct StageMetrics: Equatable, Sendable {
         titleSpacing + titleHeight + cardPadding
     }
 
-    /// The icon a failed capture's card shows: the native switcher's 102-point artwork, drawn
-    /// as its full canvas. It stays that size at every stage scale.
-    public static let placeholderIconCanvasSize: CGFloat = 128
+    /// The native switcher's full icon canvas at 100%: 102 points of artwork plus the inset
+    /// app icon bitmaps carry. Icon cards draw it; one raster of it serves every app icon.
+    public static let nativeIconCanvasSize: CGFloat = 128
 
-    /// The placeholder icon, shrunk only when the card is too short to hold it.
-    public static func placeholderIconCanvasSize(fittingThumbnailHeight height: CGFloat) -> CGFloat {
-        min(placeholderIconCanvasSize, max(0, height))
-    }
+    /// A failed capture shows the app's icon at the badge's size, with nothing around it.
+    public var placeholderIconSize: CGFloat { badgeSize }
+
+    /// How far the badge sits outside the preview's top-left corner: a tenth of its size.
+    public var badgeOffset: CGFloat { badgeSize / 10 }
 
     /// A macOS app icon's body is a continuous-corner squircle with a 185.4-point corner drawn
     /// on a 1024-point canvas.
@@ -288,8 +290,8 @@ public struct StageMetrics: Equatable, Sendable {
     static let iconCornerRadiusRatio: CGFloat = (DockGlass.Metrics.standard.selectionCornerRadius
         - DockGlass.Metrics.standard.selectionPadding) / DockGlass.Metrics.standard.iconSize
 
-    /// These metrics with only the preview (or icon) enlarged: the size setting. Margins, gaps,
-    /// titles, the highlight's padding and the badge keep their native point sizes.
+    /// These metrics with only the preview (or icon) enlarged: the size setting. The badge grows
+    /// with the preview; margins, gaps, titles and the highlight's padding keep native points.
     public func withPreviewScale(_ factor: CGFloat) -> StageMetrics {
         var metrics = StageMetrics(
             thumbnailWidth: thumbnailWidth * factor,
@@ -298,7 +300,8 @@ public struct StageMetrics: Equatable, Sendable {
             titleWidthAllowance: titleWidthAllowance,
             titleSpacing: titleSpacing,
             titleHeight: titleHeight,
-            badgeSize: badgeSize,
+            // The badge belongs to the preview, so it grows with it.
+            badgeSize: badgeSize * factor,
             windowSpacing: windowSpacing,
             rowSpacing: rowSpacing,
             padding: padding,
@@ -318,7 +321,9 @@ public struct StageMetrics: Equatable, Sendable {
     public func selectorCornerRadius(userRadius: Double) -> CGFloat {
         switch cardStyle {
         case .previews:
+            // The preview's corner grows with its badge; the highlight keeps concentric.
             return CGFloat(userRadius) * scale
+                + thumbnailCornerRadius - Self.standard.thumbnailCornerRadius * scale
         case .icons:
             let change = CGFloat(userRadius - AppSettings.defaultSelectorCornerRadius)
             return thumbnailCornerRadius

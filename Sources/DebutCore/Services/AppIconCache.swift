@@ -16,8 +16,9 @@ public final class AppIconCache: @unchecked Sendable {
     /// by size, so tracking the scale would throw the whole warmed set away every time the slider
     /// moved and put the rasterize back on the main thread. An image view downsamples the
     /// oversized bitmap for free.
-    /// The placeholder does not follow the stage scale: it is always native's icon size.
-    public static let placeholderIconRasterSize = StageMetrics.placeholderIconCanvasSize
+    /// One 128-point raster serves a failed capture's icon (badge-sized, at most 100 points)
+    /// and a native-size icon card.
+    public static let placeholderIconRasterSize = StageMetrics.nativeIconCanvasSize
     public static let badgeRasterSize = StageMetrics.standard
         .scaled(by: CGFloat(AppSettings.maximumStageScale)).badgeSize
 
@@ -26,7 +27,7 @@ public final class AppIconCache: @unchecked Sendable {
     public static let nativeIconSlotRasterSize = placeholderIconRasterSize
     /// Larger icon cards downsample one raster at the largest size. Warmed only once the icon
     /// size is set above native: it is a 640-pixel bitmap per app.
-    public static let largeIconSlotRasterSize = StageMetrics.placeholderIconCanvasSize
+    public static let largeIconSlotRasterSize = StageMetrics.nativeIconCanvasSize
         * CGFloat(AppSettings.maximumStageScale)
 
     public static let overlayIconSizes: [CGFloat] = [placeholderIconRasterSize]
@@ -52,69 +53,6 @@ public final class AppIconCache: @unchecked Sendable {
 
     /// Warmed apart from the plain sizes because the badge's bitmap carries a baked drop shadow.
     public static let overlayBadgeIconSizes: [CGFloat] = [badgeRasterSize]
-
-    /// One halo serves every placeholder, including icons that cannot be resolved. Its center
-    /// is transparent so irregular icons do not reveal an opaque silhouette behind them.
-    /// Bake the active lift once; the stage's opacity attenuates it when inactive. Like the
-    /// badge shadow, its blur scales with the icon instead of being rebuilt during animation.
-    struct BakedIconShadow {
-        static let iconSide = placeholderIconRasterSize
-        // Proportional to the icon, which no longer follows the stage scale.
-        static let blur: CGFloat = iconSide * 0.2
-        static let dy: CGFloat = iconSide * 0.05
-        static let opacity: CGFloat = 0.22
-        static let padding: CGFloat = blur * 2
-    }
-
-    static let iconShadow: NSImage = {
-        let side = BakedIconShadow.iconSide
-        let padding = BakedIconShadow.padding
-        let size = NSSize(width: side + padding * 2, height: side + padding * 2)
-        let image = NSImage(size: size)
-        guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int((size.width * 2).rounded()),
-            pixelsHigh: Int((size.height * 2).rounded()),
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
-        ) else { return image }
-        bitmap.size = size
-        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return image }
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
-        // Cast from outside the bitmap so only the blur lands in it, never the source shape.
-        let silhouette = NSBezierPath(
-            roundedRect: NSRect(x: padding, y: padding + size.height, width: side, height: side),
-            xRadius: side * 0.22, yRadius: side * 0.22
-        )
-        NSGraphicsContext.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(BakedIconShadow.opacity)
-        shadow.shadowOffset = NSSize(width: 0, height: -size.height - BakedIconShadow.dy)
-        shadow.shadowBlurRadius = BakedIconShadow.blur
-        shadow.set()
-        NSColor.black.setFill()
-        silhouette.fill()
-        NSGraphicsContext.restoreGraphicsState()
-        // Fade the center away softly. A hard squircle cutout leaves a visible collar around
-        // icons whose own transparent margins do not exactly match that shape.
-        if let fade = CGGradient(
-            colorsSpace: CGColorSpaceCreateDeviceRGB(),
-            colors: [CGColor(gray: 0, alpha: 1), CGColor(gray: 0, alpha: 1),
-                     CGColor(gray: 0, alpha: 0)] as CFArray,
-            locations: [0, 0.35, 1]
-        ) {
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            context.cgContext.setBlendMode(.destinationOut)
-            context.cgContext.drawRadialGradient(
-                fade, startCenter: center, startRadius: 0,
-                endCenter: center, endRadius: side * 0.6, options: []
-            )
-        }
-        NSGraphicsContext.restoreGraphicsState()
-        image.addRepresentation(bitmap)
-        return image
-    }()
 
     /// The badge's drop shadow, expressed in raster points so it can be drawn into the bitmap.
     ///

@@ -40,16 +40,6 @@ struct NativeSwitcherGeometryTests {
         ) < 0.5)
     }
 
-    @Test("Rows leave the same gap below a title as between neighbouring highlights")
-    func rowGapMatchesCardGap() {
-        for spacing: CGFloat in [0, 8, 14, 36] {
-            let metrics = StageMetrics.standard.withCardSpacing(spacing)
-            #expect(metrics.windowSpacing == spacing)
-            // A title ends one card padding above its card's lower edge.
-            #expect(metrics.rowSpacing + metrics.cardPadding == max(metrics.cardPadding, spacing))
-        }
-    }
-
     @Test("Command-Tab and Option-Tab wrap rows with the same spacing")
     @MainActor
     func bothOverlaysShareTheRowRule() {
@@ -89,12 +79,9 @@ struct NativeSwitcherGeometryTests {
         #expect(StageMetrics.standard.titleFontSize == 12.8125)
     }
 
-    @Test("A failed capture's placeholder icon is the native 102-point artwork")
-    func placeholderIconIsNativeSize() {
-        // The icon canvas carries the artwork's inset; native artwork is 102 points.
-        #expect(StageMetrics.placeholderIconCanvasSize == native.iconCanvasSize)
-        #expect(StageMetrics.placeholderIconCanvasSize(fittingThumbnailHeight: 300) == native.iconCanvasSize)
-        #expect(StageMetrics.placeholderIconCanvasSize(fittingThumbnailHeight: 80) == 80)
+    @Test("Icon cards draw native's full 128-point icon canvas at 100%")
+    func iconCanvasIsNative() {
+        #expect(StageMetrics.nativeIconCanvasSize == native.iconCanvasSize)
         #expect(AppIconCache.placeholderIconRasterSize >= native.iconCanvasSize)
     }
 }

@@ -407,8 +407,8 @@ struct DisplayShapedMetricsTests {
         )
 
         #expect(metrics.windowSpacing == 24 * metrics.scaleFactor)
-        // Rows leave the card padding below each title as part of the same gap.
-        #expect(metrics.rowSpacing == (24 - StageMetrics.standard.cardPadding) * metrics.scaleFactor)
+        // Rows follow the title band, not the card spacing (KHA-1060).
+        #expect(metrics.rowSpacing == -StageMetrics.standard.cardPadding * metrics.scaleFactor)
         #expect(layout.rowWidth(0) == layout.cardWidth(at: 0) * 5 + metrics.windowSpacing * 4)
     }
 }

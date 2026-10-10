@@ -480,34 +480,31 @@ struct ScreenshotTests {
         #expect(difference.changedPixelRatio < 0.001)
     }
 
-    @Test("Placeholder cards cast a halo on a light background at every stage scale",
-          arguments: [0.5, 1.0, 2.0])
-    func placeholderHalo(scale: CGFloat) throws {
-        let metrics = StageMetrics.standard.scaled(by: scale)
-        let size = NSSize(width: 400 * scale, height: 300 * scale)
+    /// A failed capture shows the app's icon at the badge's size and nothing around it: no halo
+    /// darkens the empty preview below the icon (KHA-1060).
+    @Test("A failed capture's icon casts no halo", arguments: [1.0, 1.45, 2.0])
+    func placeholderHasNoHalo(scale: CGFloat) throws {
+        let metrics = StageMetrics.standard.withPreviewScale(scale)
+        let size = NSSize(width: 500 * scale, height: 400 * scale)
         let card = WindowPreviewView(
             window: StageWindowData(
                 id: 100, windowID: 100,
-                ownerBundleID: "com.example.missing-halo-fixture", ownerName: "",
+                ownerBundleID: "com.apple.finder", ownerName: "",
                 windowTitle: "", previewImage: nil
             ),
             isWindowSelected: false, metrics: metrics, appearance: AppSettings()
         )
         let image = try #require(renderSwiftUI(card, size: size, background: 0.9))
         let bitmap = try #require(normalizedBitmap(image, size: size))
-        try saveImage(image, name: "05_placeholder_halo_\(scale)")
+        try saveImage(image, name: "05_placeholder_\(scale)")
 
-        // Both samples are inside the same empty thumbnail, below the placeholder icon.
-        // The title is empty. Require a larger difference than the card's existing shadow
-        // alone (0.024), so removing the halo fails at every scale.
-        let iconCenterY = size.height / 2 - (metrics.titleSpacing + metrics.titleHeight) / 2
-        let iconSize = StageMetrics.placeholderIconCanvasSize(
-            fittingThumbnailHeight: metrics.thumbnailHeight
-        )
-        let y = Int((iconCenterY + iconSize / 2 + 4 * scale) * 2)
-        let shadow = try #require(bitmap.colorAt(x: Int(size.width), y: y))
-        let bare = try #require(bitmap.colorAt(x: Int((size.width / 2 + 90 * scale) * 2), y: y))
-        #expect(bare.redComponent - shadow.redComponent > 0.05)
+        // Both samples are inside the same empty preview at the same height, one just below
+        // the icon and one well clear of it. A halo would darken the first.
+        let iconCenterY = size.height / 2 - metrics.titleBandHeight / 2 + metrics.cardPadding / 2
+        let y = Int((iconCenterY + metrics.placeholderIconSize / 2 + 3) * 2)
+        let belowIcon = try #require(bitmap.colorAt(x: Int(size.width), y: y))
+        let clear = try #require(bitmap.colorAt(x: Int((size.width / 2 + metrics.thumbnailWidth / 2 - 8) * 2), y: y))
+        #expect(abs(clear.redComponent - belowIcon.redComponent) < 0.01)
     }
 
     /// The global list is the first thing in the app that routinely outgrows the display, so the

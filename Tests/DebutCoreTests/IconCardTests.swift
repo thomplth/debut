@@ -153,11 +153,11 @@ struct IconCardTests {
 
     @Test("Native-size icon cards cost no extra raster; larger ones warm one more")
     func iconRastersFollowIconSize() {
-        #expect(AppIconCache.overlayIconSizes(iconScale: 1) == [StageMetrics.placeholderIconCanvasSize])
-        #expect(AppIconCache.iconSlotRasterSize(iconScale: 1) == StageMetrics.placeholderIconCanvasSize)
+        #expect(AppIconCache.overlayIconSizes(iconScale: 1) == [StageMetrics.nativeIconCanvasSize])
+        #expect(AppIconCache.iconSlotRasterSize(iconScale: 1) == StageMetrics.nativeIconCanvasSize)
         let large = AppIconCache.overlayIconSizes(iconScale: 1.5)
         #expect(large.count == 2)
-        #expect(large.max() == StageMetrics.placeholderIconCanvasSize * CGFloat(AppSettings.maximumStageScale))
+        #expect(large.max() == StageMetrics.nativeIconCanvasSize * CGFloat(AppSettings.maximumStageScale))
         #expect(AppIconCache.iconSlotRasterSize(iconScale: 1.5) == large.max())
     }
 }

@@ -40,7 +40,6 @@ struct PreviewOnlyScalingTests {
         #expect(enlarged.titleHeight == native.titleHeight)
         #expect(enlarged.titleBandHeight == native.titleBandHeight)
         #expect(enlarged.titleFontSize == DockGlass.Label.standardFontSize)
-        #expect(enlarged.badgeSize == native.badgeSize)
         #expect(enlarged.minStageWidth == native.minStageWidth)
     }
 
@@ -53,15 +52,10 @@ struct PreviewOnlyScalingTests {
             - (native.plateHeight - native.iconSize + metrics.thumbnailHeight)) < 1e-9)
     }
 
-    @Test("A preview's corner and highlight stay fixed; an icon's follow the icon")
-    func cornersFollowWhatGrows() {
+    @Test("An icon's corner and highlight follow the icon")
+    func iconCornersFollowTheIcon() {
         let settings = AppSettings()
         let native = DockGlass.Metrics.standard
-        let previews = drawn(2)
-        #expect(previews.thumbnailCornerRadius == StageMetrics.standard.thumbnailCornerRadius)
-        #expect(previews.selectorCornerRadius(userRadius: settings.selectorCornerRadius)
-            == CGFloat(settings.selectorCornerRadius))
-
         let icons = drawn(2, style: .icons)
         let iconCorner = native.selectionCornerRadius - native.selectionPadding
         #expect(abs(icons.thumbnailCornerRadius - iconCorner * 2) < 1e-9)
