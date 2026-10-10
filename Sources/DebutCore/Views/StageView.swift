@@ -975,7 +975,7 @@ public struct StageConstants {
             let fits = stageLayouts(
                 forContentAspects: contentAspects,
                 screenWidth: containerSize.width,
-                metrics: metrics.scaled(by: candidate)
+                metrics: metrics.withPreviewScale(candidate)
             ).allSatisfy {
                 $0.stageSize.width <= availableWidth && $0.stageSize.height <= availableHeight
             }
@@ -1012,7 +1012,7 @@ public struct StageConstants {
         let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize, cardStyle: cardStyle)
         let cardMetrics = cardSpacing.map(shapedMetrics.withCardSpacing) ?? shapedMetrics
         let metrics = rowSpacing.map(cardMetrics.withRowSpacing) ?? cardMetrics
-        return metrics.scaled(by: fittedStageScale(
+        return metrics.withPreviewScale(fittedStageScale(
             requested: stageScale,
             contentAspects: contentAspects,
             containerSize: containerSize,

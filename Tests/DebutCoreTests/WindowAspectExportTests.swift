@@ -22,7 +22,9 @@ struct WindowAspectExportTests {
         let aspects: [[CGFloat?]] = [[1.5698, 1.5698, size.width / size.height], [], [], []]
         func rows(_ aspects: [[CGFloat?]]) -> [Int] {
             let metrics = StageConstants.drawnMetrics(
-                stageScale: 1.5, contentAspects: aspects, containerSize: size, cardSpacing: 12)
+                // Two display-shaped cards per row on this display: with native chrome at fixed
+                // points, that takes a larger preview size than it did when chrome scaled too.
+                stageScale: 2, contentAspects: aspects, containerSize: size, cardSpacing: 12)
             return StageConstants.stageLayouts(
                 forContentAspects: aspects, screenWidth: size.width, metrics: metrics)[0].rowSizes
         }

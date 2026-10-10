@@ -786,8 +786,10 @@ struct ScreenshotTests {
         let unscaled = cardSize(stageScale: 1)
         let enlarged = cardSize(stageScale: enlargedScale)
 
-        #expect(abs(enlarged.width - unscaled.width * enlargedScale) < 0.5)
-        #expect(abs(enlarged.height - unscaled.height * enlargedScale) < 0.5)
+        // Only the preview grows: the card gains exactly the preview's extra size (KHA-1059).
+        let shaped = StageMetrics.shaped(forDisplay: size)
+        #expect(abs(enlarged.width - unscaled.width - shaped.thumbnailWidth * (enlargedScale - 1)) < 0.5)
+        #expect(abs(enlarged.height - unscaled.height - shaped.thumbnailHeight * (enlargedScale - 1)) < 0.5)
 
         // E2E clicks screen coordinates it derives from drawnMetrics, so a card drawn at any
         // other size sends those clicks somewhere the overlay never drew.
@@ -848,7 +850,7 @@ struct ScreenshotTests {
 
         for scale: CGFloat in [1, 1.45, 2, 2.5] {
             for selected in [false, true] {
-                let metrics = StageMetrics.standard.scaled(by: scale)
+                let metrics = StageMetrics.standard.withPreviewScale(scale)
                 let image = try #require(renderSwiftUI(
                     WindowPreviewView(window: window, isWindowSelected: selected,
                         metrics: metrics, appearance: appearance)
@@ -871,57 +873,23 @@ struct ScreenshotTests {
         }
     }
 
-    @Test("A 150 percent preview scale preserves the overall overlay composition")
-    func enlargedStageScalePreservesRenderedComposition() throws {
-        let originalSize = NSSize(width: 1_200, height: 600)
-        let scale: CGFloat = 1.5
-        let enlargedSize = NSSize(
-            width: originalSize.width * scale,
-            height: originalSize.height * scale
-        )
-
-        var originalAppearance = AppSettings()
-        originalAppearance.stageScale = 1
-        let original = try #require(renderSwiftUI(
-            StageOverlayView(viewModel: makeSampleViewModel(
-                spaceCount: 3,
-                windowsPerSpace: [3, 4, 2],
-                activeIndex: 1,
-                appearance: originalAppearance
-            )),
-            size: originalSize
-        ))
-        var enlargedAppearance = AppSettings()
-        enlargedAppearance.stageScale = Double(scale)
-        let enlarged = try #require(renderSwiftUI(
-            StageOverlayView(viewModel: makeSampleViewModel(
-                spaceCount: 3,
-                windowsPerSpace: [3, 4, 2],
-                activeIndex: 1,
-                appearance: enlargedAppearance
-            )),
-            size: enlargedSize
-        ))
-        let originalBitmap = try #require(normalizedBitmap(original, size: originalSize))
-        let normalizedEnlarged = try #require(normalizedBitmap(enlarged, size: originalSize))
-
-        let normalizedImage = NSImage(size: originalSize)
-        normalizedImage.addRepresentation(normalizedEnlarged)
-        try saveImage(original, name: "06_proportional_scale_original")
-        try saveImage(normalizedImage, name: "06_proportional_scale_normalized_150_percent")
-
-        let difference = screenshotDifference(originalBitmap, normalizedEnlarged)
-        #expect(difference.comparedPixelCount > 10_000)
-        // Placeholder icons are the native switcher's 102-point icon and titles the native
-        // 13.5-point label at every scale, so those two do not scale with the rest.
-        #expect(
-            difference.meanChannelDifference < 0.045,
-            "mean normalized screenshot difference was \(difference.meanChannelDifference)"
-        )
-        #expect(
-            difference.changedPixelRatio < 0.14,
-            "normalized screenshot changed-pixel ratio was \(difference.changedPixelRatio)"
-        )
+    /// Replaces the proportional-composition check: the size setting no longer enlarges the
+    /// whole overlay, only the previews (KHA-1059). The geometry is pinned in
+    /// PreviewOnlyScalingTests; this checks the overlay draws it, plate edges and gaps included.
+    @Test("A 150 percent size enlarges only the previews in the rendered overlay")
+    func enlargedStageScaleGrowsOnlyPreviews() throws {
+        let size = NSSize(width: 1_600, height: 1_000)
+        func stage(_ scale: Double) throws -> CGRect {
+            var appearance = AppSettings()
+            appearance.stageScale = scale
+            let vm = makeSampleViewModel(spaceCount: 1, windowsPerSpace: [3], activeIndex: 0, appearance: appearance)
+            return try #require(renderStageSurfaceFrames(StageOverlayView(viewModel: vm), size: size)[0])
+        }
+        let native = try stage(1)
+        let enlarged = try stage(1.5)
+        let shaped = StageMetrics.shaped(forDisplay: size)
+        #expect(abs(enlarged.height - native.height - shaped.thumbnailHeight * 0.5) < 0.5)
+        #expect(abs(enlarged.width - native.width - shaped.thumbnailWidth * 0.5 * 3) < 0.5)
     }
 
     @Test("The default stage scale still fits the display, and a crowded space shrinks to fit")

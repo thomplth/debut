@@ -26,7 +26,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Desktop switch indicator | On |
 | Overlay on main display only | On |
 | Adaptive card sizing | On |
-| Window size / inactive stage scale | 145% / 70%; 100% is the native Command-Tab switcher plate (102 pt slots, 176 pt one-row plate) |
+| Window size / inactive stage scale | 145% / 70%; 100% is the native Command-Tab switcher plate (102 pt slots, 176 pt one-row plate). The size enlarges only previews or icons; titles, plate margins, card gaps, highlight padding and corners keep native points |
 | Preview card spacing | 14 pt between selection highlights, as native; adjustable from 0 to 36 pt. Rows in both switchers leave a title the same gap |
 | Glass / stage corner radius | Native / 57.5 pt continuous (0–72 pt) |
 | Liquid Glass rim / edge refraction | 100% / 100% of the native switcher's fitted look |

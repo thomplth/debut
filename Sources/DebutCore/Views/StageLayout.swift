@@ -44,6 +44,10 @@ public struct StageMetrics: Equatable, Sendable {
     /// Icon slots are square and never take a window's or a display's shape.
     public internal(set) var cardStyle: OverlayCardStyle = .previews
 
+    /// How far the size setting (or automatic fitting) has enlarged the preview or icon relative
+    /// to the native slot. Only the slot follows it; everything around it keeps native points.
+    public internal(set) var previewScale: CGFloat = 1
+
     /// The native Command-Tab switcher (`DockGlass.Metrics.standard`) with a preview in each
     /// 102-point icon slot. The card is the slot plus the 9-point selection highlight around it
     /// and the title below, so the plate's insets are native's slot insets less that padding:
@@ -180,7 +184,8 @@ public struct StageMetrics: Equatable, Sendable {
             bottomPadding: bottomPadding,
             minStageWidth: minStageWidth,
             scale: scale,
-            cardStyle: cardStyle
+            cardStyle: cardStyle,
+            previewScale: previewScale
         )
     }
 
@@ -202,7 +207,8 @@ public struct StageMetrics: Equatable, Sendable {
             bottomPadding: bottomPadding,
             minStageWidth: minStageWidth,
             scale: scale,
-            cardStyle: cardStyle
+            cardStyle: cardStyle,
+            previewScale: previewScale
         )
     }
 
@@ -225,7 +231,8 @@ public struct StageMetrics: Equatable, Sendable {
             bottomPadding: bottomPadding,
             minStageWidth: minStageWidth,
             scale: scale,
-            cardStyle: cardStyle
+            cardStyle: cardStyle,
+            previewScale: previewScale
         )
     }
 
@@ -240,8 +247,10 @@ public struct StageMetrics: Equatable, Sendable {
     /// The native switcher's label size at 100%. Titles grow more gently than previews,
     /// independently of the display or window shape, and keep a readability floor when automatic
     /// fitting shrinks a crowded overlay.
+    /// The native label size. Only the drag view's uniform zoom changes it; the size setting
+    /// enlarges previews alone.
     public var titleFontSize: CGFloat {
-        DockGlass.Label.standardFontSize
+        DockGlass.Label.standardFontSize * scale
     }
 
     /// The band a title is centred in: from the preview's lower edge to the plate's lower edge,
@@ -271,9 +280,36 @@ public struct StageMetrics: Equatable, Sendable {
         switch cardStyle {
         case .previews: badgeSize * Self.appIconCornerRadiusRatio
         // The icon's own corner, which native's highlight is concentric with.
-        case .icons: (DockGlass.Metrics.standard.selectionCornerRadius
-            - DockGlass.Metrics.standard.selectionPadding) * scale
+        case .icons: thumbnailHeight * Self.iconCornerRadiusRatio
         }
+    }
+
+    /// An icon's own corner over its artwork size, which native's highlight is concentric with.
+    static let iconCornerRadiusRatio: CGFloat = (DockGlass.Metrics.standard.selectionCornerRadius
+        - DockGlass.Metrics.standard.selectionPadding) / DockGlass.Metrics.standard.iconSize
+
+    /// These metrics with only the preview (or icon) enlarged: the size setting. Margins, gaps,
+    /// titles, the highlight's padding and the badge keep their native point sizes.
+    public func withPreviewScale(_ factor: CGFloat) -> StageMetrics {
+        var metrics = StageMetrics(
+            thumbnailWidth: thumbnailWidth * factor,
+            thumbnailHeight: thumbnailHeight * factor,
+            cardPadding: cardPadding,
+            titleWidthAllowance: titleWidthAllowance,
+            titleSpacing: titleSpacing,
+            titleHeight: titleHeight,
+            badgeSize: badgeSize,
+            windowSpacing: windowSpacing,
+            rowSpacing: rowSpacing,
+            padding: padding,
+            topPadding: topPadding,
+            bottomPadding: bottomPadding,
+            minStageWidth: minStageWidth,
+            scale: scale,
+            cardStyle: cardStyle
+        )
+        metrics.previewScale = previewScale * factor
+        return metrics
     }
 
     /// The selection highlight's corner radius for the user's setting, which is tuned for
@@ -285,7 +321,8 @@ public struct StageMetrics: Equatable, Sendable {
             return CGFloat(userRadius) * scale
         case .icons:
             let change = CGFloat(userRadius - AppSettings.defaultSelectorCornerRadius)
-            return (DockGlass.Metrics.standard.selectionCornerRadius + change) * scale
+            return thumbnailCornerRadius
+                + (DockGlass.Metrics.standard.selectionPadding + change) * scale
         }
     }
 
@@ -293,8 +330,9 @@ public struct StageMetrics: Equatable, Sendable {
     /// non-layout details that belong to a stage, such as its corner radius and command hints.
     public var scaleFactor: CGFloat { scale }
 
-    /// Preview and label-container geometry scale together; title typography follows its
-    /// gentler curve above.
+
+    /// A uniform zoom of the whole card and its surroundings: the drag view's fit. The size
+    /// setting is `withPreviewScale`, which enlarges only the preview.
     public func scaled(by scale: CGFloat) -> StageMetrics {
         StageMetrics(
             thumbnailWidth: thumbnailWidth * scale,
@@ -311,7 +349,8 @@ public struct StageMetrics: Equatable, Sendable {
             bottomPadding: bottomPadding * scale,
             minStageWidth: minStageWidth * scale,
             scale: self.scale * scale,
-            cardStyle: cardStyle
+            cardStyle: cardStyle,
+            previewScale: previewScale
         )
     }
 }

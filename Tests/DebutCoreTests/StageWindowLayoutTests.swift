@@ -175,15 +175,16 @@ struct StageWindowLayoutTests {
 
         #expect(scaled.cardWidth == metrics.cardWidth * 1.5)
         #expect(scaled.cardHeight == metrics.cardHeight * 1.5)
-        #expect(scaled.titleFontSize == metrics.titleFontSize)
+        // `scaled(by:)` is the drag view's uniform zoom, so the title zooms with everything else.
+        #expect(scaled.titleFontSize == metrics.titleFontSize * 1.5)
         #expect(scaled.thumbnailCornerRadius == metrics.thumbnailCornerRadius * 1.5)
         #expect(metrics.scaled(by: 1) == metrics)
     }
 
     @Test("Titles stay the native label size at every window size", arguments: [0.5, 1.0, 1.45, 2.0, 2.5])
     func fixedTitleSize(scale: Double) {
-        #expect(metrics.scaled(by: scale).titleFontSize == DockGlass.Label.standardFontSize)
-        #expect(StageMetrics.icons.scaled(by: scale).titleFontSize == DockGlass.Label.standardFontSize)
+        #expect(metrics.withPreviewScale(scale).titleFontSize == DockGlass.Label.standardFontSize)
+        #expect(StageMetrics.icons.withPreviewScale(scale).titleFontSize == DockGlass.Label.standardFontSize)
     }
 
     @Test("A title's band runs from the card's lower edge to the plate's", arguments: [1.0, 1.45, 2.5])

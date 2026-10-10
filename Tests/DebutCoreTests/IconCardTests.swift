@@ -82,7 +82,8 @@ struct IconCardTests {
             cardStyle: .icons
         )
         #expect(metrics.cardStyle == .icons)
-        #expect(abs(metrics.scaleFactor - 1.2) < 1e-9)
+        #expect(abs(metrics.previewScale - 1.2) < 1e-9)
+        #expect(metrics.scaleFactor == 1)
         #expect(abs(metrics.thumbnailHeight - native.iconSize * 1.2) < 1e-9)
         #expect(metrics.thumbnailWidth == metrics.thumbnailHeight)
     }
