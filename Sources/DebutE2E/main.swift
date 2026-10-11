@@ -1631,6 +1631,15 @@ func clearDiagnosticFile() {
     try? FileManager.default.removeItem(at: diagnosticFile)
 }
 
+// A forced first launch resumes saved setup progress, so a journey that stopped on a later page
+// leaves the next run starting there, missing Welcome, and failing to the same page again (KHA-935).
+func clearOnboardingProgress() {
+    let defaults = UserDefaults(suiteName: debutBundleID)
+    for key in ["setupCheckpoint", "onboardingCheckpoint", "tutorialCheckpoint", "setupPermissionReturn"] {
+        defaults?.removeObject(forKey: key)
+    }
+}
+
 // A warm, reused guest keeps whatever desktop the previous run left active. Fixture windows
 // open on the active desktop, so without this a run that ended on a later desktop plants the
 // next run's fixtures with no empty desktop after them — the exact adjacency every drop/move
@@ -1645,7 +1654,7 @@ func clearDiagnosticFile() {
 // A focused guest-only replay for setup persistence, after a full VM validation run.
 if CommandLine.arguments.dropFirst().first == "onboarding-speed-check" {
     _ = terminateDebutAndWait()
-    UserDefaults(suiteName: debutBundleID)?.removeObject(forKey: "setupCheckpoint")
+    clearOnboardingProgress()
     clearDiagnosticFile()
     onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
     let ready = waitForDebutReady(onboardingApplication)
@@ -1660,6 +1669,7 @@ if CommandLine.arguments.dropFirst().first == "onboarding-speed-check" {
 if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
     let deniedAccessibility = CommandLine.arguments.last == "accessibility"
     let oneDesktop = CommandLine.arguments.last == "desktop"
+    clearOnboardingProgress()
     clearDiagnosticFile()
     onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
     let runtimeReady = deniedAccessibility || waitFor(timeout: 15) {
@@ -3740,9 +3750,22 @@ func onboardingControls(role wantedRole: String) -> [String] {
     return found
 }
 
+// A page transition publishes the next page's controls a moment after the previous press returns,
+// and a slow host can show an empty accessibility tree meanwhile; one immediate lookup misses a
+// control the failure listing then finds (KHA-935). Absence checks keep using onboardingButton.
+@MainActor
+func awaitOnboardingButton(_ title: String, role: String = kAXButtonRole) -> AXUIElement? {
+    var found: AXUIElement?
+    _ = waitFor(timeout: 3) {
+        found = onboardingButton(title, role: role)
+        return found != nil
+    }
+    return found
+}
+
 @MainActor
 func onboardingPress(_ title: String, role: String = kAXButtonRole) -> Bool {
-    guard let button = onboardingButton(title, role: role) else {
+    guard let button = awaitOnboardingButton(title, role: role) else {
         info("no \(role) matching \(title); available: \(onboardingControls(role: role))")
         return false
     }
@@ -3853,7 +3876,7 @@ func verifySetupDurationPersistence() -> Bool {
 
 @MainActor
 func onboardingGetStartedEnabled() -> Bool {
-    guard let button = onboardingButton("Get started") else { return false }
+    guard let button = awaitOnboardingButton("Get started") else { return false }
     var enabled: CFTypeRef?
     AXUIElementCopyAttributeValue(button, kAXEnabledAttribute as CFString, &enabled)
     return enabled as? Bool == true
@@ -3861,7 +3884,7 @@ func onboardingGetStartedEnabled() -> Bool {
 
 @MainActor
 func onboardingContinueEnabled() -> Bool {
-    guard let button = onboardingButton("Continue") else { return false }
+    guard let button = awaitOnboardingButton("Continue") else { return false }
     var enabled: CFTypeRef?
     AXUIElementCopyAttributeValue(button, kAXEnabledAttribute as CFString, &enabled)
     return enabled as? Bool == true
@@ -3886,6 +3909,7 @@ func scenario_onboarding_journey() {
     resetOnboardingDock.waitUntilExit()
     wait(3)
 
+    clearOnboardingProgress()
     clearDiagnosticFile()
     onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
     let onboardingApplicationReady = waitForDebutReady(onboardingApplication)
