@@ -170,6 +170,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var titleHaloStrength: Double
     /// The halo's blur radius in points.
     public var titleHaloSize: Double
+    /// The halo strength actually drawn: regular glass is opaque enough to keep titles
+    /// legible, so it has no halo whatever the saved strength.
+    public var effectiveTitleHaloStrength: Double {
+        glassStyle == .regular ? 0 : titleHaloStrength
+    }
     /// The plate corner when previews show.
     public var stageCornerRadius: Double
     /// The plate corner for icon cards, drawn without previews.

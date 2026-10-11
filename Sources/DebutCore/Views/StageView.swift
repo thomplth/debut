@@ -2444,7 +2444,7 @@ struct WindowPreviewView: View {
                 WindowTitleLabel(
                     title: window.displayTitle,
                     fontSize: metrics.titleFontSize,
-                    haloStrength: appearance.titleHaloStrength,
+                    haloStrength: appearance.effectiveTitleHaloStrength,
                     haloSize: CGFloat(appearance.titleHaloSize) * metrics.scaleFactor
                 )
             }

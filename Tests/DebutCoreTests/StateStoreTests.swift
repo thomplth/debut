@@ -553,6 +553,19 @@ struct StateStoreTests {
         #expect(decoded.titleHaloSize == AppSettings.maximumTitleHaloSize)
     }
 
+    @Test("The title halo only applies to the native and clear materials")
+    func titleHaloIsOffOnRegularGlass() {
+        var settings = AppSettings()
+        settings.titleHaloStrength = 0.6
+        for style in [GlassStyle.native, .clear] {
+            settings.glassStyle = style
+            #expect(settings.effectiveTitleHaloStrength == 0.6)
+        }
+        settings.glassStyle = .regular
+        #expect(settings.effectiveTitleHaloStrength == 0)
+        #expect(settings.titleHaloStrength == 0.6)
+    }
+
     @Test("Liquid Glass settings map onto the DockGlass style and clamp")
     func liquidGlassSettingsMapToDockGlassStyle() throws {
         var settings = AppSettings()

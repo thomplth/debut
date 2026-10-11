@@ -101,7 +101,7 @@ public struct SettingsView: View {
                         )
                     }
                     .padding(.horizontal, 24)
-                    .padding(.top, 14)
+                    .padding(.top, 24)
                     .padding(.bottom, 12)
                     Divider()
                 }
@@ -508,6 +508,7 @@ public struct SettingsView: View {
 
     private var liquidGlassSection: some View {
         let usesNativeGlass = viewModel.settings.glassStyle.usesDockGlass
+        let usesHalo = viewModel.settings.glassStyle != .regular
         return VStack(alignment: .leading, spacing: 12) {
             Text("Liquid Glass")
                 .font(.headline)
@@ -546,6 +547,7 @@ public struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 percentSlider("Title halo", value: $viewModel.settings.titleHaloStrength, in: 0...1)
+                    .disabled(!usesHalo)
                 HStack {
                     Text("Title halo size")
                     Spacer()
@@ -558,8 +560,8 @@ public struct SettingsView: View {
                     in: AppSettings.minimumTitleHaloSize...AppSettings.maximumTitleHaloSize,
                     step: 0.25
                 )
-                .disabled(viewModel.settings.titleHaloStrength == 0)
-                Text("A glow behind window titles in the opposite colour, so they stay legible over clear glass.")
+                .disabled(!usesHalo || viewModel.settings.titleHaloStrength == 0)
+                Text("A glow behind window titles in the opposite colour, so they stay legible over clear glass. Regular glass has none.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
