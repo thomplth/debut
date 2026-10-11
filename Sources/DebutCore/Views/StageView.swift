@@ -36,12 +36,6 @@ struct StageLift: Equatable {
     let shadowY: CGFloat
 }
 
-struct WindowLift: Equatable {
-    let shadowOpacity: Double
-    let shadowRadius: CGFloat
-    let shadowY: CGFloat
-}
-
 struct StageStackLayout: Equatable {
     let scales: [CGFloat]
     /// Each stage's own unscaled height. Stages wrap independently, so this is per space rather
@@ -367,25 +361,8 @@ enum StageMotion {
         return anchorY - layout.centers[anchorIndex]
     }
 
-    static func windowScale(
-        isSelected: Bool,
-        isDragging: Bool,
-        style: WindowSelectionStyle = .magnify,
-        magnifyScale: CGFloat = CGFloat(AppSettings.defaultMagnifyScale)
-    ) -> CGFloat {
-        // The floating drag proxy hands directly to the resting grid card. Giving it a smaller
-        // drag-only scale makes that handoff look like a new card growing into the destination.
-        if isDragging { return 1 }
-        guard isSelected, style == .magnify else { return 1 }
-        return magnifyScale
-    }
-
-    static func showsWindowSelector(
-        isSelected: Bool,
-        isDragging: Bool,
-        style: WindowSelectionStyle
-    ) -> Bool {
-        isSelected && !isDragging && style == .filled
+    static func showsWindowSelector(isSelected: Bool, isDragging: Bool) -> Bool {
+        isSelected && !isDragging
     }
 
     /// A card with no preview draws the app icon in the middle of its empty plate, so the
@@ -573,37 +550,6 @@ enum StageMotion {
         )
     }
 
-    // A black shadow over the dark stage behind it needs more density and spread to
-    // read as depth than it does in light mode. macOS scales the shadow this way rather
-    // than inverting it to white.
-    static func windowLift(
-        isSelected: Bool,
-        isDragging: Bool,
-        isDarkMode: Bool,
-        style: WindowSelectionStyle = .magnify,
-        shadowStrength: Double = AppSettings.defaultMagnifyShadowStrength
-    ) -> WindowLift {
-        guard isSelected, style == .magnify else {
-            return WindowLift(shadowOpacity: 0, shadowRadius: 0, shadowY: 0)
-        }
-        let base = isDarkMode
-            ? WindowLift(shadowOpacity: 0.5, shadowRadius: 14, shadowY: 6)
-            : WindowLift(shadowOpacity: 0.24, shadowRadius: 8, shadowY: 4)
-        let strength = max(0, shadowStrength)
-        let lifted = WindowLift(
-            shadowOpacity: base.shadowOpacity * strength,
-            shadowRadius: base.shadowRadius * CGFloat(strength),
-            shadowY: base.shadowY * CGFloat(strength)
-        )
-        guard !isDragging else {
-            return WindowLift(
-                shadowOpacity: 0,
-                shadowRadius: lifted.shadowRadius,
-                shadowY: lifted.shadowY
-            )
-        }
-        return lifted
-    }
 }
 
 enum StageInteraction {
@@ -1519,7 +1465,9 @@ public struct StageOverlayView: View {
                             StageSurfaceView(
                                 spaceIndex: index,
                                 size: CGSize(width: stageWidth, height: stageHeight),
-                                cornerRadius: CGFloat(viewModel.appearance.stageCornerRadius)
+                                cornerRadius: CGFloat(viewModel.appearance.stageCornerRadius(
+                                    for: viewModel.cardStyle
+                                ))
                                     * visualScale,
                                 appearance: viewModel.appearance,
                                 shadow: StageSurfaceShadow.forStage(
@@ -2339,18 +2287,11 @@ struct WindowPreviewView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        let lift = StageMotion.windowLift(
-            isSelected: isWindowSelected,
-            isDragging: isDragging,
-            isDarkMode: colorScheme == .dark,
-            style: appearance.windowSelectionStyle,
-            shadowStrength: appearance.magnifyShadowStrength
-        )
         let showsSelector = StageMotion.showsWindowSelector(
             isSelected: isWindowSelected,
-            isDragging: isDragging,
-            style: appearance.windowSelectionStyle
+            isDragging: isDragging
         )
+        let previewCorner = metrics.previewCornerRadius(userRadius: appearance.previewCornerRadius)
         return VStack(spacing: metrics.titleSpacing) {
             ZStack(alignment: .topLeading) {
                 Group {
@@ -2366,7 +2307,7 @@ struct WindowPreviewView: View {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .clipShape(RoundedRectangle(
-                                cornerRadius: metrics.thumbnailCornerRadius,
+                                cornerRadius: previewCorner,
                                 style: .continuous
                             ))
                             .background {
@@ -2377,7 +2318,7 @@ struct WindowPreviewView: View {
                                     let shadow = PreviewShadowCache.shared.image(
                                         for: CGSize(width: geometry.size.width / scale,
                                                     height: geometry.size.height / scale),
-                                        cornerRadius: metrics.thumbnailCornerRadius / scale
+                                        cornerRadius: previewCorner / scale
                                     )
                                     Image(nsImage: shadow)
                                         .resizable()
@@ -2391,7 +2332,7 @@ struct WindowPreviewView: View {
                             }
                     } else {
                         RoundedRectangle(
-                            cornerRadius: metrics.thumbnailCornerRadius,
+                            cornerRadius: previewCorner,
                             style: .continuous
                         )
                             .fill(.quaternary.opacity(0.3))
@@ -2417,23 +2358,27 @@ struct WindowPreviewView: View {
                 .frame(width: metrics.thumbnailWidth, height: metrics.thumbnailHeight)
 
                 if metrics.cardStyle == .previews,
+                   appearance.badgePlacement != .titleRow,
                    StageMotion.showsAppIcon(bundleID: window.ownerBundleID),
                    StageMotion.showsAppIconBadge(hasPreview: window.previewImage != nil) {
                     // The badge's shadow is in its bitmap, which is therefore padded and draws
                     // past the badge's box on every side. Framing that padded image directly
                     // would widen the card, so the box keeps the badge's size and the picture
                     // overflows it.
-                    let badge = metrics.drawnBadgeSize
+                    let badge = metrics.drawnBadgeSize(for: appearance.badgePlacement)
                     let padded = badge
                         * (AppIconCache.badgeRasterSize + AppIconCache.BakedBadgeShadow.padding * 2)
                         / AppIconCache.badgeRasterSize
                     // Centred at the bottom of the image as drawn, which a window of another
                     // shape letterboxes inside the card.
-                    let centre = metrics.badgeCentre(in: metrics.previewImageRect(
-                        forImageAspect: window.previewImage.map {
-                            CGFloat($0.width) / CGFloat(max(1, $0.height))
-                        }
-                    ))
+                    let centre = metrics.badgeCentre(
+                        in: metrics.previewImageRect(
+                            forImageAspect: window.previewImage.map {
+                                CGFloat($0.width) / CGFloat(max(1, $0.height))
+                            }
+                        ),
+                        placement: appearance.badgePlacement
+                    )
                     Color.clear
                         .frame(width: badge, height: badge)
                         .overlay {
@@ -2462,7 +2407,8 @@ struct WindowPreviewView: View {
                     // compositing group: the card's lift shadow is applied only for Magnify.
                     DockGlassSelectionHighlight(RoundedRectangle(
                         cornerRadius: metrics.selectorCornerRadius(
-                            userRadius: appearance.selectorCornerRadius
+                            userRadius: appearance.previewCornerRadius,
+                            outset: appearance.selectorOutset
                         ),
                         style: .continuous
                     ))
@@ -2482,29 +2428,34 @@ struct WindowPreviewView: View {
         }
         .padding(metrics.cardPadding)
         .overlay(alignment: .bottom) {
-            WindowTitleLabel(
-                title: window.displayTitle,
-                fontSize: metrics.titleFontSize,
-                haloStrength: appearance.titleHaloStrength,
-                haloSize: CGFloat(appearance.titleHaloSize) * metrics.scaleFactor
-            )
+            HStack(spacing: 5 * metrics.scaleFactor) {
+                // In the title row the app's icon leads the title, outside the title's halo.
+                if metrics.cardStyle == .previews,
+                   appearance.badgePlacement == .titleRow,
+                   StageMotion.showsAppIcon(bundleID: window.ownerBundleID) {
+                    AppIconImage(
+                        bundleID: window.ownerBundleID,
+                        name: window.ownerName,
+                        iconSize: AppIconCache.placeholderIconRasterSize,
+                        fallbackBaseSize: StageMetrics.nativeIconCanvasSize
+                    )
+                    .frame(width: metrics.titleRowIconSize, height: metrics.titleRowIconSize)
+                }
+                WindowTitleLabel(
+                    title: window.displayTitle,
+                    fontSize: metrics.titleFontSize,
+                    haloStrength: appearance.titleHaloStrength,
+                    haloSize: CGFloat(appearance.titleHaloSize) * metrics.scaleFactor
+                )
+            }
+                // The preview's own width, not the highlight padding around it, before
+                // truncating with an ellipsis.
                 .frame(
                     width: metrics.thumbnailWidth + metrics.titleWidthAllowance,
                     height: metrics.titleBandHeight
                 )
                 .allowsHitTesting(false)
         }
-        .scaleEffect(StageMotion.windowScale(
-            isSelected: isWindowSelected,
-            isDragging: isDragging,
-            style: appearance.windowSelectionStyle,
-            magnifyScale: CGFloat(appearance.magnifyScale)
-        ))
-        .modifier(WindowLiftShadow(
-            lift: lift,
-            scale: metrics.scaleFactor,
-            isEnabled: appearance.windowSelectionStyle == .magnify
-        ))
         .animation(.spring(duration: 0.18, bounce: 0.08), value: isWindowSelected)
         .animation(.easeOut(duration: 0.12), value: isDragging)
     }
@@ -2579,26 +2530,6 @@ struct WindowTitleLabel: View {
     }
 }
 
-/// The Magnify style's lift. Any shadow, even a clear one, renders the card as its own group,
-/// which would cut the Filled style's highlight off from the glass it blends with — so the
-/// modifier is absent unless it can cast something.
-struct WindowLiftShadow: ViewModifier {
-    let lift: WindowLift
-    let scale: CGFloat
-    let isEnabled: Bool
-
-    func body(content: Content) -> some View {
-        if isEnabled {
-            content.shadow(
-                color: .black.opacity(lift.shadowOpacity),
-                radius: lift.shadowRadius * scale,
-                y: lift.shadowY * scale
-            )
-        } else {
-            content
-        }
-    }
-}
 
 /// The native switcher's plate casts no shadow on macOS 27, so the Native material drops the
 /// stage lift's shadow; Clear and Regular keep it.

@@ -597,6 +597,9 @@ struct ScreenshotTests {
     /// placeholder icon sits in the middle of the plate and a preview fills it uniformly. The
     /// badge's own top rows are transparent icon margin, so the sample starts inside its frame.
     private func badgeCornerPixelCount(preview: CGImage?, name: String) throws -> Int {
+        // This checks the badge in the preview's top-left corner, the Corner position.
+        var cornerBadgeAppearance = AppSettings()
+        cornerBadgeAppearance.badgePlacement = .corner
         let metrics = StageMetrics.standard
         let cardSize = NSSize(
             width: metrics.thumbnailWidth + metrics.titleWidthAllowance + metrics.cardPadding * 2,
@@ -614,7 +617,7 @@ struct ScreenshotTests {
             ),
             isWindowSelected: false,
             metrics: metrics,
-            appearance: AppSettings()
+            appearance: cornerBadgeAppearance
         )
         .frame(width: cardSize.width, height: cardSize.height, alignment: .topLeading)
 
@@ -722,33 +725,6 @@ struct ScreenshotTests {
         }
     }
 
-    @Test("Magnify remains available as a selection style")
-    func magnifySelectionState() throws {
-        var appearance = AppSettings()
-        appearance.windowSelectionStyle = .magnify
-        appearance.magnifyScale = 1.12
-        appearance.magnifyShadowStrength = 1.5
-        let vm = StageOverlayViewModel(
-            spaceManager: makeSampleViewModel(
-                spaceCount: 1,
-                windowsPerSpace: [3],
-                activeIndex: 0
-            ).spaceManager,
-            activeSpaceIndex: 0,
-            selectedWindowIndex: 1,
-            appearance: appearance
-        )
-        guard let image = renderSwiftUI(
-            StageOverlayView(viewModel: vm),
-            size: NSSize(width: 900, height: 300)
-        ) else { throw ScreenshotError.renderFailed }
-
-        try saveImage(image, name: "05_magnify_selection_state")
-        #expect(vm.appearance.windowSelectionStyle == .magnify)
-    }
-
-    /// Pins the scale so the wrap threshold under test is a property of the width, not of
-    /// whatever the stage-scale default happens to be.
     private func unscaledAppearance() -> AppSettings {
         var settings = AppSettings()
         settings.stageScale = 1
@@ -789,9 +765,9 @@ struct ScreenshotTests {
             StageOverlayView(viewModel: vm),
             size: size
         )[0] else { throw ScreenshotError.renderFailed }
-        #expect(abs(stage.height
-            - (metrics.cardHeight * 2 + metrics.rowSpacing
-                + metrics.topPadding + metrics.bottomPadding)) < 0.5)
+        let expectedHeight: CGFloat = metrics.cardHeight * 2 + metrics.rowSpacing
+            + metrics.topPadding + metrics.bottomPadding
+        #expect(abs(stage.height - expectedHeight) < 0.5)
 
         // What is drawn has to be where the geometry says, or drag projection and the E2E hit
         // tests are aiming at slots the view never used.
@@ -852,8 +828,9 @@ struct ScreenshotTests {
     @Test("Titles render full-strength at one size, centred below the card")
     func windowTitlesAreUniformAndCentred() throws {
         let size = NSSize(width: 700, height: 600)
+        // Measures the title's own glyphs, so no app icon leads it.
         var appearance = AppSettings()
-        appearance.windowSelectionStyle = .filled
+        appearance.badgePlacement = .bottom
         let window = StageWindowData(
             id: 1, windowID: 1, ownerBundleID: "com.apple.finder",
             ownerName: "Finder", windowTitle: "Hg Title", previewImage: nil

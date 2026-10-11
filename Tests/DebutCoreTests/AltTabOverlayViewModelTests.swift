@@ -169,16 +169,14 @@ struct AltTabOverlayViewModelTests {
         ) < 1e-9)
     }
 
-    @Test("Configured preview card spacing changes the flat grid")
-    func configuredPreviewCardSpacing() {
+    @Test("The flat grid uses the native card gap")
+    func nativeCardSpacing() {
         let space = UUID()
         let entries = (1...5).map { entry(space, CGWindowID($0), "W\($0)") }
-        var appearance = AppSettings()
-        appearance.previewCardSpacing = 24
-        let model = AltTabOverlayViewModel(entries: entries, selectedIndex: 0, appearance: appearance)
+        let model = AltTabOverlayViewModel(entries: entries, selectedIndex: 0)
         let layout = model.layout(containerSize: CGSize(width: 900, height: 600))
 
-        #expect(layout.metrics.windowSpacing == 24 * layout.metrics.scaleFactor)
+        #expect(layout.metrics.windowSpacing == 14 * layout.metrics.scaleFactor)
         // Rows follow the title band, not the card spacing.
         #expect(layout.metrics.rowSpacing == -StageMetrics.standard.cardPadding * layout.metrics.scaleFactor)
     }

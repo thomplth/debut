@@ -32,19 +32,19 @@ struct IconCardTests {
         #expect(StageMetrics.shaped(forDisplay: CGSize(width: 900, height: 1600)).cardStyle == .previews)
     }
 
-    @Test("The icon highlight is native's, concentric with the icon")
-    func iconHighlightIsNative() {
-        let settings = AppSettings()
+    /// Icons keep their own corner whatever the preview corner setting; the highlight stays
+    /// concentric with whichever corner the card draws.
+    @Test("The highlight is concentric with the icon or the preview")
+    func highlightIsConcentric() {
+        let iconCorner = native.selectionCornerRadius - native.selectionPadding
         let icons = StageMetrics.icons
-        #expect(icons.selectorCornerRadius(userRadius: settings.selectorCornerRadius)
-            == native.selectionCornerRadius)
-        #expect(abs(StageMetrics.standard.selectorCornerRadius(userRadius: settings.selectorCornerRadius)
-            - CGFloat(settings.selectorCornerRadius)) < 1e-9)
-        // A user's change keeps its offset from concentric in both styles.
-        #expect(icons.selectorCornerRadius(userRadius: settings.selectorCornerRadius + 4)
-            == native.selectionCornerRadius + 4)
-        #expect(icons.scaled(by: 2).selectorCornerRadius(userRadius: settings.selectorCornerRadius)
+        #expect(icons.previewCornerRadius(userRadius: 3) == iconCorner)
+        #expect(icons.selectorCornerRadius(userRadius: 3, outset: 9) == native.selectionCornerRadius)
+        #expect(icons.scaled(by: 2).selectorCornerRadius(userRadius: 3, outset: 9)
             == native.selectionCornerRadius * 2)
+        let previews = StageMetrics.standard
+        #expect(previews.previewCornerRadius(userRadius: 6) == 6)
+        #expect(previews.selectorCornerRadius(userRadius: 6, outset: 6) == 12)
     }
 
     @Test("Icon size is stored apart from preview size and defaults to native")
@@ -151,13 +151,16 @@ struct IconCardTests {
         #expect(previews != icons)
     }
 
-    @Test("Native-size icon cards cost no extra raster; larger ones warm one more")
+    /// Each step up the icon size warms one sharper raster per app, and only the one in use.
+    @Test("Icon cards warm only the raster their size needs")
     func iconRastersFollowIconSize() {
-        #expect(AppIconCache.overlayIconSizes(iconScale: 1) == [StageMetrics.nativeIconCanvasSize])
-        #expect(AppIconCache.iconSlotRasterSize(iconScale: 1) == StageMetrics.nativeIconCanvasSize)
-        let large = AppIconCache.overlayIconSizes(iconScale: 1.5)
-        #expect(large.count == 2)
-        #expect(large.max() == StageMetrics.nativeIconCanvasSize * CGFloat(AppSettings.maximumStageScale))
-        #expect(AppIconCache.iconSlotRasterSize(iconScale: 1.5) == large.max())
+        let native = StageMetrics.nativeIconCanvasSize
+        #expect(AppIconCache.overlayIconSizes(iconScale: 1) == [native])
+        #expect(AppIconCache.iconSlotRasterSize(iconScale: 1) == native)
+        #expect(AppIconCache.overlayIconSizes(iconScale: 1.5) == [native, native * 2])
+        #expect(AppIconCache.iconSlotRasterSize(iconScale: 2) == native * 2)
+        let largest = native * CGFloat(AppSettings.maximumStageScale)
+        #expect(AppIconCache.overlayIconSizes(iconScale: 3) == [native, largest])
+        #expect(AppIconCache.iconSlotRasterSize(iconScale: AppSettings.maximumStageScale) == largest)
     }
 }

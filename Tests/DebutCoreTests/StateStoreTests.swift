@@ -269,11 +269,10 @@ struct StateStoreTests {
         settings.stageCornerRadius = 30
         settings.overlayOnMainDisplayOnly = true
         settings.showsDesktopSwitchIndicator = false
-        settings.windowSelectionStyle = .magnify
+        settings.iconStageCornerRadius = 40
         settings.selectorOutset = 3
-        settings.selectorCornerRadius = 18
-        settings.magnifyScale = 1.14
-        settings.magnifyShadowStrength = 1.6
+        settings.previewCornerRadius = 18
+        settings.badgePlacement = .top
         settings.overlayPresentationDelay = 0.25
         settings.quickSwitchModifiers = ShortcutModifiers(control: true, option: true)
         settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(command: true)
@@ -284,11 +283,10 @@ struct StateStoreTests {
         #expect(loaded.stageCornerRadius == 30)
         #expect(loaded.overlayOnMainDisplayOnly)
         #expect(!loaded.showsDesktopSwitchIndicator)
-        #expect(loaded.windowSelectionStyle == .magnify)
+        #expect(loaded.iconStageCornerRadius == 40)
         #expect(loaded.selectorOutset == 3)
-        #expect(loaded.selectorCornerRadius == 18)
-        #expect(loaded.magnifyScale == 1.14)
-        #expect(loaded.magnifyShadowStrength == 1.6)
+        #expect(loaded.previewCornerRadius == 18)
+        #expect(loaded.badgePlacement == .top)
         #expect(loaded.overlayPresentationDelay == 0.25)
         #expect(loaded.quickSwitchModifiers == ShortcutModifiers(control: true, option: true))
         #expect(loaded.quickSwitchSameApplicationModifiers == ShortcutModifiers(command: true))
@@ -398,15 +396,16 @@ struct StateStoreTests {
         #expect(AppSettings.defaultHeldCycleMinimumInterval == 0.06)
     }
 
-    @Test("Saved preview scales respect the current setting range", arguments: [0.5, 0.75, 1.0, 1.5, 2.5, 3.0])
+    @Test("Saved preview scales respect the current setting range", arguments: [0.5, 0.75, 1.0, 1.5, 2.5, 3.0, 4.0, 4.5])
     func savedStageScaleRange(scale: Double) throws {
         var settings = AppSettings()
         settings.stageScale = scale
         let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
-        #expect(decoded.stageScale == min(2.5, max(1, scale)))
+        #expect(AppSettings.maximumStageScale == 4)
+        #expect(decoded.stageScale == min(AppSettings.maximumStageScale, max(1, scale)))
     }
 
-    @Test("Settings written before the stage scale existed use the 145 percent default")
+    @Test("Settings written before the stage scale existed use the 150 percent default")
     func legacySettingsDefaultStageScale() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
@@ -418,33 +417,36 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.stageScale == AppSettings.defaultStageScale)
-        #expect(AppSettings.defaultStageScale == 1.45)
+        #expect(AppSettings.defaultStageScale == 1.5)
     }
 
-    @Test("Settings written before selector customization use the macOS filled defaults")
-    func legacySettingsDefaultSelector() throws {
+    /// Magnify was retired (KHA-1064): a file that chose it, with its sliders and the old
+    /// highlight corner, loads with the highlight and the default preview corner.
+    @Test("Settings that chose Magnify load with the highlight")
+    func legacySettingsDropMagnify() throws {
         let encoded = try JSONEncoder().encode(AppSettings())
         var object = try #require(
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
-        for key in [
-            "windowSelectionStyle",
-            "selectorOutset",
-            "selectorCornerRadius",
-            "magnifyScale",
-            "magnifyShadowStrength",
-        ] {
-            object.removeValue(forKey: key)
-        }
+        #expect(object["windowSelectionStyle"] == nil)
+        #expect(object["magnifyScale"] == nil)
+        #expect(object["previewCardSpacing"] == nil, "card spacing is no longer a setting")
+        object["windowSelectionStyle"] = "Magnify"
+        object["magnifyScale"] = 1.14
+        object["magnifyShadowStrength"] = 1.6
+        object["selectorCornerRadius"] = 18
+        object["previewCardSpacing"] = 30
+        object.removeValue(forKey: "selectorOutset")
+        object.removeValue(forKey: "previewCornerRadius")
+        object.removeValue(forKey: "iconStageCornerRadius")
         let legacyData = try JSONSerialization.data(withJSONObject: object)
 
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
-        #expect(decoded.windowSelectionStyle == .filled)
         #expect(decoded.selectorOutset == AppSettings.defaultSelectorOutset)
-        #expect(decoded.selectorCornerRadius == AppSettings.defaultSelectorCornerRadius)
-        #expect(decoded.magnifyScale == AppSettings.defaultMagnifyScale)
-        #expect(decoded.magnifyShadowStrength == AppSettings.defaultMagnifyShadowStrength)
+        #expect(decoded.previewCornerRadius == AppSettings.defaultPreviewCornerRadius)
+        #expect(decoded.iconStageCornerRadius == AppSettings.defaultIconStageCornerRadius)
+        #expect(decoded.previewCardSpacing == AppSettings.defaultPreviewCardSpacing)
     }
 
     /// Adaptive sizing is the new default, so a settings file written before it existed opts
@@ -462,25 +464,6 @@ struct StateStoreTests {
 
         #expect(decoded.adaptiveCardSizing)
         #expect(AppSettings().adaptiveCardSizing)
-    }
-
-    @Test("The short-lived outline style migrates to the filled selector")
-    func outlineStyleMigratesToFilled() throws {
-        let encoded = try JSONEncoder().encode(AppSettings())
-        var object = try #require(
-            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
-        )
-        object["windowSelectionStyle"] = "Outline"
-        object.removeValue(forKey: "selectorOutset")
-        object["selectorBorderWidth"] = 4
-
-        let decoded = try JSONDecoder().decode(
-            AppSettings.self,
-            from: JSONSerialization.data(withJSONObject: object)
-        )
-
-        #expect(decoded.windowSelectionStyle == .filled)
-        #expect(decoded.selectorOutset == AppSettings.defaultSelectorOutset)
     }
 
     @Test("Settings files written before the option audit still load")
@@ -524,7 +507,7 @@ struct StateStoreTests {
         let settings = try store.loadSettings()
         #expect(settings.launchAtLogin == true)
         #expect(settings.glassStyle == .native)
-        #expect(settings.windowSelectionStyle == .filled)
+        #expect(settings.badgePlacement == .titleRow)
     }
 
     @Test("Settings written before Liquid Glass tuning use the native look")
@@ -549,7 +532,7 @@ struct StateStoreTests {
         #expect(decoded.dockGlassStyle == .native)
         #expect(decoded.badgeGrowth == AppSettings.defaultBadgeGrowth)
         #expect(decoded.titleHaloStrength == 1)
-        #expect(decoded.titleHaloSize == 1)
+        #expect(decoded.titleHaloSize == AppSettings.defaultTitleHaloSize)
     }
 
     @Test("Badge growth and title halo settings clamp to their ranges")

@@ -274,11 +274,32 @@ public struct StageMetrics: Equatable, Sendable {
     /// The gap between the badge and the preview's lower edge.
     public var badgeInset: CGFloat { 6 * scale }
 
-    /// Where the badge's centre sits for a preview image drawn in `imageRect`: centred, just
-    /// inside its lower edge, so it never meets the title below.
-    public func badgeCentre(in imageRect: CGRect) -> CGPoint {
-        CGPoint(x: imageRect.midX, y: imageRect.maxY - badgeInset - drawnBadgeSize / 2)
+    /// The badge as drawn for a placement: the bottom-centre badge is a little larger, as
+    /// Mission Control's icons are; the edge badges keep the badge size.
+    public func drawnBadgeSize(for placement: BadgePlacement) -> CGFloat {
+        placement == .bottom ? drawnBadgeSize : badgeSize
     }
+
+    /// Where the badge's centre sits for a preview image drawn in `imageRect`.
+    public func badgeCentre(
+        in imageRect: CGRect,
+        placement: BadgePlacement = .bottom
+    ) -> CGPoint {
+        let size = drawnBadgeSize(for: placement)
+        switch placement {
+        case .bottom, .titleRow:
+            // Just inside the lower edge, so it never meets the title below.
+            return CGPoint(x: imageRect.midX, y: imageRect.maxY - badgeInset - size / 2)
+        case .corner:
+            // Overhanging the top-left corner by a tenth of its size.
+            return CGPoint(x: imageRect.minX + size * 0.4, y: imageRect.minY + size * 0.4)
+        case .top:
+            return CGPoint(x: imageRect.midX, y: imageRect.minY)
+        }
+    }
+
+    /// The icon that leads the title when the badge sits in the title row.
+    public var titleRowIconSize: CGFloat { 18 * scale }
 
     /// Where a preview image of the given shape is drawn inside the card's thumbnail: fitted and
     /// centred, as the card draws it. No shape fills the thumbnail.
@@ -348,20 +369,16 @@ public struct StageMetrics: Equatable, Sendable {
         return metrics
     }
 
-    /// The selection highlight's corner radius for the user's setting, which is tuned for
-    /// preview cards. Icons keep the user's change from the default on top of native's own
-    /// concentric radius, so the default draws exactly native's highlight.
-    public func selectorCornerRadius(userRadius: Double) -> CGFloat {
-        switch cardStyle {
-        case .previews:
-            // The preview's corner grows with its badge; the highlight keeps concentric.
-            return CGFloat(userRadius) * scale
-                + thumbnailCornerRadius - Self.standard.thumbnailCornerRadius * scale
-        case .icons:
-            let change = CGFloat(userRadius - AppSettings.defaultSelectorCornerRadius)
-            return thumbnailCornerRadius
-                + (DockGlass.Metrics.standard.selectionPadding + change) * scale
-        }
+    /// The preview's corner as drawn: the user's radius, in points, on every card. An icon card
+    /// keeps the icon's own shape.
+    public func previewCornerRadius(userRadius: Double) -> CGFloat {
+        cardStyle == .icons ? thumbnailCornerRadius : CGFloat(userRadius) * scale
+    }
+
+    /// The selection highlight's corner: concentric with the preview's, so its own radius plus
+    /// the space the highlight leaves around it.
+    public func selectorCornerRadius(userRadius: Double, outset: Double) -> CGFloat {
+        previewCornerRadius(userRadius: userRadius) + CGFloat(outset) * scale
     }
 
     /// The visual scale represented by these metrics. Rendering code uses this for the few

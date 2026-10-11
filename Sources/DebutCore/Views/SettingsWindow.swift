@@ -38,7 +38,8 @@ public struct SettingsView: View {
     @State private var selectedSection: SettingsSection = .general
     @State private var showingResetConfirmation = false
     @State private var showingResetAllSettingsConfirmation = false
-    @State private var showingRestoreDefaultsConfirmation = false
+    /// The page whose settings are about to be restored, while its confirmation shows.
+    @State private var restoringSection: SettingsSection?
     private let shortcutRecordingService: (any ShortcutRecordingService)?
     @State private var externallyAppliedSettings: AppSettings?
 
@@ -76,6 +77,34 @@ public struct SettingsView: View {
             .navigationSplitViewColumnWidth(180)
             .listStyle(.sidebar)
         } detail: {
+            VStack(spacing: 0) {
+                if selectedSection == .appearance {
+                    // Pinned above the scrolling controls, so it stays in view while adjusting.
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("Appearance")
+                                .font(.title2.bold())
+                            Spacer()
+                            Picker("Backdrop", selection: $previewBackdrop) {
+                                ForEach(AppearancePreviewBackdrop.allCases) { backdrop in
+                                    Text(backdrop.rawValue).tag(backdrop)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .fixedSize()
+                        }
+                        AppearancePreview(
+                            settings: viewModel.settings,
+                            cardStyle: viewModel.overlayCardStyle,
+                            backdrop: previewBackdrop
+                        )
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 14)
+                    .padding(.bottom, 12)
+                    Divider()
+                }
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     switch selectedSection {
@@ -92,11 +121,17 @@ public struct SettingsView: View {
                     case .support: supportSection
                     case .about: aboutSection
                     }
+                    if !selectedSection.options.isEmpty {
+                        restoreDefaultsButton(for: selectedSection)
+                    }
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .id(selectedSection)
+            }
+            // Every page uses the title bar's height too; the window has no title to clear.
+            .ignoresSafeArea(.container, edges: .top)
         }
         .alert("Reset Window Cache?", isPresented: $showingResetConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -369,27 +404,19 @@ public struct SettingsView: View {
 
     private var appearanceSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Appearance")
-                .font(.title2.bold())
-
-            Text("Fine-tune workspace cards and window previews.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
             Text("Layout")
                 .font(.headline)
-                .padding(.top, 4)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Stage corner radius")
                     Spacer()
-                    Text("\(viewModel.settings.stageCornerRadius.formatted(.number.precision(.fractionLength(0...1)))) pt")
+                    Text("\(viewModel.overlayCornerRadius.formatted(.number.precision(.fractionLength(0...1)))) pt")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(
-                    value: $viewModel.settings.stageCornerRadius,
+                    value: $viewModel.overlayCornerRadius,
                     in: AppSettings.minimumStageCornerRadius...AppSettings.maximumStageCornerRadius,
                     step: 0.5
                 )
@@ -411,6 +438,24 @@ public struct SettingsView: View {
                 Text(viewModel.overlayCardStyle == .icons
                     ? "Without window previews, windows show as app icons. 100% matches the macOS app switcher."
                     : "100% matches the macOS app switcher. Large workspaces scale down automatically to fit.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("App icon position")
+                    Spacer()
+                    Picker("", selection: $viewModel.settings.badgePlacement) {
+                        Text("Corner").tag(BadgePlacement.corner)
+                        Text("Bottom").tag(BadgePlacement.bottom)
+                        Text("Title").tag(BadgePlacement.titleRow)
+                        Text("Top").tag(BadgePlacement.top)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 260)
+                }
+                Text("Where each preview shows its app's icon.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -443,24 +488,6 @@ public struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Preview card spacing")
-                    Spacer()
-                    Text("\(Int(viewModel.settings.previewCardSpacing)) pt")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(
-                    value: $viewModel.settings.previewCardSpacing,
-                    in: AppSettings.minimumPreviewCardSpacing...AppSettings.maximumPreviewCardSpacing,
-                    step: 2
-                )
-                Text("Space between cards in the switcher overlays.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -516,12 +543,6 @@ public struct SettingsView: View {
                 in: AppSettings.minimumGlassEdgeRefraction...AppSettings.maximumGlassEdgeRefraction
             )
             .disabled(!usesNativeGlass)
-
-            percentSlider(
-                "Selection highlight",
-                value: $viewModel.settings.selectionHighlightStrength,
-                in: AppSettings.minimumSelectionHighlightStrength...AppSettings.maximumSelectionHighlightStrength
-            )
 
             VStack(alignment: .leading, spacing: 4) {
                 percentSlider("Title halo", value: $viewModel.settings.titleHaloStrength, in: 0...1)
@@ -586,92 +607,49 @@ public struct SettingsView: View {
 
     private var selectorSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Selection")
+            Text("Preview & selection highlight")
                 .font(.headline)
 
-            Text("Choose how the selected window stands out inside its stage.")
+            Text("The selected window sits on a highlight that darkens the glass in light mode and lightens it in dark mode, as the macOS app switcher does. It hides while you drag a window.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            HStack {
-                Text("Style")
-                Spacer()
-                Picker("", selection: $viewModel.settings.windowSelectionStyle) {
-                    ForEach(WindowSelectionStyle.allCases, id: \.self) { style in
-                        Text(style.rawValue).tag(style)
-                    }
+            percentSlider(
+                "Strength",
+                value: $viewModel.settings.selectionHighlightStrength,
+                in: AppSettings.minimumSelectionHighlightStrength...AppSettings.maximumSelectionHighlightStrength
+            )
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Surrounding space")
+                    Spacer()
+                    Text("\(Int(viewModel.settings.selectorOutset.rounded())) pt")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 220)
+                Slider(
+                    value: $viewModel.settings.selectorOutset,
+                    in: AppSettings.minimumSelectorOutset...AppSettings.maximumSelectorOutset,
+                    step: 1
+                )
             }
 
-            if viewModel.settings.windowSelectionStyle == .filled {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Surrounding space")
-                        Spacer()
-                        Text("\(Int(viewModel.settings.selectorOutset.rounded())) pt")
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    Slider(
-                        value: $viewModel.settings.selectorOutset,
-                        in: AppSettings.minimumSelectorOutset...AppSettings.maximumSelectorOutset,
-                        step: 1
-                    )
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Corner radius")
+                    Spacer()
+                    Text("\(Int(viewModel.settings.previewCornerRadius.rounded())) pt")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Selector corner radius")
-                        Spacer()
-                        Text("\(Int(viewModel.settings.selectorCornerRadius.rounded())) pt")
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    Slider(
-                        value: $viewModel.settings.selectorCornerRadius,
-                        in: AppSettings.minimumSelectorCornerRadius...AppSettings.maximumSelectorCornerRadius,
-                        step: 1
-                    )
-                }
-
-                Text("The filled selector sits behind the preview and app icon. It follows macOS contrast: RGB 103 on dark appearances and RGB 167 on light appearances, and is hidden while dragging.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Selected window size")
-                        Spacer()
-                        Text("\(Int((viewModel.settings.magnifyScale * 100).rounded()))%")
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    Slider(
-                        value: $viewModel.settings.magnifyScale,
-                        in: AppSettings.minimumMagnifyScale...AppSettings.maximumMagnifyScale,
-                        step: AppSettings.magnifyScaleStep
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Shadow strength")
-                        Spacer()
-                        Text("\(Int((viewModel.settings.magnifyShadowStrength * 100).rounded()))%")
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    Slider(
-                        value: $viewModel.settings.magnifyShadowStrength,
-                        in: AppSettings.minimumMagnifyShadowStrength...AppSettings.maximumMagnifyShadowStrength,
-                        step: 0.1
-                    )
-                }
-
-                Text("Magnify enlarges the selected preview and casts a depth shadow, matching Debut's original selection treatment.")
+                Slider(
+                    value: $viewModel.settings.previewCornerRadius,
+                    in: AppSettings.minimumPreviewCornerRadius...AppSettings.maximumPreviewCornerRadius,
+                    step: 1
+                )
+                Text("Rounds every preview, selected or not. The highlight keeps the same curve around it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -679,6 +657,8 @@ public struct SettingsView: View {
         }
     }
 
+    /// A per-window viewing choice, not a Debut setting.
+    @AppStorage("appearancePreviewBackdrop") private var previewBackdrop = AppearancePreviewBackdrop.highContrast
     @State private var selectedAppToExclude: String = ""
 
     private var excludedAppsGroup: some View {
@@ -869,22 +849,38 @@ public struct SettingsView: View {
                 configurable: false
             )
 
-            Button("Restore Defaults…", role: .destructive) {
-                showingRestoreDefaultsConfirmation = true
-            }
-            .padding(.top, 8)
         }
         .onChange(of: viewModel.settings.quickSwitchModifiers) { _, _ in saveSettings() }
         .onChange(of: viewModel.settings.quickSwitchSameApplicationModifiers) { _, _ in
             saveSettings()
         }
-        .alert("Restore Default Shortcuts?", isPresented: $showingRestoreDefaultsConfirmation) {
-            Button("Cancel", role: .cancel) {}
+    }
+
+    /// Resets only this page's settings, after a confirmation that names the page.
+    private func restoreDefaultsButton(for section: SettingsSection) -> some View {
+        HStack {
+            Spacer()
+            Button("Restore \(section.rawValue) Defaults…", role: .destructive) {
+                restoringSection = section
+            }
+        }
+        .padding(.top, 8)
+        .alert(
+            "Restore \(restoringSection?.rawValue ?? "") Defaults?",
+            isPresented: Binding(
+                get: { restoringSection != nil },
+                set: { if !$0 { restoringSection = nil } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) { restoringSection = nil }
             Button("Restore Defaults", role: .destructive) {
-                viewModel.restoreDefaultShortcuts()
+                if let section = restoringSection {
+                    viewModel.restoreDefaults(for: section)
+                }
+                restoringSection = nil
             }
         } message: {
-            Text("This resets all keyboard shortcuts and shortcut modifiers to their defaults. Other settings are preserved.")
+            Text("This resets the settings on the \(restoringSection?.rawValue ?? "") page to their defaults. Settings on other pages are kept.")
         }
     }
 

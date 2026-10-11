@@ -22,7 +22,7 @@ struct BadgeAndRowTests {
 
     /// The badge grows with the preview on an adjustable curve: the preview's size raised to
     /// the badge growth setting (KHA-1062). 0 keeps it at native size, 1 grows it in proportion.
-    @Test("The badge grows on the configured curve, and the preview's corner with it",
+    @Test("The badge grows on the configured curve",
           arguments: [0.0, 0.5, 0.8, 1.0])
     func badgeGrowsOnTheConfiguredCurve(growth: Double) {
         let native = drawn(1, badgeGrowth: growth)
@@ -30,18 +30,17 @@ struct BadgeAndRowTests {
         let factor = pow(CGFloat(1.45), CGFloat(growth))
         #expect(abs(native.badgeSize - StageMetrics.standard.badgeSize) < 1e-9)
         #expect(abs(enlarged.badgeSize - native.badgeSize * factor) < 1e-9)
-        #expect(abs(enlarged.thumbnailCornerRadius - native.thumbnailCornerRadius * factor) < 1e-9)
-        let user = AppSettings().selectorCornerRadius
-        #expect(abs(enlarged.selectorCornerRadius(userRadius: user)
-            - (CGFloat(user) + native.thumbnailCornerRadius * (factor - 1))) < 1e-9)
+        // The preview corner is a setting in points (KHA-1064); it no longer follows the badge.
+        let user = AppSettings().previewCornerRadius
+        #expect(enlarged.previewCornerRadius(userRadius: user) == CGFloat(user))
         #expect(enlarged.cardPadding == native.cardPadding)
         #expect(enlarged.titleFontSize == native.titleFontSize)
     }
 
-    @Test("The default curve is 0.8")
+    @Test("The default curve is 0.5")
     func defaultBadgeGrowth() {
-        #expect(AppSettings().badgeGrowth == 0.8)
-        #expect(abs(drawn(1.45).badgeSize - 40 * pow(1.45, 0.8)) < 1e-9)
+        #expect(AppSettings().badgeGrowth == 0.5)
+        #expect(abs(drawn(1.5).badgeSize - 40 * pow(1.5, 0.5)) < 1e-9)
     }
 
     /// Mission Control's placement: centred, just inside the preview's lower edge, so it never

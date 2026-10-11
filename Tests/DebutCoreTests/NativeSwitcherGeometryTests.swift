@@ -31,20 +31,15 @@ struct NativeSwitcherGeometryTests {
     func cardReservesNativeSelectionPadding() {
         let metrics = StageMetrics.standard
         #expect(metrics.cardPadding == native.selectionPadding)
-        #expect(CGFloat(AppSettings.defaultSelectorOutset) == native.selectionPadding)
+        // The highlight may use all of that padding, never more; the default uses less.
         #expect(CGFloat(AppSettings.maximumSelectorOutset) == native.selectionPadding)
-        // Concentric with the preview's own corner, as native's highlight is with the icon's.
-        #expect(abs(
-            CGFloat(AppSettings.defaultSelectorCornerRadius)
-                - (metrics.thumbnailCornerRadius + native.selectionPadding)
-        ) < 0.5)
+        #expect(AppSettings.defaultSelectorOutset <= AppSettings.maximumSelectorOutset)
     }
 
     @Test("Command-Tab and Option-Tab wrap rows with the same spacing")
     @MainActor
     func bothOverlaysShareTheRowRule() {
-        var appearance = AppSettings()
-        appearance.previewCardSpacing = 20
+        let appearance = AppSettings()
         let aspects: [CGFloat?] = Array(repeating: 1.6, count: 30)
         let stage = StageConstants.drawnMetrics(
             stageScale: CGFloat(appearance.stageScale),
@@ -63,8 +58,10 @@ struct NativeSwitcherGeometryTests {
     @Test("Native appearance defaults")
     func nativeDefaults() {
         let settings = AppSettings()
-        #expect(settings.stageScale == 1.45)
-        #expect(CGFloat(settings.stageCornerRadius) == native.plateCornerRadius)
+        #expect(settings.stageScale == 1.5)
+        #expect(settings.stageCornerRadius == 47.5)
+        // Icon cards are the native switcher, so they keep its plate corner.
+        #expect(CGFloat(settings.iconStageCornerRadius) == native.plateCornerRadius)
         #expect(CGFloat(settings.previewCardSpacing) == native.iconSpacing - native.selectionPadding * 2)
         #expect(settings.selectionHighlightStrength == 1)
         #expect(settings.dockGlassStyle.selectionStrength == 1)

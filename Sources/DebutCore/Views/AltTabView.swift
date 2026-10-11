@@ -90,7 +90,9 @@ public struct AltTabOverlayView: View {
             .frame(width: plateSize.width, height: plateSize.height)
             .background {
                 Color.clear.modifier(LiquidGlassModifier(
-                    cornerRadius: CGFloat(viewModel.appearance.stageCornerRadius)
+                    cornerRadius: CGFloat(viewModel.appearance.stageCornerRadius(
+                        for: viewModel.cardStyle
+                    ))
                         * metrics.scaleFactor,
                     appearance: viewModel.appearance
                 ))

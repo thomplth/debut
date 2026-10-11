@@ -25,16 +25,18 @@ public final class AppIconCache: @unchecked Sendable {
     /// An icon card at native size draws the same 128-point canvas as the placeholder, so the
     /// two share one warmed raster and the default costs nothing extra.
     public static let nativeIconSlotRasterSize = placeholderIconRasterSize
-    /// Larger icon cards downsample one raster at the largest size. Warmed only once the icon
-    /// size is set above native: it is a 640-pixel bitmap per app.
-    public static let largeIconSlotRasterSize = StageMetrics.nativeIconCanvasSize
+    /// Larger icon cards downsample a raster at the next size up, warmed only once the icon size
+    /// is set above native: each step doubles a bitmap kept for every app.
+    public static let largeIconSlotRasterSize = StageMetrics.nativeIconCanvasSize * 2
+    public static let largestIconSlotRasterSize = StageMetrics.nativeIconCanvasSize
         * CGFloat(AppSettings.maximumStageScale)
 
     public static let overlayIconSizes: [CGFloat] = [placeholderIconRasterSize]
 
     /// The raster icon cards draw from at an icon size.
     public static func iconSlotRasterSize(iconScale: Double) -> CGFloat {
-        iconScale > 1 ? largeIconSlotRasterSize : nativeIconSlotRasterSize
+        if iconScale <= 1 { return nativeIconSlotRasterSize }
+        return iconScale <= 2 ? largeIconSlotRasterSize : largestIconSlotRasterSize
     }
 
     /// Every size to warm for an app, given the icon size icon cards are drawn at.

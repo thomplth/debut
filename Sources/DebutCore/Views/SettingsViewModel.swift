@@ -38,21 +38,18 @@ public enum SettingsSection: String, CaseIterable, Sendable {
                 .glassStyle,
                 .glassRimStrength,
                 .glassEdgeRefraction,
-                .selectionHighlightStrength,
                 .glassTint,
                 .titleHaloStrength,
                 .titleHaloSize,
                 .stageCornerRadius,
                 .stageScale,
+                .badgePlacement,
                 .badgeGrowth,
-                .previewCardSpacing,
                 .adaptiveCardSizing,
                 .inactiveStageScale,
-                .windowSelectionStyle,
+                .selectionHighlightStrength,
                 .selectorOutset,
-                .selectorCornerRadius,
-                .magnifyScale,
-                .magnifyShadowStrength,
+                .previewCornerRadius,
             ]
         case .shortcuts:
             [
@@ -90,18 +87,15 @@ enum SettingsOption: String, CaseIterable, Sendable {
     case titleHaloStrength
     case titleHaloSize
     case badgeGrowth
+    case badgePlacement
     case stageCornerRadius
     case stageScale
-    case previewCardSpacing
     case adaptiveCardSizing
     case inactiveStageScale
     case previewRefreshPolicy
     case previewCacheTTL
-    case windowSelectionStyle
     case selectorOutset
-    case selectorCornerRadius
-    case magnifyScale
-    case magnifyShadowStrength
+    case previewCornerRadius
     case keyBindings
     case quickSwitchModifiers
     case quickSwitchSameApplicationModifiers
@@ -125,6 +119,17 @@ public struct SettingsViewModel: Sendable {
     /// What the switchers are drawing with the current settings and permission.
     public var overlayCardStyle: OverlayCardStyle {
         OverlayCardStyle(previewsAvailable: settings.features.windowPreviews && screenRecordingGranted)
+    }
+
+    /// The one corner slider: the preview plate's corner, or the icon plate's while icons show.
+    public var overlayCornerRadius: Double {
+        get { settings.stageCornerRadius(for: overlayCardStyle) }
+        set {
+            switch overlayCardStyle {
+            case .previews: settings.stageCornerRadius = newValue
+            case .icons: settings.iconStageCornerRadius = newValue
+            }
+        }
     }
 
     /// The one size slider: the preview size, or the icon size while icons are drawn.
@@ -156,12 +161,65 @@ public struct SettingsViewModel: Sendable {
     }
 
     public mutating func restoreDefaultShortcuts() {
-        settings.keyBindings.restoreDefaults()
-        settings.quickSwitchModifiers = .control
-        settings.quickSwitchSameApplicationModifiers = ShortcutModifiers(
-            control: true,
-            option: true
-        )
+        restoreDefaults(for: .shortcuts)
+    }
+
+    /// Resets only the settings that `section` shows; every other page keeps its choices.
+    public mutating func restoreDefaults(for section: SettingsSection) {
+        let defaults = AppSettings()
+        for option in section.options {
+            restore(option, from: defaults)
+        }
+    }
+
+    private mutating func restore(_ option: SettingsOption, from defaults: AppSettings) {
+        switch option {
+        case .launchAtLogin: settings.launchAtLogin = defaults.launchAtLogin
+        case .showInDock: settings.showsDockIcon = defaults.showsDockIcon
+        case .ignoredApps: settings.excludedBundleIDs = defaults.excludedBundleIDs
+        case .crashReports: settings.sendsCrashReportsAutomatically = defaults.sendsCrashReportsAutomatically
+        case .fasterDesktopSwitching: settings.features.fasterDesktopSwitching = defaults.features.fasterDesktopSwitching
+        case .numberShortcuts: settings.features.numberShortcuts = defaults.features.numberShortcuts
+        case .controlArrows: settings.features.controlArrows = defaults.features.controlArrows
+        case .trackpadSwipes: settings.features.trackpadSwipes = defaults.features.trackpadSwipes
+        case .spaceSwitchDuration: settings.spaceSwitchDuration = defaults.spaceSwitchDuration
+        case .desktopSwitchIndicator: settings.showsDesktopSwitchIndicator = defaults.showsDesktopSwitchIndicator
+        case .workspaceIsolation: settings.features.workspaceIsolation = defaults.features.workspaceIsolation
+        case .optionTab: settings.features.optionTab = defaults.features.optionTab
+        case .windowPreviews: settings.features.windowPreviews = defaults.features.windowPreviews
+        case .mainDisplayOnly: settings.overlayOnMainDisplayOnly = defaults.overlayOnMainDisplayOnly
+        case .glassStyle: settings.glassStyle = defaults.glassStyle
+        case .glassRimStrength: settings.glassRimStrength = defaults.glassRimStrength
+        case .glassEdgeRefraction: settings.glassEdgeRefraction = defaults.glassEdgeRefraction
+        case .selectionHighlightStrength: settings.selectionHighlightStrength = defaults.selectionHighlightStrength
+        case .glassTint:
+            settings.followsSystemGlassTint = defaults.followsSystemGlassTint
+            settings.glassTintAmount = defaults.glassTintAmount
+        case .titleHaloStrength: settings.titleHaloStrength = defaults.titleHaloStrength
+        case .titleHaloSize: settings.titleHaloSize = defaults.titleHaloSize
+        case .badgeGrowth: settings.badgeGrowth = defaults.badgeGrowth
+        case .badgePlacement: settings.badgePlacement = defaults.badgePlacement
+        case .stageCornerRadius:
+            // One slider edits both corners, so both return to their defaults.
+            settings.stageCornerRadius = defaults.stageCornerRadius
+            settings.iconStageCornerRadius = defaults.iconStageCornerRadius
+        case .stageScale:
+            // One slider edits both sizes, so both return to their defaults.
+            settings.stageScale = defaults.stageScale
+            settings.iconScale = defaults.iconScale
+        case .adaptiveCardSizing: settings.adaptiveCardSizing = defaults.adaptiveCardSizing
+        case .inactiveStageScale: settings.inactiveStageScale = defaults.inactiveStageScale
+        case .previewRefreshPolicy: settings.previewRefreshPolicy = defaults.previewRefreshPolicy
+        case .previewCacheTTL: settings.previewCacheTTL = defaults.previewCacheTTL
+        case .selectorOutset: settings.selectorOutset = defaults.selectorOutset
+        case .previewCornerRadius: settings.previewCornerRadius = defaults.previewCornerRadius
+        case .keyBindings: settings.keyBindings = defaults.keyBindings
+        case .quickSwitchModifiers: settings.quickSwitchModifiers = defaults.quickSwitchModifiers
+        case .quickSwitchSameApplicationModifiers:
+            settings.quickSwitchSameApplicationModifiers = defaults.quickSwitchSameApplicationModifiers
+        case .overlayPresentationDelay: settings.overlayPresentationDelay = defaults.overlayPresentationDelay
+        case .heldCycleMinimumInterval: settings.heldCycleMinimumInterval = defaults.heldCycleMinimumInterval
+        }
     }
 
     public mutating func restoreDefaultSettings() {

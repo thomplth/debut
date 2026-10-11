@@ -10,27 +10,17 @@ public enum GlassStyle: String, Codable, Sendable, CaseIterable {
     public var usesDockGlass: Bool { self == .native }
 }
 
-public enum WindowSelectionStyle: String, Codable, Sendable, CaseIterable {
-    case filled = "Filled"
-    case magnify = "Magnify"
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        switch try container.decode(String.self) {
-        case "Filled", "Outline": self = .filled
-        case "Magnify": self = .magnify
-        default:
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "Unknown window selection style"
-            )
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(rawValue)
-    }
+/// Where a preview card shows its app's icon. Magnify, the old alternative selection style,
+/// was retired in KHA-1064; a saved choice of it is ignored and the highlight is used.
+public enum BadgePlacement: String, Codable, Sendable, CaseIterable {
+    /// Overhanging the preview's top-left corner.
+    case corner = "Corner"
+    /// Centred just inside the preview's lower edge, as Mission Control places icons.
+    case bottom = "Bottom"
+    /// A small icon before the title; the preview carries no badge.
+    case titleRow = "Title"
+    /// Centred on the preview's top edge.
+    case top = "Top"
 }
 
 public enum PreviewRefreshPolicy: String, Codable, Sendable, CaseIterable {
@@ -119,33 +109,25 @@ public struct AppSettings: Codable, Sendable, Equatable {
     // Appearance
     /// Enlarge the complete presentation proportionally while retaining the original size as
     /// the lower end of the user-selectable range.
-    public static let defaultStageScale: Double = 1.45
+    public static let defaultStageScale: Double = 1.5
     public static let defaultIconScale: Double = 1
     /// The user-selectable range. Automatic viewport fitting has its own lower floor.
     public static let minimumStageScale: Double = 1.0
-    public static let maximumStageScale: Double = 2.5
+    public static let maximumStageScale: Double = 4
     public static let stageScaleStep: Double = 0.05
     public static let defaultPreviewCardSpacing: Double = 14
     public static let minimumPreviewCardSpacing: Double = 0
     public static let maximumPreviewCardSpacing: Double = 36
 
     /// Native's highlight padding around its icon.
-    public static let defaultSelectorOutset: Double = 9
+    public static let defaultSelectorOutset: Double = 6
     public static let minimumSelectorOutset: Double = 2
     /// The fill stays inside the card's reserved preview outset, clear of the title.
     public static let maximumSelectorOutset: Double = 9
-    /// Concentric with the preview's 7.2-point corner at the default outset, as native's
-    /// highlight is with the icon's.
-    public static let defaultSelectorCornerRadius: Double = 16
-    public static let minimumSelectorCornerRadius: Double = 0
-    public static let maximumSelectorCornerRadius: Double = 24
-    public static let defaultMagnifyScale: Double = 1.06
-    public static let minimumMagnifyScale: Double = 1
-    public static let maximumMagnifyScale: Double = 1.2
-    public static let magnifyScaleStep: Double = 0.01
-    public static let defaultMagnifyShadowStrength: Double = 1
-    public static let minimumMagnifyShadowStrength: Double = 0
-    public static let maximumMagnifyShadowStrength: Double = 2
+    /// The corner of every preview, selected or not. The highlight stays concentric with it.
+    public static let defaultPreviewCornerRadius: Double = 6
+    public static let minimumPreviewCornerRadius: Double = 0
+    public static let maximumPreviewCornerRadius: Double = 24
 
     // Liquid Glass. Each strength scales DockGlass's fitted native look, so 1 is native.
     public static let minimumGlassRimStrength: Double = 0
@@ -159,14 +141,18 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let maximumStageCornerRadius: Double = 72
     /// How the app badge grows with the preview: the preview's size raised to this power.
     /// 0 keeps it at native size, 1 grows it in proportion.
-    public static let defaultBadgeGrowth: Double = 0.8
+    public static let defaultBadgeGrowth: Double = 0.5
     public static let minimumBadgeGrowth: Double = 0
     public static let maximumBadgeGrowth: Double = 1
     /// The title halo's blur radius in points, and its strength (0 turns it off).
     public static let minimumTitleHaloSize: Double = 0.5
     public static let maximumTitleHaloSize: Double = 3
-    /// The native switcher plate's continuous corner at 100%.
-    public static let defaultStageCornerRadius: Double = 57.5
+    /// The plate's continuous corner when previews show. Icon cards keep the native
+    /// switcher's 57.5-point corner, so the two are stored apart behind one slider.
+    public static let defaultStageCornerRadius: Double = 47.5
+    public static let defaultIconStageCornerRadius: Double = 57.5
+    public static let defaultTitleHaloSize: Double = 0.5
+    public static let defaultBadgePlacement: BadgePlacement = .titleRow
 
     public var glassStyle: GlassStyle
     /// Opacity of the hairline rim along the native glass's outline, relative to native.
@@ -184,15 +170,22 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var titleHaloStrength: Double
     /// The halo's blur radius in points.
     public var titleHaloSize: Double
+    /// The plate corner when previews show.
     public var stageCornerRadius: Double
+    /// The plate corner for icon cards, drawn without previews.
+    public var iconStageCornerRadius: Double
     public var inactiveStageScale: Double
     public var stageScale: Double
     /// The same size, for the icon cards drawn without previews. 100% is the native switcher.
     public var iconScale: Double
     /// How the app badge grows with the preview; see `defaultBadgeGrowth`.
     public var badgeGrowth: Double
+    /// Where each preview shows its app's icon.
+    public var badgePlacement: BadgePlacement
     /// Space between preview card frames before the overlay's automatic scale is applied.
-    public var previewCardSpacing: Double
+    /// The native gap between neighbouring highlights. No longer adjustable (KHA-1064); saved
+    /// values are ignored.
+    public var previewCardSpacing: Double { Self.defaultPreviewCardSpacing }
     /// Whether each card takes its own window's shape rather than the display's.
     public var adaptiveCardSizing: Bool
     /// Keep both overlay modes on the system primary display regardless of window focus.
@@ -201,11 +194,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var showsDesktopSwitchIndicator: Bool
 
     // Window selection
-    public var windowSelectionStyle: WindowSelectionStyle
     public var selectorOutset: Double
-    public var selectorCornerRadius: Double
-    public var magnifyScale: Double
-    public var magnifyShadowStrength: Double
+    /// The preview's corner on every card; the selection highlight is concentric with it.
+    public var previewCornerRadius: Double
 
     // Keyboard
     public var overlayPresentationDelay: TimeInterval
@@ -235,21 +226,19 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.glassTintAmount = 0
         self.selectionHighlightStrength = 1
         self.titleHaloStrength = 1
-        self.titleHaloSize = 1
+        self.titleHaloSize = Self.defaultTitleHaloSize
         self.stageCornerRadius = Self.defaultStageCornerRadius
+        self.iconStageCornerRadius = Self.defaultIconStageCornerRadius
         self.inactiveStageScale = 0.7
         self.stageScale = Self.defaultStageScale
         self.iconScale = Self.defaultIconScale
         self.badgeGrowth = Self.defaultBadgeGrowth
-        self.previewCardSpacing = Self.defaultPreviewCardSpacing
+        self.badgePlacement = Self.defaultBadgePlacement
         self.adaptiveCardSizing = true
         self.overlayOnMainDisplayOnly = true
         self.showsDesktopSwitchIndicator = true
-        self.windowSelectionStyle = .filled
         self.selectorOutset = Self.defaultSelectorOutset
-        self.selectorCornerRadius = Self.defaultSelectorCornerRadius
-        self.magnifyScale = Self.defaultMagnifyScale
-        self.magnifyShadowStrength = Self.defaultMagnifyShadowStrength
+        self.previewCornerRadius = Self.defaultPreviewCornerRadius
 
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
         self.heldCycleMinimumInterval = Self.defaultHeldCycleMinimumInterval
@@ -299,12 +288,20 @@ public struct AppSettings: Codable, Sendable, Equatable {
             try container.decodeIfPresent(Double.self, forKey: .selectionHighlightStrength) ?? 1
         ))
         stageCornerRadius = try container.decode(Double.self, forKey: .stageCornerRadius)
+        iconStageCornerRadius = try container.decodeIfPresent(
+            Double.self,
+            forKey: .iconStageCornerRadius
+        ) ?? Self.defaultIconStageCornerRadius
         inactiveStageScale = try container.decode(Double.self, forKey: .inactiveStageScale)
         let savedStageScale = try container.decodeIfPresent(
             Double.self,
             forKey: .stageScale
         ) ?? Self.defaultStageScale
         stageScale = min(Self.maximumStageScale, max(Self.minimumStageScale, savedStageScale))
+        badgePlacement = (try? container.decodeIfPresent(
+            BadgePlacement.self,
+            forKey: .badgePlacement
+        )) ?? Self.defaultBadgePlacement
         badgeGrowth = min(Self.maximumBadgeGrowth, max(
             Self.minimumBadgeGrowth,
             try container.decodeIfPresent(Double.self, forKey: .badgeGrowth) ?? Self.defaultBadgeGrowth
@@ -315,20 +312,12 @@ public struct AppSettings: Codable, Sendable, Equatable {
         ))
         titleHaloSize = min(Self.maximumTitleHaloSize, max(
             Self.minimumTitleHaloSize,
-            try container.decodeIfPresent(Double.self, forKey: .titleHaloSize) ?? 1
+            try container.decodeIfPresent(Double.self, forKey: .titleHaloSize) ?? Self.defaultTitleHaloSize
         ))
         iconScale = min(Self.maximumStageScale, max(
             Self.minimumStageScale,
             try container.decodeIfPresent(Double.self, forKey: .iconScale) ?? Self.defaultIconScale
         ))
-        let savedPreviewCardSpacing = try container.decodeIfPresent(
-            Double.self,
-            forKey: .previewCardSpacing
-        ) ?? Self.defaultPreviewCardSpacing
-        previewCardSpacing = min(
-            Self.maximumPreviewCardSpacing,
-            max(Self.minimumPreviewCardSpacing, savedPreviewCardSpacing)
-        )
         adaptiveCardSizing = try container.decodeIfPresent(
             Bool.self,
             forKey: .adaptiveCardSizing
@@ -341,26 +330,15 @@ public struct AppSettings: Codable, Sendable, Equatable {
             Bool.self,
             forKey: .showsDesktopSwitchIndicator
         ) ?? true
-        windowSelectionStyle = try container.decodeIfPresent(
-            WindowSelectionStyle.self,
-            forKey: .windowSelectionStyle
-        ) ?? .filled
         selectorOutset = try container.decodeIfPresent(
             Double.self,
             forKey: .selectorOutset
         ) ?? Self.defaultSelectorOutset
-        selectorCornerRadius = try container.decodeIfPresent(
-            Double.self,
-            forKey: .selectorCornerRadius
-        ) ?? Self.defaultSelectorCornerRadius
-        magnifyScale = try container.decodeIfPresent(
-            Double.self,
-            forKey: .magnifyScale
-        ) ?? Self.defaultMagnifyScale
-        magnifyShadowStrength = try container.decodeIfPresent(
-            Double.self,
-            forKey: .magnifyShadowStrength
-        ) ?? Self.defaultMagnifyShadowStrength
+        previewCornerRadius = min(Self.maximumPreviewCornerRadius, max(
+            Self.minimumPreviewCornerRadius,
+            try container.decodeIfPresent(Double.self, forKey: .previewCornerRadius)
+                ?? Self.defaultPreviewCornerRadius
+        ))
         overlayPresentationDelay = try container.decodeIfPresent(
             TimeInterval.self,
             forKey: .overlayPresentationDelay
@@ -397,5 +375,10 @@ extension AppSettings {
     /// The size the switchers draw at for a card style: previews and icons are sized apart.
     public func overlayScale(for cardStyle: OverlayCardStyle) -> Double {
         cardStyle == .icons ? iconScale : stageScale
+    }
+
+    /// The plate corner the switchers draw for a card style.
+    public func stageCornerRadius(for cardStyle: OverlayCardStyle) -> Double {
+        cardStyle == .icons ? iconStageCornerRadius : stageCornerRadius
     }
 }
