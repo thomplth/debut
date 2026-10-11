@@ -136,20 +136,30 @@ public struct WindowImageCapture: @unchecked Sendable {
 }
 
 enum PreviewCaptureSize {
-    /// Previews are drawn into thumbnails at most 160pt wide, so a native-resolution capture
-    /// costs orders of magnitude more memory and render work than the overlay can use: a
-    /// 4412x2880 capture is ~50MB on its own, and the cache holds one per window.
-    static let maxPixelDimension = 640
+    /// The longest edge, in points, the overlay can draw a preview at with this size setting on
+    /// any of these displays. A native-resolution capture costs orders of magnitude more memory
+    /// and render work than the overlay can use (a 4412x2880 capture is ~50MB, and the cache
+    /// holds one per window), but a fixed pixel cap left a 400% preview with half the pixels it
+    /// is drawn at on a Retina display (KHA-1067). Stages only shrink from their resting size,
+    /// and the drag view never grows past the focused stage, so the resting card is the bound.
+    static func drawnPointDimension(stageScale: CGFloat, displaySizes: [CGSize]) -> CGFloat {
+        let sizes = displaySizes.isEmpty ? [CGSize.zero] : displaySizes
+        return sizes.map { display in
+            let metrics = StageMetrics.shaped(forDisplay: display).withPreviewScale(stageScale)
+            return max(metrics.thumbnailWidth, metrics.thumbnailHeight)
+        }.max() ?? 0
+    }
 
     static func pixelSize(
         contentSize: CGSize,
         pointPixelScale: CGFloat,
-        maxPixelDimension: Int = maxPixelDimension
+        maxPointDimension: CGFloat
     ) -> (width: Int, height: Int) {
         let nativeWidth = contentSize.width * pointPixelScale
         let nativeHeight = contentSize.height * pointPixelScale
         let longest = max(nativeWidth, nativeHeight)
-        let scale = longest > CGFloat(maxPixelDimension) ? CGFloat(maxPixelDimension) / longest : 1
+        let maxPixelDimension = (maxPointDimension * pointPixelScale).rounded(.up)
+        let scale = longest > maxPixelDimension ? maxPixelDimension / longest : 1
         return (
             width: max(1, Int(ceil(nativeWidth * scale))),
             height: max(1, Int(ceil(nativeHeight * scale)))
@@ -306,11 +316,14 @@ public protocol WindowService: Sendable {
     /// would classify all apps' AX windows reuses the first classification taken in the pass,
     /// so a caller asking several questions of the same moment pays for one sweep, not one each.
     func withSharedAccessibilitySweep<T>(_ body: () -> T) -> T
+    /// `maxPointDimension` is the longest edge, in points, a preview is drawn at; each window
+    /// is captured at that size times its display's pixel density, or its own size if smaller.
     /// `onEnumerated` reports which requested windows the shareable-content
     /// snapshot actually matched, before any of them is captured. Without it a
     /// caller cannot tell the shared enumeration wait apart from capture time.
     func captureWindowImages(
         windowIDs: [CGWindowID],
+        maxPointDimension: CGFloat,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async

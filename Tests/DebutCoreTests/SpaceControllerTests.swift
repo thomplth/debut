@@ -25,6 +25,7 @@ private final class DelayedCaptureWindowService: WindowService, @unchecked Senda
 
     func captureWindowImages(
         windowIDs: [CGWindowID],
+        maxPointDimension: CGFloat,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
@@ -1153,6 +1154,35 @@ struct SpaceControllerTests {
         let secondRequest = Set(try #require(windowSvc.captureRequests.last))
         #expect(secondRequest == [frontWindowID], "Only the last active window should be re-captured")
         #expect(controller.windowPreviews.count == 3, "Cached previews must survive a partial refresh")
+        keyboardSvc.simulateEvent(.escape)
+    }
+
+    /// A preview cached at the old size setting is the wrong resolution for the new one:
+    /// enlarged, it would be upscaled for as long as the window kept its title (KHA-1067).
+    @Test("Changing the preview size recaptures cached previews at the new size")
+    func previewSizeChangeRecapturesCache() throws {
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
+        let spaceID = controller.spaceManager.spaces[0].id
+        for windowID in [CGWindowID(101), 202, 303] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
+                toSpaceID: spaceID
+            )
+        }
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage(), 303: makeTestImage()]
+        controller.previewCaptureDimension = 245
+
+        controller.prewarmWindowPreviews()
+        #expect(waitUntil { controller.windowPreviews.count == 3 })
+
+        controller.previewCaptureDimension = 650
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
+
+        #expect(Set(try #require(windowSvc.captureRequests.last)) == [101, 202, 303],
+                "Every preview captured at the old size must be recaptured")
+        #expect(windowSvc.captureDimensions == [245, 650])
         keyboardSvc.simulateEvent(.escape)
     }
 

@@ -680,6 +680,7 @@ struct WindowServiceTests {
 
         await service.captureWindowImages(
             windowIDs: [kCGNullWindowID],
+            maxPointDimension: 245,
             onEnumerated: { _ in enumerations.increment() }
         ) { _ in
             counter.increment()
@@ -979,16 +980,30 @@ struct WindowServiceTests {
         #expect(scanCount == 1)
     }
 
-    @Test("An oversized window is captured down to the preview cap")
+    @Test("An oversized window is captured down to the drawn size at the display's density")
     func capturePixelSizeIsCapped() {
         let size = PreviewCaptureSize.pixelSize(
             contentSize: CGSize(width: 2206, height: 1440),
             pointPixelScale: 2,
-            maxPixelDimension: 640
+            maxPointDimension: 320
         )
 
         #expect(size.width == 640)
         #expect(size.height == 418)
+    }
+
+    /// The cap was a fixed 640 pixels, so a 400% preview drawn ~650 points wide on a Retina
+    /// display had half the pixels it needed and was upscaled (KHA-1067).
+    @Test("A large preview is captured at Retina density, not a fixed pixel cap")
+    func largePreviewKeepsRetinaDensity() {
+        let size = PreviewCaptureSize.pixelSize(
+            contentSize: CGSize(width: 2206, height: 1440),
+            pointPixelScale: 2,
+            maxPointDimension: 650
+        )
+
+        #expect(size.width == 1300)
+        #expect(size.height == 849)
     }
 
     @Test("A window smaller than the cap is captured at native resolution")
@@ -996,7 +1011,7 @@ struct WindowServiceTests {
         let size = PreviewCaptureSize.pixelSize(
             contentSize: CGSize(width: 300, height: 200),
             pointPixelScale: 1,
-            maxPixelDimension: 640
+            maxPointDimension: 640
         )
 
         #expect(size.width == 300)
@@ -1008,11 +1023,39 @@ struct WindowServiceTests {
         let size = PreviewCaptureSize.pixelSize(
             contentSize: CGSize(width: 0, height: 0),
             pointPixelScale: 2,
-            maxPixelDimension: 640
+            maxPointDimension: 320
         )
 
         #expect(size.width == 1)
         #expect(size.height == 1)
+    }
+
+    @Test("The capture budget is the longest edge a preview is drawn at for the size setting")
+    func captureBudgetFollowsSizeSetting() {
+        let display = CGSize(width: 1512, height: 982)
+        let drawn = StageMetrics.shaped(forDisplay: display).withPreviewScale(4)
+
+        let budget = PreviewCaptureSize.drawnPointDimension(stageScale: 4, displaySizes: [display])
+
+        #expect(budget == max(drawn.thumbnailWidth, drawn.thumbnailHeight))
+        #expect(budget > PreviewCaptureSize.drawnPointDimension(
+            stageScale: 1.5,
+            displaySizes: [display]
+        ))
+    }
+
+    @Test("A portrait display's taller preview sets the budget")
+    func captureBudgetCoversEveryDisplay() {
+        let landscape = CGSize(width: 1512, height: 982)
+        let portrait = CGSize(width: 1080, height: 1920)
+        let tall = StageMetrics.shaped(forDisplay: portrait).withPreviewScale(2)
+
+        let budget = PreviewCaptureSize.drawnPointDimension(
+            stageScale: 2,
+            displaySizes: [landscape, portrait]
+        )
+
+        #expect(budget >= tall.thumbnailHeight)
     }
 }
 

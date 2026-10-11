@@ -121,6 +121,7 @@ final class PreviewCaptureMetrics: @unchecked Sendable {
 private struct PreviewCacheEntry {
     let capturedAt: Date
     let windowTitle: String
+    let captureDimension: CGFloat
 }
 
 /// Completes a space commit only after every asynchronous window relocation has answered.
@@ -346,6 +347,12 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
     public var previewCacheTTL: TimeInterval
+    /// The longest edge, in points, a preview is drawn at with the current size setting. A
+    /// cached preview captured under another size is recaptured at the next activation.
+    public var previewCaptureDimension: CGFloat = PreviewCaptureSize.drawnPointDimension(
+        stageScale: CGFloat(AppSettings.defaultStageScale),
+        displaySizes: []
+    )
 
     /// The model rendered by the overlay, including interactions that are still waiting for
     /// the session commit. The persisted `spaceManager` remains the last committed state.
@@ -2761,6 +2768,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                   let entry = previewCacheEntries[window.windowID]
             else { return window.windowID }
             if entry.windowTitle != window.windowTitle { return window.windowID }
+            // Captured for another size setting: too few pixels to draw sharp, or more than
+            // the overlay will ever draw.
+            if entry.captureDimension != previewCaptureDimension { return window.windowID }
             // Dirty tracking alone goes stale for windows that change without ever being
             // activated — video, chat, dashboards.
             if now.timeIntervalSince(entry.capturedAt) >= previewCacheTTL { return window.windowID }
@@ -2820,9 +2830,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
 
         let clock = self.clock
+        let captureDimension = previewCaptureDimension
         previewCaptureTask = Task { [weak self, windowService] in
             await windowService.captureWindowImages(
                 windowIDs: windowIDs,
+                maxPointDimension: captureDimension,
                 onEnumerated: { matchedWindowIDs in
                     metrics.recordEnumeration(matchedWindowIDs: matchedWindowIDs)
                 }
@@ -2870,7 +2882,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                     self.windowPreviews[capture.windowID] = capture.image
                     self.previewCacheEntries[capture.windowID] = PreviewCacheEntry(
                         capturedAt: capturedAt,
-                        windowTitle: window.windowTitle
+                        windowTitle: window.windowTitle,
+                        captureDimension: captureDimension
                     )
                     self.variedWindowPreviewIDs.insert(capture.windowID)
                     self.scheduleOverlayPreviewFlush()

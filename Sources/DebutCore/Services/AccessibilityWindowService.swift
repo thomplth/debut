@@ -1254,6 +1254,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
     public func captureWindowImages(
         windowIDs: [CGWindowID],
+        maxPointDimension: CGFloat,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
@@ -1292,7 +1293,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                     let configuration = SCStreamConfiguration()
                     let pixelSize = PreviewCaptureSize.pixelSize(
                         contentSize: filter.contentRect.size,
-                        pointPixelScale: CGFloat(filter.pointPixelScale)
+                        pointPixelScale: CGFloat(filter.pointPixelScale),
+                        maxPointDimension: maxPointDimension
                     )
                     configuration.width = pixelSize.width
                     configuration.height = pixelSize.height
