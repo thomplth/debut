@@ -2,6 +2,7 @@ import Testing
 import AppKit
 import SwiftUI
 import Foundation
+import DockGlass
 @testable import DebutCore
 
 @MainActor
@@ -374,6 +375,52 @@ struct ScreenshotTests {
         #expect(viewModel.selectedWindow?.windowID == entries[2].window.windowID)
     }
 
+    @Test("halo probe", .enabled(if: ProcessInfo.processInfo.environment["DEBUT_HALO_PROBE"] != nil))
+    func haloProbe() throws {
+        let size = NSSize(width: 240, height: 60)
+        func measure(_ view: some View, _ name: String) throws {
+            let image = try #require(renderSwiftUI(view.frame(width: size.width, height: size.height), size: size, background: 0.5))
+            try saveImage(image, name: "halo_\(name)")
+            let bitmap = try #require(normalizedBitmap(image, size: size))
+            var brightest: CGFloat = 0, count = 0
+            for y in 0..<bitmap.pixelsHigh { for x in 0..<bitmap.pixelsWide {
+                let c = bitmap.colorAt(x: x, y: y)!.redComponent
+                brightest = max(brightest, c); if c > 0.55 { count += 1 }
+            }}
+            print("HALO \(name): brightest \(brightest) pixels>0.55: \(count)")
+        }
+        try measure(WindowTitleLabel(title: "Meeting Notes", fontSize: 12.8125).environment(\.colorScheme, .light), "flattened")
+        try measure(Text("Meeting Notes").dockGlassLabel(fontSize: 12.8125).shadow(color: .white.opacity(0.95), radius: 1).environment(\.colorScheme, .light), "live")
+        try measure(Text("Meeting Notes").dockGlassLabel(fontSize: 12.8125).environment(\.colorScheme, .light), "none")
+    }
+
+    /// The title halo is adjustable (KHA-1062): at strength 0 nothing lights the backdrop around
+    /// a light-mode title, and at the default it visibly does.
+    @Test("The title halo follows its strength setting")
+    func titleHaloFollowsStrength() throws {
+        let size = NSSize(width: 240, height: 60)
+        func brightest(strength: Double) throws -> CGFloat {
+            let label = WindowTitleLabel(
+                title: "Meeting Notes",
+                fontSize: DockGlass.Label.standardFontSize,
+                haloStrength: strength,
+                haloSize: 1
+            )
+            .frame(width: size.width, height: size.height)
+            .environment(\.colorScheme, .light)
+            let image = try #require(renderSwiftUI(label, size: size, background: 0.5))
+            let bitmap = try #require(normalizedBitmap(image, size: size))
+            var peak: CGFloat = 0
+            for y in 0..<bitmap.pixelsHigh { for x in 0..<bitmap.pixelsWide {
+                peak = max(peak, bitmap.colorAt(x: x, y: y)!.redComponent)
+            }}
+            return peak
+        }
+        let off = try brightest(strength: 0)
+        let on = try brightest(strength: 1)
+        #expect(on - off > 0.15, "halo on \(on), off \(off)")
+    }
+
     @Test("Actual previews cast a shadow beyond their image bounds",
           arguments: [CGFloat(0.5), 1, 2.5], [CGFloat(0.3), 1.6, 4])
     func previewDropShadow(scale: CGFloat, aspect: CGFloat) throws {
@@ -391,7 +438,10 @@ struct ScreenshotTests {
         // The shadow must follow the visible image, not the surrounding layout frame.
         let imageWidth = min(metrics.thumbnailWidth, metrics.thumbnailHeight * aspect)
         let centerY = size.height / 2 - (metrics.titleSpacing + metrics.titleHeight) / 2
-        for selected in [false, true] {
+        // The shadow does not depend on selection, and native's 9-point highlight would put a
+        // sample past it beyond the shadow's reach; offscreen rendering also draws that
+        // highlight without the glass it blends with. Sample unselected cards only.
+        for selected in [false] {
             for dark in [false, true] {
                 let background: CGFloat = dark ? 0.25 : 0.9
                 let card = WindowPreviewView(
@@ -476,31 +526,31 @@ struct ScreenshotTests {
         #expect(difference.changedPixelRatio < 0.001)
     }
 
-    @Test("Placeholder cards cast a halo on a light background at every stage scale",
-          arguments: [0.5, 1.0, 2.0])
-    func placeholderHalo(scale: CGFloat) throws {
-        let metrics = StageMetrics.standard.scaled(by: scale)
-        let size = NSSize(width: 400 * scale, height: 300 * scale)
+    /// A failed capture shows the app's icon at the badge's size and nothing around it: no halo
+    /// darkens the empty preview below the icon (KHA-1060).
+    @Test("A failed capture's icon casts no halo", arguments: [1.0, 1.45, 2.0])
+    func placeholderHasNoHalo(scale: CGFloat) throws {
+        let metrics = StageMetrics.standard.withPreviewScale(scale)
+        let size = NSSize(width: 500 * scale, height: 400 * scale)
         let card = WindowPreviewView(
             window: StageWindowData(
                 id: 100, windowID: 100,
-                ownerBundleID: "com.example.missing-halo-fixture", ownerName: "",
+                ownerBundleID: "com.apple.finder", ownerName: "",
                 windowTitle: "", previewImage: nil
             ),
             isWindowSelected: false, metrics: metrics, appearance: AppSettings()
         )
         let image = try #require(renderSwiftUI(card, size: size, background: 0.9))
         let bitmap = try #require(normalizedBitmap(image, size: size))
-        try saveImage(image, name: "05_placeholder_halo_\(scale)")
+        try saveImage(image, name: "05_placeholder_\(scale)")
 
-        // Both samples are inside the same empty thumbnail, below the placeholder icon.
-        // The title is empty. Require a larger difference than the card's existing shadow
-        // alone (0.024), so removing the halo fails at every scale.
-        let iconCenterY = size.height / 2 - (metrics.titleSpacing + metrics.titleHeight) / 2
-        let y = Int((iconCenterY + metrics.previewPlaceholderIconSize / 2 + 4 * scale) * 2)
-        let shadow = try #require(bitmap.colorAt(x: Int(size.width), y: y))
-        let bare = try #require(bitmap.colorAt(x: Int((size.width / 2 + 90 * scale) * 2), y: y))
-        #expect(bare.redComponent - shadow.redComponent > 0.05)
+        // Both samples are inside the same empty preview at the same height, one just below
+        // the icon and one well clear of it. A halo would darken the first.
+        let iconCenterY = size.height / 2 - metrics.titleBandHeight / 2 + metrics.cardPadding / 2
+        let y = Int((iconCenterY + metrics.placeholderIconSize / 2 + 3) * 2)
+        let belowIcon = try #require(bitmap.colorAt(x: Int(size.width), y: y))
+        let clear = try #require(bitmap.colorAt(x: Int((size.width / 2 + metrics.thumbnailWidth / 2 - 8) * 2), y: y))
+        #expect(abs(clear.redComponent - belowIcon.redComponent) < 0.01)
     }
 
     /// The global list is the first thing in the app that routinely outgrows the display, so the
@@ -547,6 +597,9 @@ struct ScreenshotTests {
     /// placeholder icon sits in the middle of the plate and a preview fills it uniformly. The
     /// badge's own top rows are transparent icon margin, so the sample starts inside its frame.
     private func badgeCornerPixelCount(preview: CGImage?, name: String) throws -> Int {
+        // This checks the badge in the preview's top-left corner, the Corner position.
+        var cornerBadgeAppearance = AppSettings()
+        cornerBadgeAppearance.badgePlacement = .corner
         let metrics = StageMetrics.standard
         let cardSize = NSSize(
             width: metrics.thumbnailWidth + metrics.titleWidthAllowance + metrics.cardPadding * 2,
@@ -564,7 +617,7 @@ struct ScreenshotTests {
             ),
             isWindowSelected: false,
             metrics: metrics,
-            appearance: AppSettings()
+            appearance: cornerBadgeAppearance
         )
         .frame(width: cardSize.width, height: cardSize.height, alignment: .topLeading)
 
@@ -672,33 +725,6 @@ struct ScreenshotTests {
         }
     }
 
-    @Test("Magnify remains available as a selection style")
-    func magnifySelectionState() throws {
-        var appearance = AppSettings()
-        appearance.windowSelectionStyle = .magnify
-        appearance.magnifyScale = 1.12
-        appearance.magnifyShadowStrength = 1.5
-        let vm = StageOverlayViewModel(
-            spaceManager: makeSampleViewModel(
-                spaceCount: 1,
-                windowsPerSpace: [3],
-                activeIndex: 0
-            ).spaceManager,
-            activeSpaceIndex: 0,
-            selectedWindowIndex: 1,
-            appearance: appearance
-        )
-        guard let image = renderSwiftUI(
-            StageOverlayView(viewModel: vm),
-            size: NSSize(width: 900, height: 300)
-        ) else { throw ScreenshotError.renderFailed }
-
-        try saveImage(image, name: "05_magnify_selection_state")
-        #expect(vm.appearance.windowSelectionStyle == .magnify)
-    }
-
-    /// Pins the scale so the wrap threshold under test is a property of the width, not of
-    /// whatever the stage-scale default happens to be.
     private func unscaledAppearance() -> AppSettings {
         var settings = AppSettings()
         settings.stageScale = 1
@@ -739,9 +765,9 @@ struct ScreenshotTests {
             StageOverlayView(viewModel: vm),
             size: size
         )[0] else { throw ScreenshotError.renderFailed }
-        #expect(abs(stage.height
-            - (metrics.cardHeight * 2 + metrics.rowSpacing
-                + metrics.topPadding + metrics.bottomPadding)) < 0.5)
+        let expectedHeight: CGFloat = metrics.cardHeight * 2 + metrics.rowSpacing
+            + metrics.topPadding + metrics.bottomPadding
+        #expect(abs(stage.height - expectedHeight) < 0.5)
 
         // What is drawn has to be where the geometry says, or drag projection and the E2E hit
         // tests are aiming at slots the view never used.
@@ -779,8 +805,10 @@ struct ScreenshotTests {
         let unscaled = cardSize(stageScale: 1)
         let enlarged = cardSize(stageScale: enlargedScale)
 
-        #expect(abs(enlarged.width - unscaled.width * enlargedScale) < 0.5)
-        #expect(abs(enlarged.height - unscaled.height * enlargedScale) < 0.5)
+        // Only the preview grows: the card gains exactly the preview's extra size (KHA-1059).
+        let shaped = StageMetrics.shaped(forDisplay: size)
+        #expect(abs(enlarged.width - unscaled.width - shaped.thumbnailWidth * (enlargedScale - 1)) < 0.5)
+        #expect(abs(enlarged.height - unscaled.height - shaped.thumbnailHeight * (enlargedScale - 1)) < 0.5)
 
         // E2E clicks screen coordinates it derives from drawnMetrics, so a card drawn at any
         // other size sends those clicks somewhere the overlay never drew.
@@ -793,108 +821,95 @@ struct ScreenshotTests {
         #expect(abs(enlarged.height - expected.cardHeight) < 0.5)
     }
 
-    @Test("Rendered title glyphs grow more gently than previews")
-    func windowTitleSizeGrowsGently() throws {
-        let size = NSSize(width: 600, height: 500)
+    /// Every card is titled, not only the selected one as natively, so a title must read as
+    /// clearly unselected as selected: full strength, one fixed size at every window size, and
+    /// centred between the card's lower edge and the plate's, not around a highlight only the
+    /// selected card draws (KHA-1057).
+    @Test("Titles render full-strength at one size, centred below the card")
+    func windowTitlesAreUniformAndCentred() throws {
+        let size = NSSize(width: 700, height: 600)
+        // Measures the title's own glyphs, so no app icon leads it.
         var appearance = AppSettings()
-        appearance.windowSelectionStyle = .filled
+        appearance.badgePlacement = .bottom
         let window = StageWindowData(
             id: 1, windowID: 1, ownerBundleID: "com.apple.finder",
             ownerName: "Finder", windowTitle: "Hg Title", previewImage: nil
         )
-        func glyphSize(_ bitmap: NSBitmapImageRep, rows: Range<Int>) -> CGSize {
+        struct Glyphs { var box: CGRect; var peak: CGFloat }
+        func glyphs(_ bitmap: NSBitmapImageRep, rows: Range<Int>) -> Glyphs? {
             var minX = bitmap.pixelsWide, minY = bitmap.pixelsHigh
             var maxX = -1, maxY = -1
+            var peak: CGFloat = 0
             for y in rows {
                 for x in 0..<bitmap.pixelsWide {
-                    guard let color = bitmap.colorAt(x: x, y: y),
-                          min(color.redComponent, color.greenComponent, color.blueComponent) > 0.7
-                    else { continue }
+                    guard let color = bitmap.colorAt(x: x, y: y) else { continue }
+                    let level = min(color.redComponent, color.greenComponent, color.blueComponent)
+                    guard level > 0.5 else { continue }
+                    peak = max(peak, level)
                     minX = min(minX, x); maxX = max(maxX, x)
                     minY = min(minY, y); maxY = max(maxY, y)
                 }
             }
-            #expect(maxX >= minX && maxY >= minY)
-            return CGSize(width: maxX - minX + 1, height: maxY - minY + 1)
+            guard maxX >= minX, maxY >= minY else { return nil }
+            return Glyphs(box: CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1), peak: peak)
         }
-        for (scale, fontSize): (CGFloat, CGFloat) in [(1, 10.4), (1.5, 12.73734666), (2, 14.70782105), (2.5, 16.44384383)] {
-            let metrics = StageMetrics.standard.scaled(by: scale)
-            let image = try #require(renderSwiftUI(
-                WindowPreviewView(window: window, isWindowSelected: true,
-                    metrics: metrics, appearance: appearance)
-                    .environment(\.colorScheme, .dark), size: size
-            ))
-            try saveImage(image, name: "06_gentle_title_\(scale)")
-            let bitmap = try #require(normalizedBitmap(image, size: size))
-            // Only the title region, below the preview: measure actual bright glyph pixels,
-            // rather than a frame that would pass even if the text were scaled or clipped.
-            let top = size.height / 2 - metrics.cardHeight / 2
-                + metrics.cardPadding + metrics.thumbnailHeight + metrics.titleSpacing
-            let bottom = top + metrics.titleHeight
-            let measured = glyphSize(bitmap, rows: Int(top * 2)..<Int(bottom * 2))
-            // Compare against text rendered at the intended point size. System-font optical
-            // sizing changes glyph proportions, so multiplying baseline pixels is not a reference.
-            let referenceSize = NSSize(width: 200, height: 60)
-            let reference = try #require(renderSwiftUI(
-                Text("Hg Title").font(.system(size: fontSize)).foregroundStyle(.white),
-                size: referenceSize
-            ))
-            let referenceBitmap = try #require(normalizedBitmap(reference, size: referenceSize))
-            let expected = glyphSize(referenceBitmap, rows: 0..<referenceBitmap.pixelsHigh)
-            #expect(abs(measured.width - expected.width) <= 2)
-            #expect(abs(measured.height - expected.height) <= 2)
+
+        // The same title on its own, centred in a frame, gives the glyphs' size and how far
+        // their ink sits from a centred text box (descenders pull it down).
+        let referenceSize = NSSize(width: 300, height: 80)
+        let reference = try #require(renderSwiftUI(
+            Text("Hg Title")
+                .font(DockGlass.Label.font(size: DockGlass.Label.standardFontSize))
+                .foregroundStyle(.white)
+                .frame(width: referenceSize.width, height: referenceSize.height),
+            size: referenceSize
+        ))
+        let referenceBitmap = try #require(normalizedBitmap(reference, size: referenceSize))
+        let expected = try #require(glyphs(referenceBitmap, rows: 0..<referenceBitmap.pixelsHigh))
+        let inkOffset = expected.box.midY - referenceSize.height
+
+        for scale: CGFloat in [1, 1.45, 2, 2.5] {
+            for selected in [false, true] {
+                let metrics = StageMetrics.standard.withPreviewScale(scale)
+                let image = try #require(renderSwiftUI(
+                    WindowPreviewView(window: window, isWindowSelected: selected,
+                        metrics: metrics, appearance: appearance)
+                        .environment(\.colorScheme, .dark), size: size
+                ))
+                try saveImage(image, name: "06_title_\(scale)_\(selected)")
+                let bitmap = try #require(normalizedBitmap(image, size: size))
+                // Only the band below the preview, which ends at the card's (and plate's) edge.
+                let cardTop = size.height / 2 - metrics.cardHeight / 2
+                let bandTop = cardTop + metrics.cardPadding + metrics.thumbnailHeight
+                let bandBottom = cardTop + metrics.cardHeight
+                let measured = try #require(glyphs(bitmap, rows: Int(bandTop * 2)..<Int(bandBottom * 2)))
+
+                #expect(abs(measured.box.width - expected.box.width) <= 2, "scale \(scale)")
+                #expect(abs(measured.box.height - expected.box.height) <= 2, "scale \(scale)")
+                #expect(measured.peak > 0.95, "an unselected title is as strong as a selected one")
+                let bandCentre = (bandTop + bandBottom) // in pixels at 2x
+                #expect(abs((measured.box.midY - bandCentre) - inkOffset) <= 2, "scale \(scale) selected \(selected)")
+            }
         }
     }
 
-    @Test("A 150 percent preview scale preserves the overall overlay composition")
-    func enlargedStageScalePreservesRenderedComposition() throws {
-        let originalSize = NSSize(width: 1_200, height: 600)
-        let scale: CGFloat = 1.5
-        let enlargedSize = NSSize(
-            width: originalSize.width * scale,
-            height: originalSize.height * scale
-        )
-
-        var originalAppearance = AppSettings()
-        originalAppearance.stageScale = 1
-        let original = try #require(renderSwiftUI(
-            StageOverlayView(viewModel: makeSampleViewModel(
-                spaceCount: 3,
-                windowsPerSpace: [3, 4, 2],
-                activeIndex: 1,
-                appearance: originalAppearance
-            )),
-            size: originalSize
-        ))
-        var enlargedAppearance = AppSettings()
-        enlargedAppearance.stageScale = Double(scale)
-        let enlarged = try #require(renderSwiftUI(
-            StageOverlayView(viewModel: makeSampleViewModel(
-                spaceCount: 3,
-                windowsPerSpace: [3, 4, 2],
-                activeIndex: 1,
-                appearance: enlargedAppearance
-            )),
-            size: enlargedSize
-        ))
-        let originalBitmap = try #require(normalizedBitmap(original, size: originalSize))
-        let normalizedEnlarged = try #require(normalizedBitmap(enlarged, size: originalSize))
-
-        let normalizedImage = NSImage(size: originalSize)
-        normalizedImage.addRepresentation(normalizedEnlarged)
-        try saveImage(original, name: "06_proportional_scale_original")
-        try saveImage(normalizedImage, name: "06_proportional_scale_normalized_150_percent")
-
-        let difference = screenshotDifference(originalBitmap, normalizedEnlarged)
-        #expect(difference.comparedPixelCount > 10_000)
-        #expect(
-            difference.meanChannelDifference < 0.035,
-            "mean normalized screenshot difference was \(difference.meanChannelDifference)"
-        )
-        #expect(
-            difference.changedPixelRatio < 0.12,
-            "normalized screenshot changed-pixel ratio was \(difference.changedPixelRatio)"
-        )
+    /// Replaces the proportional-composition check: the size setting no longer enlarges the
+    /// whole overlay, only the previews (KHA-1059). The geometry is pinned in
+    /// PreviewOnlyScalingTests; this checks the overlay draws it, plate edges and gaps included.
+    @Test("A 150 percent size enlarges only the previews in the rendered overlay")
+    func enlargedStageScaleGrowsOnlyPreviews() throws {
+        let size = NSSize(width: 1_600, height: 1_000)
+        func stage(_ scale: Double) throws -> CGRect {
+            var appearance = AppSettings()
+            appearance.stageScale = scale
+            let vm = makeSampleViewModel(spaceCount: 1, windowsPerSpace: [3], activeIndex: 0, appearance: appearance)
+            return try #require(renderStageSurfaceFrames(StageOverlayView(viewModel: vm), size: size)[0])
+        }
+        let native = try stage(1)
+        let enlarged = try stage(1.5)
+        let shaped = StageMetrics.shaped(forDisplay: size)
+        #expect(abs(enlarged.height - native.height - shaped.thumbnailHeight * 0.5) < 0.5)
+        #expect(abs(enlarged.width - native.width - shaped.thumbnailWidth * 0.5 * 3) < 0.5)
     }
 
     @Test("The default stage scale still fits the display, and a crowded space shrinks to fit")

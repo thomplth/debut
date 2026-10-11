@@ -16,77 +16,45 @@ public final class AppIconCache: @unchecked Sendable {
     /// by size, so tracking the scale would throw the whole warmed set away every time the slider
     /// moved and put the rasterize back on the main thread. An image view downsamples the
     /// oversized bitmap for free.
-    public static let placeholderIconRasterSize = StageMetrics.standard
-        .scaled(by: CGFloat(AppSettings.maximumStageScale)).previewPlaceholderIconSize
+    /// One 128-point raster serves a failed capture's icon (badge-sized, at most 100 points)
+    /// and a native-size icon card.
+    public static let placeholderIconRasterSize = StageMetrics.nativeIconCanvasSize
     public static let badgeRasterSize = StageMetrics.standard
-        .scaled(by: CGFloat(AppSettings.maximumStageScale)).badgeSize
+        .scaled(by: CGFloat(AppSettings.maximumStageScale)).drawnBadgeSize
+
+    /// An icon card at native size draws the same 128-point canvas as the placeholder, so the
+    /// two share one warmed raster and the default costs nothing extra.
+    public static let nativeIconSlotRasterSize = placeholderIconRasterSize
+    /// Larger icon cards downsample a raster at the next size up, warmed only once the icon size
+    /// is set above native: each step doubles a bitmap kept for every app.
+    public static let largeIconSlotRasterSize = StageMetrics.nativeIconCanvasSize * 2
+    public static let largestIconSlotRasterSize = StageMetrics.nativeIconCanvasSize
+        * CGFloat(AppSettings.maximumStageScale)
 
     public static let overlayIconSizes: [CGFloat] = [placeholderIconRasterSize]
 
-    /// Warmed apart from the plain sizes because the badge's bitmap carries a baked drop shadow.
-    public static let overlayBadgeIconSizes: [CGFloat] = [badgeRasterSize]
-
-    /// One halo serves every placeholder, including icons that cannot be resolved. Its center
-    /// is transparent so irregular icons do not reveal an opaque silhouette behind them.
-    /// Bake the active lift once; the stage's opacity attenuates it when inactive. Like the
-    /// badge shadow, its blur scales with the icon instead of being rebuilt during animation.
-    struct BakedIconShadow {
-        static let iconSide = placeholderIconRasterSize
-        static let blur: CGFloat = 36 * CGFloat(AppSettings.maximumStageScale)
-        static let dy: CGFloat = 8 * CGFloat(AppSettings.maximumStageScale)
-        static let opacity: CGFloat = 0.22
-        static let padding: CGFloat = blur * 2
+    /// The raster icon cards draw from at an icon size.
+    public static func iconSlotRasterSize(iconScale: Double) -> CGFloat {
+        if iconScale <= 1 { return nativeIconSlotRasterSize }
+        return iconScale <= 2 ? largeIconSlotRasterSize : largestIconSlotRasterSize
     }
 
-    static let iconShadow: NSImage = {
-        let side = BakedIconShadow.iconSide
-        let padding = BakedIconShadow.padding
-        let size = NSSize(width: side + padding * 2, height: side + padding * 2)
-        let image = NSImage(size: size)
-        guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int((size.width * 2).rounded()),
-            pixelsHigh: Int((size.height * 2).rounded()),
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
-        ) else { return image }
-        bitmap.size = size
-        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return image }
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
-        // Cast from outside the bitmap so only the blur lands in it, never the source shape.
-        let silhouette = NSBezierPath(
-            roundedRect: NSRect(x: padding, y: padding + size.height, width: side, height: side),
-            xRadius: side * 0.22, yRadius: side * 0.22
-        )
-        NSGraphicsContext.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(BakedIconShadow.opacity)
-        shadow.shadowOffset = NSSize(width: 0, height: -size.height - BakedIconShadow.dy)
-        shadow.shadowBlurRadius = BakedIconShadow.blur
-        shadow.set()
-        NSColor.black.setFill()
-        silhouette.fill()
-        NSGraphicsContext.restoreGraphicsState()
-        // Fade the center away softly. A hard squircle cutout leaves a visible collar around
-        // icons whose own transparent margins do not exactly match that shape.
-        if let fade = CGGradient(
-            colorsSpace: CGColorSpaceCreateDeviceRGB(),
-            colors: [CGColor(gray: 0, alpha: 1), CGColor(gray: 0, alpha: 1),
-                     CGColor(gray: 0, alpha: 0)] as CFArray,
-            locations: [0, 0.35, 1]
-        ) {
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            context.cgContext.setBlendMode(.destinationOut)
-            context.cgContext.drawRadialGradient(
-                fade, startCenter: center, startRadius: 0,
-                endCenter: center, endRadius: side * 0.6, options: []
-            )
-        }
-        NSGraphicsContext.restoreGraphicsState()
-        image.addRepresentation(bitmap)
-        return image
-    }()
+    /// Every size to warm for an app, given the icon size icon cards are drawn at.
+    public static func overlayIconSizes(iconScale: Double) -> [CGFloat] {
+        Array(Set(overlayIconSizes + [iconSlotRasterSize(iconScale: iconScale)])).sorted()
+    }
+
+    /// The icon size icon cards draw at, which decides what launches warm.
+    public var iconScale: Double {
+        get { lock.lock(); defer { lock.unlock() }; return storedIconScale }
+        set { lock.lock(); storedIconScale = newValue; lock.unlock() }
+    }
+
+    /// The sizes to warm for a newly seen app.
+    public var warmSizes: [CGFloat] { Self.overlayIconSizes(iconScale: iconScale) }
+
+    /// Warmed apart from the plain sizes because the badge's bitmap carries a baked drop shadow.
+    public static let overlayBadgeIconSizes: [CGFloat] = [badgeRasterSize]
 
     /// The badge's drop shadow, expressed in raster points so it can be drawn into the bitmap.
     ///
@@ -116,6 +84,7 @@ public final class AppIconCache: @unchecked Sendable {
     private let lock = NSLock()
     private var icons: [Key: NSImage] = [:]
     private var requested: Set<Key> = []
+    private var storedIconScale: Double = AppSettings.defaultIconScale
 
     public init(rasterize: @escaping (String, CGFloat) -> NSImage? = AppIconCache.rasterizeApplicationIcon) {
         self.rasterize = rasterize

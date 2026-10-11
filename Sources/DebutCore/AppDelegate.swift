@@ -1,4 +1,5 @@
 import AppKit
+import DockGlass
 import QuartzCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -304,9 +305,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         spaceManager.activateLaunchSpace(focusedWindowID: focusedWindowID)
 
+        AppIconCache.shared.iconScale = currentSettings.iconScale
         AppIconCache.shared.warm(
             bundleIDs: spaceManager.allWindowOwnerBundleIDs,
-            sizes: AppIconCache.overlayIconSizes,
+            sizes: AppIconCache.shared.warmSizes,
             badgeSizes: AppIconCache.overlayBadgeIconSizes
         )
 
@@ -550,6 +552,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             object: nil
         )
 
+        // Native glass silently becomes stock glass on an unverified macOS, under Reduce
+        // Transparency or Increase Contrast, or when an update changes the glass filter.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(dockGlassStatusDidChange(_:)),
+            name: DockGlass.statusDidChange,
+            object: nil
+        )
+
         // Reordering desktops changes no active space, so no AppKit notification reports it.
         NotificationCenter.default.addObserver(
             self,
@@ -689,7 +700,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         window.present(
             presentation,
             on: screen,
-            glassStyle: currentSettings.glassStyle
+            glassStyle: currentSettings.glassStyle,
+            dockGlassStyle: currentSettings.dockGlassStyle
         )
         diag.report("desktop_switch_indicator_shown", level: .transient, details: [
             "desktopCount": "\(presentation.desktopCount)",
@@ -742,6 +754,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             as? NSRunningApplication
         guard app?.bundleIdentifier == "com.apple.dock" else { return }
         overviewWindowProbe?.invalidate()
+    }
+
+    @objc private func dockGlassStatusDidChange(_ notification: Notification) {
+        let status: String = switch DockGlass.status {
+        case .tuned: "tuned"
+        case .stock(let reason): "stock: \(reason)"
+        }
+        diag.report("dock_glass_status", details: ["status": status])
     }
 
     @objc private func screenParametersDidChange(_ notification: Notification) {
@@ -1156,6 +1176,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             appearance: currentSettings, forceDisplayStackIndicator: forceDisplayStackIndicator,
             keyboardWindowMoveAnimation: spaceController.keyboardWindowMoveAnimation,
             overlayKeyboardInteractionSequence: spaceController.overlayKeyboardInteractionSequence)
+        vm.cardStyle = OverlayCardStyle(previewsAvailable: spaceController.windowPreviewsEnabled)
         vm.tutorialScope = spaceController.activeTutorialScope
         vm.tutorialCoachmark = spaceController.tutorialCoachmark
         return vm
@@ -1166,6 +1187,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             selectedIndex: spaceController.altTabSelectionIndex, windowPreviews: spaceController.windowPreviews,
             windowSizes: spaceController.windowSizes, appearance: currentSettings,
             overlayKeyboardInteractionSequence: spaceController.overlayKeyboardInteractionSequence)
+        vm.cardStyle = OverlayCardStyle(previewsAvailable: spaceController.windowPreviewsEnabled)
         vm.tutorialScope = spaceController.activeTutorialScope
         vm.tutorialCoachmark = spaceController.tutorialCoachmark
         return vm
@@ -1833,6 +1855,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             diag.report("desktop_swipe_tap_failed")
         }
         keyboardService?.features = newSettings.features
+        if AppIconCache.shared.iconScale != newSettings.iconScale {
+            AppIconCache.shared.iconScale = newSettings.iconScale
+            // Off the main thread, before an overlay asks for the size.
+            AppIconCache.shared.warm(
+                bundleIDs: spaceController?.spaceManager.allWindowOwnerBundleIDs ?? [],
+                sizes: AppIconCache.shared.warmSizes
+            )
+        }
         spaceController?.windowPreviewsEnabled = OnboardingCapturePolicy.isEnabled(
             previewsRequested: newSettings.features.windowPreviews,
             screenRecordingGranted: onboardingPermissionClient.currentState().screenRecordingGranted
@@ -1865,6 +1895,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             spaceManager: currentSpaceManager
         )
         vm.crashReportingAvailable = crashReports.isAvailable
+        vm.screenRecordingGranted = onboardingPermissionClient.currentState().screenRecordingGranted
+            && onboardingViewModel?.screenRecordingRequiresRelaunch != true
         vm.onSettingsChanged = { [weak self] newSettings in
             DispatchQueue.main.async {
                 guard let self else { return }

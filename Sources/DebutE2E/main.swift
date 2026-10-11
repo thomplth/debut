@@ -1106,6 +1106,9 @@ func spaceWindowCounts(in state: [String: String]) -> [Int] {
 /// width, so the counts alone no longer say where one is. A window the running app never
 /// measured, or a session with the setting off, leaves the card on the display's own shape.
 func spaceCardAspects(in state: [String: String]) -> [[CGFloat?]] {
+    // Every geometry helper reads card aspects first, so this is where the drawn card style is
+    // learned: without Screen Recording the overlay draws icon slots, not preview cards.
+    reportedCardStyle = OverlayCardStyle(rawValue: state["overlayCardStyle"] ?? "") ?? .previews
     let counts = spaceWindowCounts(in: state)
     let uniform = counts.map { [CGFloat?](repeating: nil, count: $0) }
     guard interactionSettings.adaptiveCardSizing else { return uniform }
@@ -1116,6 +1119,9 @@ func spaceCardAspects(in state: [String: String]) -> [[CGFloat?]] {
 // Read before any geometry helper runs: top-level declarations in main.swift initialize in
 // source order, so the hit tests below cannot reach a setting declared beneath them.
 let interactionSettings = (try? StateStore().loadSettings()) ?? AppSettings()
+/// The card style the running overlay last reported. Declared beside the settings for the same
+/// initialization-order reason.
+nonisolated(unsafe) var reportedCardStyle = OverlayCardStyle.previews
 
 /// The rectangle the overlay actually occupies, which stops short of the menu bar and any camera
 /// housing. Every card coordinate below is measured in it and then translated back to the screen,
@@ -1131,9 +1137,12 @@ let overlayBounds = OverlayDisplayResolver.overlayBounds(
 /// setting and how many windows the display has to hold.
 func drawnMetrics(cardAspects: [[CGFloat?]]) -> StageMetrics {
     StageConstants.drawnMetrics(
-        stageScale: CGFloat(interactionSettings.stageScale),
+        stageScale: CGFloat(interactionSettings.overlayScale(for: reportedCardStyle)),
         contentAspects: cardAspects,
-        containerSize: overlayBounds.size
+        containerSize: overlayBounds.size,
+        cardSpacing: CGFloat(interactionSettings.previewCardSpacing),
+        cardStyle: reportedCardStyle,
+        badgeGrowth: CGFloat(interactionSettings.badgeGrowth)
     )
 }
 
@@ -1179,13 +1188,15 @@ func dragViewDropPoint(
         || NSScreen.screens.count > 1
     return StageConstants.dragViewDropPoint(
         contentAspects: cardAspects,
-        stageScale: CGFloat(interactionSettings.stageScale),
+        stageScale: CGFloat(interactionSettings.overlayScale(for: reportedCardStyle)),
         cardSpacing: CGFloat(interactionSettings.previewCardSpacing),
         containerSize: overlayBounds.size,
         reservesDisplayIndicator: reservesIndicator,
         sourceSpaceIndex: sourceSpaceIndex,
         sourceWindowIndex: sourceWindowIndex,
-        destinationSpaceIndex: destinationSpaceIndex
+        destinationSpaceIndex: destinationSpaceIndex,
+        cardStyle: reportedCardStyle,
+        badgeGrowth: CGFloat(interactionSettings.badgeGrowth)
     ).map { CGPoint(x: overlayBounds.minX + $0.x, y: overlayBounds.minY + $0.y) }
 }
 
@@ -1620,6 +1631,15 @@ func clearDiagnosticFile() {
     try? FileManager.default.removeItem(at: diagnosticFile)
 }
 
+// A forced first launch resumes saved setup progress, so a journey that stopped on a later page
+// leaves the next run starting there, missing Welcome, and failing to the same page again (KHA-935).
+func clearOnboardingProgress() {
+    let defaults = UserDefaults(suiteName: debutBundleID)
+    for key in ["setupCheckpoint", "onboardingCheckpoint", "tutorialCheckpoint", "setupPermissionReturn"] {
+        defaults?.removeObject(forKey: key)
+    }
+}
+
 // A warm, reused guest keeps whatever desktop the previous run left active. Fixture windows
 // open on the active desktop, so without this a run that ended on a later desktop plants the
 // next run's fixtures with no empty desktop after them — the exact adjacency every drop/move
@@ -1634,7 +1654,7 @@ func clearDiagnosticFile() {
 // A focused guest-only replay for setup persistence, after a full VM validation run.
 if CommandLine.arguments.dropFirst().first == "onboarding-speed-check" {
     _ = terminateDebutAndWait()
-    UserDefaults(suiteName: debutBundleID)?.removeObject(forKey: "setupCheckpoint")
+    clearOnboardingProgress()
     clearDiagnosticFile()
     onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
     let ready = waitForDebutReady(onboardingApplication)
@@ -1649,6 +1669,7 @@ if CommandLine.arguments.dropFirst().first == "onboarding-speed-check" {
 if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
     let deniedAccessibility = CommandLine.arguments.last == "accessibility"
     let oneDesktop = CommandLine.arguments.last == "desktop"
+    clearOnboardingProgress()
     clearDiagnosticFile()
     onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
     let runtimeReady = deniedAccessibility || waitFor(timeout: 15) {
@@ -3729,9 +3750,22 @@ func onboardingControls(role wantedRole: String) -> [String] {
     return found
 }
 
+// A page transition publishes the next page's controls a moment after the previous press returns,
+// and a slow host can show an empty accessibility tree meanwhile; one immediate lookup misses a
+// control the failure listing then finds (KHA-935). Absence checks keep using onboardingButton.
+@MainActor
+func awaitOnboardingButton(_ title: String, role: String = kAXButtonRole) -> AXUIElement? {
+    var found: AXUIElement?
+    _ = waitFor(timeout: 3) {
+        found = onboardingButton(title, role: role)
+        return found != nil
+    }
+    return found
+}
+
 @MainActor
 func onboardingPress(_ title: String, role: String = kAXButtonRole) -> Bool {
-    guard let button = onboardingButton(title, role: role) else {
+    guard let button = awaitOnboardingButton(title, role: role) else {
         info("no \(role) matching \(title); available: \(onboardingControls(role: role))")
         return false
     }
@@ -3842,7 +3876,7 @@ func verifySetupDurationPersistence() -> Bool {
 
 @MainActor
 func onboardingGetStartedEnabled() -> Bool {
-    guard let button = onboardingButton("Get started") else { return false }
+    guard let button = awaitOnboardingButton("Get started") else { return false }
     var enabled: CFTypeRef?
     AXUIElementCopyAttributeValue(button, kAXEnabledAttribute as CFString, &enabled)
     return enabled as? Bool == true
@@ -3850,7 +3884,7 @@ func onboardingGetStartedEnabled() -> Bool {
 
 @MainActor
 func onboardingContinueEnabled() -> Bool {
-    guard let button = onboardingButton("Continue") else { return false }
+    guard let button = awaitOnboardingButton("Continue") else { return false }
     var enabled: CFTypeRef?
     AXUIElementCopyAttributeValue(button, kAXEnabledAttribute as CFString, &enabled)
     return enabled as? Bool == true
@@ -3875,6 +3909,7 @@ func scenario_onboarding_journey() {
     resetOnboardingDock.waitUntilExit()
     wait(3)
 
+    clearOnboardingProgress()
     clearDiagnosticFile()
     onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
     let onboardingApplicationReady = waitForDebutReady(onboardingApplication)

@@ -17,6 +17,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"),
         .package(url: "https://github.com/getsentry/sentry-cocoa", exact: "9.29.2"),
+        .package(url: "https://github.com/thomplth/dock-glass.git", exact: "0.3.0"),
     ],
     targets: [
         .executableTarget(
@@ -33,7 +34,10 @@ let package = Package(
         ),
         .target(
             name: "DebutCore",
-            dependencies: ["AXPrivate"],
+            dependencies: [
+                "AXPrivate",
+                .product(name: "DockGlass", package: "dock-glass"),
+            ],
             path: "Sources/DebutCore"
         ),
         .target(
@@ -83,7 +87,11 @@ let package = Package(
         ),
         .testTarget(
             name: "DebutCoreTests",
-            dependencies: ["DebutCore", "DebutInputDriver"],
+            dependencies: [
+                "DebutCore",
+                "DebutInputDriver",
+                .product(name: "DockGlass", package: "dock-glass"),
+            ],
             path: "Tests/DebutCoreTests"
         ),
     ]

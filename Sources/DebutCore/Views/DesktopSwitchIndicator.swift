@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import DockGlass
 import SwiftUI
 
 /// A desktop movement macOS has confirmed, reduced to the copy and display placement the
@@ -86,13 +87,16 @@ public enum DesktopSwitchIndicatorPolicy {
 public struct DesktopSwitchIndicatorView: View {
     public let presentation: DesktopSwitchIndicatorPresentation
     public let glassStyle: GlassStyle
+    public let dockGlassStyle: DockGlassStyle
 
     public init(
         presentation: DesktopSwitchIndicatorPresentation,
-        glassStyle: GlassStyle
+        glassStyle: GlassStyle,
+        dockGlassStyle: DockGlassStyle = .native
     ) {
         self.presentation = presentation
         self.glassStyle = glassStyle
+        self.dockGlassStyle = dockGlassStyle
     }
 
     public var body: some View {
@@ -101,7 +105,10 @@ public struct DesktopSwitchIndicatorView: View {
             .monospacedDigit()
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
-            .modifier(OverlayGlassCapsuleModifier(glassStyle: glassStyle))
+            .modifier(OverlayGlassCapsuleModifier(
+                glassStyle: glassStyle,
+                dockGlassStyle: dockGlassStyle
+            ))
             .accessibilityLabel(presentation.accessibilityLabel)
     }
 }
@@ -111,9 +118,14 @@ public struct DesktopSwitchIndicatorView: View {
 struct DesktopSwitchIndicatorPanelContent: View {
     let presentation: DesktopSwitchIndicatorPresentation
     let glassStyle: GlassStyle
+    let dockGlassStyle: DockGlassStyle
 
     var body: some View {
-        DesktopSwitchIndicatorView(presentation: presentation, glassStyle: glassStyle)
+        DesktopSwitchIndicatorView(
+            presentation: presentation,
+            glassStyle: glassStyle,
+            dockGlassStyle: dockGlassStyle
+        )
             .padding(DesktopSwitchIndicatorWindow.glassRenderingInset)
     }
 }
@@ -175,12 +187,14 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
         _ presentation: DesktopSwitchIndicatorPresentation,
         on screen: NSScreen,
         glassStyle: GlassStyle,
+        dockGlassStyle: DockGlassStyle = .native,
         visibleDuration: TimeInterval = visibleDuration
     ) {
         let generation = beginPresentation()
         let content = DesktopSwitchIndicatorPanelContent(
             presentation: presentation,
-            glassStyle: glassStyle
+            glassStyle: glassStyle,
+            dockGlassStyle: dockGlassStyle
         )
         let isOnScreen = isVisible
         let hostingView: NSHostingView<DesktopSwitchIndicatorPanelContent>

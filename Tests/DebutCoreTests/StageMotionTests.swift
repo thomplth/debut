@@ -735,7 +735,7 @@ struct StageMotionTests {
         ]
         let container = CGSize(width: 1_024, height: 744)
         let metrics = StageConstants.drawnMetrics(
-            stageScale: 1.5,
+            stageScale: CGFloat(AppSettings.defaultStageScale),
             contentAspects: aspects,
             containerSize: container
         )
@@ -757,41 +757,13 @@ struct StageMotionTests {
             containerHeight: container.height,
             metrics: metrics
         ))
+        // The stack stays anchored rather than scrolling, so a stage below a two-row stage is
+        // focused where it already sat: on this 1024×744 screen its first card starts on
+        // screen, though at the native plate's height not all of it fits.
+        let cardTop = centeredCard.y + translation - metrics.cardHeight / 2
         #expect(translation.isFinite)
-        #expect(centeredCard.y + translation > 0)
-        #expect(centeredCard.y + translation < container.height)
-    }
-
-    @Test("The default filled selector does not magnify its window")
-    func filledWindowScale() {
-        #expect(StageMotion.windowScale(
-            isSelected: false,
-            isDragging: false,
-            style: .filled,
-            magnifyScale: 1.12
-        ) == 1)
-        #expect(StageMotion.windowScale(
-            isSelected: true,
-            isDragging: false,
-            style: .filled,
-            magnifyScale: 1.12
-        ) == 1)
-    }
-
-    @Test("A dragged window keeps its resting scale through the drop handoff")
-    func draggedWindowScale() {
-        #expect(StageMotion.windowScale(
-            isSelected: true,
-            isDragging: false,
-            style: .magnify,
-            magnifyScale: 1.12
-        ) == 1.12)
-        #expect(StageMotion.windowScale(
-            isSelected: true,
-            isDragging: true,
-            style: .magnify,
-            magnifyScale: 1.12
-        ) == 1)
+        #expect(cardTop > 0)
+        #expect(cardTop < container.height)
     }
 
     @Test("A committed drop does not replay window lifecycle insertion motion")
@@ -811,23 +783,11 @@ struct StageMotionTests {
         ) == nil)
     }
 
-    @Test("The fill appears only on a selected window resting in its stage")
+    @Test("The highlight appears only on a selected window resting in its stage")
     func filledVisibility() {
-        #expect(StageMotion.showsWindowSelector(
-            isSelected: true,
-            isDragging: false,
-            style: .filled
-        ))
-        #expect(!StageMotion.showsWindowSelector(
-            isSelected: true,
-            isDragging: true,
-            style: .filled
-        ))
-        #expect(!StageMotion.showsWindowSelector(
-            isSelected: true,
-            isDragging: false,
-            style: .magnify
-        ))
+        #expect(StageMotion.showsWindowSelector(isSelected: true, isDragging: false))
+        #expect(!StageMotion.showsWindowSelector(isSelected: true, isDragging: true))
+        #expect(!StageMotion.showsWindowSelector(isSelected: false, isDragging: false))
     }
 
     @Test("The corner badge yields to the placeholder icon on a card with no preview")
@@ -844,107 +804,12 @@ struct StageMotionTests {
         ))
     }
 
-    @Test("The fill uses screenshot-derived translucent adaptive colors")
-    func filledColors() {
-        let darkFill = StageMotion.windowSelectorFill(isDarkMode: true)
-        #expect(darkFill.white == 1)
-        #expect(darkFill.opacity == 0.30)
-
-        let lightFill = StageMotion.windowSelectorFill(isDarkMode: false)
-        #expect(lightFill.white == 0)
-        #expect(lightFill.opacity == 0.25)
-    }
-
     @Test("The fill expands behind the preview by the configured outset")
     func filledSelectorSize() {
         #expect(StageMotion.windowSelectorSize(
             thumbnailSize: CGSize(width: 160, height: 100),
             outset: 6
         ) == CGSize(width: 172, height: 112))
-    }
-
-    @Test("Only the selected window carries a lift")
-    func unselectedWindowHasNoLift() {
-        #expect(
-            StageMotion.windowLift(isSelected: false, isDragging: false, isDarkMode: false)
-                == .init(shadowOpacity: 0, shadowRadius: 0, shadowY: 0)
-        )
-        #expect(
-            StageMotion.windowLift(isSelected: false, isDragging: false, isDarkMode: true)
-                == .init(shadowOpacity: 0, shadowRadius: 0, shadowY: 0)
-        )
-    }
-
-    @Test("The selected window keeps its light-mode shadow unchanged")
-    func selectedWindowLiftInLightMode() {
-        #expect(
-            StageMotion.windowLift(
-                isSelected: true,
-                isDragging: false,
-                isDarkMode: false,
-                style: .magnify,
-                shadowStrength: 1
-            )
-                == .init(shadowOpacity: 0.24, shadowRadius: 8, shadowY: 4)
-        )
-    }
-
-    @Test("Dark mode deepens the selected window shadow")
-    func selectedWindowLiftInDarkMode() {
-        let dark = StageMotion.windowLift(
-            isSelected: true,
-            isDragging: false,
-            isDarkMode: true,
-            style: .magnify,
-            shadowStrength: 1
-        )
-        let light = StageMotion.windowLift(
-            isSelected: true,
-            isDragging: false,
-            isDarkMode: false,
-            style: .magnify,
-            shadowStrength: 1
-        )
-
-        #expect(dark.shadowOpacity > light.shadowOpacity)
-        #expect(dark.shadowRadius > light.shadowRadius)
-    }
-
-    @Test("Dragging suppresses the selected window's shadow")
-    func draggingWindowDropsItsLift() {
-        for isDarkMode in [true, false] {
-            #expect(
-                StageMotion.windowLift(
-                    isSelected: true,
-                    isDragging: true,
-                    isDarkMode: isDarkMode,
-                    style: .magnify,
-                    shadowStrength: 1
-                ).shadowOpacity == 0
-            )
-        }
-    }
-
-    @Test("Filled selection never adds a window lift")
-    func filledWindowHasNoLift() {
-        #expect(StageMotion.windowLift(
-            isSelected: true,
-            isDragging: false,
-            isDarkMode: true,
-            style: .filled,
-            shadowStrength: 2
-        ) == .init(shadowOpacity: 0, shadowRadius: 0, shadowY: 0))
-    }
-
-    @Test("Magnify shadow strength scales the existing lift")
-    func magnifyShadowStrength() {
-        #expect(StageMotion.windowLift(
-            isSelected: true,
-            isDragging: false,
-            isDarkMode: false,
-            style: .magnify,
-            shadowStrength: 0.5
-        ) == .init(shadowOpacity: 0.12, shadowRadius: 4, shadowY: 2))
     }
 
     @Test("Window drops allow reordered and cross-space positions")
@@ -1198,10 +1063,12 @@ struct StageMotionTests {
         // Displayed layouts: space 0 keeps three cards for a same-space reorder, space 1 has
         // already grown to three for the incoming card, space 2 is an empty destination.
         let layouts = [grid(3, capacity: 4), grid(3, capacity: 4), grid(1, capacity: 4)]
+        let height = layouts[0].stageSize.height
+        let cardY = height / 2 + layouts[0].cardOffsetFromCenter(at: 0).height
         let stages = [
-            0: CGRect(x: 0, y: 0, width: 640, height: 164),
-            1: CGRect(x: 0, y: 200, width: 640, height: 164),
-            2: CGRect(x: 100, y: 400, width: 300, height: 164),
+            0: CGRect(x: 0, y: 0, width: 640, height: height),
+            1: CGRect(x: 0, y: 200, width: 640, height: height),
+            2: CGRect(x: 100, y: 400, width: 300, height: height),
         ]
 
         #expect(StageMotion.windowDropDestination(
@@ -1209,33 +1076,38 @@ struct StageMotionTests {
             stageFrames: stages,
             layouts: layouts,
             scales: [1, 1, 1]
-        ) == CGPoint(x: 320 + stride, y: 92))
+        ) == CGPoint(x: 320 + stride, y: cardY))
         #expect(StageMotion.windowDropDestination(
             target: WindowDropTarget(spaceIndex: 1, windowIndex: 1),
             stageFrames: stages,
             layouts: layouts,
             scales: [1, 1, 1]
-        ) == CGPoint(x: 320, y: 292))
+        ) == CGPoint(x: 320, y: 200 + cardY))
         #expect(StageMotion.windowDropDestination(
             target: WindowDropTarget(spaceIndex: 2, windowIndex: 0),
             stageFrames: stages,
             layouts: layouts,
             scales: [1, 1, 1]
-        ) == CGPoint(x: 250, y: 492))
+        ) == CGPoint(x: 250, y: 400 + cardY))
     }
 
     @Test("A scaled destination stage lands the preview on its scaled slot")
     func releasedPreviewFollowsStageScale() {
         let metrics = StageMetrics.standard
         let stride = metrics.cardWidth + metrics.windowSpacing
-        let stages = [0: CGRect(x: 0, y: 0, width: 320, height: 82)]
+        let layout = grid(3, capacity: 4)
+        let height = layout.stageSize.height / 2
+        let stages = [0: CGRect(x: 0, y: 0, width: 320, height: height)]
+        let cardY = height / 2 + layout.cardOffsetFromCenter(at: 0).height / 2
 
-        #expect(StageMotion.windowDropDestination(
+        let destination = StageMotion.windowDropDestination(
             target: WindowDropTarget(spaceIndex: 0, windowIndex: 2),
             stageFrames: stages,
-            layouts: [grid(3, capacity: 4)],
+            layouts: [layout],
             scales: [0.5]
-        ) == CGPoint(x: 160 + stride / 2, y: 46))
+        )
+        #expect(abs((destination?.x ?? 0) - (160 + stride / 2)) < 1e-9)
+        #expect(abs((destination?.y ?? 0) - cardY) < 1e-9)
     }
 
     @Test("A press without meaningful movement selects instead of starting a drag")

@@ -10,6 +10,8 @@ public struct AltTabOverlayViewModel: Sendable {
     public let windows: [StageWindowData]
     public var selectedIndex: Int
     public var appearance: AppSettings
+    /// Icons when previews are off or Screen Recording is not granted.
+    public var cardStyle: OverlayCardStyle = .previews
     public var overlayKeyboardInteractionSequence: Int
 
     public init(
@@ -48,18 +50,28 @@ public struct AltTabOverlayViewModel: Sendable {
     /// The list is one stage holding every window, so it fits itself the same way a stack of
     /// stages does — by walking the scale slider's own steps down until the grid fits.
     public func metrics(containerSize: CGSize) -> StageMetrics {
+        Self.drawnMetrics(
+            appearance: appearance,
+            contentAspects: windows.map(\.contentAspect),
+            containerSize: containerSize,
+            cardStyle: cardStyle
+        )
+    }
+
+    /// Rows wrap exactly as a Command-Tab stage's do, so the two switchers cannot drift apart.
+    static func drawnMetrics(
+        appearance: AppSettings,
+        contentAspects: [CGFloat?],
+        containerSize: CGSize,
+        cardStyle: OverlayCardStyle = .previews
+    ) -> StageMetrics {
         StageConstants.drawnMetrics(
-            stageScale: CGFloat(appearance.stageScale),
-            contentAspects: [windows.map(\.contentAspect)],
+            stageScale: CGFloat(appearance.overlayScale(for: cardStyle)),
+            contentAspects: [contentAspects],
             containerSize: containerSize,
             cardSpacing: CGFloat(appearance.previewCardSpacing),
-            // Each card already supplies an inset on both sides of a row boundary. The flat
-            // switcher needs no third gap at the default. Changes above the default add the
-            // same amount to row spacing while keeping existing saved settings visually stable.
-            rowSpacing: CGFloat(max(
-                0,
-                appearance.previewCardSpacing - AppSettings.defaultPreviewCardSpacing
-            ))
+            cardStyle: cardStyle,
+            badgeGrowth: CGFloat(appearance.badgeGrowth)
         )
     }
 

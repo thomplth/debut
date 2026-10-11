@@ -1,4 +1,17 @@
 import CoreGraphics
+import Foundation
+import DockGlass
+
+/// What a card shows: a window's preview, or — when previews are off or Screen Recording is not
+/// granted — the native switcher's icon for the window's app.
+public enum OverlayCardStyle: String, Sendable, Equatable {
+    case previews
+    case icons
+
+    public init(previewsAvailable: Bool) {
+        self = previewsAvailable ? .previews : .icons
+    }
+}
 
 /// The sizes every window card on one display is drawn at.
 ///
@@ -18,7 +31,6 @@ public struct StageMetrics: Equatable, Sendable {
     public let titleSpacing: CGFloat
     public let titleHeight: CGFloat
     public let badgeSize: CGFloat
-    public let previewPlaceholderIconSize: CGFloat
     public let windowSpacing: CGFloat
     public let rowSpacing: CGFloat
     public let padding: CGFloat
@@ -30,24 +42,73 @@ public struct StageMetrics: Equatable, Sendable {
     /// thumbnail's width also moves with the display's shape and so cannot stand in for it.
     public let scale: CGFloat
 
+    /// Icon slots are square and never take a window's or a display's shape.
+    public internal(set) var cardStyle: OverlayCardStyle = .previews
+
+    /// How far the size setting (or automatic fitting) has enlarged the preview or icon relative
+    /// to the native slot. Only the slot follows it; everything around it keeps native points.
+    public internal(set) var previewScale: CGFloat = 1
+
+    /// The native Command-Tab switcher (`DockGlass.Metrics.standard`) with a preview in each
+    /// 102-point icon slot. The card is the slot plus the 9-point selection highlight around it
+    /// and the title below, so the plate's insets are native's slot insets less that padding:
+    /// 37.5 points at the sides, 35 above the slot and 39 below it, which holds the title.
     public static let standard = StageMetrics(
+        // 16:10, the area every display-shaped card keeps, at native's 102-point slot height.
+        thumbnailWidth: 163.2,
+        thumbnailHeight: 102,
+        cardPadding: 9,
+        titleWidthAllowance: 0,
+        // The title's box spans 14 to 30 points below the slot, ending where native's label does.
+        titleSpacing: 14,
+        titleHeight: 16,
+        badgeSize: 40,
+        // Neighbouring highlights sit 14 points apart: native's 32-point slot gap less both paddings.
+        windowSpacing: 14,
+        // Rows overlap their cards' outer padding, so a wrapped row's title sits midway between
+        // its previews and the next row's, in the same band it has above the plate's edge.
+        rowSpacing: -9,
+        padding: 28.5,
+        topPadding: 26,
+        bottomPadding: 0,
+        minStageWidth: 300,
+        scale: 1
+    )
+
+    /// The native switcher exactly: an app icon in each square 102-point slot, on native's
+    /// 134-point pitch, with everything around the slot the same as a preview card's.
+    public static let icons = StageMetrics(
+        thumbnailWidth: DockGlass.Metrics.standard.iconSize,
+        thumbnailHeight: DockGlass.Metrics.standard.iconSize,
+        cardPadding: standard.cardPadding,
+        titleWidthAllowance: standard.titleWidthAllowance,
+        titleSpacing: standard.titleSpacing,
+        titleHeight: standard.titleHeight,
+        badgeSize: standard.badgeSize,
+        windowSpacing: standard.windowSpacing,
+        rowSpacing: standard.rowSpacing,
+        padding: standard.padding,
+        topPadding: standard.topPadding,
+        bottomPadding: standard.bottomPadding,
+        minStageWidth: standard.minStageWidth,
+        scale: 1,
+        cardStyle: .icons
+    )
+
+    /// The cards the tutorial was laid out for, before stages took the native switcher's
+    /// geometry. Its fixed-width panel is sized around them.
+    static let tutorial = StageMetrics(
         thumbnailWidth: 160,
         thumbnailHeight: 100,
         cardPadding: 6,
         titleWidthAllowance: 8,
-        // This centers the title in the gap between the preview and the stage's lower edge,
-        // while leaving the selector around the preview clear of the text.
         titleSpacing: 10,
         titleHeight: 14,
         badgeSize: 40,
-        previewPlaceholderIconSize: 32,
         windowSpacing: 12,
         rowSpacing: 12,
         padding: 24,
         topPadding: 24,
-        // The original one-row stage was 164 points high. The card itself is 130 points once
-        // its vertical padding is represented explicitly, leaving ten points below the card and
-        // preserving the original seven-point downward optical offset inside the stage.
         bottomPadding: 4,
         minStageWidth: 300,
         scale: 1
@@ -59,7 +120,11 @@ public struct StageMetrics: Equatable, Sendable {
     /// make a 9:16 monitor's card 284 points tall, which `fittedStageScale` then has to shrink
     /// the whole overlay to absorb; holding the area instead gives a portrait card the same
     /// visual weight as a landscape one, so only the shape changes.
-    public static func shaped(forDisplay displaySize: CGSize) -> StageMetrics {
+    public static func shaped(
+        forDisplay displaySize: CGSize,
+        cardStyle: OverlayCardStyle = .previews
+    ) -> StageMetrics {
+        if cardStyle == .icons { return icons }
         let standard = Self.standard
         guard displaySize.width > 0, displaySize.height > 0 else { return standard }
 
@@ -75,7 +140,6 @@ public struct StageMetrics: Equatable, Sendable {
             titleSpacing: standard.titleSpacing,
             titleHeight: standard.titleHeight,
             badgeSize: standard.badgeSize,
-            previewPlaceholderIconSize: standard.previewPlaceholderIconSize,
             windowSpacing: standard.windowSpacing,
             rowSpacing: standard.rowSpacing,
             padding: standard.padding,
@@ -90,7 +154,7 @@ public struct StageMetrics: Equatable, Sendable {
     /// which app the window belongs to, which is the icon badged over its top-left corner. A
     /// fraction of the display's card was the earlier floor and had nothing to do with what a
     /// narrow card still has to show.
-    public var minimumAdaptiveWidth: CGFloat { badgeSize + cardPadding * 2 }
+    public var minimumAdaptiveWidth: CGFloat { drawnBadgeSize + badgeInset * 2 }
 
     /// These metrics with the card narrowed to one window's shape when it fits.
     ///
@@ -98,7 +162,7 @@ public struct StageMetrics: Equatable, Sendable {
     /// less horizontal room than the widest one beside it. An aspect of `nil` is a window whose
     /// size has not been discovered, and the display's shape is the honest answer for it.
     public func adapted(toContentAspect aspect: CGFloat?) -> StageMetrics {
-        guard let aspect, aspect > 0, thumbnailWidth > 0 else { return self }
+        guard cardStyle == .previews, let aspect, aspect > 0, thumbnailWidth > 0 else { return self }
         return withThumbnailWidth(max(
             min(thumbnailHeight * aspect, thumbnailWidth),
             minimumAdaptiveWidth
@@ -116,14 +180,15 @@ public struct StageMetrics: Equatable, Sendable {
             titleSpacing: titleSpacing,
             titleHeight: titleHeight,
             badgeSize: badgeSize,
-            previewPlaceholderIconSize: previewPlaceholderIconSize,
             windowSpacing: windowSpacing,
             rowSpacing: rowSpacing,
             padding: padding,
             topPadding: topPadding,
             bottomPadding: bottomPadding,
             minStageWidth: minStageWidth,
-            scale: scale
+            scale: scale,
+            cardStyle: cardStyle,
+            previewScale: previewScale
         )
     }
 
@@ -138,17 +203,20 @@ public struct StageMetrics: Equatable, Sendable {
             titleSpacing: titleSpacing,
             titleHeight: titleHeight,
             badgeSize: badgeSize,
-            previewPlaceholderIconSize: previewPlaceholderIconSize,
             windowSpacing: windowSpacing,
             rowSpacing: spacing,
             padding: padding,
             topPadding: topPadding,
             bottomPadding: bottomPadding,
             minStageWidth: minStageWidth,
-            scale: scale
+            scale: scale,
+            cardStyle: cardStyle,
+            previewScale: previewScale
         )
     }
 
+    /// Space between neighbouring cards in a row. Rows do not follow it: each wrapped row's
+    /// title sits midway between its previews and the next row's (KHA-1060).
     func withCardSpacing(_ spacing: CGFloat) -> StageMetrics {
         StageMetrics(
             thumbnailWidth: thumbnailWidth,
@@ -158,14 +226,15 @@ public struct StageMetrics: Equatable, Sendable {
             titleSpacing: titleSpacing,
             titleHeight: titleHeight,
             badgeSize: badgeSize,
-            previewPlaceholderIconSize: previewPlaceholderIconSize,
             windowSpacing: spacing,
-            rowSpacing: spacing,
+            rowSpacing: -cardPadding,
             padding: padding,
             topPadding: topPadding,
             bottomPadding: bottomPadding,
             minStageWidth: minStageWidth,
-            scale: scale
+            scale: scale,
+            cardStyle: cardStyle,
+            previewScale: previewScale
         )
     }
 
@@ -177,11 +246,79 @@ public struct StageMetrics: Equatable, Sendable {
         thumbnailHeight + titleSpacing + titleHeight + cardPadding * 2
     }
 
-    /// Grow titles more gently than previews, independently of the display or window shape.
-    /// Keep the existing readability floor when automatic fitting shrinks a crowded overlay.
+    /// The native switcher's label size at 100%. Titles grow more gently than previews,
+    /// independently of the display or window shape, and keep a readability floor when automatic
+    /// fitting shrinks a crowded overlay.
+    /// The native label size. Only the drag view's uniform zoom changes it; the size setting
+    /// enlarges previews alone.
     public var titleFontSize: CGFloat {
-        max(9, 10.4 * scale.squareRoot())
+        DockGlass.Label.standardFontSize * scale
     }
+
+    /// The band a title is centred in: from the preview's lower edge to the plate's lower edge,
+    /// which is the card's own lower edge. Native centres its label there without counting the
+    /// highlight, which only the selected card draws.
+    public var titleBandHeight: CGFloat {
+        titleSpacing + titleHeight + cardPadding
+    }
+
+    /// The native switcher's full icon canvas at 100%: 102 points of artwork plus the inset
+    /// app icon bitmaps carry. Icon cards draw it; one raster of it serves every app icon.
+    public static let nativeIconCanvasSize: CGFloat = 128
+
+    /// The app badge as drawn: centred at the bottom of the preview, like Mission Control's
+    /// icons, a little larger than the badge size that sets the preview's corner.
+    public var drawnBadgeSize: CGFloat { badgeSize * Self.drawnBadgeRatio }
+    static let drawnBadgeRatio: CGFloat = 1.15
+
+    /// The gap between the badge and the preview's lower edge.
+    public var badgeInset: CGFloat { 6 * scale }
+
+    /// The badge as drawn for a placement: the bottom-centre badge is a little larger, as
+    /// Mission Control's icons are; the edge badges keep the badge size.
+    public func drawnBadgeSize(for placement: BadgePlacement) -> CGFloat {
+        placement == .bottom ? drawnBadgeSize : badgeSize
+    }
+
+    /// Where the badge's centre sits for a preview image drawn in `imageRect`.
+    public func badgeCentre(
+        in imageRect: CGRect,
+        placement: BadgePlacement = .bottom
+    ) -> CGPoint {
+        let size = drawnBadgeSize(for: placement)
+        switch placement {
+        case .bottom, .titleRow:
+            // Just inside the lower edge, so it never meets the title below.
+            return CGPoint(x: imageRect.midX, y: imageRect.maxY - badgeInset - size / 2)
+        case .corner:
+            // Overhanging the top-left corner by a tenth of its size.
+            return CGPoint(x: imageRect.minX + size * 0.4, y: imageRect.minY + size * 0.4)
+        case .top:
+            return CGPoint(x: imageRect.midX, y: imageRect.minY)
+        }
+    }
+
+    /// The icon that leads the title when the badge sits in the title row.
+    public var titleRowIconSize: CGFloat { 18 * scale }
+
+    /// Where a preview image of the given shape is drawn inside the card's thumbnail: fitted and
+    /// centred, as the card draws it. No shape fills the thumbnail.
+    public func previewImageRect(forImageAspect aspect: CGFloat?) -> CGRect {
+        let frame = CGRect(x: 0, y: 0, width: thumbnailWidth, height: thumbnailHeight)
+        guard let aspect, aspect > 0, thumbnailHeight > 0 else { return frame }
+        let size = aspect > thumbnailWidth / thumbnailHeight
+            ? CGSize(width: thumbnailWidth, height: thumbnailWidth / aspect)
+            : CGSize(width: thumbnailHeight * aspect, height: thumbnailHeight)
+        return CGRect(
+            x: (thumbnailWidth - size.width) / 2,
+            y: (thumbnailHeight - size.height) / 2,
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    /// A failed capture shows the app's icon at the badge's size, with nothing around it.
+    public var placeholderIconSize: CGFloat { drawnBadgeSize }
 
     /// A macOS app icon's body is a continuous-corner squircle with a 185.4-point corner drawn
     /// on a 1024-point canvas.
@@ -190,14 +327,67 @@ public struct StageMetrics: Equatable, Sendable {
     /// Cut like the app icon badged over the thumbnail's top-left corner, since the badge's
     /// offset puts the icon body's own corner there. A shallower cut hugs the corner point more
     /// closely than the icon's does, leaving the thumbnail showing past the icon covering it.
-    public var thumbnailCornerRadius: CGFloat { badgeSize * Self.appIconCornerRadiusRatio }
+    public var thumbnailCornerRadius: CGFloat {
+        switch cardStyle {
+        case .previews: badgeSize * Self.appIconCornerRadiusRatio
+        // The icon's own corner, which native's highlight is concentric with.
+        case .icons: thumbnailHeight * Self.iconCornerRadiusRatio
+        }
+    }
+
+    /// An icon's own corner over its artwork size, which native's highlight is concentric with.
+    static let iconCornerRadiusRatio: CGFloat = (DockGlass.Metrics.standard.selectionCornerRadius
+        - DockGlass.Metrics.standard.selectionPadding) / DockGlass.Metrics.standard.iconSize
+
+    /// These metrics with only the preview (or icon) enlarged: the size setting. The badge grows
+    /// with it raised to `badgeGrowth`; margins, gaps, titles and the highlight's padding keep
+    /// native points.
+    public func withPreviewScale(
+        _ factor: CGFloat,
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
+    ) -> StageMetrics {
+        var metrics = StageMetrics(
+            thumbnailWidth: thumbnailWidth * factor,
+            thumbnailHeight: thumbnailHeight * factor,
+            cardPadding: cardPadding,
+            titleWidthAllowance: titleWidthAllowance,
+            titleSpacing: titleSpacing,
+            titleHeight: titleHeight,
+            // The badge belongs to the preview but grows on its own curve (a setting): in
+            // proportion it would be 100 points on a 250% preview.
+            badgeSize: badgeSize * pow(factor, badgeGrowth),
+            windowSpacing: windowSpacing,
+            rowSpacing: rowSpacing,
+            padding: padding,
+            topPadding: topPadding,
+            bottomPadding: bottomPadding,
+            minStageWidth: minStageWidth,
+            scale: scale,
+            cardStyle: cardStyle
+        )
+        metrics.previewScale = previewScale * factor
+        return metrics
+    }
+
+    /// The preview's corner as drawn: the user's radius, in points, on every card. An icon card
+    /// keeps the icon's own shape.
+    public func previewCornerRadius(userRadius: Double) -> CGFloat {
+        cardStyle == .icons ? thumbnailCornerRadius : CGFloat(userRadius) * scale
+    }
+
+    /// The selection highlight's corner: concentric with the preview's, so its own radius plus
+    /// the space the highlight leaves around it.
+    public func selectorCornerRadius(userRadius: Double, outset: Double) -> CGFloat {
+        previewCornerRadius(userRadius: userRadius) + CGFloat(outset) * scale
+    }
 
     /// The visual scale represented by these metrics. Rendering code uses this for the few
     /// non-layout details that belong to a stage, such as its corner radius and command hints.
     public var scaleFactor: CGFloat { scale }
 
-    /// Preview and label-container geometry scale together; title typography follows its
-    /// gentler curve above.
+
+    /// A uniform zoom of the whole card and its surroundings: the drag view's fit. The size
+    /// setting is `withPreviewScale`, which enlarges only the preview.
     public func scaled(by scale: CGFloat) -> StageMetrics {
         StageMetrics(
             thumbnailWidth: thumbnailWidth * scale,
@@ -207,14 +397,15 @@ public struct StageMetrics: Equatable, Sendable {
             titleSpacing: titleSpacing * scale,
             titleHeight: titleHeight * scale,
             badgeSize: badgeSize * scale,
-            previewPlaceholderIconSize: previewPlaceholderIconSize * scale,
             windowSpacing: windowSpacing * scale,
             rowSpacing: rowSpacing * scale,
             padding: padding * scale,
             topPadding: topPadding * scale,
             bottomPadding: bottomPadding * scale,
             minStageWidth: minStageWidth * scale,
-            scale: self.scale * scale
+            scale: self.scale * scale,
+            cardStyle: cardStyle,
+            previewScale: previewScale
         )
     }
 }
@@ -293,9 +484,13 @@ public struct StageWindowLayout: Equatable, Sendable {
             prefix[index + 1] = prefix[index] + cardWidths[index] + spacing
         }
         func width(_ start: Int, _ end: Int) -> CGFloat { prefix[end] - prefix[start] - spacing }
+        // Card widths are rarely exact in binary, so running sums drift by a few ulps. Without a
+        // tolerance, a row that exactly fits could fail to, and equal splits could tie-break on
+        // rounding noise instead of towards the earlier rows.
+        let tolerance: CGFloat = 1e-6
         // A single card that overflows on its own has nowhere else to go.
         func fits(_ start: Int, _ end: Int) -> Bool {
-            end - start == 1 || width(start, end) <= contentWidth
+            end - start == 1 || width(start, end) <= contentWidth + tolerance
         }
 
         // Greedily filling rows uses the fewest of them, which is the row count to then balance
@@ -322,7 +517,7 @@ public struct StageWindowLayout: Equatable, Sendable {
                     guard fits(start, end) else { continue }
                     let rowWidth = width(start, end)
                     let candidate = cost[row - 1][start] + rowWidth * rowWidth
-                    if candidate <= cost[row][end] {
+                    if candidate <= cost[row][end] + tolerance * max(1, cost[row][end].magnitude) {
                         cost[row][end] = candidate
                         split[row][end] = start
                     }

@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import DockGlass
 @testable import DebutCore
 
 @Suite("StageWindowLayout")
@@ -111,12 +112,16 @@ struct StageWindowLayoutTests {
         let firstRow = (0..<3).map { wrapped.cardOffsetFromCenter(at: $0).width }
         let lastRow = (3..<5).map { wrapped.cardOffsetFromCenter(at: $0).width }
 
-        #expect(firstRow.reduce(0, +) == 0)
-        #expect(lastRow.reduce(0, +) == 0)
+        // Native card widths are not exact in binary, so compare to within rounding.
+        func close(_ a: [CGFloat], _ b: [CGFloat]) -> Bool {
+            a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-9 }
+        }
+        #expect(abs(firstRow.reduce(0, +)) < 1e-9)
+        #expect(abs(lastRow.reduce(0, +)) < 1e-9)
 
         let stride = metrics.cardWidth + metrics.windowSpacing
-        #expect(firstRow == [-stride, 0, stride])
-        #expect(lastRow == [-stride / 2, stride / 2])
+        #expect(close(firstRow, [-stride, 0, stride]))
+        #expect(close(lastRow, [-stride / 2, stride / 2]))
     }
 
     @Test("Rows stack downward by a whole card height")
@@ -163,7 +168,6 @@ struct StageWindowLayoutTests {
         #expect(scaled.thumbnailWidth == metrics.thumbnailWidth * 1.5)
         #expect(scaled.thumbnailHeight == metrics.thumbnailHeight * 1.5)
         #expect(scaled.badgeSize == metrics.badgeSize * 1.5)
-        #expect(scaled.previewPlaceholderIconSize == metrics.previewPlaceholderIconSize * 1.5)
         #expect(scaled.windowSpacing == metrics.windowSpacing * 1.5)
         #expect(scaled.rowSpacing == metrics.rowSpacing * 1.5)
         #expect(scaled.padding == metrics.padding * 1.5)
@@ -171,14 +175,26 @@ struct StageWindowLayoutTests {
 
         #expect(scaled.cardWidth == metrics.cardWidth * 1.5)
         #expect(scaled.cardHeight == metrics.cardHeight * 1.5)
-        #expect(abs(scaled.titleFontSize - 12.737) < 0.001)
+        // `scaled(by:)` is the drag view's uniform zoom, so the title zooms with everything else.
+        #expect(scaled.titleFontSize == metrics.titleFontSize * 1.5)
         #expect(scaled.thumbnailCornerRadius == metrics.thumbnailCornerRadius * 1.5)
         #expect(metrics.scaled(by: 1) == metrics)
     }
 
-    @Test("Titles follow the approved gentle curve", arguments: [1.0, 1.5, 2.0, 2.5])
-    func gentleTitleScale(scale: Double) {
-        #expect(abs(metrics.scaled(by: scale).titleFontSize - 10.4 * scale.squareRoot()) < 0.0001)
+    @Test("Titles stay the native label size at every window size", arguments: [0.5, 1.0, 1.45, 2.0, 2.5])
+    func fixedTitleSize(scale: Double) {
+        #expect(metrics.withPreviewScale(scale).titleFontSize == DockGlass.Label.standardFontSize)
+        #expect(StageMetrics.icons.withPreviewScale(scale).titleFontSize == DockGlass.Label.standardFontSize)
+    }
+
+    @Test("A title's band runs from the card's lower edge to the plate's", arguments: [1.0, 1.45, 2.5])
+    func titleBandSpansCardToPlateEdge(scale: Double) {
+        for base in [StageMetrics.standard, StageMetrics.icons] {
+            let scaled = base.scaled(by: scale)
+            let stage = StageWindowLayout(windowCount: 2, availableWidth: 10_000, metrics: scaled)
+            let cardBottom = scaled.topPadding + scaled.cardPadding + scaled.thumbnailHeight
+            #expect(abs(scaled.titleBandHeight - (stage.stageSize.height - cardBottom)) < 1e-9)
+        }
     }
 
     @Test("A thumbnail's corner is cut like the app icon badged over it")
@@ -189,15 +205,16 @@ struct StageWindowLayoutTests {
         let iconCornerRadius = metrics.badgeSize * 185.4 / 1024
 
         #expect(metrics.thumbnailCornerRadius == iconCornerRadius)
-        #expect(metrics.thumbnailCornerRadius > metrics.cardPadding)
     }
 
     @Test("The standard stage stays compact while its cards make selector clearance")
     func standardSingleRowVerticalProfile() {
         let stage = layout(3, availableWidth: fourColumnWidth)
 
-        #expect(stage.stageSize.height == 164)
-        #expect(stage.cardOffsetFromCenter(at: 0).height == 10)
+        // The native plate: 35 points above the slot and 39 below it, each less the card's
+        // 9-point highlight padding.
+        #expect(stage.stageSize.height == 176)
+        #expect(stage.cardOffsetFromCenter(at: 0).height == 13)
 
         let enlarged = StageWindowLayout(
             windowCount: 3,
@@ -209,18 +226,17 @@ struct StageWindowLayoutTests {
             == stage.cardOffsetFromCenter(at: 0).height * 1.5)
     }
 
-    @Test("The title sits midway between the preview and the stage edge")
+    @Test("The title ends where the native switcher's label does, clear of the highlight")
     func titleUsesSelectorClearance() {
         let previewBottom = metrics.topPadding
             + metrics.cardPadding
             + metrics.thumbnailHeight
-        let titleCenter = previewBottom
-            + metrics.titleSpacing
-            + metrics.titleHeight / 2
+        let titleBottom = previewBottom + metrics.titleSpacing + metrics.titleHeight
         let stageBottom = layout(1, availableWidth: fourColumnWidth).stageSize.height
 
-        #expect(titleCenter == (previewBottom + stageBottom) / 2)
-        #expect(metrics.titleSpacing > 4)
+        #expect(titleBottom - previewBottom == 30)
+        #expect(stageBottom - previewBottom == 39)
+        #expect(metrics.titleSpacing > CGFloat(AppSettings.maximumSelectorOutset))
         #expect(CGFloat(AppSettings.maximumSelectorOutset) <= metrics.cardPadding)
     }
 
@@ -391,7 +407,8 @@ struct DisplayShapedMetricsTests {
         )
 
         #expect(metrics.windowSpacing == 24 * metrics.scaleFactor)
-        #expect(metrics.rowSpacing == 24 * metrics.scaleFactor)
+        // Rows follow the title band, not the card spacing (KHA-1060).
+        #expect(metrics.rowSpacing == -StageMetrics.standard.cardPadding * metrics.scaleFactor)
         #expect(layout.rowWidth(0) == layout.cardWidth(at: 0) * 5 + metrics.windowSpacing * 4)
     }
 }

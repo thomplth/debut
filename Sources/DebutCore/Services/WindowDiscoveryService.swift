@@ -1823,7 +1823,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         installWindowCreationObserver(for: app.pid, bundleID: app.bundleID)
         AppIconCache.shared.warm(
             bundleIDs: [app.bundleID],
-            sizes: AppIconCache.overlayIconSizes,
+            sizes: AppIconCache.shared.warmSizes,
             badgeSizes: AppIconCache.overlayBadgeIconSizes
         )
 

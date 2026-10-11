@@ -602,6 +602,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 .map { String($0.windows.count) }
                 .joined(separator: ","),
             "windowAspectsBySpace": Self.encode(windowAspectsBySpace),
+            "overlayCardStyle": OverlayCardStyle(previewsAvailable: windowPreviewsEnabled).rawValue,
             "windowIDsBySpace": Self.encode(windowIDsBySpace),
             "tutorialOverlay": String(isSpaceManagerVisible && activeTutorialScope != nil),
             "tutorialCoachAction": tutorialCoachmark?.action ?? "",

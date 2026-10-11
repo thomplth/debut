@@ -106,8 +106,11 @@ struct OverlayViewModelTests {
             activeSpaceIndex: 0, inactiveScale: 0.8, containerSize: container
         )
 
-        #expect(first == CGPoint(x: 600 - stride, y: 400 + opticalOffset))
-        #expect(last == CGPoint(x: 600 + stride, y: 400 + opticalOffset))
+        // Native card widths are not exact in binary, so compare to within rounding.
+        #expect(abs((first?.x ?? 0) - (600 - stride)) < 1e-9)
+        #expect(first?.y == 400 + opticalOffset)
+        #expect(abs((last?.x ?? 0) - (600 + stride)) < 1e-9)
+        #expect(last?.y == 400 + opticalOffset)
         #expect(StageConstants.windowCardCenter(
             spaceIndex: 0, windowIndex: 3, windowCounts: [3],
             activeSpaceIndex: 0, inactiveScale: 0.8, containerSize: container

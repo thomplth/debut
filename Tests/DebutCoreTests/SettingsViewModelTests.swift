@@ -12,17 +12,24 @@ struct SettingsViewModelTests {
         #expect(vm.settings.features.fasterDesktopSwitching)
         #expect(vm.settings.features.controlArrows)
         #expect(vm.settings.features.trackpadSwipes)
-        #expect(vm.settings.glassStyle == .clear)
-        #expect(vm.settings.stageCornerRadius == 30)
+        #expect(vm.settings.glassStyle == .native)
+        #expect(vm.settings.glassRimStrength == 1)
+        #expect(vm.settings.glassEdgeRefraction == 1)
+        #expect(vm.settings.followsSystemGlassTint)
+        #expect(vm.settings.glassTintAmount == 0)
+        #expect(vm.settings.stageCornerRadius == 47.5)
+        #expect(vm.settings.iconStageCornerRadius == 57.5)
         #expect(vm.settings.inactiveStageScale == 0.7)
         #expect(vm.settings.stageScale == 1.5)
-        #expect(vm.settings.previewCardSpacing == 12)
+        #expect(vm.settings.previewCardSpacing == 14)
         #expect(vm.settings.overlayOnMainDisplayOnly)
-        #expect(vm.settings.windowSelectionStyle == .filled)
         #expect(vm.settings.selectorOutset == 6)
-        #expect(vm.settings.selectorCornerRadius == 12)
-        #expect(vm.settings.magnifyScale == 1.06)
-        #expect(vm.settings.magnifyShadowStrength == 1)
+        #expect(vm.settings.previewCornerRadius == 6)
+        #expect(vm.settings.selectionHighlightStrength == 1)
+        #expect(vm.settings.badgePlacement == .titleRow)
+        #expect(vm.settings.badgeGrowth == 0.5)
+        #expect(vm.settings.titleHaloStrength == 1)
+        #expect(vm.settings.titleHaloSize == 0.5)
         #expect(vm.settings.showsDesktopSwitchIndicator)
         // Must stay on the hold-delay slider's 25ms step grid, or the first drag moves it.
         #expect(vm.settings.overlayPresentationDelay == 0.1)
@@ -116,16 +123,20 @@ struct SettingsViewModelTests {
         ])
         #expect(SettingsSection.appearance.options == [
             .glassStyle,
+            .glassRimStrength,
+            .glassEdgeRefraction,
+            .glassTint,
+            .titleHaloStrength,
+            .titleHaloSize,
             .stageCornerRadius,
             .stageScale,
-            .previewCardSpacing,
+            .badgePlacement,
+            .badgeGrowth,
             .adaptiveCardSizing,
             .inactiveStageScale,
-            .windowSelectionStyle,
+            .selectionHighlightStrength,
             .selectorOutset,
-            .selectorCornerRadius,
-            .magnifyScale,
-            .magnifyShadowStrength,
+            .previewCornerRadius,
         ])
     }
 
@@ -161,17 +172,67 @@ struct SettingsViewModelTests {
         #expect(normalized["shareAnonymousTelemetry"] == nil)
     }
 
-    @Test("Preview card spacing persists and old settings keep the current gap")
-    func previewCardSpacingPersistence() throws {
-        var settings = AppSettings()
-        settings.previewCardSpacing = 24
-        let saved = try JSONEncoder().encode(settings)
-        #expect(try JSONDecoder().decode(AppSettings.self, from: saved).previewCardSpacing == 24)
+    /// Restoring a page's defaults resets that page's settings and nothing else (KHA-1064).
+    @Test("Restoring a page's defaults leaves the other pages alone", arguments: SettingsSection.allCases)
+    func restoreDefaultsForOnePage(section: SettingsSection) {
+        var changed = AppSettings()
+        changed.launchAtLogin = false
+        changed.excludedBundleIDs = ["com.example.app"]
+        changed.features.numberShortcuts = false
+        changed.spaceSwitchDuration = 0.2
+        changed.features.optionTab = false
+        changed.previewCacheTTL = 5
+        changed.glassStyle = .regular
+        changed.stageCornerRadius = 20
+        changed.iconStageCornerRadius = 30
+        changed.stageScale = 2
+        changed.iconScale = 1.5
+        changed.badgePlacement = .corner
+        changed.previewCornerRadius = 12
+        changed.quickSwitchModifiers = ShortcutModifiers(command: true)
 
-        var object = try #require(try JSONSerialization.jsonObject(with: saved) as? [String: Any])
-        object.removeValue(forKey: "previewCardSpacing")
-        let oldData = try JSONSerialization.data(withJSONObject: object)
-        #expect(try JSONDecoder().decode(AppSettings.self, from: oldData).previewCardSpacing == 12)
+        var vm = SettingsViewModel(settings: changed)
+        vm.restoreDefaults(for: section)
+
+        let defaults = AppSettings()
+        let isGeneral = section == .general, isDesktops = section == .desktops
+        let isSwitcher = section == .switcher, isAppearance = section == .appearance
+        #expect((vm.settings.launchAtLogin == defaults.launchAtLogin) == isGeneral)
+        #expect((vm.settings.excludedBundleIDs == defaults.excludedBundleIDs) == isGeneral)
+        #expect((vm.settings.features.numberShortcuts == defaults.features.numberShortcuts) == isDesktops)
+        #expect((vm.settings.spaceSwitchDuration == defaults.spaceSwitchDuration) == isDesktops)
+        #expect((vm.settings.features.optionTab == defaults.features.optionTab) == isSwitcher)
+        #expect((vm.settings.previewCacheTTL == defaults.previewCacheTTL) == isSwitcher)
+        for appearanceValueIsDefault in [
+            vm.settings.glassStyle == defaults.glassStyle,
+            vm.settings.stageCornerRadius == defaults.stageCornerRadius,
+            vm.settings.iconStageCornerRadius == defaults.iconStageCornerRadius,
+            vm.settings.stageScale == defaults.stageScale,
+            vm.settings.iconScale == defaults.iconScale,
+            vm.settings.badgePlacement == defaults.badgePlacement,
+            vm.settings.previewCornerRadius == defaults.previewCornerRadius,
+        ] {
+            #expect(appearanceValueIsDefault == isAppearance)
+        }
+        #expect((vm.settings.quickSwitchModifiers == defaults.quickSwitchModifiers) == (section == .shortcuts))
+    }
+
+    @Test("One corner slider edits whichever plate the switcher is drawing")
+    func cornerSliderFollowsTheCardStyle() {
+        var vm = SettingsViewModel()
+        vm.screenRecordingGranted = true
+        #expect(vm.overlayCornerRadius == 47.5)
+        vm.overlayCornerRadius = 40
+        #expect(vm.settings.stageCornerRadius == 40)
+        #expect(vm.settings.iconStageCornerRadius == 57.5)
+
+        vm.screenRecordingGranted = false
+        #expect(vm.overlayCornerRadius == 57.5)
+        vm.overlayCornerRadius = 50
+        #expect(vm.settings.iconStageCornerRadius == 50)
+        #expect(vm.settings.stageCornerRadius == 40)
+        #expect(vm.settings.stageCornerRadius(for: .icons) == 50)
+        #expect(vm.settings.stageCornerRadius(for: .previews) == 40)
     }
 
     @Test("Troubleshooting actions are forwarded to the app")

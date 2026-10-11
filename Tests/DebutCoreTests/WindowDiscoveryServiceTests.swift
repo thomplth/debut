@@ -677,7 +677,10 @@ struct WindowDiscoveryServiceTests {
         #expect(!service.isAdmissionRefused(windowID: 82_256, ownerPID: 69_928))
     }
 
+    // Main-actor isolated: the publish hops to the main queue, so only a body running on main
+    // guarantees the creation below lands first. Off main, a loaded CPU let it race (KHA-1063).
     @Test("A background refresh captured before a creation event cannot publish the window")
+    @MainActor
     func backgroundRefreshHonoursLaterCreationHold() async {
         let (service, _, _) = pendingDiaFixture()
 

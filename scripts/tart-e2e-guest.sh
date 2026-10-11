@@ -306,6 +306,10 @@ as_console env HOME="$console_home" defaults write -g NSQuitAlwaysKeepsWindows -
 echo "Preparing deterministic fixture windows..."
 as_console rm -rf "$support_dir"
 as_console env HOME="$console_home" defaults write "$bundle_id" hasCompletedOnboarding -bool true
+# A reused guest keeps the last run's onboarding progress; a forced first launch would resume it.
+for progress_key in setupCheckpoint onboardingCheckpoint tutorialCheckpoint setupPermissionReturn; do
+    as_console env HOME="$console_home" defaults delete "$bundle_id" "$progress_key" 2>/dev/null || true
+done
 rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 printf 'Debut E2E fixture one\n' > "$FIXTURE_DIR/one.txt"
