@@ -7,6 +7,11 @@ extension GlassStyle {
     var overlayGlass: Glass {
         self == .regular ? .regular : .clear
     }
+
+    /// The same material for DockGlass, which draws it with a tint override.
+    var systemGlassMaterial: SystemGlassMaterial {
+        self == .regular ? .regular : .clear
+    }
 }
 
 extension AppSettings {
@@ -45,6 +50,12 @@ struct OverlayGlassModifier<S: InsettableShape>: ViewModifier {
         if glassStyle.usesDockGlass {
             content
                 .dockGlass(in: shape)
+                .dockGlassStyle(activeDockGlassStyle)
+        } else if case .fixed = dockGlassStyle.tint {
+            // SwiftUI's own glass reads the system tint once at launch, so DockGlass writes the
+            // override onto the filter (KHA-1072).
+            content
+                .systemGlass(glassStyle.systemGlassMaterial, in: shape)
                 .dockGlassStyle(activeDockGlassStyle)
         } else {
             content

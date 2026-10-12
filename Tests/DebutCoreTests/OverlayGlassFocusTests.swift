@@ -15,10 +15,13 @@ import Testing
 @MainActor
 @Suite("Overlay glass focus state", .serialized)
 struct OverlayGlassFocusTests {
-    @Test("Every glass style draws active in an inactive window", arguments: GlassStyle.allCases)
-    func drawsActive(style: GlassStyle) throws {
+    @Test("Every glass style draws active in an inactive window", arguments: GlassStyle.allCases, [true, false])
+    func drawsActive(style: GlassStyle, followsSystemTint: Bool) throws {
         try #require(DockGlass.canOverrideFocusState)
-        let window = Self.host(style: style, dockGlassStyle: AppSettings().dockGlassStyle)
+        var settings = AppSettings()
+        settings.followsSystemGlassTint = followsSystemTint
+        settings.glassTintAmount = 0.5
+        let window = Self.host(style: style, dockGlassStyle: settings.dockGlassStyle)
         defer { window.orderOut(nil) }
         #expect(!window.isKeyWindow)
         let opacities = Self.rimOpacities(in: try #require(window.contentView?.layer))
@@ -33,6 +36,25 @@ struct OverlayGlassFocusTests {
         defer { window.orderOut(nil) }
         let opacities = Self.rimOpacities(in: try #require(window.contentView?.layer))
         #expect(!opacities.isEmpty && opacities.allSatisfy { $0 == 1 }, "rim opacities \(opacities)")
+    }
+
+    /// The tint override is one setting for every material (KHA-1072): a fixed tint must reach
+    /// the glass filter whichever material draws, not only Native.
+    @Test("A fixed tint reaches every glass style", arguments: GlassStyle.allCases)
+    func fixedTintReachesEveryStyle(style: GlassStyle) throws {
+        // Full tint frosts every material completely; none does at zero. Pick the end the system
+        // tint is not at, so the override is what shows.
+        let systemTint = UserDefaults.standard.double(forKey: "NSGlassTintAmount")
+        let tint: Double = systemTint > 0.5 ? 0 : 1
+        var settings = AppSettings()
+        settings.glassStyle = style
+        settings.followsSystemGlassTint = false
+        settings.glassTintAmount = tint
+        let window = Self.host(style: style, dockGlassStyle: settings.dockGlassStyle)
+        defer { window.orderOut(nil) }
+        let fills = Self.fillOpacities(in: try #require(window.contentView?.layer))
+        #expect(!fills.isEmpty, "no glass backdrop for \(style)")
+        #expect(fills.allSatisfy { $0 == tint }, "\(style) fill opacities \(fills) at tint \(tint)")
     }
 
     @Test("Debut asks DockGlass for the active state")
@@ -64,6 +86,17 @@ struct OverlayGlassFocusTests {
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         }
         return window
+    }
+
+    /// The frosted fill opacity of every glass backdrop under `layer`.
+    static func fillOpacities(in layer: CALayer) -> [Double] {
+        var found: [Double] = []
+        if NSStringFromClass(type(of: layer)) == "CABackdropLayer",
+           let fill = layer.value(forKeyPath: "filters.glassBackground.inputBlurFillNormalOpacity") as? NSNumber {
+            found.append(fill.doubleValue)
+        }
+        for sublayer in layer.sublayers ?? [] { found += fillOpacities(in: sublayer) }
+        return found
     }
 
     /// The opacity of every specular rim layer under `layer`.

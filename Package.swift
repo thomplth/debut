@@ -17,7 +17,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"),
         .package(url: "https://github.com/getsentry/sentry-cocoa", exact: "9.29.2"),
-        .package(url: "https://github.com/thomplth/dock-glass.git", exact: "0.5.0"),
+        .package(url: "https://github.com/thomplth/dock-glass.git", exact: "0.6.0"),
     ],
     targets: [
         .executableTarget(

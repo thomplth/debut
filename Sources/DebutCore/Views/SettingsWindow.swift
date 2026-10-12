@@ -583,10 +583,9 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .disabled(!usesNativeGlass)
 
             if !usesNativeGlass {
-                Text("Rim, edge refraction and tint apply to the Native material.")
+                Text("Rim and edge refraction apply to the Native material.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

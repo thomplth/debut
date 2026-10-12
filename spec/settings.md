@@ -112,10 +112,11 @@ in Appearance; and all key assignments are in Shortcuts.
 Support contains actions rather than preferences. Every page with preferences ends with a
 confirmed Restore Defaults action that resets that page only.
 
-Native glass matches the macOS Command-Tab switcher through DockGlass. It follows the
-system Liquid Glass tint live unless a fixed tint is chosen. Under Reduce Transparency,
-Increase Contrast, or a macOS version without a fitted look it shows the system's own clear
-glass and reports why in diagnostics.
+Native glass matches the macOS Command-Tab switcher through DockGlass. Every material follows
+the system Liquid Glass tint live unless a fixed tint is chosen; Clear and Regular then draw
+what macOS draws at that tint. Under Reduce Transparency, Increase Contrast, or a macOS version
+without a fitted look, Native shows the system's own clear glass and reports why in diagnostics,
+and every material follows the system tint.
 
 The menu-bar item provides feature toggles, Settings, Setup, Tutorial, update
 checks, and Quit. System Reduce Motion changes overlay animation; it is not a separate
