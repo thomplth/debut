@@ -116,7 +116,7 @@ final class OnboardingPermissionGuide {
 
     private func updatePanelContent() {
         guard let panel, let permission else { return }
-        panel.contentView = NSHostingView(rootView: PermissionGuideView(
+        Self.setContent(in: panel, PermissionGuideView(
             permission: permission,
             requiresRelaunch: requiresRelaunch,
             onReturn: { [weak self] in
@@ -136,6 +136,19 @@ final class OnboardingPermissionGuide {
                 action?(permission)
             }
         ))
+    }
+
+    /// Updates the guide in its one hosting view, whose window sizing is off so only
+    /// `panelFrame` sizes the panel. A fresh hosting view per refresh resized the panel
+    /// to SwiftUI's unconstrained height, flickering it tall on every activation.
+    static func setContent<Content: View>(in panel: NSPanel, _ content: Content) {
+        if let host = panel.contentView as? NSHostingView<Content> {
+            host.rootView = content
+            return
+        }
+        let host = NSHostingView(rootView: content)
+        host.sizingOptions = []
+        panel.contentView = host
     }
 
     private static func systemSettingsFrame() -> CGRect? {
@@ -199,7 +212,7 @@ final class OnboardingPermissionGuide {
     }
 }
 
-private struct PermissionGuideView: View {
+struct PermissionGuideView: View {
     let permission: OnboardingPermission
     let requiresRelaunch: Bool
     let onReturn: () -> Void

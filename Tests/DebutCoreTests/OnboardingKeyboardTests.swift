@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Testing
 @testable import DebutCore
@@ -78,6 +79,31 @@ struct PermissionGuidePlacementTests {
         let settings = CGRect(x: 20, y: 20, width: 480, height: 400)
         let frame = OnboardingPermissionGuide.panelFrame(inside: settings, visibleFrame: visible)
         #expect(settings.contains(frame))
+    }
+
+    @Test("Refreshing the guide's content keeps the panel at the frame placement gave it")
+    func contentRefreshKeepsFrame() {
+        let frame = CGRect(x: 400, y: 200, width: 420, height: 154)
+        let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false)
+        panel.alphaValue = 0
+        defer { panel.close() }
+        func guide(_ requiresRelaunch: Bool) -> PermissionGuideView {
+            PermissionGuideView(permission: .screenRecording, requiresRelaunch: requiresRelaunch,
+                onReturn: {}, onRestart: {}, onCancel: {})
+        }
+        OnboardingPermissionGuide.setContent(in: panel, guide(false))
+        panel.setFrame(frame, display: true)
+        panel.orderFrontRegardless()
+        let host = panel.contentView
+        // Each app activation refreshes the guide several times; KHA-1068 swapped in a new
+        // hosting view each time, which grew the panel to SwiftUI's unconstrained height.
+        for requiresRelaunch in [false, true, false] {
+            OnboardingPermissionGuide.setContent(in: panel, guide(requiresRelaunch))
+            RunLoop.main.run(until: .now + 0.1)
+            #expect(panel.frame == frame, "frame \(panel.frame) after refresh, relaunch \(requiresRelaunch)")
+        }
+        #expect(panel.contentView === host)
     }
 }
 
