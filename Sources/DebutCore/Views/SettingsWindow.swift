@@ -81,19 +81,22 @@ public struct SettingsView: View {
                 if selectedSection == .appearance {
                     // Pinned above the scrolling controls, so it stays in view while adjusting.
                     VStack(spacing: 8) {
-                        HStack {
-                            Text("Appearance")
-                                .font(.title2.bold())
-                            Spacer()
-                            Picker("Backdrop", selection: $previewBackdrop) {
-                                ForEach(AppearancePreviewBackdrop.allCases) { backdrop in
-                                    Text(backdrop.rawValue).tag(backdrop)
+                        // The picker overlays the title row rather than sharing an HStack with
+                        // it: it is taller than the title, and centring the title on it dropped
+                        // the title below every other page's (KHA-1070).
+                        Text("Appearance")
+                            .font(.title2.bold())
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .overlay(alignment: .trailing) {
+                                Picker("Backdrop", selection: $previewBackdrop) {
+                                    ForEach(AppearancePreviewBackdrop.allCases) { backdrop in
+                                        Text(backdrop.rawValue).tag(backdrop)
+                                    }
                                 }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                                .fixedSize()
                             }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .fixedSize()
-                        }
                         AppearancePreview(
                             settings: viewModel.settings,
                             cardStyle: viewModel.overlayCardStyle,
