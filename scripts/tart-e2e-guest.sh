@@ -154,6 +154,42 @@ grant_screen_capture() {
 'kTCCServiceScreenCapture','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
+# A grant made for a build signed by another identity: listed and switched on in System
+# Settings, but its code requirement no longer matches this build, so neither permission is
+# live. A reinstall over an older, differently signed Debut leaves exactly this (KHA-1069).
+# Grants made in System Settings live in the system database only; the user database's Screen
+# Recording row is the harness's own belt-and-braces, which tccutil as the user never resets.
+stale_csreq_hex() {
+    printf 'identifier "%s" and anchor apple generic and certificate leaf[subject.OU] = "AAAAAAAAAA"' "$1" \
+        | csreq -r- -b /dev/stdout | xxd -p | tr -d '\n'
+}
+
+plant_stale_grants() {
+    local client="$1"
+    local csreq_hex
+    csreq_hex="$(stale_csreq_hex "$client")"
+    sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "UPDATE access SET csreq=X'$csreq_hex', auth_value=2 \
+WHERE client='$client' AND service IN ('kTCCServiceAccessibility','kTCCServiceScreenCapture');"
+}
+
+# Debut must have cleared every stale row at launch, so onboarding's prompt or drag can add a
+# grant that matches this build. Prints every row it judged.
+stale_grants_cleared() {
+    local client="$1"
+    local csreq_hex rows stale
+    csreq_hex="$(stale_csreq_hex "$client" | tr '[:lower:]' '[:upper:]')"
+    rows="$(sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "SELECT 'system', service, auth_value, hex(csreq) \
+FROM access WHERE client='$client' AND service IN ('kTCCServiceAccessibility','kTCCServiceScreenCapture');")"
+    stale="$(grep -F "|$csreq_hex" <<<"$rows" || true)"
+    echo "TCC rows for $client after the stale-grant launch (stale requirement $csreq_hex):"
+    echo "${rows:-  (none)}"
+    if [[ -n "$stale" ]]; then
+        echo "FAIL: Debut left a stale grant in place: $stale"
+        return 1
+    fi
+    echo "PASS: Debut cleared the stale grants at launch"
+}
+
 grant_post_event() {
     local client="$1"
     local signed_path="${2:-}"
@@ -349,7 +385,7 @@ as_console env HOME="$console_home" "$E2E_SOURCE" switch-to-desktop 0
 as_console open -a TextEdit "$FIXTURE_DIR/one.txt" "$FIXTURE_DIR/two.txt" --args -ApplePersistenceIgnoreState YES
 as_console rm -f "$support_dir/settings.json"
 sleep 2
-for denied_permission in accessibility capture desktop; do
+for denied_permission in accessibility capture desktop stale; do
     as_console pkill -x TextEdit 2>/dev/null || true
     as_console rm -rf "$support_dir"
     as_console env HOME="$console_home" "$E2E_SOURCE" switch-to-desktop 0
@@ -362,6 +398,8 @@ for denied_permission in accessibility capture desktop; do
     elif [[ "$denied_permission" == capture ]]; then
         sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
         sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
+    elif [[ "$denied_permission" == stale ]]; then
+        plant_stale_grants "$bundle_id"
     fi
     if [[ "$denied_permission" == desktop ]]; then
         if ! as_console env HOME="$console_home" "$E2E_SOURCE" reset-desktops; then
@@ -373,6 +411,9 @@ for denied_permission in accessibility capture desktop; do
     sleep 2
     echo "Checking onboarding with denied $denied_permission..."
     if ! as_console env HOME="$console_home" "$E2E_SOURCE" onboarding-permission-check "$denied_permission"; then
+        status=1
+    fi
+    if [[ "$denied_permission" == stale ]] && ! stale_grants_cleared "$bundle_id"; then
         status=1
     fi
     if [[ -d /tmp/debut-e2e-screenshots ]]; then

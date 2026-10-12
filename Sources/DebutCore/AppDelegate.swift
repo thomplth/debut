@@ -179,6 +179,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             applicationUpdater.start()
         }
 
+        // Before anything prompts: a prompt's fresh grant must not be the one reset.
+        let clearedGrants = onboardingPermissionClient.clearStaleGrants()
+        if !clearedGrants.isEmpty {
+            diag.report("stale_permission_grants_cleared", details: Dictionary(
+                uniqueKeysWithValues: clearedGrants.map { ($0.key.rawValue, String($0.value)) }))
+        }
+
         let forceOnboarding = ProcessInfo.processInfo.arguments.contains("--show-onboarding")
         let permissionReturn = OnboardingPermissionReturnStore.pending()
         let shouldShowOnboarding = OnboardingLaunchPolicy.shouldPresent(force: forceOnboarding)

@@ -1667,7 +1667,9 @@ if CommandLine.arguments.dropFirst().first == "onboarding-speed-check" {
 }
 
 if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
-    let deniedAccessibility = CommandLine.arguments.last == "accessibility"
+    // A stale grant, listed but for another signature, leaves Accessibility as untrusted as a denial.
+    let staleGrant = CommandLine.arguments.last == "stale"
+    let deniedAccessibility = CommandLine.arguments.last == "accessibility" || staleGrant
     let oneDesktop = CommandLine.arguments.last == "desktop"
     clearOnboardingProgress()
     clearDiagnosticFile()
@@ -1681,7 +1683,7 @@ if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
     var passed = runtimeReady && appeared
     if deniedAccessibility {
         passed = passed && onboardingContains("Required") && !onboardingGetStartedEnabled()
-        _ = takeScreenshot("onboarding_accessibility_denied")
+        _ = takeScreenshot(staleGrant ? "onboarding_stale_grant" : "onboarding_accessibility_denied")
     } else {
         passed = passed && onboardingPress("Get started") && onboardingContinueEnabled()
         if oneDesktop {

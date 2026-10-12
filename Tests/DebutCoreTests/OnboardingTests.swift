@@ -113,3 +113,31 @@ func onboardingSmallScreen() {
     #expect(OnboardingLayout.contentHeight(visibleHeight: 670, titleBarHeight: 28) == 642)
     #expect(OnboardingLayout.contentHeight(visibleHeight: 900, titleBarHeight: 28) == 650)
 }
+
+@Suite("Stale permission grants")
+struct StalePermissionGrantTests {
+    @Test("Launch resets only the permissions Debut lacks", arguments: [
+        (true, true, [OnboardingPermission]()),
+        (false, true, [.accessibility]),
+        (true, false, [.screenRecording]),
+        (false, false, [.accessibility, .screenRecording]),
+    ])
+    func resetsMissingOnly(accessibility: Bool, screenRecording: Bool, expected: [OnboardingPermission]) {
+        let state = OnboardingPermissionState(accessibilityGranted: accessibility,
+            screenRecordingGranted: screenRecording)
+        #expect(StalePermissionGrants.toReset(state, launchedByLaunchServices: true) == expected)
+    }
+
+    @Test("A binary run from a terminal never resets Debut's grants")
+    func terminalLaunchKeepsGrants() {
+        // tccd judges such a process by its terminal's grant, which says nothing about Debut's.
+        let state = OnboardingPermissionState(accessibilityGranted: false, screenRecordingGranted: false)
+        #expect(StalePermissionGrants.toReset(state, launchedByLaunchServices: false).isEmpty)
+    }
+
+    @Test("Each permission resets its own TCC service")
+    func services() {
+        #expect(StalePermissionGrants.service(for: .accessibility) == "Accessibility")
+        #expect(StalePermissionGrants.service(for: .screenRecording) == "ScreenCapture")
+    }
+}
