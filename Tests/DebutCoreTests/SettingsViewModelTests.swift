@@ -18,7 +18,7 @@ struct SettingsViewModelTests {
         #expect(vm.settings.followsSystemGlassTint)
         #expect(vm.settings.glassTintAmount == 0)
         #expect(vm.settings.stageCornerRadius == 47.5)
-        #expect(vm.settings.iconStageCornerRadius == 57.5)
+        #expect(vm.settings.iconStageCornerRadius == AppSettings.defaultIconStageCornerRadius)
         #expect(vm.settings.inactiveStageScale == 0.7)
         #expect(vm.settings.stageScale == 1.5)
         #expect(vm.settings.previewCardSpacing == 14)
@@ -224,10 +224,10 @@ struct SettingsViewModelTests {
         #expect(vm.overlayCornerRadius == 47.5)
         vm.overlayCornerRadius = 40
         #expect(vm.settings.stageCornerRadius == 40)
-        #expect(vm.settings.iconStageCornerRadius == 57.5)
+        #expect(vm.settings.iconStageCornerRadius == AppSettings.defaultIconStageCornerRadius)
 
         vm.screenRecordingGranted = false
-        #expect(vm.overlayCornerRadius == 57.5)
+        #expect(vm.overlayCornerRadius == AppSettings.defaultIconStageCornerRadius)
         vm.overlayCornerRadius = 50
         #expect(vm.settings.iconStageCornerRadius == 50)
         #expect(vm.settings.stageCornerRadius == 40)

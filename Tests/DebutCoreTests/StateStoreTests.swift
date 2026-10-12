@@ -529,7 +529,7 @@ struct StateStoreTests {
         #expect(decoded.glassRimStrength == 1)
         #expect(decoded.glassEdgeRefraction == 1)
         #expect(decoded.followsSystemGlassTint)
-        #expect(decoded.dockGlassStyle == .native)
+        #expect(decoded.dockGlassStyle == DockGlassStyle(focusState: .active))
         #expect(decoded.badgeGrowth == AppSettings.defaultBadgeGrowth)
         #expect(decoded.titleHaloStrength == 1)
         #expect(decoded.titleHaloSize == AppSettings.defaultTitleHaloSize)
@@ -576,7 +576,8 @@ struct StateStoreTests {
         #expect(settings.dockGlassStyle == DockGlassStyle(
             rimStrength: 0.5,
             edgeRefraction: 1.5,
-            tint: .fixed(0.25)
+            tint: .fixed(0.25),
+            focusState: .active
         ))
 
         let encoded = try JSONEncoder().encode(settings)

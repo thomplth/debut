@@ -28,7 +28,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Adaptive card sizing | On |
 | Window size / inactive stage scale | 150% / 70%; 100% is the native Command-Tab switcher plate (102 pt slots, 176 pt one-row plate), up to 400%. The size enlarges only previews or icons; titles, plate margins, card gaps, highlight padding and corners keep native points |
 | Card spacing | 14 pt between selection highlights, as native; not adjustable. Wrapped rows in both switchers put each title midway between its previews and the next row's |
-| Glass / stage corner radius | Native / 47.5 pt continuous with previews, 57.5 pt (native) for icon cards; one slider edits whichever the switcher draws (0–72 pt) |
+| Glass / stage corner radius | Native / 47.5 pt continuous with previews, 58 pt (native) for icon cards; one slider edits whichever the switcher draws (0–72 pt) |
 | Liquid Glass rim / edge refraction | 100% / 100% of the native switcher's fitted look |
 | Liquid Glass tint | Follows System Settings; a fixed 0–100% tint is optional |
 | Title halo / size | 100% / 0.5 pt; 0% turns the halo off |

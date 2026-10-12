@@ -10,31 +10,46 @@ extension GlassStyle {
 }
 
 extension AppSettings {
+    /// The window state every overlay glass draws in. The overlay is a non-activating panel in an
+    /// app that never activates, so its glass would otherwise always draw inactive: milky, with
+    /// no specular rim. The native switcher draws active (KHA-1065).
+    static let overlayGlassFocusState: DockGlassStyle.FocusState = .active
+
     /// The Liquid Glass settings as DockGlass's adjustments to its fitted native look.
     public var dockGlassStyle: DockGlassStyle {
         DockGlassStyle(
             rimStrength: glassRimStrength,
             edgeRefraction: glassEdgeRefraction,
             selectionStrength: selectionHighlightStrength,
-            tint: followsSystemGlassTint ? .system : .fixed(glassTintAmount)
+            tint: followsSystemGlassTint ? .system : .fixed(glassTintAmount),
+            focusState: Self.overlayGlassFocusState
         )
     }
 }
 
 /// Overlay glass in any shape: DockGlass's native switcher material, or SwiftUI's own clear or
-/// regular glass.
+/// regular glass, drawn active whatever the window's state.
 struct OverlayGlassModifier<S: InsettableShape>: ViewModifier {
     let shape: S
     let glassStyle: GlassStyle
     var dockGlassStyle: DockGlassStyle = .native
 
+    /// The style with the overlay's focus state, whatever the caller passed.
+    private var activeDockGlassStyle: DockGlassStyle {
+        var style = dockGlassStyle
+        style.focusState = AppSettings.overlayGlassFocusState
+        return style
+    }
+
     func body(content: Content) -> some View {
         if glassStyle.usesDockGlass {
             content
                 .dockGlass(in: shape)
-                .dockGlassStyle(dockGlassStyle)
+                .dockGlassStyle(activeDockGlassStyle)
         } else {
-            content.glassEffect(glassStyle.overlayGlass, in: shape)
+            content
+                .glassEffect(glassStyle.overlayGlass, in: shape)
+                .dockGlassFocusState(AppSettings.overlayGlassFocusState)
         }
     }
 }

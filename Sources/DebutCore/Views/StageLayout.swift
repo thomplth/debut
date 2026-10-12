@@ -52,7 +52,7 @@ public struct StageMetrics: Equatable, Sendable {
     /// The native Command-Tab switcher (`DockGlass.Metrics.standard`) with a preview in each
     /// 102-point icon slot. The card is the slot plus the 9-point selection highlight around it
     /// and the title below, so the plate's insets are native's slot insets less that padding:
-    /// 37.5 points at the sides, 35 above the slot and 39 below it, which holds the title.
+    /// 37 points at the sides, 35 above the slot and 39 below it, which holds the title.
     public static let standard = StageMetrics(
         // 16:10, the area every display-shaped card keeps, at native's 102-point slot height.
         thumbnailWidth: 163.2,
@@ -68,8 +68,8 @@ public struct StageMetrics: Equatable, Sendable {
         // Rows overlap their cards' outer padding, so a wrapped row's title sits midway between
         // its previews and the next row's, in the same band it has above the plate's edge.
         rowSpacing: -9,
-        padding: 28.5,
-        topPadding: 26,
+        padding: DockGlass.Metrics.standard.horizontalPadding - 9,
+        topPadding: DockGlass.Metrics.standard.topPadding - 9,
         bottomPadding: 0,
         minStageWidth: 300,
         scale: 1

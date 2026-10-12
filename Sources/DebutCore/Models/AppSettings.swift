@@ -1,3 +1,4 @@
+import DockGlass
 import Foundation
 
 public enum GlassStyle: String, Codable, Sendable, CaseIterable {
@@ -137,7 +138,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let minimumSelectionHighlightStrength: Double = 0
     public static let maximumSelectionHighlightStrength: Double = 2
     public static let minimumStageCornerRadius: Double = 0
-    /// Room above the native switcher's 57.5-point plate corner.
+    /// Room above the native switcher's 58-point plate corner.
     public static let maximumStageCornerRadius: Double = 72
     /// How the app badge grows with the preview: the preview's size raised to this power.
     /// 0 keeps it at native size, 1 grows it in proportion.
@@ -148,9 +149,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let minimumTitleHaloSize: Double = 0.5
     public static let maximumTitleHaloSize: Double = 3
     /// The plate's continuous corner when previews show. Icon cards keep the native
-    /// switcher's 57.5-point corner, so the two are stored apart behind one slider.
+    /// switcher's corner, so the two are stored apart behind one slider.
     public static let defaultStageCornerRadius: Double = 47.5
-    public static let defaultIconStageCornerRadius: Double = 57.5
+    public static let defaultIconStageCornerRadius = Double(DockGlass.Metrics.standard.plateCornerRadius)
     public static let defaultTitleHaloSize: Double = 0.5
     public static let defaultBadgePlacement: BadgePlacement = .titleRow
 
