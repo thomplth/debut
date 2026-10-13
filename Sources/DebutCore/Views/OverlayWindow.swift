@@ -91,6 +91,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         // A panel hides itself when its application deactivates, and the overlay is opened from
         // the background by an application that never becomes active.
         self.hidesOnDeactivate = false
+        BackgroundCursor.enable()
         self.level = .statusBar
         self.isOpaque = false
         self.backgroundColor = .clear
@@ -103,6 +104,20 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         // The release fade animates this layer, so the render server can finish it while the
         // main queue fronts the chosen window.
         contentView?.wantsLayer = true
+    }
+
+    /// The overlay is one pointing-hand surface: its cards are clickable and draggable, and a click
+    /// on the backdrop dismisses it, so no part of it wants the arrow. Set after the event is
+    /// delivered, because a hover or drag handler it reaches may have chosen another cursor.
+    public override func sendEvent(_ event: NSEvent) {
+        super.sendEvent(event)
+        switch event.type {
+        case .mouseMoved, .mouseEntered, .cursorUpdate, .leftMouseDragged, .leftMouseDown,
+             .leftMouseUp:
+            NSCursor.pointingHand.set()
+        default:
+            break
+        }
     }
 
     @discardableResult
@@ -238,6 +253,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         // that is inactive when the overlay opens. Asking for key status buys
         // nothing and makes the ordering conditional on app activation.
         orderFrontRegardless()
+        NSCursor.pointingHand.set()
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = max(0, revealDuration)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)

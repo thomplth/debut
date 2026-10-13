@@ -2452,6 +2452,48 @@ func scenario_overlay_pointer() {
                 && hoverEvents.last?["windowIndex"] == "0"
                 && readState()["selectedWindowIndex"] == keyboardSelectionBeforeHover
         }
+        test("Hovering a window card shows the pointing hand (KHA-1073)") {
+            // The system cursor is readable from any process, so this sees what the user sees.
+            var observed = "none"
+            for _ in 0..<30 {
+                if let cursor = NSCursor.currentSystem {
+                    observed = "hotSpot=\(cursor.hotSpot) size=\(cursor.image.size)"
+                    if cursor.hotSpot == NSCursor.pointingHand.hotSpot,
+                       cursor.image.size == NSCursor.pointingHand.image.size {
+                        return true
+                    }
+                }
+                wait(0.1)
+            }
+            info("  Cursor over the card: \(observed); pointing hand is hotSpot="
+                + "\(NSCursor.pointingHand.hotSpot) size=\(NSCursor.pointingHand.image.size)")
+            return false
+        }
+        test("The pointing hand shows over the empty backdrop too (KHA-1073)") {
+            // The overlay covers the display, so the pointer is over Debut's window even where
+            // no card is drawn. Its corner holds no card.
+            let corner = CGPoint(x: overlayBounds.minX + 6, y: overlayBounds.minY + 6)
+            postMouseMove(to: corner)
+            // Settled, not first seen: the hand left over from the card the pointer just left
+            // would otherwise satisfy this before the backdrop had any say.
+            wait(0.6)
+            var observed = "none"
+            var isHand = true
+            for _ in 0..<5 {
+                let cursor = NSCursor.currentSystem
+                observed = cursor.map { "hotSpot=\($0.hotSpot) size=\($0.image.size)" } ?? "none"
+                if cursor?.hotSpot != NSCursor.pointingHand.hotSpot
+                    || cursor?.image.size != NSCursor.pointingHand.image.size {
+                    isHand = false
+                }
+                wait(0.1)
+            }
+            if !isHand { info("  Cursor over the backdrop at \(corner): \(observed)") }
+            // Back over the first card, so the Command release below still commits it.
+            postMouseMove(to: movedPoint)
+            wait(0.5)
+            return isHand
+        }
         postFlagsChanged(flags: [])
         wait(0.8)
 
@@ -2467,6 +2509,21 @@ func scenario_overlay_pointer() {
                 }
                 wait(0.1)
             }
+            return false
+        }
+        test("The pointing hand does not outlive the overlay (KHA-1073)") {
+            // Closing the overlay under the pointer sends no hover-ended event to the card.
+            var observed = "none"
+            for _ in 0..<30 {
+                if let cursor = NSCursor.currentSystem {
+                    observed = "hotSpot=\(cursor.hotSpot) size=\(cursor.image.size)"
+                    if cursor.image.size != NSCursor.pointingHand.image.size {
+                        return true
+                    }
+                }
+                wait(0.1)
+            }
+            info("  Cursor after the overlay closed: \(observed)")
             return false
         }
     } else {
