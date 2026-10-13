@@ -9,6 +9,12 @@ private struct SendableCaptureWindow: @unchecked Sendable {
     let window: SCWindow
 }
 
+/// Shared by every capture, so a handle fetched for one batch serves the next (KHA-1080).
+private let captureHandles = CaptureHandleCatalog<SendableCaptureWindow>(
+    identify: { $0.window.windowID },
+    enumerate: { try await ShareableContent.shared.value().content.windows.map(SendableCaptureWindow.init) }
+)
+
 private struct ResolvedRunningApplication {
     let application: NSRunningApplication
     let bundleID: String
@@ -1258,11 +1264,29 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
+        await captureWindowImages(
+            windowIDs: windowIDs,
+            windowSizes: [:],
+            maxPointDimension: maxPointDimension,
+            onEnumerated: onEnumerated,
+            onCapture: onCapture
+        )
+    }
+
+    /// One window at a time, in the order asked: on macOS 27 concurrent captures are slower in
+    /// total than serial ones, and the caller orders the batch by urgency (KHA-1080).
+    public func captureWindowImages(
+        windowIDs: [CGWindowID],
+        windowSizes: [CGWindowID: CGSize],
+        maxPointDimension: CGFloat,
+        onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
+        onCapture: @escaping @Sendable (WindowImageCapture) -> Void
+    ) async {
         guard windowCaptureEnabled, !windowIDs.isEmpty else { return }
 
-        let content: SCShareableContent
+        let windows: [SendableCaptureWindow]
         do {
-            content = try await ShareableContent.shared.value().content
+            windows = try await captureHandles.handles(for: windowIDs)
         } catch {
             DiagnosticReporter.shared.report("window_preview_enumeration_failed", details: [
                 "error": "\(error)",
@@ -1270,55 +1294,41 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
             ])
             return
         }
-
-        let requestedWindowIDs = Set(windowIDs)
-        let windows = content.windows
-            .filter { requestedWindowIDs.contains($0.windowID) }
-            .map(SendableCaptureWindow.init)
         onEnumerated(windows.map(\.window.windowID))
-        // Durable: this is the boundary between the shared enumeration wait and
-        // the captures, and a stall on either side is only diagnosable from a
-        // log that survived the session it happened in.
+        // Durable: this is the boundary between finding the windows and capturing them, and a
+        // stall on either side is only diagnosable from a log that survived the session.
         DiagnosticReporter.shared.report("window_preview_capture_started", details: [
             "matchedCount": "\(windows.count)",
             "requestedCount": "\(windowIDs.count)",
-            "shareableCount": "\(content.windows.count)",
         ])
 
-        await withTaskGroup(of: WindowImageCapture?.self) { group in
-            for captureWindow in windows {
-                group.addTask { [captureWindow] in
-                    let window = captureWindow.window
-                    let filter = SCContentFilter(desktopIndependentWindow: window)
-                    let configuration = SCStreamConfiguration()
-                    let pixelSize = PreviewCaptureSize.pixelSize(
-                        contentSize: filter.contentRect.size,
-                        pointPixelScale: CGFloat(filter.pointPixelScale),
-                        maxPointDimension: maxPointDimension
-                    )
-                    configuration.width = pixelSize.width
-                    configuration.height = pixelSize.height
-                    configuration.showsCursor = false
-                    configuration.captureResolution = .best
+        for captureWindow in windows {
+            let window = captureWindow.window
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            let configuration = SCStreamConfiguration()
+            let pixelSize = PreviewCaptureSize.pixelSize(
+                contentSize: windowSizes[window.windowID] ?? filter.contentRect.size,
+                pointPixelScale: CGFloat(filter.pointPixelScale),
+                maxPointDimension: maxPointDimension
+            )
+            configuration.width = pixelSize.width
+            configuration.height = pixelSize.height
+            configuration.showsCursor = false
+            configuration.captureResolution = .best
 
-                    do {
-                        let image = try await SCScreenshotManager.captureImage(
-                            contentFilter: filter,
-                            configuration: configuration
-                        )
-                        return WindowImageCapture(windowID: window.windowID, image: image)
-                    } catch {
-                        DiagnosticReporter.shared.report("window_preview_capture_failed", details: [
-                            "error": "\(error)",
-                            "windowID": "\(window.windowID)",
-                        ])
-                        return nil
-                    }
-                }
-            }
-
-            for await capture in group {
-                if let capture { onCapture(capture) }
+            do {
+                let image = try await SCScreenshotManager.captureImage(
+                    contentFilter: filter,
+                    configuration: configuration
+                )
+                onCapture(WindowImageCapture(windowID: window.windowID, image: image))
+            } catch {
+                // A handle can outlive its window; fetch the list again next time.
+                await captureHandles.evict(window.windowID)
+                DiagnosticReporter.shared.report("window_preview_capture_failed", details: [
+                    "error": "\(error)",
+                    "windowID": "\(window.windowID)",
+                ])
             }
         }
     }

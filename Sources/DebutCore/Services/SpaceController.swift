@@ -116,6 +116,11 @@ final class PreviewCaptureMetrics: @unchecked Sendable {
     }
 }
 
+/// A main-queue callback carried through a capture task and handed back to main.
+struct MainQueueCompletion: @unchecked Sendable {
+    let run: () -> Void
+}
+
 /// Counts across a capture batch's concurrent completions.
 final class PreviewCaptureTally: @unchecked Sendable {
     private let lock = NSLock()
@@ -346,7 +351,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public var windowPreviewsEnabled = true {
         didSet {
             if !windowPreviewsEnabled {
-                previewCaptureTask?.cancel()
+                previewCaptureScheduler.reset()
                 previewCaptureGeneration &+= 1
                 windowPreviews.removeAll()
                 previewCacheEntries.removeAll()
@@ -491,7 +496,12 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// Debut's own key window, read locally. Focus reports never name this process's windows,
     /// so this is the only way the probe learns the user is on Settings or a tutorial window.
     private let ownKeyWindowProvider: (() -> FocusedWindowSnapshot?)?
-    private var previewCaptureTask: Task<Void, Never>?
+    private lazy var previewCaptureScheduler = PreviewCaptureScheduler { [weak self] batch, completion in
+        self?.runPreviewCaptureBatch(batch, completion: completion)
+    }
+    /// The overlay open whose captures are queued, so the batch that carries them is timed
+    /// against its trace.
+    private var pendingCaptureOverlayPresentation: OverlayPresentationContext?
     private var previewCaptureGeneration: UInt = 0
     private var previewCacheEntries: [CGWindowID: PreviewCacheEntry] = [:]
     private var pendingPreviewCaptureIDs: [CGWindowID] = []
@@ -2928,34 +2938,68 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private func captureWindowPreviews(
         windowIDs: [CGWindowID],
         overlayPresentation: OverlayPresentationContext? = nil,
-        reason: String
+        reason: String,
+        priority: PreviewCapturePriority? = nil
     ) {
         guard windowPreviewsEnabled else { return }
-        previewCaptureTask?.cancel()
-        previewCaptureGeneration &+= 1
-        let generation = previewCaptureGeneration
-        let metrics = PreviewCaptureMetrics(
-            windowIDs: windowIDs,
-            overlayPresentation: overlayPresentation,
-            overlayPresentationRecorder: overlayPresentationRecorder
-        )
-
         guard !windowIDs.isEmpty else {
-            _ = metrics.finish()
+            _ = PreviewCaptureMetrics(
+                windowIDs: [],
+                overlayPresentation: overlayPresentation,
+                overlayPresentationRecorder: overlayPresentationRecorder
+            ).finish()
             diag.report("preview_capture_skipped", level: .transient, details: [
                 "cached": "\(windowPreviews.count)",
                 "reason": reason,
             ])
             return
         }
+        if let overlayPresentation { pendingCaptureOverlayPresentation = overlayPresentation }
+        previewCaptureScheduler.enqueue(windowIDs.map {
+            PreviewCaptureRequest(
+                windowID: $0,
+                priority: priority ?? overlayCapturePriority(for: $0),
+                reason: reason
+            )
+        })
+    }
 
+    /// The selected card first, then the stage the overlay is showing, then the rest.
+    private func overlayCapturePriority(for windowID: CGWindowID) -> PreviewCapturePriority {
+        guard isSpaceManagerVisible else { return .overlay }
+        let space = overlaySpaceManager.spaces[safe: selectedSpaceIndex]
+        if space?.windows[safe: selectedWindowIndex]?.windowID == windowID { return .selected }
+        if space?.windows.contains(where: { $0.windowID == windowID }) == true { return .visible }
+        return .overlay
+    }
+
+    private func runPreviewCaptureBatch(
+        _ batch: [PreviewCaptureRequest],
+        completion: @escaping () -> Void
+    ) {
+        let windowIDs = batch.map(\.windowID)
+        let reason = batch.first?.reason ?? "unknown"
+        let overlayPresentation = batch.contains { $0.priority != .background }
+            ? pendingCaptureOverlayPresentation
+            : nil
+        if overlayPresentation != nil { pendingCaptureOverlayPresentation = nil }
+        let generation = previewCaptureGeneration
+        let metrics = PreviewCaptureMetrics(
+            windowIDs: windowIDs,
+            overlayPresentation: overlayPresentation,
+            overlayPresentationRecorder: overlayPresentationRecorder
+        )
         let clock = self.clock
         let captureDimension = previewCaptureDimension
+        let windowSizes = self.windowSizes
         let discarded = PreviewCaptureTally()
         let startedAt = DispatchTime.now().uptimeNanoseconds
-        previewCaptureTask = Task { [weak self, windowService] in
+        // Only ever called back on the main queue, where the scheduler lives.
+        let completion = MainQueueCompletion(run: completion)
+        Task { [weak self, windowService] in
             await windowService.captureWindowImages(
                 windowIDs: windowIDs,
+                windowSizes: windowSizes,
                 maxPointDimension: captureDimension,
                 onEnumerated: { matchedWindowIDs in
                     metrics.recordEnumeration(matchedWindowIDs: matchedWindowIDs)
@@ -3032,6 +3076,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                     discarded: discardedCount,
                     wallMilliseconds: wallMilliseconds
                 )
+                completion.run()
             }
             DiagnosticReporter.shared.report("preview_capture_completed", level: .transient, details: [
                 "requested": "\(windowIDs.count)",

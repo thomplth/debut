@@ -47,6 +47,14 @@ passed: captures per hour by reason. Capture power scales with that count. Each 
 regardless of the ScreenCaptureKit API (capbench, 2026-10-13). The rollup is emitted by the first
 batch after the hour, not by a timer.
 
+Captures go through `PreviewCaptureScheduler`: one batch in flight at a time, captured one
+window after another in priority order (selected card, its stage, other stages, background).
+Concurrent captures measured slower in total on macOS 27. A request for a window already being
+captured is dropped, and an overlay open reorders queued work instead of cancelling it.
+ScreenCaptureKit window handles are held between captures and the window list is fetched again
+only for a window that is missing; captures are sized from Debut's tracked window bounds,
+because a held handle keeps the frame it was enumerated with.
+
 ### Development-only measurements
 
 Measurements that cost real work run only when `DebutCore.version` is `0.0.0-dev` in the Debut

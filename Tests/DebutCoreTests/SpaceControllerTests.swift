@@ -1361,6 +1361,36 @@ struct SpaceControllerTests {
         keyboardSvc.simulateEvent(.escape)
     }
 
+    @Test("An overlay captures the selected card first, then its stage, then other stages")
+    func capturesInPriorityOrder() throws {
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(policy: .all)
+        let activeSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addFixtureDesktop()
+        let otherSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 909, ownerBundleID: "com.b", ownerName: "B", windowTitle: "Other"),
+            toSpaceID: otherSpaceID
+        )
+        for windowID in [CGWindowID(101), 202, 303] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
+                toSpaceID: activeSpaceID
+            )
+        }
+        controller.spaceManager.activateSpace(id: activeSpaceID)
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage(), 303: makeTestImage(), 909: makeTestImage()]
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 1 })
+        let selected = try #require(controller.overlaySpaceManager.spaces[controller.selectedSpaceIndex]
+            .windows[safe: controller.selectedWindowIndex]?.windowID)
+        let order = try #require(windowSvc.captureRequests.first)
+        #expect(order.first == selected)
+        #expect(order.last == 909, "a window on another stage comes last")
+        keyboardSvc.simulateEvent(.escape)
+    }
+
     @Test("No preview is captured before the overlay is revealed")
     func capturesWaitForOverlayReveal() {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()

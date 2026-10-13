@@ -59,3 +59,40 @@ enum ShareableContent {
         )
     }
 }
+
+/// Holds ScreenCaptureKit's window handles between captures (KHA-1080).
+///
+/// A capture needs the window's `SCWindow`, and the only way to get one is to enumerate every
+/// shareable window on the system: ~60ms at ~240 windows on macOS 27 (capbench, 2026-10-13).
+/// The 500ms snapshot above meant every overlay open, and every background capture, paid that.
+/// A held handle keeps capturing the window's current content, so the list is fetched again only
+/// when a requested window is missing, or after a capture through a handle failed.
+///
+/// A held handle's frame is from when it was enumerated, so callers size captures from the
+/// window's tracked bounds rather than from the handle.
+actor CaptureHandleCatalog<Handle: Sendable> {
+    private let identify: @Sendable (Handle) -> CGWindowID
+    private let enumerate: @Sendable () async throws -> [Handle]
+    private var handles: [CGWindowID: Handle] = [:]
+
+    init(
+        identify: @escaping @Sendable (Handle) -> CGWindowID,
+        enumerate: @escaping @Sendable () async throws -> [Handle]
+    ) {
+        self.identify = identify
+        self.enumerate = enumerate
+    }
+
+    /// The handles for `windowIDs` that exist, in the order asked.
+    func handles(for windowIDs: [CGWindowID]) async throws -> [Handle] {
+        if windowIDs.contains(where: { handles[$0] == nil }) {
+            let listed = try await enumerate()
+            handles = Dictionary(listed.map { (identify($0), $0) }, uniquingKeysWith: { first, _ in first })
+        }
+        return windowIDs.compactMap { handles[$0] }
+    }
+
+    func evict(_ windowID: CGWindowID) {
+        handles[windowID] = nil
+    }
+}

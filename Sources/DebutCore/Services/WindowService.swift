@@ -327,6 +327,15 @@ public protocol WindowService: Sendable {
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async
+    /// Captures in the order given, sizing each window from `windowSizes` (points) where it is
+    /// known. A capture's own idea of the window's frame can be older than the window (KHA-1080).
+    func captureWindowImages(
+        windowIDs: [CGWindowID],
+        windowSizes: [CGWindowID: CGSize],
+        maxPointDimension: CGFloat,
+        onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
+        onCapture: @escaping @Sendable (WindowImageCapture) -> Void
+    ) async
     func raiseWindow(windowID: CGWindowID) -> Bool
     /// Raises the window only through an element already held for it, and never searches for
     /// one. For a window on a desktop that is not showing, a search cannot find it anyway.
@@ -384,6 +393,22 @@ public extension WindowService {
     func listingRefusal(windowID: CGWindowID) -> WindowListingRefusal { .unadmitted }
 
     func withSharedAccessibilitySweep<T>(_ body: () -> T) -> T { body() }
+
+    /// Conformers that capture nothing real have no size to honour.
+    func captureWindowImages(
+        windowIDs: [CGWindowID],
+        windowSizes: [CGWindowID: CGSize],
+        maxPointDimension: CGFloat,
+        onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
+        onCapture: @escaping @Sendable (WindowImageCapture) -> Void
+    ) async {
+        await captureWindowImages(
+            windowIDs: windowIDs,
+            maxPointDimension: maxPointDimension,
+            onEnumerated: onEnumerated,
+            onCapture: onCapture
+        )
+    }
 
     /// Conformers that keep no elements have no cheaper path than their ordinary raise.
     func raiseTrackedWindow(windowID: CGWindowID) -> Bool {
