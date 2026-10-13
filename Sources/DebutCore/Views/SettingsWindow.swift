@@ -456,7 +456,9 @@ public struct SettingsView: View {
                         Text("Top").tag(BadgePlacement.top)
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 260)
+                    // A fixed width squeezed it below its natural width; AppKit then drew it past
+                    // its frame, at a different size on each relayout as sliders moved (KHA-1071).
+                    .fixedSize()
                 }
                 Text("Where each preview shows its app's icon.")
                     .font(.caption)
@@ -526,7 +528,7 @@ public struct SettingsView: View {
                         Text("Regular").tag(GlassStyle.regular)
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 220)
+                    .fixedSize()
                 }
                 Text("Native matches the macOS app switcher. Regular adds contrast over busy wallpapers.")
                     .font(.caption)

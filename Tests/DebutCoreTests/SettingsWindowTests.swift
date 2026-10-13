@@ -76,3 +76,46 @@ struct SettingsPageTitleTests {
         #expect(spread <= 1, "title tops \(tops)")
     }
 }
+
+@MainActor
+@Suite("Settings segmented pickers", .serialized)
+struct SettingsSegmentedPickerTests {
+    static func segmentedControls(in view: NSView) -> [NSSegmentedControl] {
+        (view as? NSSegmentedControl).map { [$0] } ?? view.subviews.flatMap(segmentedControls(in:))
+    }
+
+    /// Slider tracks in window coordinates. SwiftUI draws sliders itself; each leaves only a
+    /// focus ring view behind, spanning the track.
+    static func sliderTracks(in view: NSView) -> [NSRect] {
+        var rings: [NSRect] = []
+        func walk(_ v: NSView) {
+            if String(describing: type(of: v)) == "_FocusRingView" { rings.append(v.convert(v.bounds, to: nil)) }
+            v.subviews.forEach(walk)
+        }
+        walk(view)
+        return rings.filter { $0.height < 20 }
+    }
+
+    /// A segmented control squeezed below its natural width still draws at that width, past
+    /// its frame, and each relayout from a nearby slider redraws it at a different size (KHA-1071).
+    @Test("Segmented pickers get their natural width and stay inside the page", arguments: SettingsSection.allCases)
+    func segmentsKeepNaturalWidth(section: SettingsSection) throws {
+        let window = SettingsWindow(rootView: SettingsView(selectedSection: section))
+        defer { window.close() }
+        // Off-screen, so the test never draws over the desktop.
+        window.setFrameOrigin(NSPoint(x: -4000, y: -4000))
+        window.orderFrontRegardless()
+        RunLoop.main.run(until: .now + 0.3)
+        let view = try #require(window.contentView)
+        let tracks = Self.sliderTracks(in: view)
+        let trailing = tracks.map(\.maxX).max() ?? view.bounds.maxX - 24
+        for control in Self.segmentedControls(in: view) {
+            let frame = control.convert(control.bounds, to: nil)
+            let label = control.label(forSegment: 0) ?? "?"
+            #expect(frame.width >= control.intrinsicContentSize.width - 0.5,
+                "\(label) picker is \(frame.width)pt wide but draws \(control.intrinsicContentSize.width)pt")
+            #expect(frame.maxX <= trailing + 0.5, "\(label) picker ends at \(frame.maxX), page content at \(trailing)")
+        }
+    }
+}
+
