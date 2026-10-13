@@ -787,7 +787,6 @@ struct SpaceControllerTests {
 
         #expect(handlingDuration < .milliseconds(50))
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
     }
 
     @Test("Quick Cmd+Tab release switches without presenting overlay UI")
@@ -985,8 +984,8 @@ struct SpaceControllerTests {
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
     }
 
-    @Test("Visible overlay updates after asynchronous preview capture")
-    func visibleOverlayUpdatesAfterPreviewCapture() {
+    @Test("A capture landing behind the visible overlay updates its card without rebuilding the overlay")
+    func visibleOverlayUpdatesCardInPlace() {
         let windowService = DelayedCaptureWindowService(
             captureDelay: 0.35,
             capturedImage: makeTestImage()
@@ -1007,15 +1006,18 @@ struct SpaceControllerTests {
         keyboardService.simulateEvent(.cmdTabHold)
 
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
+        let rebuildsBeforeCapture = delegate.previewSets.count
+        #expect(waitUntil { DispatchQueue.main.sync { controller.previewStore.slot(for: 101).image != nil } })
         let preview = controller.windowPreviews[101]
         #expect(preview != nil)
         if let preview {
             #expect(WindowImageStatistics.holdsContent(preview))
         }
+        #expect(delegate.previewSets.count == rebuildsBeforeCapture,
+                "a preview landing must not rebuild the overlay")
     }
 
-    @Test("Window previews publish incrementally as concurrent captures finish")
+    @Test("Window previews reach their cards one at a time as concurrent captures finish")
     func previewsPublishIncrementally() {
         let windowService = DelayedCaptureWindowService(
             captureDelay: 0,
@@ -1041,10 +1043,11 @@ struct SpaceControllerTests {
         keyboardService.simulateEvent(.cmdTabHold)
 
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(delegate.overlayUpdated.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(delegate.previewSets.contains(Set([101])))
-        #expect(delegate.previewSets.last == Set([101, 202]))
+        #expect(waitUntil { DispatchQueue.main.sync {
+            controller.previewStore.slot(for: 101).image != nil
+                && controller.previewStore.slot(for: 202).image != nil
+        } })
+        #expect(delegate.previewSets.isEmpty, "no capture may rebuild the overlay")
     }
 
     // MARK: - Preview cache
@@ -2157,6 +2160,8 @@ struct SpaceControllerTests {
         keyboardService.simulateEvent(.cmdTabHold)
         keyboardService.simulateEvent(.nextWindow)
         #expect(controller.selectedWindowIndex == 2)
+        // The refresh is for an overlay on screen; before the reveal there is nothing to redraw.
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
 
         _ = controller.spaceManager.makeWindowsDormant(forOwnerPID: 22)
         controller.handleLiveWindowsRemoved()

@@ -2379,7 +2379,7 @@ struct WindowPreviewView: View {
                             metrics: metrics,
                             iconScale: appearance.iconScale
                         )
-                    } else if let cgImage = window.previewImage {
+                    } else if let cgImage = window.currentPreview {
                         Image(decorative: cgImage, scale: 1.0)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
@@ -2437,7 +2437,7 @@ struct WindowPreviewView: View {
                 if metrics.cardStyle == .previews,
                    appearance.badgePlacement != .titleRow,
                    StageMotion.showsAppIcon(bundleID: window.ownerBundleID),
-                   StageMotion.showsAppIconBadge(hasPreview: window.previewImage != nil) {
+                   StageMotion.showsAppIconBadge(hasPreview: window.currentPreview != nil) {
                     // The badge's shadow is in its bitmap, which is therefore padded and draws
                     // past the badge's box on every side. Framing that padded image directly
                     // would widen the card, so the box keeps the badge's size and the picture
@@ -2450,7 +2450,7 @@ struct WindowPreviewView: View {
                     // shape letterboxes inside the card.
                     let centre = metrics.badgeCentre(
                         in: metrics.previewImageRect(
-                            forImageAspect: window.previewImage.map {
+                            forImageAspect: window.currentPreview.map {
                                 CGFloat($0.width) / CGFloat(max(1, $0.height))
                             }
                         ),

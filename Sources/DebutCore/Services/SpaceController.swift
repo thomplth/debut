@@ -370,7 +370,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     /// Window previews captured when overlay opens
-    public private(set) var windowPreviews: [CGWindowID: CGImage] = [:]
+    public private(set) var windowPreviews: [CGWindowID: CGImage] = [:] {
+        didSet { previewStore.update(to: windowPreviews) }
+    }
+    /// The same previews, one observable slot per card, so a capture updates its card in place.
+    public let previewStore = PreviewImageStore()
     public private(set) var variedWindowPreviewIDs: Set<CGWindowID> = []
 
     /// The size each window was last discovered at, which is the shape its card takes. Read from
@@ -492,7 +496,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var previewCacheEntries: [CGWindowID: PreviewCacheEntry] = [:]
     private var pendingPreviewCaptureIDs: [CGWindowID] = []
     private let clock: @Sendable () -> Date
-    private var pendingPreviewFlush = false
     let previewFreshness: PreviewFreshnessRecorder
 
     /// Activation carries a bare window ID, so the controller has to answer the exclusion
@@ -3014,7 +3017,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                         captureDimension: captureDimension
                     )
                     self.variedWindowPreviewIDs.insert(capture.windowID)
-                    self.scheduleOverlayPreviewFlush()
+                    // The card observes its slot; only the state block needs telling.
+                    self.diag.refreshState()
                 }
             }
             let capturedCount = metrics.finish()
@@ -3034,13 +3038,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 "captured": "\(capturedCount)",
                 "reason": reason,
             ])
-
-            DispatchQueue.main.async { [weak self] in
-                guard let self,
-                      self.previewCaptureGeneration == generation
-                else { return }
-                self.scheduleOverlayPreviewFlush()
-            }
         }
     }
 
@@ -3070,20 +3067,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         else { return false }
         let previewAspect = CGFloat(preview.width) / CGFloat(preview.height)
         return abs(previewAspect / (size.width / size.height) - 1) > 0.03
-    }
-
-    /// Concurrent captures land in a burst, and each one otherwise rebuilt the whole overlay
-    /// view model. Coalescing to one rebuild per frame keeps previews streaming in without
-    /// turning a 15-window refresh into 15 full SwiftUI diffs.
-    private func scheduleOverlayPreviewFlush() {
-        guard isSpaceManagerVisible, !pendingPreviewFlush else { return }
-        pendingPreviewFlush = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
-            guard let self else { return }
-            self.pendingPreviewFlush = false
-            guard self.isSpaceManagerVisible else { return }
-            self.notifyOverlayUpdated()
-        }
     }
 
     private func commitSelection() {

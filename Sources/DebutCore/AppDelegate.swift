@@ -1203,8 +1203,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private func stageViewModel(spaceController: SpaceController) -> StageOverlayViewModel {
         var vm = StageOverlayViewModel(spaceManager: spaceController.overlaySpaceManager,
             activeSpaceIndex: spaceController.selectedSpaceIndex, selectedWindowIndex: spaceController.selectedWindowIndex,
-            windowPreviews: spaceController.windowPreviews, windowSizes: spaceController.windowSizes,
-            appearance: currentSettings, forceDisplayStackIndicator: forceDisplayStackIndicator,
+            windowPreviews: spaceController.windowPreviews, previewStore: spaceController.previewStore,
+            windowSizes: spaceController.windowSizes, appearance: currentSettings, forceDisplayStackIndicator: forceDisplayStackIndicator,
             keyboardWindowMoveAnimation: spaceController.keyboardWindowMoveAnimation,
             overlayKeyboardInteractionSequence: spaceController.overlayKeyboardInteractionSequence)
         vm.cardStyle = OverlayCardStyle(previewsAvailable: spaceController.windowPreviewsEnabled)
@@ -1216,7 +1216,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private func altTabViewModel(spaceController: SpaceController) -> AltTabOverlayViewModel {
         var vm = AltTabOverlayViewModel(entries: spaceController.altTabEntries,
             selectedIndex: spaceController.altTabSelectionIndex, windowPreviews: spaceController.windowPreviews,
-            windowSizes: spaceController.windowSizes, appearance: currentSettings,
+            previewStore: spaceController.previewStore, windowSizes: spaceController.windowSizes, appearance: currentSettings,
             overlayKeyboardInteractionSequence: spaceController.overlayKeyboardInteractionSequence)
         vm.cardStyle = OverlayCardStyle(previewsAvailable: spaceController.windowPreviewsEnabled)
         vm.tutorialScope = spaceController.activeTutorialScope

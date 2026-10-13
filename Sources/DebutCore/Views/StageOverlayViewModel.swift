@@ -8,6 +8,9 @@ public struct StageWindowData: Sendable, Identifiable {
     public let ownerName: String
     public let windowTitle: String
     public let previewImage: CGImage?
+    /// The card's live preview. A capture that lands while the overlay is up updates this slot,
+    /// and through it this card alone, instead of rebuilding the overlay (KHA-1079).
+    public let previewSlot: PreviewImageSlot?
     /// The window's own width over its height, when it has been measured. The card takes this
     /// shape; `nil` leaves it on the display's, which is what every card had before.
     public let contentAspect: CGFloat?
@@ -19,7 +22,8 @@ public struct StageWindowData: Sendable, Identifiable {
         ownerName: String,
         windowTitle: String,
         previewImage: CGImage?,
-        contentAspect: CGFloat? = nil
+        contentAspect: CGFloat? = nil,
+        previewSlot: PreviewImageSlot? = nil
     ) {
         self.id = id
         self.windowID = windowID
@@ -28,6 +32,13 @@ public struct StageWindowData: Sendable, Identifiable {
         self.windowTitle = windowTitle
         self.previewImage = previewImage
         self.contentAspect = contentAspect
+        self.previewSlot = previewSlot
+    }
+
+    /// What the card draws: the live slot when the overlay has one, else the snapshot the card
+    /// was built with (settings previews and tests build cards without a store).
+    public var currentPreview: CGImage? {
+        previewSlot.map(\.image) ?? previewImage
     }
 
     public var displayTitle: String {
@@ -40,7 +51,8 @@ public struct StageWindowData: Sendable, Identifiable {
         for window: SpaceWindow,
         previews: [CGWindowID: CGImage],
         sizes: [CGWindowID: CGSize],
-        adaptive: Bool
+        adaptive: Bool,
+        previewStore: PreviewImageStore? = nil
     ) -> StageWindowData {
         StageWindowData(
             id: window.windowID,
@@ -49,7 +61,8 @@ public struct StageWindowData: Sendable, Identifiable {
             ownerName: window.ownerName,
             windowTitle: window.windowTitle,
             previewImage: previews[window.windowID],
-            contentAspect: adaptive ? contentAspect(of: sizes[window.windowID]) : nil
+            contentAspect: adaptive ? contentAspect(of: sizes[window.windowID]) : nil,
+            previewSlot: previewStore?.slot(for: window.windowID)
         )
     }
 
@@ -101,6 +114,7 @@ public struct StageOverlayViewModel: Sendable {
     public var activeSpaceIndex: Int
     public var selectedWindowIndex: Int
     public let windowPreviews: [CGWindowID: CGImage]
+    public let previewStore: PreviewImageStore?
     /// The size each window was last discovered at. Read from `WindowInfo.bounds` rather than
     /// from a preview, which arrives asynchronously and would reshape the grid mid-overlay.
     public let windowSizes: [CGWindowID: CGSize]
@@ -136,11 +150,12 @@ public struct StageOverlayViewModel: Sendable {
 
     public var displayStackShortcutSpacing: CGFloat { 3.5 }
 
-    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], windowSizes: [CGWindowID: CGSize] = [:], appearance: AppSettings = AppSettings(), forceDisplayStackIndicator: Bool = false, keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation? = nil, overlayKeyboardInteractionSequence: Int = 0) {
+    public init(spaceManager: SpaceManager, activeSpaceIndex: Int, selectedWindowIndex: Int, windowPreviews: [CGWindowID: CGImage] = [:], previewStore: PreviewImageStore? = nil, windowSizes: [CGWindowID: CGSize] = [:], appearance: AppSettings = AppSettings(), forceDisplayStackIndicator: Bool = false, keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation? = nil, overlayKeyboardInteractionSequence: Int = 0) {
         self.spaceManager = spaceManager
         self.activeSpaceIndex = activeSpaceIndex
         self.selectedWindowIndex = selectedWindowIndex
         self.windowPreviews = windowPreviews
+        self.previewStore = previewStore
         self.windowSizes = windowSizes
         self.appearance = appearance
         self.forceDisplayStackIndicator = forceDisplayStackIndicator
@@ -164,7 +179,8 @@ public struct StageOverlayViewModel: Sendable {
             for: window,
             previews: windowPreviews,
             sizes: windowSizes,
-            adaptive: appearance.adaptiveCardSizing
+            adaptive: appearance.adaptiveCardSizing,
+            previewStore: previewStore
         )
     }
 

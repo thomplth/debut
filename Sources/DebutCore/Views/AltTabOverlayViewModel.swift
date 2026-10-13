@@ -18,6 +18,7 @@ public struct AltTabOverlayViewModel: Sendable {
         entries: [GlobalWindowEntry],
         selectedIndex: Int,
         windowPreviews: [CGWindowID: CGImage] = [:],
+        previewStore: PreviewImageStore? = nil,
         windowSizes: [CGWindowID: CGSize] = [:],
         appearance: AppSettings = AppSettings(),
         overlayKeyboardInteractionSequence: Int = 0
@@ -27,7 +28,8 @@ public struct AltTabOverlayViewModel: Sendable {
                 for: $0.window,
                 previews: windowPreviews,
                 sizes: windowSizes,
-                adaptive: appearance.adaptiveCardSizing
+                adaptive: appearance.adaptiveCardSizing,
+                previewStore: previewStore
             )
         }
         self.selectedIndex = selectedIndex
