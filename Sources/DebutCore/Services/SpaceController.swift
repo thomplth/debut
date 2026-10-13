@@ -360,6 +360,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         didSet {
             if !windowPreviewsEnabled {
                 previewCaptureScheduler.reset()
+                previewDebouncer.cancelAll()
                 previewCaptureGeneration &+= 1
                 windowPreviews.removeAll()
                 previewCacheEntries.removeAll()
@@ -412,10 +413,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// without this a card kept its shape until the user switched apps.
     public func recordWindowSize(windowID: CGWindowID, size: CGSize) {
         guard !isSpaceManagerVisible else { return }
+        let previous = windowSizes[windowID]
         windowSizes[windowID] = size
         if var frame = windowFrames[windowID] {
             frame.size = size
             windowFrames[windowID] = frame
+        }
+        // A report under a point off is rounding, not a resize the preview would show.
+        if let previous, abs(previous.width - size.width) >= 1 || abs(previous.height - size.height) >= 1 {
+            capturePreviewInBackground(windowID, reason: "resized", settled: false)
         }
         // Transient, so a drag that reports every frame refreshes the observable state block
         // without any of it reaching durable storage.
@@ -512,12 +518,24 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public var previewCaptureSuspended = false {
         didSet {
             guard previewCaptureSuspended != oldValue else { return }
-            if previewCaptureSuspended { previewCaptureScheduler.dropBackground() }
+            if previewCaptureSuspended {
+                previewCaptureScheduler.dropBackground()
+                previewDebouncer.cancelAll()
+            }
             diag.report("preview_capture_availability", details: [
                 "suspended": "\(previewCaptureSuspended)",
             ])
         }
     }
+    /// How long a window must stop changing before its debounced background capture fires.
+    public var backgroundPreviewSettleDelay: TimeInterval = PreviewCaptureDebouncer.defaultSettleDelay
+    private lazy var previewDebouncer = PreviewCaptureDebouncer(
+        delay: { [weak self] in self?.backgroundPreviewSettleDelay ?? PreviewCaptureDebouncer.defaultSettleDelay },
+        fire: { [weak self] windowID, reason in
+            guard let self, self.isOnShowingDesktop(windowID) else { return }
+            self.captureWindowPreviews(windowIDs: [windowID], reason: reason, priority: .background)
+        }
+    )
     /// The overlay open whose captures are queued, so the batch that carries them is timed
     /// against its trace.
     private var pendingCaptureOverlayPresentation: OverlayPresentationContext?
@@ -890,6 +908,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
         applyPendingExternalDesktopActivations(in: topology)
         applyDeferredSwitchActivations()
+        captureShowingDesktopsInBackground()
         applyPendingSpaceFocus()
         continueFollowingWindowMove()
         return indicatorPresentations
@@ -1987,6 +2006,12 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// Only cache focus after the callback survives the stale-switch, cycle, retired-window,
     /// and exclusion checks above. Those callbacks can name a window that is no longer focused.
     private func cacheAcceptedFocus(windowID: CGWindowID) {
+        if let previous = focusedWindowID, previous != windowID {
+            capturePreviewInBackground(previous, reason: "focus_left", settled: true)
+        }
+        if focusedWindowID != windowID {
+            capturePreviewInBackground(windowID, reason: "focus_arrived", settled: false)
+        }
         focusedWindowID = windowID
         focusedWindowFrame = windowFrames[windowID]
         focusedWindowIsFullscreen = focusedWindowFrame.map(Self.frameFillsScreen) ?? false
@@ -2741,7 +2766,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let assignedWindowIDs = spaceManager.allSpaces.flatMap { $0.windows.map(\.windowID) }
         pruneWindowPreviews(assignedWindowIDs: Set(assignedWindowIDs))
         let cachedCount = variedWindowPreviewIDs.intersection(assignedWindowIDs).count
-        pendingPreviewCaptureIDs = windowIDsNeedingCapture().filter { activeTutorialScope?.windowIDs.contains($0) ?? true }
+        let promoted = previewDebouncer.takePending().keys
+        let stale = windowIDsNeedingCapture()
+        pendingPreviewCaptureIDs = (stale + promoted.filter { !stale.contains($0) })
+            .filter { activeTutorialScope?.windowIDs.contains($0) ?? true }
         if let presentation {
             let workload = PerformanceWorkload(
                 spaces: spaceManager.spaces.count,
@@ -3107,6 +3135,63 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 "reason": reason,
             ])
         }
+    }
+
+    // MARK: - Background capture (KHA-1084)
+
+    /// Keeps a preview current between overlay opens. `settled` marks an event that is itself
+    /// evidence the change is over — focus leaving the window, a desktop switch that finished —
+    /// and captures at once. Anything else waits until the window has been quiet for
+    /// `backgroundPreviewSettleDelay`.
+    func capturePreviewInBackground(_ windowID: CGWindowID, reason: String, settled: Bool) {
+        guard windowPreviewsEnabled, !previewCaptureSuspended,
+              spaceOwningWindow(windowID: windowID) != nil
+        else { return }
+        if settled {
+            previewDebouncer.cancel(windowID)
+            captureWindowPreviews(windowIDs: [windowID], reason: reason, priority: .background)
+        } else {
+            previewDebouncer.debounce(windowID, reason: reason)
+        }
+    }
+
+    public func recordWindowTitleChange(windowID: CGWindowID) {
+        capturePreviewInBackground(windowID, reason: "title_changed", settled: false)
+    }
+
+    /// Windows discovery just found. Only one with no preview yet needs a first picture.
+    public func recordWindowsAppeared(_ windowIDs: [CGWindowID]) {
+        for windowID in windowIDs where windowPreviews[windowID] == nil {
+            capturePreviewInBackground(windowID, reason: "window_appeared", settled: false)
+        }
+    }
+
+    /// The notification fires once the switch has settled, so the windows now showing are
+    /// drawn and may have changed while they were away. A route still crossing intermediate
+    /// desktops has not arrived anywhere yet.
+    private func captureShowingDesktopsInBackground() {
+        guard !isSpaceManagerVisible,
+              spaceSwitcher?.isSwitchInFlight(stackID: spaceManager.selectedSpaceStackID) != true
+        else { return }
+        let windowIDs = showingSpaceIDs.flatMap { spaceID in
+            spaceManager.allSpaces.first { $0.id == spaceID }?.windows.map(\.windowID) ?? []
+        }
+        for windowID in windowIDs {
+            capturePreviewInBackground(windowID, reason: "desktop_settled", settled: true)
+        }
+    }
+
+    /// The desktop each connected display is showing, from the model: no window-server query.
+    private var showingSpaceIDs: Set<UUID> {
+        Set(spaceManager.connectedSpaceStacks.map(\.activeSpaceID))
+    }
+
+    /// Debut's blank captures come from windows that are not on screen, so debounced captures
+    /// only fire for windows on a showing desktop. A window focus just left is the exception:
+    /// its last frame is what the user saw, and a blank one is discarded.
+    private func isOnShowingDesktop(_ windowID: CGWindowID) -> Bool {
+        guard let spaceID = spaceOwningWindow(windowID: windowID) else { return false }
+        return showingSpaceIDs.contains(spaceID)
     }
 
     /// What each card the overlay is about to reveal will show, for `preview_freshness`.

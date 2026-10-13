@@ -55,6 +55,13 @@ ScreenCaptureKit window handles are held between captures and the window list is
 only for a window that is missing; captures are sized from Debut's tracked window bounds,
 because a held handle keeps the frame it was enumerated with.
 
+Between overlay opens, previews are kept current by window events. Focus leaving a window and
+a desktop switch that has settled capture at once: each is evidence the change is over. Focus
+arriving, a resize, a title change and a new window restart a per-window timer, and the capture
+fires once the window has been quiet for a second, and only if it is on a showing desktop. There
+is no maximum wait. An overlay open takes over any capture still waiting. Background capture
+stops while the screen is locked, the displays sleep or another session is in front.
+
 ### Development-only measurements
 
 Measurements that cost real work run only when `DebutCore.version` is `0.0.0-dev` in the Debut

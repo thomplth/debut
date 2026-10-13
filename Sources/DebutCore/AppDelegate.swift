@@ -423,6 +423,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                     "trigger": "window_created",
                 ])
                 self.reportAssignmentEvents(result.events, trigger: "window_created")
+                controller.recordWindowsAppeared(snapshot.liveWindows.map(\.windowID))
                 if result.didMutate {
                     self.debouncedSaver?.scheduleSave(controller.spaceManager)
                 }
@@ -448,7 +449,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         discovery.onWindowTitleChanged = { [weak self] windowID, newTitle in
             DispatchQueue.main.async {
                 guard let self else { return }
+                let oldTitle = self.spaceController?.spaceManager.allSpaces.lazy.flatMap(\.windows)
+                    .first { $0.windowID == windowID }?.windowTitle
                 self.spaceController?.spaceManager.updateWindowTitle(windowID: windowID, title: newTitle)
+                if oldTitle != newTitle {
+                    self.spaceController?.recordWindowTitleChange(windowID: windowID)
+                }
                 if let sm = self.spaceController?.spaceManager {
                     self.debouncedSaver?.scheduleSave(sm)
                 }
