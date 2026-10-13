@@ -137,6 +137,9 @@ private struct PreviewCacheEntry {
     let captureDimension: CGFloat
     /// The window's size when it was captured, in points; `nil` when it had not been measured.
     let windowSize: CGSize?
+    /// Which system appearance the window was drawn in: every window restyles on a light/dark
+    /// switch, so a capture from before one is stale whatever its age (KHA-1085).
+    let appearanceGeneration: Int
 
     /// Discovery and capture round sizes differently, so under a point is not a resize.
     func windowWasResized(to size: CGSize?) -> Bool {
@@ -527,6 +530,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             ])
         }
     }
+    private var appearanceGeneration = 0
+
     /// How long a window must stop changing before its debounced background capture fires.
     public var backgroundPreviewSettleDelay: TimeInterval = PreviewCaptureDebouncer.defaultSettleDelay
     private lazy var previewDebouncer = PreviewCaptureDebouncer(
@@ -2948,6 +2953,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             // Captured for another size setting: too few pixels to draw sharp, or more than
             // the overlay will ever draw.
             if entry.captureDimension != previewCaptureDimension { return window.windowID }
+            if entry.appearanceGeneration != appearanceGeneration { return window.windowID }
             // Resized since: the old picture would be drawn letterboxed in the new card shape.
             if entry.windowWasResized(to: windowSizes[window.windowID]) { return window.windowID }
             // Dirty tracking alone goes stale for windows that change without ever being
@@ -3041,6 +3047,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         )
         let clock = self.clock
         let captureDimension = previewCaptureDimension
+        // A capture that started before a light/dark switch shows the old appearance.
+        let appearanceGeneration = self.appearanceGeneration
         let windowSizes = self.windowSizes
         let discarded = PreviewCaptureTally()
         let startedAt = DispatchTime.now().uptimeNanoseconds
@@ -3109,7 +3117,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                         capturedAt: capturedAt,
                         windowTitle: window.windowTitle,
                         captureDimension: captureDimension,
-                        windowSize: windowSizes[capture.windowID]
+                        windowSize: windowSizes[capture.windowID],
+                        appearanceGeneration: appearanceGeneration
                     )
                     self.variedWindowPreviewIDs.insert(capture.windowID)
                     // The card observes its slot; only the state block needs telling.
@@ -3152,6 +3161,22 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             captureWindowPreviews(windowIDs: [windowID], reason: reason, priority: .background)
         } else {
             previewDebouncer.debounce(windowID, reason: reason)
+        }
+    }
+
+    /// Every window restyles on a light/dark switch. Previews keep showing until replaced; the
+    /// windows on a showing desktop are recaptured once they have had a moment to redraw, which
+    /// is what the settle delay gives them, and the rest at the next overlay open.
+    public func systemAppearanceDidChange() {
+        appearanceGeneration += 1
+        diag.report("preview_appearance_invalidated", details: [
+            "previews": "\(windowPreviews.count)",
+        ])
+        let showing = showingSpaceIDs.flatMap { spaceID in
+            spaceManager.allSpaces.first { $0.id == spaceID }?.windows.map(\.windowID) ?? []
+        }
+        for windowID in showing {
+            capturePreviewInBackground(windowID, reason: "appearance_changed", settled: false)
         }
     }
 

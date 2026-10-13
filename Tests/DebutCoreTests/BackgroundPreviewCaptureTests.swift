@@ -163,4 +163,27 @@ struct BackgroundPreviewCaptureTests {
         }
         #expect(waitFor { reports.events("preview_capture_batch").contains { $0["reason"] == "focus_left" } })
     }
+
+    @Test("A light/dark switch recaptures showing windows once redrawn, and the rest at the next open")
+    func appearanceChange() {
+        let (controller, service, keyboard, _, _) = makeController(settleDelay: 0.1)
+        keyboard.simulateEvent(.cmdTabHold)
+        #expect(waitFor { controller.windowPreviews.count == 3 })
+        keyboard.simulateEvent(.escape)
+        #expect(waitFor { !controller.isSpaceManagerVisible })
+        let before = service.captureRequests.count
+        let image = controller.windowPreviews[909]
+
+        DispatchQueue.main.sync { controller.systemAppearanceDidChange() }
+        #expect(controller.windowPreviews[909] === image, "the old picture stays until replaced")
+        #expect(waitFor { Set(service.captureRequests[before...].flatMap { $0 }).isSuperset(of: [101, 102]) })
+        #expect(!service.captureRequests[before...].flatMap { $0 }.contains(909), "not on a showing desktop")
+
+        let afterSettle = service.captureRequests.count
+        keyboard.simulateEvent(.cmdTabHold)
+        #expect(waitFor { service.captureRequests.count > afterSettle })
+        #expect(waitFor { service.captureRequests[afterSettle...].flatMap { $0 }.contains(909) },
+                "a window on another desktop is stale at the next open")
+        keyboard.simulateEvent(.escape)
+    }
 }

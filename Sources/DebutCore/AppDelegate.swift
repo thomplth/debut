@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SpaceControllerDelegate {
     private var spaceController: SpaceController?
     private var captureAvailability: CaptureAvailabilityMonitor?
+    private var appearanceObserver: NSObjectProtocol?
     private var overlayWindow: OverlayWindow?
     private var desktopSwitchIndicatorWindows: [String: DesktopSwitchIndicatorWindow] = [:]
     private var settingsWindow: NSWindow?
@@ -340,6 +341,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         spaceController = controller
         captureAvailability = CaptureAvailabilityMonitor { [weak controller] suspended in
             DispatchQueue.main.async { controller?.previewCaptureSuspended = suspended }
+        }
+        appearanceObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak controller] _ in
+            MainActor.assumeIsolated { controller?.systemAppearanceDidChange() }
         }
 
         keyboardService.keyBindings = currentSettings.keyBindings
