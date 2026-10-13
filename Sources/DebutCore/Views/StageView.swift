@@ -1506,10 +1506,17 @@ public struct StageOverlayView: View {
 
                 if viewModel.shouldShowDisplayStackIndicator {
                     HStack(spacing: 8) {
-                        Text(viewModel.displayStackName)
-                            .fontWeight(.semibold)
-                        Text("\(viewModel.displayStackPosition) of \(viewModel.displayStackCount)")
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            Text(viewModel.displayStackName)
+                                .fontWeight(.semibold)
+                            Text("\(viewModel.displayStackPosition) of \(viewModel.displayStackCount)")
+                                .foregroundStyle(.secondary)
+                        }
+                        // The shortcut keeps its own darkened capsule, so only the text is haloed.
+                        .titleHalo(
+                            strength: viewModel.appearance.effectiveTitleHaloStrength,
+                            size: CGFloat(viewModel.appearance.titleHaloSize)
+                        )
                         if !viewModel.displayStackShortcut.isEmpty {
                             HStack(spacing: viewModel.displayStackShortcutSpacing) {
                                 Text("⌘")
@@ -2501,32 +2508,51 @@ struct WindowTitleLabel: View {
     var haloStrength: Double = 1
     /// The halo's blur radius in points.
     var haloSize: CGFloat = 1
-    @Environment(\.colorScheme) private var colorScheme
-
-    static let haloOpacity: Double = 0.95
 
     var body: some View {
-        let text = Text(title)
+        Text(title)
             .dockGlassLabel(fontSize: fontSize)
             .lineLimit(1)
-        if haloStrength > 0 {
+            .titleHalo(strength: haloStrength, size: haloSize)
+    }
+}
+
+/// The window titles' halo, shared by every label drawn straight on overlay glass: the titles,
+/// the desktop switch indicator and the display stack indicator (KHA-1076).
+struct TitleHalo: ViewModifier {
+    /// 0 turns the halo off; 1 is two full-strength passes.
+    let strength: Double
+    /// The halo's blur radius in points.
+    let size: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    static let opacity: Double = 0.95
+
+    func body(content: Content) -> some View {
+        if strength > 0 {
             let halo = (colorScheme == .dark ? Color.black : Color.white)
-                .opacity(Self.haloOpacity * min(1, haloStrength))
+                .opacity(Self.opacity * min(1, strength))
             // Room for the halo inside the flattened image, so the blur is not clipped.
-            let inset = haloSize * 3
-            text
+            let inset = size * 3
+            content
                 // Two passes: one tight halo spreads too thin to see on busy glass.
-                .shadow(color: halo, radius: haloSize)
-                .shadow(color: halo, radius: haloSize)
-                // Flattened into one image, the halo is blurred once per title. Left live, it
+                .shadow(color: halo, radius: size)
+                .shadow(color: halo, radius: size)
+                // Flattened into one image, the halo is blurred once per label. Left live, it
                 // was re-blurred on every frame the stage animates: 3.6ms a cycling frame
                 // against 0.54ms without it, and 0.59ms flattened (KHA-1057).
                 .padding(inset)
                 .drawingGroup()
                 .padding(-inset)
         } else {
-            text
+            content
         }
+    }
+}
+
+extension View {
+    func titleHalo(strength: Double, size: CGFloat) -> some View {
+        modifier(TitleHalo(strength: strength, size: size))
     }
 }
 

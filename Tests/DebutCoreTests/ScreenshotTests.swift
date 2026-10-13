@@ -1077,6 +1077,64 @@ struct ScreenshotTests {
         #expect(vm.displayStackCount == 2)
     }
 
+    /// The display stack indicator's text carries the window titles' halo (KHA-1076). Only the
+    /// indicator's strip is measured, since the cards' titles follow the same setting.
+    @Test("The display stack indicator's text follows the title halo")
+    func displayStackIndicatorHalo() throws {
+        let size = NSSize(width: 1200, height: 600)
+        func brightest(strength: Double) throws -> CGFloat {
+            var manager = makeSampleViewModel(
+                spaceCount: 3,
+                windowsPerSpace: [3, 2, 1],
+                activeIndex: 1
+            ).spaceManager
+            manager.reconcileSpaceStacks(with: SpaceTopology(separateSpaces: true, stacks: [
+                SpaceStackDescriptor(
+                    id: "display-a", displayID: 1, displayName: "Studio Display",
+                    frame: .zero, desktopIDs: [10, 11, 12], currentDesktopID: 11
+                ),
+                SpaceStackDescriptor(
+                    id: "display-b", displayID: 2, displayName: "Built-in Display",
+                    frame: .zero, desktopIDs: [20], currentDesktopID: 20
+                ),
+            ]))
+            var appearance = AppSettings()
+            appearance.glassStyle = .clear
+            appearance.titleHaloStrength = strength
+            appearance.titleHaloSize = 1
+            let vm = StageOverlayViewModel(
+                spaceManager: manager,
+                activeSpaceIndex: 1,
+                selectedWindowIndex: 1,
+                appearance: appearance
+            )
+            let view = StageOverlayView(viewModel: vm).environment(\.colorScheme, .light)
+            let image = try #require(renderSwiftUI(view, size: size, background: 0.5))
+            return try peakBrightness(
+                image,
+                size: size,
+                in: CGRect(x: size.width / 2 - 200, y: 0, width: 400, height: 60)
+            )
+        }
+        let off = try brightest(strength: 0)
+        let on = try brightest(strength: 1)
+        #expect(on - off > 0.15, "halo on \(on), off \(off)")
+    }
+
+    /// The brightest red channel inside `region`, in top-left-origin points.
+    private func peakBrightness(_ image: NSImage, size: NSSize, in region: CGRect) throws -> CGFloat {
+        let bitmap = try #require(normalizedBitmap(image, size: size))
+        let scaleX = CGFloat(bitmap.pixelsWide) / size.width
+        let scaleY = CGFloat(bitmap.pixelsHigh) / size.height
+        var peak: CGFloat = 0
+        for y in Int(region.minY * scaleY)..<min(bitmap.pixelsHigh, Int(region.maxY * scaleY)) {
+            for x in Int(region.minX * scaleX)..<min(bitmap.pixelsWide, Int(region.maxX * scaleX)) {
+                peak = max(peak, bitmap.colorAt(x: x, y: y)!.redComponent)
+            }
+        }
+        return peak
+    }
+
     @Test(
         "Desktop switch indicator is a compact top-center capsule with configured glass",
         arguments: GlassStyle.allCases
@@ -1103,6 +1161,35 @@ struct ScreenshotTests {
                 name: "07_desktop_switch_indicator_\(glassStyle.rawValue.lowercased())_\(backgroundName)"
             )
         }
+    }
+
+    /// The indicator's label carries the window titles' halo (KHA-1076): at strength 0 nothing
+    /// lights the backdrop around a light-mode label, and at the default it visibly does.
+    @Test("The desktop switch indicator's label follows the title halo")
+    func desktopSwitchIndicatorHalo() throws {
+        let size = NSSize(width: 264, height: 96)
+        func brightest(strength: Double) throws -> CGFloat {
+            let view = DesktopSwitchIndicatorView(
+                presentation: DesktopSwitchIndicatorPresentation(
+                    stackID: "display-a",
+                    displayID: 1,
+                    displayName: "Studio Display",
+                    desktopPosition: 1,
+                    desktopCount: 4
+                ),
+                glassStyle: .clear,
+                haloStrength: strength,
+                haloSize: 1
+            )
+            .padding(DesktopSwitchIndicatorWindow.glassRenderingInset)
+            .frame(width: size.width, height: size.height)
+            .environment(\.colorScheme, .light)
+            let image = try #require(renderSwiftUI(view, size: size, background: 0.5))
+            return try peakBrightness(image, size: size, in: CGRect(origin: .zero, size: size))
+        }
+        let off = try brightest(strength: 0)
+        let on = try brightest(strength: 1)
+        #expect(on - off > 0.15, "halo on \(on), off \(off)")
     }
 
     @Test("Launch settings sections render independently", arguments: SettingsSection.allCases)

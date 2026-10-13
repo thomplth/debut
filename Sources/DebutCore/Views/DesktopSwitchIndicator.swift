@@ -88,21 +88,29 @@ public struct DesktopSwitchIndicatorView: View {
     public let presentation: DesktopSwitchIndicatorPresentation
     public let glassStyle: GlassStyle
     public let dockGlassStyle: DockGlassStyle
+    /// The window titles' halo, so the label stays as legible over clear glass as they are.
+    public let haloStrength: Double
+    public let haloSize: CGFloat
 
     public init(
         presentation: DesktopSwitchIndicatorPresentation,
         glassStyle: GlassStyle,
-        dockGlassStyle: DockGlassStyle = .native
+        dockGlassStyle: DockGlassStyle = .native,
+        haloStrength: Double = 0,
+        haloSize: CGFloat = CGFloat(AppSettings.defaultTitleHaloSize)
     ) {
         self.presentation = presentation
         self.glassStyle = glassStyle
         self.dockGlassStyle = dockGlassStyle
+        self.haloStrength = haloStrength
+        self.haloSize = haloSize
     }
 
     public var body: some View {
         Text(presentation.title)
             .font(.system(.callout, design: .rounded, weight: .semibold))
             .monospacedDigit()
+            .titleHalo(strength: haloStrength, size: haloSize)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
             .modifier(OverlayGlassCapsuleModifier(
@@ -119,12 +127,16 @@ struct DesktopSwitchIndicatorPanelContent: View {
     let presentation: DesktopSwitchIndicatorPresentation
     let glassStyle: GlassStyle
     let dockGlassStyle: DockGlassStyle
+    let haloStrength: Double
+    let haloSize: CGFloat
 
     var body: some View {
         DesktopSwitchIndicatorView(
             presentation: presentation,
             glassStyle: glassStyle,
-            dockGlassStyle: dockGlassStyle
+            dockGlassStyle: dockGlassStyle,
+            haloStrength: haloStrength,
+            haloSize: haloSize
         )
             .padding(DesktopSwitchIndicatorWindow.glassRenderingInset)
     }
@@ -188,13 +200,17 @@ public final class DesktopSwitchIndicatorWindow: NSPanel {
         on screen: NSScreen,
         glassStyle: GlassStyle,
         dockGlassStyle: DockGlassStyle = .native,
+        haloStrength: Double = 0,
+        haloSize: CGFloat = CGFloat(AppSettings.defaultTitleHaloSize),
         visibleDuration: TimeInterval = visibleDuration
     ) {
         let generation = beginPresentation()
         let content = DesktopSwitchIndicatorPanelContent(
             presentation: presentation,
             glassStyle: glassStyle,
-            dockGlassStyle: dockGlassStyle
+            dockGlassStyle: dockGlassStyle,
+            haloStrength: haloStrength,
+            haloSize: haloSize
         )
         let isOnScreen = isVisible
         let hostingView: NSHostingView<DesktopSwitchIndicatorPanelContent>

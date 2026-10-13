@@ -709,7 +709,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             presentation,
             on: screen,
             glassStyle: currentSettings.glassStyle,
-            dockGlassStyle: currentSettings.dockGlassStyle
+            dockGlassStyle: currentSettings.dockGlassStyle,
+            haloStrength: currentSettings.effectiveTitleHaloStrength,
+            haloSize: CGFloat(currentSettings.titleHaloSize)
         )
         diag.report("desktop_switch_indicator_shown", level: .transient, details: [
             "desktopCount": "\(presentation.desktopCount)",

@@ -65,7 +65,8 @@ the App icon growth curve. Magnify, the former alternative selection style, is r
 saved choice of it loads with the highlight.
 Every card in both switchers is titled in the native label style at full strength, a
 fixed 12.8 pt (the native label, at SF weight 680) at every size, centred between the card's lower edge and the plate's,
-with a tight halo in the opposite colour for legibility on clear glass. Screen Recording enables screenshot previews and
+with a tight halo in the opposite colour for legibility on clear glass. The desktop
+indicator and the display stack indicator text carry the same halo. Screen Recording enables screenshot previews and
 can affect title availability. Debut no longer captures or paints desktop
 wallpaper. Accessibility is required for global input and window control.
 
