@@ -31,6 +31,51 @@ struct PerformanceObservabilityTests {
         ))
     }
 
+    @Test("Process CPU is read in nanoseconds, matching getrusage")
+    func processCPUIsNanoseconds() throws {
+        let reader = SystemProcessResourceReader()
+        let before = try #require(reader.read())
+        let rusageBefore = Self.getrusageNanoseconds()
+        var sink = 0.0
+        let end = DispatchTime.now().uptimeNanoseconds + 200_000_000
+        while DispatchTime.now().uptimeNanoseconds < end { sink += sin(sink + 1) }
+        let after = try #require(reader.read())
+        let measured = Double(after.userCPUNanoseconds + after.systemCPUNanoseconds)
+            - Double(before.userCPUNanoseconds + before.systemCPUNanoseconds)
+        let reference = Double(Self.getrusageNanoseconds() - rusageBefore)
+        // Other suites' threads share the process, so only the order of magnitude is asserted.
+        // Mach ticks read as nanoseconds come out ~42x small on Apple Silicon (KHA-1088).
+        #expect(measured > reference * 0.5, "measured \(measured)ns, getrusage \(reference)ns, sink \(sink)")
+        #expect(measured < reference * 2, "measured \(measured)ns, getrusage \(reference)ns")
+    }
+
+    @Test("Ticks convert to nanoseconds through the timebase")
+    func tickConversion() {
+        #expect(SystemProcessResourceReader.nanoseconds(ticks: 24_000_000, numerator: 125, denominator: 3) == 1_000_000_000)
+        #expect(SystemProcessResourceReader.nanoseconds(ticks: 7, numerator: 1, denominator: 1) == 7)
+        #expect(SystemProcessResourceReader.nanoseconds(ticks: UInt64.max / 2, numerator: 125, denominator: 3) > 0)
+    }
+
+    @Test("Reading resources releases the thread ports it is handed")
+    func readingReleasesThreadPorts() throws {
+        let reader = SystemProcessResourceReader()
+        let thread = mach_thread_self()
+        defer { mach_port_deallocate(mach_task_self_, thread) }
+        var before: mach_port_urefs_t = 0
+        try #require(mach_port_get_refs(mach_task_self_, thread, MACH_PORT_RIGHT_SEND, &before) == KERN_SUCCESS)
+        for _ in 0..<50 { _ = reader.read() }
+        var after: mach_port_urefs_t = 0
+        try #require(mach_port_get_refs(mach_task_self_, thread, MACH_PORT_RIGHT_SEND, &after) == KERN_SUCCESS)
+        #expect(after == before, "send rights grew from \(before) to \(after) over 50 reads")
+    }
+
+    private static func getrusageNanoseconds() -> UInt64 {
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        func ns(_ t: timeval) -> UInt64 { UInt64(t.tv_sec) * 1_000_000_000 + UInt64(t.tv_usec) * 1_000 }
+        return ns(usage.ru_utime) + ns(usage.ru_stime)
+    }
+
     @Test("Resource deltas reject reset counters and derive CPU only from elapsed event intervals")
     func resourceDelta() {
         let old = ProcessResourceSnapshot(
