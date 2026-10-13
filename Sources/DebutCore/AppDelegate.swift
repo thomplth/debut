@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, SpaceControllerDelegate {
     private var spaceController: SpaceController?
+    private var captureAvailability: CaptureAvailabilityMonitor?
     private var overlayWindow: OverlayWindow?
     private var desktopSwitchIndicatorWindows: [String: DesktopSwitchIndicatorWindow] = [:]
     private var settingsWindow: NSWindow?
@@ -337,6 +338,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         controller.fasterDesktopSwitchingEnabled =
             currentSettings.features.fasterDesktopSwitching
         spaceController = controller
+        captureAvailability = CaptureAvailabilityMonitor { [weak controller] suspended in
+            DispatchQueue.main.async { controller?.previewCaptureSuspended = suspended }
+        }
 
         keyboardService.keyBindings = currentSettings.keyBindings
         keyboardService.quickSwitchModifiers = currentSettings.quickSwitchModifiers

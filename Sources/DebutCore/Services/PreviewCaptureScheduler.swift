@@ -82,6 +82,11 @@ final class PreviewCaptureScheduler {
         pump()
     }
 
+    /// Drops queued background work, leaving anything an open overlay asked for.
+    func dropBackground() {
+        queued = queued.filter { $0.value.request.priority != .background }
+    }
+
     /// Drops everything queued. A batch already in flight runs to the end, but its completion
     /// no longer starts another.
     func reset() {

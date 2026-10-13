@@ -499,6 +499,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private lazy var previewCaptureScheduler = PreviewCaptureScheduler { [weak self] batch, completion in
         self?.runPreviewCaptureBatch(batch, completion: completion)
     }
+    /// Set while the screen is locked, the displays sleep or another session is in front:
+    /// background captures are dropped, since they would cost the same and show nothing.
+    public var previewCaptureSuspended = false {
+        didSet {
+            guard previewCaptureSuspended != oldValue else { return }
+            if previewCaptureSuspended { previewCaptureScheduler.dropBackground() }
+            diag.report("preview_capture_availability", details: [
+                "suspended": "\(previewCaptureSuspended)",
+            ])
+        }
+    }
     /// The overlay open whose captures are queued, so the batch that carries them is timed
     /// against its trace.
     private var pendingCaptureOverlayPresentation: OverlayPresentationContext?
@@ -2954,6 +2965,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             ])
             return
         }
+        if previewCaptureSuspended, priority == .background { return }
         if let overlayPresentation { pendingCaptureOverlayPresentation = overlayPresentation }
         previewCaptureScheduler.enqueue(windowIDs.map {
             PreviewCaptureRequest(

@@ -1316,6 +1316,22 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                     width: pixelSize.width,
                     height: pixelSize.height
                 )
+                guard !PreviewCaptureRoute.isPartialFrame(
+                    width: image.width,
+                    height: image.height,
+                    requestedWidth: pixelSize.width,
+                    requestedHeight: pixelSize.height
+                ) else {
+                    DiagnosticReporter.shared.report("preview_capture_discarded", details: [
+                        "height": "\(image.height)",
+                        "reason": "partial_frame",
+                        "requestedHeight": "\(pixelSize.height)",
+                        "requestedWidth": "\(pixelSize.width)",
+                        "width": "\(image.width)",
+                        "windowID": "\(window.windowID)",
+                    ])
+                    continue
+                }
                 onCapture(WindowImageCapture(windowID: window.windowID, image: image))
             } catch {
                 // A handle can outlive its window; fetch the list again next time.

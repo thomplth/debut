@@ -47,6 +47,13 @@ enum PreviewCaptureRoute {
         }
     }
 
+    /// Captures land a pixel or two off the size asked for. A frame below 90% on either edge was
+    /// drawn mid-animation: un-minimizing draws the window scaled down inside its frame for
+    /// ~0.6s (alt-tab-macos `WindowThumbnails.isPartialFrame`). The old preview is kept.
+    static func isPartialFrame(width: Int, height: Int, requestedWidth: Int, requestedHeight: Int) -> Bool {
+        Double(width) < Double(requestedWidth) * 0.9 || Double(height) < Double(requestedHeight) * 0.9
+    }
+
     enum CaptureError: Error {
         case noImage
     }

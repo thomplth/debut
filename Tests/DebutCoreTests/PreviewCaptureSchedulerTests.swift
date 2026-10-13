@@ -103,6 +103,19 @@ struct PreviewCaptureSchedulerTests {
         #expect(harness.dispatched.count == 3, "the overlay never waits")
     }
 
+    @Test("Suspending background capture keeps what an open overlay asked for")
+    func dropBackgroundKeepsOverlay() {
+        let harness = SchedulerHarness()
+        harness.scheduler.enqueue([.init(windowID: 9, priority: .overlay, reason: "overlay_refresh")])
+        harness.scheduler.enqueue([
+            .init(windowID: 1, priority: .background, reason: "focus_left"),
+            .init(windowID: 2, priority: .selected, reason: "overlay_refresh"),
+        ])
+        harness.scheduler.dropBackground()
+        harness.completeBatch()
+        #expect(harness.lastBatchIDs == [2])
+    }
+
     @Test("Resetting drops queued work and ignores the batch in flight")
     func resetDropsQueue() {
         let harness = SchedulerHarness()
