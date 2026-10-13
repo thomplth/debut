@@ -1305,21 +1305,16 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         for captureWindow in windows {
             let window = captureWindow.window
             let filter = SCContentFilter(desktopIndependentWindow: window)
-            let configuration = SCStreamConfiguration()
             let pixelSize = PreviewCaptureSize.pixelSize(
                 contentSize: windowSizes[window.windowID] ?? filter.contentRect.size,
                 pointPixelScale: CGFloat(filter.pointPixelScale),
                 maxPointDimension: maxPointDimension
             )
-            configuration.width = pixelSize.width
-            configuration.height = pixelSize.height
-            configuration.showsCursor = false
-            configuration.captureResolution = .best
-
             do {
-                let image = try await SCScreenshotManager.captureImage(
-                    contentFilter: filter,
-                    configuration: configuration
+                let image = try await PreviewCaptureRoute.capture(
+                    filter: filter,
+                    width: pixelSize.width,
+                    height: pixelSize.height
                 )
                 onCapture(WindowImageCapture(windowID: window.windowID, image: image))
             } catch {
