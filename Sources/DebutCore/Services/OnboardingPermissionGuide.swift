@@ -272,7 +272,10 @@ struct PermissionGuideView: View {
             .frame(height: 52)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
             .contentShape(RoundedRectangle(cornerRadius: 10))
-            .onDrag { NSItemProvider(object: appURL as NSURL) }
+            .overlay {
+                // The Restart button needs its clicks; there is nothing to drag then anyway.
+                if !requiresRelaunch { FileDragSource(url: appURL) }
+            }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Drag \(appName) into the System Settings permission list")
 
@@ -288,5 +291,44 @@ struct PermissionGuideView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(.primary.opacity(0.12)))
+    }
+}
+
+/// Drags the file itself. SwiftUI's `onDrag` hands the drop a copy of the whole bundle in
+/// ~/Library/Caches/com.apple.SwiftUI.Drag-<UUID>, which System Settings then lists in place of
+/// the installed app, and which LaunchServices registers as a second Debut (KHA-1074).
+private struct FileDragSource: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> FileDragSourceView { FileDragSourceView(url: url) }
+    func updateNSView(_ view: FileDragSourceView, context: Context) { view.url = url }
+}
+
+final class FileDragSourceView: NSView, NSDraggingSource {
+    var url: URL
+
+    init(url: URL) {
+        self.url = url
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    // The guide is a nonactivating panel; the first click must start the drag.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) {}
+
+    override func mouseDragged(with event: NSEvent) {
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        let location = convert(event.locationInWindow, from: nil)
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        item.setDraggingFrame(CGRect(x: location.x - 16, y: location.y - 16, width: 32, height: 32),
+                              contents: icon)
+        beginDraggingSession(with: [item], event: event, source: self)
+    }
+
+    func draggingSession(_ session: NSDraggingSession,
+                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .outsideApplication ? [.copy, .link, .generic] : []
     }
 }

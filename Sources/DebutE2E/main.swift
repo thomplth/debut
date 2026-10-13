@@ -1767,6 +1767,160 @@ if CommandLine.arguments.dropFirst().first == "window-audit-desktops" {
     exit(0)
 }
 
+/// Receives the permission guide's drag the way any file drop target does, so the check sees
+/// exactly what System Settings is handed.
+final class GuideDropTarget: NSView {
+    var received: [URL] = []
+    var offeredTypes: [String] = []
+    var offeredOperations: NSDragOperation = []
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.fileURL, .URL])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        offeredTypes = sender.draggingPasteboard.types?.map(\.rawValue) ?? []
+        offeredOperations = sender.draggingSourceOperationMask
+        return [.copy, .link, .generic].first { offeredOperations.contains($0) } ?? []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        received = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return !received.isEmpty
+    }
+}
+
+/// Bundles SwiftUI's drag machinery copied into the user's caches, one folder per drag.
+func swiftUIDragCopies() -> Set<String> {
+    let caches = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches")
+    let folders = (try? FileManager.default.contentsOfDirectory(atPath: caches.path)) ?? []
+    return Set(folders.filter { $0.hasPrefix("com.apple.SwiftUI.Drag-") }.flatMap { folder in
+        ((try? FileManager.default.contentsOfDirectory(atPath: caches.appendingPathComponent(folder).path)) ?? [])
+            .map { "\(folder)/\($0)" }
+    })
+}
+
+/// Posts a left-button drag from a background thread, so the main thread stays free to answer
+/// the drop as a destination while the drag is in flight.
+func postBackgroundDrag(from start: CGPoint, to end: CGPoint, done: @escaping @Sendable () -> Void) {
+    Thread.detachNewThread {
+        func post(_ type: CGEventType, _ point: CGPoint) {
+            CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)?
+                .post(tap: .cghidEventTap)
+        }
+        post(.leftMouseDown, start)
+        Thread.sleep(forTimeInterval: 0.25)
+        for step in 1...24 {
+            let progress = CGFloat(step) / 24
+            post(.leftMouseDragged, CGPoint(x: start.x + (end.x - start.x) * progress,
+                                            y: start.y + (end.y - start.y) * progress))
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        Thread.sleep(forTimeInterval: 0.3)
+        post(.leftMouseUp, end)
+        done()
+    }
+}
+
+/// The guide's drag tile, from the window server: the guide is Debut's only floating-level
+/// window, and the tile spans its vertical middle (59-111pt of 154). Its label is not reachable
+/// through AX, which skips the borderless nonactivating panel.
+@MainActor
+func permissionGuideDragTileFrame() -> CGRect? {
+    guard let pid = onboardingApplication?.processIdentifier,
+          let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+            as? [[String: Any]] else { return nil }
+    for window in windows {
+        guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+              (window[kCGWindowLayer as String] as? NSNumber)?.intValue == Int(CGWindowLevelForKey(.floatingWindow)),
+              let bounds = window[kCGWindowBounds as String] as? NSDictionary,
+              let frame = CGRect(dictionaryRepresentation: bounds),
+              frame.height > 100, frame.height < 200 else { continue }
+        return CGRect(x: frame.minX + 15, y: frame.minY + 59, width: frame.width - 30, height: 52)
+    }
+    return nil
+}
+
+// KHA-1074: the drop must receive the installed Debut.app. SwiftUI's onDrag handed it a copy of the
+// whole bundle in ~/Library/Caches/com.apple.SwiftUI.Drag-<UUID>, which System Settings then
+// listed and LaunchServices registered as a second Debut.
+if CommandLine.arguments.dropFirst().first == "onboarding-guide-drag-check" {
+    currentGroup = "permissions"
+    currentScenario = "onboarding-guide-drag"
+    let installed = debutApplicationURL().resolvingSymlinksInPath()
+    let copiesBefore = swiftUIDragCopies()
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.accessory)
+    NSApp.finishLaunching()
+
+    clearOnboardingProgress()
+    clearDiagnosticFile()
+    onboardingApplication = launchDebut(arguments: ["--show-onboarding"])
+    let pressed = waitFor(timeout: 10) { onboardingButton("Allow Accessibility") != nil }
+        && onboardingPress("Allow Accessibility")
+    var tileFrame: CGRect?
+    _ = waitFor(timeout: 15) {
+        tileFrame = permissionGuideDragTileFrame()
+        return tileFrame.map { $0.width > 0 && $0.height > 0 } ?? false
+    }
+
+    let visible = (NSScreen.screens.first { $0.displayID == CGMainDisplayID() } ?? NSScreen.main)?.visibleFrame
+        ?? CGRect(x: 0, y: 0, width: 1440, height: 875)
+    let primaryHeight = NSScreen.screens.first?.frame.height ?? visible.maxY
+    let dropFrame = CGRect(x: visible.minX + 40, y: visible.maxY - 260, width: 240, height: 220)
+    let dropWindow = NSWindow(contentRect: dropFrame, styleMask: .borderless, backing: .buffered, defer: false)
+    let target = GuideDropTarget(frame: CGRect(origin: .zero, size: dropFrame.size))
+    dropWindow.contentView = target
+    dropWindow.level = .floating
+    dropWindow.backgroundColor = .systemTeal
+    dropWindow.isReleasedWhenClosed = false
+    dropWindow.orderFrontRegardless()
+    // Global CG coordinates put the origin at the primary display's top-left.
+    let dropPoint = CGPoint(x: dropFrame.midX, y: primaryHeight - dropFrame.midY)
+
+    var dragFinished = false
+    if let tileFrame, pressed {
+        let start = CGPoint(x: tileFrame.minX + 30, y: tileFrame.midY)
+        let finished = LockedFlag()
+        postBackgroundDrag(from: start, to: dropPoint) { finished.set() }
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline, !(finished.value && !target.received.isEmpty) {
+            if let event = NSApp.nextEvent(matching: .any, until: Date().addingTimeInterval(0.05),
+                                           inMode: .default, dequeue: true) {
+                NSApp.sendEvent(event)
+            }
+            if finished.value, target.received.isEmpty, deadline.timeIntervalSinceNow < 10 { break }
+        }
+        dragFinished = finished.value
+    }
+    let newCopies = swiftUIDragCopies().subtracting(copiesBefore).sorted()
+    let receivedPaths = target.received.map { $0.resolvingSymlinksInPath().path }
+    info("  Allow Accessibility pressed: \(pressed); guide tile frame: \(tileFrame.map { "\($0)" } ?? "none")")
+    info("  Drop target \(dropFrame) at CG \(dropPoint); drag finished: \(dragFinished)")
+    info("  Offered types: \(target.offeredTypes); operations: \(target.offeredOperations.rawValue)")
+    info("  Installed app: \(installed.path); received: \(receivedPaths)")
+    info("  New SwiftUI drag copies: \(newCopies)")
+    _ = takeScreenshot("onboarding_guide_drag")
+    dropWindow.close()
+    _ = terminateDebutAndWait()
+
+    let passed = pressed && tileFrame != nil && receivedPaths == [installed.path] && newCopies.isEmpty
+    print("Permission guide drag: \(passed ? "PASS" : "FAIL")")
+    recordCheck("The permission guide drags the installed Debut, not a copy", status: passed ? "passed" : "failed")
+    exit(passed ? 0 : 1)
+}
+
+final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    var value: Bool { lock.withLock { flag } }
+    func set() { lock.withLock { flag = true } }
+}
+
 // MARK: - Main
 
 header("Debut E2E — Screen Interaction Tests")

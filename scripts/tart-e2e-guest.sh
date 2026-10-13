@@ -190,6 +190,21 @@ FROM access WHERE client='$client' AND service IN ('kTCCServiceAccessibility','k
     echo "PASS: Debut cleared the stale grants at launch"
 }
 
+# SwiftUI's onDrag copied the whole dragged bundle into the user's caches (KHA-1074), and
+# LaunchServices registers every copy as another Debut, after which DebutE2E refuses to pick one.
+remove_swiftui_drag_copies() {
+    local lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+    local folder bundle
+    for folder in "$console_home"/Library/Caches/com.apple.SwiftUI.Drag-*; do
+        [[ -d "$folder" ]] || continue
+        for bundle in "$folder"/*.app; do
+            [[ -d "$bundle" ]] && as_console "$lsregister" -u "$bundle" 2>/dev/null || true
+        done
+        echo "Removing SwiftUI drag copy $folder"
+        as_console rm -rf "$folder"
+    done
+}
+
 grant_post_event() {
     local client="$1"
     local signed_path="${2:-}"
@@ -415,6 +430,13 @@ for denied_permission in accessibility capture desktop stale; do
     fi
     if [[ "$denied_permission" == stale ]] && ! stale_grants_cleared "$bundle_id"; then
         status=1
+    fi
+    if [[ "$denied_permission" == accessibility ]]; then
+        echo "Checking the permission guide's drag..."
+        if ! as_console env HOME="$console_home" "$E2E_SOURCE" onboarding-guide-drag-check; then
+            status=1
+        fi
+        remove_swiftui_drag_copies
     fi
     if [[ -d /tmp/debut-e2e-screenshots ]]; then
         ditto /tmp/debut-e2e-screenshots "$RESULTS_DIR/screenshots"
