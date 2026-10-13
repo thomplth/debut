@@ -39,8 +39,7 @@ struct BridgedWindowManagementTests {
         let service = SpaceService()
         let desktops = service.userDesktops()
 
-        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = OffDesktopWindow()
         // Closing an NSWindow releases it by default, which over-releases the reference this
         // test still holds and segfaults the *next* test rather than this one.
         window.isReleasedWhenClosed = false
@@ -62,8 +61,7 @@ struct BridgedWindowManagementTests {
         let service = SpaceService()
         try #require(!service.userDesktops().isEmpty)
 
-        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = OffDesktopWindow()
         // Closing an NSWindow releases it by default, which over-releases the reference this
         // test still holds and segfaults the *next* test rather than this one.
         window.isReleasedWhenClosed = false

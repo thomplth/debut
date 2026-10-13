@@ -825,8 +825,7 @@ struct SpaceServiceWindowEnumerationTests {
         let service = SpaceService()
         let target = try #require(service.userDesktops().first)
 
-        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = OffDesktopWindow()
         // Closing an NSWindow releases it by default, which over-releases the reference this
         // test still holds and segfaults the *next* test rather than this one.
         window.isReleasedWhenClosed = false
@@ -849,8 +848,7 @@ struct SpaceServiceWindowEnumerationTests {
         let service = SpaceService()
         let desktops = service.userDesktops()
 
-        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = OffDesktopWindow()
         window.isReleasedWhenClosed = false
         window.orderFront(nil)
         defer { window.close() }
@@ -879,8 +877,7 @@ struct SpaceServiceWindowEnumerationTests {
         let service = SpaceService()
         #expect(service.userDesktops().count >= 2)
 
-        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = OffDesktopWindow()
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert(.canJoinAllSpaces)
         window.orderFront(nil)
@@ -904,8 +901,7 @@ struct SpaceServiceWindowEnumerationTests {
         let service = SpaceService()
         #expect(service.userDesktops().count >= 2)
 
-        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = OffDesktopWindow()
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert(.canJoinAllSpaces)
         window.orderFront(nil)

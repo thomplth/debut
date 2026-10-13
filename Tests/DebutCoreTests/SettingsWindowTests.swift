@@ -42,7 +42,7 @@ struct SettingsPageTitleTests {
     static func titleTop(of section: SettingsSection) throws -> CGFloat {
         let window = SettingsWindow(rootView: SettingsView(selectedSection: section))
         window.appearance = NSAppearance(named: .aqua)
-        window.alphaValue = 0
+        OffDesktop.hide(window)
         defer { window.close() }
         window.orderFrontRegardless()
         RunLoop.main.run(until: .now + 0.3)
@@ -102,8 +102,8 @@ struct SettingsSegmentedPickerTests {
     func segmentsKeepNaturalWidth(section: SettingsSection) throws {
         let window = SettingsWindow(rootView: SettingsView(selectedSection: section))
         defer { window.close() }
-        // Off-screen, so the test never draws over the desktop.
-        window.setFrameOrigin(NSPoint(x: -4000, y: -4000))
+        // A titled window is pulled back onto a display when ordered in, so it is also hidden.
+        OffDesktop.hide(window)
         window.orderFrontRegardless()
         RunLoop.main.run(until: .now + 0.3)
         let view = try #require(window.contentView)

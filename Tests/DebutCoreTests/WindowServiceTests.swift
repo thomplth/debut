@@ -932,8 +932,7 @@ struct WindowServiceTests {
     @MainActor
     @Test("Debut's own window is raised before returning, never from the raise queue")
     func ownWindowRaisesOnCaller() {
-        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 120, height: 80),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = OffDesktopWindow()
         window.isReleasedWhenClosed = false
         defer { window.close() }
         let service = AccessibilityWindowService()

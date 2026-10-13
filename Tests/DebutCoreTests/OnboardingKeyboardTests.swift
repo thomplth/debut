@@ -83,10 +83,10 @@ struct PermissionGuidePlacementTests {
 
     @Test("Refreshing the guide's content keeps the panel at the frame placement gave it")
     func contentRefreshKeepsFrame() {
-        let frame = CGRect(x: 400, y: 200, width: 420, height: 154)
+        let frame = CGRect(origin: OffDesktop.origin, size: CGSize(width: 420, height: 154))
         let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false)
-        panel.alphaValue = 0
+        OffDesktop.hide(panel)
         defer { panel.close() }
         func guide(_ requiresRelaunch: Bool) -> PermissionGuideView {
             PermissionGuideView(permission: .screenRecording, requiresRelaunch: requiresRelaunch,

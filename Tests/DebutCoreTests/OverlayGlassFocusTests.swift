@@ -64,13 +64,14 @@ struct OverlayGlassFocusTests {
 
     static func host(style: GlassStyle, dockGlassStyle: DockGlassStyle) -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: -6000, y: -6000, width: 400, height: 200),
+            contentRect: NSRect(origin: OffDesktop.origin, size: CGSize(width: 400, height: 200)),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
         window.isOpaque = false
         window.backgroundColor = .clear
+        window.ignoresMouseEvents = true
         window.contentView = NSHostingView(rootView: Color.clear
             .frame(width: 300, height: 120)
             .modifier(OverlayGlassModifier(

@@ -184,8 +184,7 @@ struct OverlayWindowTests {
 
     @Test("The overlay opens on the display it was pointed at")
     func showOverlayUsesTargetDisplayFrame() async throws {
-        let screen = try #require(NSScreen.main ?? NSScreen.screens.first)
-        let target = screen.frame.insetBy(dx: 120, dy: 120)
+        let target = OffDesktop.frame(width: 1_200, height: 700)
         let window = OverlayWindow()
         window.targetScreenFrame = target
 
@@ -250,7 +249,7 @@ struct OverlayWindowTests {
 
     @Test("Reveal completion is delivered after ordering and rendering")
     func revealCompletion() async {
-        let window = OverlayWindow()
+        let window = OverlayWindow.offDesktop()
         _ = window.update(viewModel: StageOverlayViewModel(
             spaceManager: SpaceManager(),
             activeSpaceIndex: 0,
@@ -271,7 +270,7 @@ struct OverlayWindowTests {
     /// Escape closes the system switcher at once; only a release fades (KHA-856).
     @Test("Hiding without a fade takes the overlay off screen before returning")
     func hideIsImmediate() async {
-        let window = OverlayWindow()
+        let window = OverlayWindow.offDesktop()
         _ = window.update(viewModel: StageOverlayViewModel(
             spaceManager: SpaceManager(),
             activeSpaceIndex: 0,
@@ -293,7 +292,7 @@ struct OverlayWindowTests {
     /// the fade is a layer animation the render server runs to the end (KHA-856).
     @Test("A release fade runs in Core Animation and orders the overlay out when it ends")
     func releaseFadeRunsInCoreAnimation() async throws {
-        let window = OverlayWindow()
+        let window = OverlayWindow.offDesktop()
         _ = window.update(viewModel: StageOverlayViewModel(
             spaceManager: SpaceManager(),
             activeSpaceIndex: 0,
@@ -314,7 +313,7 @@ struct OverlayWindowTests {
 
     @Test("Showing again during a release fade keeps the overlay up")
     func showCancelsReleaseFade() async throws {
-        let window = OverlayWindow()
+        let window = OverlayWindow.offDesktop()
         _ = window.update(viewModel: StageOverlayViewModel(
             spaceManager: SpaceManager(),
             activeSpaceIndex: 0,
@@ -341,7 +340,7 @@ struct OverlayWindowTests {
 
     @Test("The overlay appears at full opacity, without a fade in")
     func showIsImmediate() {
-        let window = OverlayWindow()
+        let window = OverlayWindow.offDesktop()
         _ = window.update(viewModel: StageOverlayViewModel(
             spaceManager: SpaceManager(),
             activeSpaceIndex: 0,
@@ -360,7 +359,7 @@ struct OverlayWindowTests {
         // Debut is an accessory app, so it is usually inactive when the overlay
         // is shown. A borderless window cannot become key, so asking for key
         // status buys nothing and leaves ordering subject to app activation.
-        let window = OverlayWindow()
+        let window = OverlayWindow.offDesktop()
         _ = window.update(viewModel: StageOverlayViewModel(
             spaceManager: SpaceManager(),
             activeSpaceIndex: 0,
