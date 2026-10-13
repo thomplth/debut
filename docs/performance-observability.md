@@ -62,6 +62,12 @@ fires once the window has been quiet for a second, and only if it is on a showin
 is no maximum wait. An overlay open takes over any capture still waiting. Background capture
 stops while the screen is locked, the displays sleep or another session is in front.
 
+At an overlay open, the window in use when the shortcut was pressed is captured straight away,
+before the reveal, since focus has not left it and no background capture has seen its current
+content; everything else that is stale is captured after the reveal. Age alone (the TTL) makes a
+preview stale only for a window on a showing desktop; a window elsewhere is refreshed when its
+desktop settles into view.
+
 ### Development-only measurements
 
 Measurements that cost real work run only when `DebutCore.version` is `0.0.0-dev` in the Debut

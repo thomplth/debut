@@ -238,21 +238,22 @@ struct PreviewFreshnessTests {
         #expect(spin { reports.events("preview_freshness").count == 1 })
         let cold = try #require(reports.events("preview_freshness").first)
         #expect(cold["withPreview"] == "0")
-        #expect(cold["fillsAfterReveal"] == "2")
+        // The front window's capture starts at the press and may land either side of the reveal.
+        #expect((Int(cold["fillsAfterReveal"] ?? "") ?? 0) >= 1)
 
+        let batchesBefore = reports.events("preview_capture_batch").count
         keyboardService.simulateEvent(.cmdTabHold)
-        #expect(spin { windowService.captureRequests.count == 2 })
         // Only the front window is recaptured; the other card is served from the cache.
-        #expect(spin { reports.events("preview_capture_batch").count == 2 })
+        #expect(spin { reports.events("preview_capture_batch").count == batchesBefore + 1 })
         keyboardService.simulateEvent(.escape)
         #expect(spin { reports.events("preview_freshness").count == 2 })
         let warm = try #require(reports.events("preview_freshness").last)
         #expect(warm["withPreview"] == "2")
-        #expect(warm["pendingCaptures"] == "1")
-        #expect(warm["replacementsAfterReveal"] == "1")
+        #expect(warm["pendingCaptures"] == "0", "the front window is no longer left for after the reveal")
         #expect(warm["fillsAfterReveal"] == "0")
+        #expect((Int(warm["replacementsAfterReveal"] ?? "") ?? 9) <= 1)
         let batch = try #require(reports.events("preview_capture_batch").last)
-        #expect(batch["reason"] == "overlay_refresh")
+        #expect(batch["reason"] == "overlay_front_window")
         #expect(batch["requested"] == "1")
         #expect(batch["captured"] == "1")
     }

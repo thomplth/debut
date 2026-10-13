@@ -2775,6 +2775,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let stale = windowIDsNeedingCapture()
         pendingPreviewCaptureIDs = (stale + promoted.filter { !stale.contains($0) })
             .filter { activeTutorialScope?.windowIDs.contains($0) ?? true }
+        startFrontWindowCapture(overlayPresentation: presentation)
         if let presentation {
             let workload = PerformanceWorkload(
                 spaces: spaceManager.spaces.count,
@@ -2957,8 +2958,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             // Resized since: the old picture would be drawn letterboxed in the new card shape.
             if entry.windowWasResized(to: windowSizes[window.windowID]) { return window.windowID }
             // Dirty tracking alone goes stale for windows that change without ever being
-            // activated — video, chat, dashboards.
-            if now.timeIntervalSince(entry.capturedAt) >= previewCacheTTL { return window.windowID }
+            // activated — video, chat, dashboards. Age is a guess rather than evidence, so it
+            // only pays for a window on screen; one on another desktop is captured when that
+            // desktop settles into view (KHA-1086).
+            if now.timeIntervalSince(entry.capturedAt) >= previewCacheTTL,
+               isOnShowingDesktop(window.windowID) {
+                return window.windowID
+            }
             return nil
         }
     }
@@ -3144,6 +3150,24 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 "reason": reason,
             ])
         }
+    }
+
+    /// The window in use when the shortcut was pressed is the one card background capture can
+    /// never have seen: focus has not left it. Its capture starts here rather than after the
+    /// reveal, so it can land before the card is drawn. It no longer competes with the reveal
+    /// for the main queue: held handles spare the enumeration, the capture runs off main, and a
+    /// landing preview updates one card slot instead of rebuilding the overlay (KHA-1086).
+    private func startFrontWindowCapture(overlayPresentation: OverlayPresentationContext?) {
+        guard let frontWindowID = spaceManager.activeSpace.windows.first?.windowID,
+              let index = pendingPreviewCaptureIDs.firstIndex(of: frontWindowID)
+        else { return }
+        pendingPreviewCaptureIDs.remove(at: index)
+        captureWindowPreviews(
+            windowIDs: [frontWindowID],
+            overlayPresentation: overlayPresentation,
+            reason: "overlay_front_window",
+            priority: .selected
+        )
     }
 
     // MARK: - Background capture (KHA-1084)

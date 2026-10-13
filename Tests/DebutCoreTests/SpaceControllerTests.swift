@@ -162,6 +162,12 @@ private func waitUntil(
     return condition()
 }
 
+/// Every window asked for by capture calls made after the first `since` calls. An overlay open
+/// can make two: the front window at the press, the rest after the reveal (KHA-1086).
+private func requestedIDs(_ service: MockWindowService, since mark: Int) -> Set<CGWindowID> {
+    Set(service.captureRequests.dropFirst(mark).flatMap { $0 })
+}
+
 @Suite("SpaceController", .serialized)
 struct SpaceControllerTests {
 
@@ -1150,12 +1156,13 @@ struct SpaceControllerTests {
         keyboardSvc.simulateEvent(.escape)
 
         let frontWindowID = try #require(controller.spaceManager.activeSpace.windows.first?.windowID)
+        let mark = windowSvc.captureRequests.count
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
-
-        let secondRequest = Set(try #require(windowSvc.captureRequests.last))
-        #expect(secondRequest == [frontWindowID], "Only the last active window should be re-captured")
+        #expect(waitUntil { requestedIDs(windowSvc, since: mark).contains(frontWindowID) })
+        Thread.sleep(forTimeInterval: 0.2)
+        #expect(requestedIDs(windowSvc, since: mark) == [frontWindowID],
+                "Only the last active window should be re-captured")
         #expect(controller.windowPreviews.count == 3, "Cached previews must survive a partial refresh")
         keyboardSvc.simulateEvent(.escape)
     }
@@ -1179,13 +1186,13 @@ struct SpaceControllerTests {
         #expect(waitUntil { controller.windowPreviews.count == 3 })
 
         controller.previewCaptureDimension = 650
+        let mark = windowSvc.captureRequests.count
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
-
-        #expect(Set(try #require(windowSvc.captureRequests.last)) == [101, 202, 303],
+        #expect(waitUntil { requestedIDs(windowSvc, since: mark) == [101, 202, 303] },
                 "Every preview captured at the old size must be recaptured")
-        #expect(windowSvc.captureDimensions == [245, 650])
+        #expect(windowSvc.captureDimensions.first == 245)
+        #expect(windowSvc.captureDimensions.dropFirst(mark).allSatisfy { $0 == 650 })
         keyboardSvc.simulateEvent(.escape)
     }
 
@@ -1214,11 +1221,12 @@ struct SpaceControllerTests {
         // With the active space emptied there is no last-active window left to refresh.
         controller.spaceManager.removeWindow(windowID: 101, fromSpaceID: activeSpaceID)
         controller.spaceManager.activateSpace(id: activeSpaceID)
+        let mark = windowSvc.captureRequests.count
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         Thread.sleep(forTimeInterval: 0.2)
-        #expect(windowSvc.captureRequests.count == 1, "A fully cached activation must not enumerate or capture")
+        #expect(windowSvc.captureRequests.count == mark, "A fully cached activation must not enumerate or capture")
         #expect(controller.windowPreviews[202] != nil)
         keyboardSvc.simulateEvent(.escape)
     }
@@ -1246,11 +1254,11 @@ struct SpaceControllerTests {
         keyboardSvc.simulateEvent(.escape)
 
         controller.spaceManager.updateWindowTitle(windowID: 202, title: "Inbox (3)")
+        let mark = windowSvc.captureRequests.count
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
-        #expect(Set(windowSvc.captureRequests[1]).contains(202), "A retitled window is stale")
+        #expect(waitUntil { requestedIDs(windowSvc, since: mark).contains(202) }, "A retitled window is stale")
         keyboardSvc.simulateEvent(.escape)
     }
 
@@ -1284,50 +1292,50 @@ struct SpaceControllerTests {
             controller.recordWindowSize(windowID: 202, size: CGSize(width: 1200, height: 600))
             controller.recordWindowSize(windowID: 303, size: CGSize(width: 800.4, height: 600))
         }
+        let mark = windowSvc.captureRequests.count
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
-        #expect(Set(windowSvc.captureRequests[1]).contains(202), "a resized window is stale")
-        #expect(!Set(windowSvc.captureRequests[1]).contains(303), "a sub-point difference is not a resize")
+        #expect(waitUntil { requestedIDs(windowSvc, since: mark).contains(202) }, "a resized window is stale")
+        Thread.sleep(forTimeInterval: 0.2)
+        #expect(!requestedIDs(windowSvc, since: mark).contains(303), "a sub-point difference is not a resize")
         keyboardSvc.simulateEvent(.escape)
     }
 
-    @Test("A preview older than the cache TTL is re-captured")
+    @Test("An expired preview is re-captured on a showing desktop and left alone on another")
     func ttlExpiryForcesRecapture() {
         let clock = TestClock()
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(ttl: 60, clock: clock)
         let activeSpaceID = controller.spaceManager.spaces[0].id
         controller.spaceManager.addFixtureDesktop()
         let otherSpaceID = controller.spaceManager.spaces[1].id
-        controller.spaceManager.addWindow(
-            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
-            toSpaceID: activeSpaceID
-        )
+        for windowID in [CGWindowID(101), 303] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T\(windowID)"),
+                toSpaceID: activeSpaceID
+            )
+        }
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
             toSpaceID: otherSpaceID
         )
         controller.spaceManager.activateSpace(id: activeSpaceID)
-        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage(), 303: makeTestImage()]
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { controller.windowPreviews.count == 2 })
+        #expect(waitUntil { controller.windowPreviews.count == 3 })
         keyboardSvc.simulateEvent(.escape)
-
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
-        #expect(!Set(windowSvc.captureRequests[1]).contains(202), "A fresh preview is still good")
-        keyboardSvc.simulateEvent(.escape)
+        let afterFirstOpen = windowSvc.captureRequests.count
 
         clock.advance(by: 61)
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests.count == 3 })
-        #expect(Set(windowSvc.captureRequests[2]).contains(202), "An expired preview must be refreshed")
+        #expect(waitUntil { windowSvc.captureRequests[afterFirstOpen...].flatMap { $0 }.contains(303) },
+                "an expired preview on a showing desktop must be refreshed")
+        #expect(!windowSvc.captureRequests[afterFirstOpen...].flatMap { $0 }.contains(202),
+                "age alone does not justify capturing a window that is not on screen")
         keyboardSvc.simulateEvent(.escape)
     }
 
@@ -1342,10 +1350,12 @@ struct SpaceControllerTests {
             SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
             toSpaceID: activeSpaceID
         )
+        // On the showing desktop but not in front, so only its age makes it stale.
         controller.spaceManager.addWindow(
             SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"),
-            toSpaceID: otherSpaceID
+            toSpaceID: activeSpaceID
         )
+        _ = otherSpaceID
         controller.spaceManager.activateSpace(id: activeSpaceID)
 
         let staleImage = makeTestImage()
@@ -1357,20 +1367,20 @@ struct SpaceControllerTests {
 
         clock.advance(by: 61)
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeBlankWindowCaptureImage()]
+        let expiredMark = windowSvc.captureRequests.count
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
-        #expect(waitUntil { Set(windowSvc.captureRequests[1]).contains(202) })
+        #expect(waitUntil { requestedIDs(windowSvc, since: expiredMark).contains(202) })
         #expect(controller.windowPreviews[202] === staleImage,
                 "A corrupt refresh must not evict the last good preview")
         keyboardSvc.simulateEvent(.escape)
 
         let refreshedImage = makeTestImage()
         windowSvc.capturedImages = [101: makeTestImage(), 202: refreshedImage]
+        let retryMark = windowSvc.captureRequests.count
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests.count == 3 })
-        #expect(Set(try #require(windowSvc.captureRequests.last)).contains(202),
+        #expect(waitUntil { requestedIDs(windowSvc, since: retryMark).contains(202) },
                 "A failed refresh must leave the stale preview eligible for retry")
         #expect(waitUntil { controller.windowPreviews[202] === refreshedImage })
         keyboardSvc.simulateEvent(.escape)
@@ -1392,11 +1402,11 @@ struct SpaceControllerTests {
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(waitUntil { controller.windowPreviews.count == 3 })
         keyboardSvc.simulateEvent(.escape)
+        let mark = windowSvc.captureRequests.count
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
-        #expect(Set(windowSvc.captureRequests[1]) == [101, 202, 303])
+        #expect(waitUntil { requestedIDs(windowSvc, since: mark) == [101, 202, 303] })
         keyboardSvc.simulateEvent(.escape)
     }
 
@@ -1421,16 +1431,18 @@ struct SpaceControllerTests {
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests.count == 1 })
+        #expect(waitUntil { windowSvc.captureRequests.flatMap { $0 }.count == 4 })
         let selected = try #require(controller.overlaySpaceManager.spaces[controller.selectedSpaceIndex]
             .windows[safe: controller.selectedWindowIndex]?.windowID)
-        let order = try #require(windowSvc.captureRequests.first)
-        #expect(order.first == selected)
-        #expect(order.last == 909, "a window on another stage comes last")
+        // The window in use at the press goes first, on its own; then the rest by priority.
+        #expect(windowSvc.captureRequests.first == [101])
+        let rest = try #require(windowSvc.captureRequests.last)
+        #expect(rest.first == selected)
+        #expect(rest.last == 909, "a window on another stage comes last")
         keyboardSvc.simulateEvent(.escape)
     }
 
-    @Test("No preview is captured before the overlay is revealed")
+    @Test("Only the front window is captured before the reveal; the rest wait for it")
     func capturesWaitForOverlayReveal() {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
         let spaceID = controller.spaceManager.spaces[0].id
@@ -1442,14 +1454,18 @@ struct SpaceControllerTests {
         }
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage()]
 
-        let requestsAtReveal = Locked<Int?>(nil)
-        delegate.onOverlayOpened = { requestsAtReveal.set(windowSvc.captureRequests.count) }
+        let requestedAtReveal = Locked<Set<CGWindowID>?>(nil)
+        delegate.onOverlayOpened = { requestedAtReveal.set(Set(windowSvc.captureRequests.flatMap { $0 })) }
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(waitUntil { controller.windowPreviews.count == 2 })
 
-        #expect(requestsAtReveal.get() == 0, "Captures must not compete with the reveal for the main queue")
+        // The window in use when the shortcut was pressed can only be captured now: focus has
+        // not left it, so no background capture has seen its current content.
+        let frontWindowID = controller.spaceManager.activeSpace.windows.first?.windowID
+        #expect(requestedAtReveal.get().map { $0.isSubset(of: Set([frontWindowID].compactMap { $0 })) } == true,
+                "Everything else must not compete with the reveal")
         keyboardSvc.simulateEvent(.escape)
     }
 
