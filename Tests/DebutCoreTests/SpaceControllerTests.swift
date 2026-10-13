@@ -1254,6 +1254,45 @@ struct SpaceControllerTests {
         keyboardSvc.simulateEvent(.escape)
     }
 
+    @Test("A resized window's preview is re-captured; an unchanged one is served from the cache")
+    func resizeMakesPreviewStale() {
+        let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()
+        let activeSpaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addFixtureDesktop()
+        let otherSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"),
+            toSpaceID: activeSpaceID
+        )
+        for windowID in [CGWindowID(202), 303] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T\(windowID)"),
+                toSpaceID: otherSpaceID
+            )
+            controller.recordWindowSize(windowID: windowID, size: CGSize(width: 800, height: 600))
+        }
+        controller.spaceManager.activateSpace(id: activeSpaceID)
+        windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage(), 303: makeTestImage()]
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { controller.windowPreviews.count == 3 })
+        keyboardSvc.simulateEvent(.escape)
+        #expect(waitUntil { !controller.isSpaceManagerVisible })
+
+        DispatchQueue.main.sync {
+            controller.recordWindowSize(windowID: 202, size: CGSize(width: 1200, height: 600))
+            controller.recordWindowSize(windowID: 303, size: CGSize(width: 800.4, height: 600))
+        }
+
+        keyboardSvc.simulateEvent(.cmdTabHold)
+        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        #expect(waitUntil { windowSvc.captureRequests.count == 2 })
+        #expect(Set(windowSvc.captureRequests[1]).contains(202), "a resized window is stale")
+        #expect(!Set(windowSvc.captureRequests[1]).contains(303), "a sub-point difference is not a resize")
+        keyboardSvc.simulateEvent(.escape)
+    }
+
     @Test("A preview older than the cache TTL is re-captured")
     func ttlExpiryForcesRecapture() {
         let clock = TestClock()

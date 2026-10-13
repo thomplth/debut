@@ -135,6 +135,14 @@ private struct PreviewCacheEntry {
     let capturedAt: Date
     let windowTitle: String
     let captureDimension: CGFloat
+    /// The window's size when it was captured, in points; `nil` when it had not been measured.
+    let windowSize: CGSize?
+
+    /// Discovery and capture round sizes differently, so under a point is not a resize.
+    func windowWasResized(to size: CGSize?) -> Bool {
+        guard let windowSize, let size else { return false }
+        return abs(windowSize.width - size.width) >= 1 || abs(windowSize.height - size.height) >= 1
+    }
 }
 
 /// Completes a space commit only after every asynchronous window relocation has answered.
@@ -2912,6 +2920,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             // Captured for another size setting: too few pixels to draw sharp, or more than
             // the overlay will ever draw.
             if entry.captureDimension != previewCaptureDimension { return window.windowID }
+            // Resized since: the old picture would be drawn letterboxed in the new card shape.
+            if entry.windowWasResized(to: windowSizes[window.windowID]) { return window.windowID }
             // Dirty tracking alone goes stale for windows that change without ever being
             // activated — video, chat, dashboards.
             if now.timeIntervalSince(entry.capturedAt) >= previewCacheTTL { return window.windowID }
@@ -3070,7 +3080,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                     self.previewCacheEntries[capture.windowID] = PreviewCacheEntry(
                         capturedAt: capturedAt,
                         windowTitle: window.windowTitle,
-                        captureDimension: captureDimension
+                        captureDimension: captureDimension,
+                        windowSize: windowSizes[capture.windowID]
                     )
                     self.variedWindowPreviewIDs.insert(capture.windowID)
                     // The card observes its slot; only the state block needs telling.
