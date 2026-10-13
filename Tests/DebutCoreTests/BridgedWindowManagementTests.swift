@@ -75,6 +75,44 @@ struct BridgedWindowManagementTests {
         #expect(service.spaces(forWindow: windowID) == [origin])
     }
 
+    /// The only proof the Dock-adopted path still works is to take it. A created desktop is
+    /// appended without a transition and removed again within milliseconds, so this never
+    /// changes what the user sees; on macOS 26 it would leave an unreachable desktop, which is
+    /// why it runs only where `canManageDesktops` holds.
+    @Test("A desktop is created on the display it was asked for and removed again",
+          .enabled(if: SpaceService().canManageDesktops, "needs macOS 27 with a live bridge"))
+    func desktopRoundTrip() async throws {
+        let service = SpaceService()
+        let stackID = try #require(service.spaceTopology().stacks.first?.id)
+        let before = service.spaceTopology().stack(id: stackID)?.desktopIDs ?? []
+
+        let created = await withCheckedContinuation { continuation in
+            service.createDesktop(onStack: stackID) { continuation.resume(returning: $0) }
+        }
+        let location = try #require(created)
+        #expect(!before.contains(location.desktopID))
+        #expect(service.spaceTopology().stack(id: stackID)?.desktopIDs.last == location.desktopID)
+
+        let removed = await withCheckedContinuation { continuation in
+            service.removeDesktop(location) { continuation.resume(returning: $0) }
+        }
+        #expect(removed)
+        #expect(service.spaceTopology().stack(id: stackID)?.desktopIDs == before)
+    }
+
+    @Test("Removing the showing desktop is refused before anything is sent",
+          .enabled(if: SpaceService().canManageDesktops, "needs macOS 27 with a live bridge"))
+    func showingDesktopIsNotRemoved() async throws {
+        let service = SpaceService()
+        let stack = try #require(service.spaceTopology().stacks.first)
+        let showing = try #require(stack.currentDesktopIndex.flatMap(stack.location(at:)))
+        let removed = await withCheckedContinuation { continuation in
+            service.removeDesktop(showing) { continuation.resume(returning: $0) }
+        }
+        #expect(!removed)
+        #expect(service.spaceTopology().stack(id: stack.id)?.desktopIDs == stack.desktopIDs)
+    }
+
     @Test("An empty window list is refused rather than sent")
     func emptyListIsRefused() {
         #expect(!BridgedWindowManagement.moveWindows([], toSpace: 1))

@@ -12,9 +12,10 @@ import Foundation
 //      boundaries. Window reassignment therefore goes through BridgedWindowManagement; the
 //      private symbols in this file are reads, while desktop switching uses Dock gestures.
 //
-//   2. Space *creation* is gated too. SLSSpaceCreate returns an id that no display manages,
-//      which is why spaces map onto desktops the user made in Mission Control rather than
-//      onto desktops Debut creates.
+//   2. Plain Space *creation* is gated too: SLSSpaceCreate returns an id that no display
+//      manages. The bridged create does make a desktop, but only macOS 27's Dock adopts it
+//      (KHA-1087, DesktopManagement.swift). Either way the space list follows macOS through
+//      reconciliation; Debut never adds a space the window server does not list.
 
 typealias CGSConnectionID = Int32
 public typealias CGSSpaceID = UInt64
@@ -1331,6 +1332,17 @@ public protocol SpaceSwitching: AnyObject, Sendable {
     /// already forward instead of reordering in front of the user once the transition ends.
     @discardableResult
     func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool
+    /// Whether this conformer can add and remove macOS desktops. False keeps the commands
+    /// inert, exactly as `canMoveWindows` does for moves.
+    var canManageDesktops: Bool { get }
+    /// Appends a desktop to the stack and reports where it landed once macOS lists it there,
+    /// or nil when it did not. Completion may run on any queue.
+    func createDesktop(onStack stackID: String,
+                       completion: @escaping @Sendable (DesktopLocation?) -> Void)
+    /// Removes a desktop that is not showing; its windows land on the desktop that is.
+    /// Reports true once macOS no longer lists it. Completion may run on any queue.
+    func removeDesktop(_ location: DesktopLocation,
+                       completion: @escaping @Sendable (Bool) -> Void)
 }
 
 public extension SpaceSwitching {
@@ -1350,6 +1362,15 @@ public extension SpaceSwitching {
     func spaceDidChange() {}
     func cancelPendingSwitches() {}
     func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool { false }
+    var canManageDesktops: Bool { false }
+    func createDesktop(onStack stackID: String,
+                       completion: @escaping @Sendable (DesktopLocation?) -> Void) {
+        completion(nil)
+    }
+    func removeDesktop(_ location: DesktopLocation,
+                       completion: @escaping @Sendable (Bool) -> Void) {
+        completion(false)
+    }
 
     func spaceTopology() -> SpaceTopology {
         let count = desktopCount()
@@ -2173,6 +2194,89 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         var psn = ProcessSerialNumber()
         guard getProcessForPID(pid, &psn) == noErr else { return false }
         return slsSpaceSetFrontPSN(connection, desktopID, psn) == .success
+    }
+
+    // MARK: Desktops
+
+    public var canManageDesktops: Bool {
+        DesktopManagementCompatibility.isSupported && BridgedWindowManagement.canManageDesktops
+    }
+
+    /// Adds a desktop without opening Mission Control.
+    ///
+    /// The window server chooses the display, so a desktop that lands on another stack than
+    /// the one asked for is removed again rather than reported: the caller asked for a stage
+    /// beside the ones it is showing, not for one on a screen it is not looking at.
+    public func createDesktop(onStack stackID: String,
+                              completion: @escaping @Sendable (DesktopLocation?) -> Void) {
+        guard canManageDesktops, spaceTopology().stack(id: stackID) != nil else {
+            completion(nil)
+            return
+        }
+        moveQueue.async { [self] in
+            guard let desktopID = BridgedWindowManagement.createDesktop() else {
+                DiagnosticReporter.shared.report("desktop_create_failed", details: [
+                    "stackID": stackID, "reason": "bridgeRefused",
+                ])
+                completion(nil)
+                return
+            }
+            let location = waitForTopology { topology in
+                topology.location(ofSpace: desktopID) != nil
+            }.flatMap {
+                DesktopManagementPlan.createdLocation(of: desktopID, onStack: stackID, in: $0)
+            }
+            if location == nil {
+                BridgedWindowManagement.destroyDesktop(desktopID)
+                DiagnosticReporter.shared.report("desktop_create_failed", details: [
+                    "stackID": stackID, "desktopID": "\(desktopID)",
+                    "reason": "notListedOnRequestedStack",
+                ])
+            }
+            completion(location)
+        }
+    }
+
+    public func removeDesktop(_ location: DesktopLocation,
+                              completion: @escaping @Sendable (Bool) -> Void) {
+        guard canManageDesktops else {
+            completion(false)
+            return
+        }
+        if let refusal = DesktopManagementPlan.removalRefusal(for: location, in: spaceTopology()) {
+            DiagnosticReporter.shared.report("desktop_remove_refused", details: [
+                "desktopID": "\(location.desktopID)", "reason": refusal.rawValue,
+            ])
+            completion(false)
+            return
+        }
+        guard BridgedWindowManagement.destroyDesktop(location.desktopID) else {
+            completion(false)
+            return
+        }
+        moveQueue.async { [self] in
+            let removed = waitForTopology { $0.location(ofSpace: location.desktopID) == nil } != nil
+            if !removed {
+                DiagnosticReporter.shared.report("desktop_remove_failed", details: [
+                    "desktopID": "\(location.desktopID)", "reason": "stillListed",
+                ])
+            }
+            completion(removed)
+        }
+    }
+
+    /// Reads the topology until `condition` holds, returning that topology, or nil at the
+    /// deadline. Neither operation posts a notification Debut receives, and both are
+    /// asynchronous in the window server, so the only confirmation is to look.
+    private func waitForTopology(timeout: TimeInterval = 1,
+                                 until condition: (SpaceTopology) -> Bool) -> SpaceTopology? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let topology = spaceTopology()
+            if condition(topology) { return topology }
+            usleep(2000)
+        } while Date() < deadline
+        return nil
     }
 
     /// Polls the window server until `windowID` reports `space`.

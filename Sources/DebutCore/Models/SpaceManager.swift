@@ -681,6 +681,30 @@ public struct SpaceManager: Codable, Sendable {
         } ?? windows.count
         spaceStacks[destination.stack].spaces[destination.space].insertWindow(window, at: index)
     }
+    /// Moves everything assigned to one space onto another, ahead of the first space's desktop
+    /// being removed. macOS puts a removed desktop's windows on the desktop showing; doing the
+    /// same here first means reconciliation finds the departing space empty instead of piling
+    /// its windows onto the last space. Dormant assignments follow too, so a quit app's windows
+    /// are not forgotten with the desktop they were saved on (KHA-1087).
+    public mutating func mergeSpace(id sourceID: UUID, intoSpaceID destinationID: UUID) {
+        guard sourceID != destinationID,
+              let source = spaceLocation(id: sourceID),
+              spaceLocation(id: destinationID) != nil
+        else { return }
+        for window in spaceStacks[source.stack].spaces[source.space].windows {
+            refileWindowByActivation(windowID: window.windowID, toSpaceID: destinationID)
+        }
+        let destinationCount = windowIDs(inSpaceID: destinationID)?.count ?? 0
+        dormantWindowAssignments = dormantWindowAssignments.map { assignment in
+            guard assignment.spaceID == sourceID else { return assignment }
+            return DormantWindowAssignment(
+                spaceID: destinationID,
+                windowIndex: destinationCount,
+                window: assignment.window
+            )
+        }
+    }
+
     func windowIDs(inSpaceID id: UUID) -> [CGWindowID]? {
         guard let location = spaceLocation(id: id) else { return nil }
         return spaceStacks[location.stack].spaces[location.space].windows.map(\.windowID)

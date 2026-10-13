@@ -133,7 +133,7 @@ public struct SpaceTopology: Equatable, Sendable {
 public extension SpaceTopology {
     /// One shared stack of synthetic desktops, for tests and benchmarks that need desktops
     /// without a window server. A model only ever gains or loses stages by reconciling a
-    /// topology like this one: Debut cannot create or delete a macOS desktop (KHA-783).
+    /// topology like this one, including after Debut itself adds a desktop (KHA-1087).
     static func synthetic(desktopUUIDs: [String], currentIndex: Int = 0) -> SpaceTopology {
         let desktopIDs = desktopUUIDs.indices.map { CGSSpaceID(1_000 + $0) }
         let current = desktopUUIDs.indices.contains(currentIndex) ? currentIndex : nil

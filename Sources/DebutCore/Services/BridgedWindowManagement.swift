@@ -49,7 +49,13 @@ public enum BridgedWindowManagement {
         "__ZL54SLSPerformAsynchronousBridgedWindowManagementOperation"
         + "P47SLSAsynchronousBridgedWindowManagementOperation"
 
+    /// The synchronous twin, for operations that answer — creating a Space returns its id.
+    private static let performSynchronousSymbolName =
+        "__ZL54_SLSPerformSynchronousBridgedWindowManagementOperation"
+        + "P46SLSSynchronousBridgedWindowManagementOperation"
+
     private typealias PerformFunction = @convention(c) (AnyObject) -> Void
+    private typealias PerformSynchronousFunction = @convention(c) (AnyObject) -> Unmanaged<AnyObject>?
     private typealias AllocFunction = @convention(c) (AnyClass, Selector) -> Unmanaged<AnyObject>?
     private typealias InitFunction =
         @convention(c) (AnyObject, Selector, NSArray, CGSSpaceID) -> Unmanaged<AnyObject>?
@@ -68,6 +74,12 @@ public enum BridgedWindowManagement {
         _ = bridgeLoaded
         return machOLocalSymbol(image: skyLightPath, named: performSymbolName)
             .map { unsafeBitCast($0, to: PerformFunction.self) }
+    }()
+
+    private static let performSynchronousOperation: PerformSynchronousFunction? = {
+        _ = bridgeLoaded
+        return machOLocalSymbol(image: skyLightPath, named: performSynchronousSymbolName)
+            .map { unsafeBitCast($0, to: PerformSynchronousFunction.self) }
     }()
 
     private static let moveOperationClass: AnyClass? =
@@ -116,6 +128,72 @@ public enum BridgedWindowManagement {
         // is the single balancing release.
         perform(initialized.takeRetainedValue())
         return true
+    }
+
+    // MARK: - Desktops
+
+    private static let createSpaceOperationClass: AnyClass? =
+        NSClassFromString("SLSBridgedSpaceCreateOperation")
+    private static let destroySpaceOperationClass: AnyClass? =
+        NSClassFromString("SLSBridgedSpaceDestroyOperation")
+
+    /// Asks the window manager for a new user desktop and returns its id.
+    ///
+    /// Options 0 is what makes it a desktop: 1, like the plain `SLSSpaceCreate`, builds an
+    /// unmanaged Space no display lists. The window server appends the desktop to a display
+    /// of its choosing, and only macOS 27's Dock adopts it — see
+    /// `DesktopManagementCompatibility`. Measured at ~6ms on macOS 27.
+    public static func createDesktop() -> CGSSpaceID? {
+        typealias CreateInit =
+            @convention(c) (AnyObject, Selector, UInt32, NSDictionary) -> Unmanaged<AnyObject>?
+        guard let operationClass = createSpaceOperationClass,
+              let msgSend = objcMsgSend,
+              let perform = performSynchronousOperation,
+              isBridgeDelegateLive(),
+              let allocated = allocate(operationClass),
+              let operation = unsafeBitCast(msgSend, to: CreateInit.self)(
+                  allocated, NSSelectorFromString("initWithOptions:values:"), 0, [:] as NSDictionary
+              ),
+              let result = perform(operation.takeRetainedValue())?.takeUnretainedValue(),
+              result.responds(to: NSSelectorFromString("spaceID")),
+              let spaceID = (result.value(forKey: "spaceID") as? NSNumber)?.uint64Value,
+              spaceID != 0
+        else { return nil }
+        return spaceID
+    }
+
+    /// Asks the window manager to remove a desktop. Its windows land on the desktop showing.
+    ///
+    /// `SLSSpaceDestroy` answers success for a managed desktop and leaves it in place, so this
+    /// is the only removal that works. Like a move, dispatching is not landing.
+    @discardableResult
+    public static func destroyDesktop(_ space: CGSSpaceID) -> Bool {
+        typealias DestroyInit = @convention(c) (AnyObject, Selector, CGSSpaceID) -> Unmanaged<AnyObject>?
+        guard space != 0,
+              let operationClass = destroySpaceOperationClass,
+              let msgSend = objcMsgSend,
+              let perform = performOperation,
+              isBridgeDelegateLive(),
+              let allocated = allocate(operationClass),
+              let operation = unsafeBitCast(msgSend, to: DestroyInit.self)(
+                  allocated, NSSelectorFromString("initWithSpaceID:"), space
+              )
+        else { return false }
+        perform(operation.takeRetainedValue())
+        return true
+    }
+
+    /// Whether both desktop operations and their entry points resolve on this system.
+    static var canManageDesktops: Bool {
+        createSpaceOperationClass != nil && destroySpaceOperationClass != nil
+            && performSynchronousOperation != nil && isAvailable
+    }
+
+    private static func allocate(_ operationClass: AnyClass) -> AnyObject? {
+        guard let msgSend = objcMsgSend else { return nil }
+        return unsafeBitCast(msgSend, to: AllocFunction.self)(
+            operationClass, NSSelectorFromString("alloc")
+        )?.takeUnretainedValue()
     }
 
     // MARK: - Preconditions

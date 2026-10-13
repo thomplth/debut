@@ -622,9 +622,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     /// Makes the space list match the desktops macOS actually has.
     ///
-    /// Spaces are desktops now, and only the user can create a desktop — `SLSSpaceCreate`
-    /// returns an id no display manages, so a Debut-created Space would be unreachable from
-    /// Mission Control. A space with no desktop behind it is therefore a switch target that
+    /// Spaces are desktops, so the space list only ever changes here: a desktop added or
+    /// removed through `addDesktop`/`removeDesktop` reaches the model by the same route as one
+    /// added in Mission Control. A space with no desktop behind it is a switch target that
     /// silently does nothing, and a desktop with no space is invisible to the switcher.
     /// Called on launch and whenever the desktop set may have changed.
     public func reconcileSpacesWithDesktops() {
@@ -638,6 +638,85 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
         reconcileSpaces(with: topology)
         fileAllDesktopsWindowsOnShowingDesktops(in: topology)
+    }
+
+    // MARK: - Desktop management
+
+    /// Whether desktops can be added and removed from Debut. Only macOS 27 adopts a desktop
+    /// created this way; elsewhere the commands stay inert (KHA-1087).
+    public var canManageDesktops: Bool { spaceSwitcher?.canManageDesktops ?? false }
+
+    /// Adds a desktop after the last one on the selected display, without Mission Control.
+    ///
+    /// The model gains its space by reconciling, never directly, so a desktop macOS did not
+    /// list is never a stage. Completes on the main queue with the new space's id, or nil.
+    public func addDesktop(completion: (@Sendable (UUID?) -> Void)? = nil) {
+        guard let switcher = spaceSwitcher, switcher.canManageDesktops,
+              let stackID = spaceManager.selectedSpaceStack?.id
+        else {
+            diag.report("desktop_add_refused", details: ["reason": "unsupported"])
+            completion?(nil)
+            return
+        }
+        switcher.createDesktop(onStack: stackID) { [weak self] location in
+            let controller = self
+            let finish: @Sendable () -> Void = {
+                guard let controller, let location else {
+                    completion?(nil)
+                    return
+                }
+                controller.reconcileSpacesWithDesktops()
+                let spaceID = controller.spaceManager.spaceID(stackID: location.stackID, at: location.index)
+                controller.diag.report("desktop_added", details: [
+                    "stackID": location.stackID,
+                    "desktopID": "\(location.desktopID)",
+                    "space": spaceID.map { controller.spaceLabel(forID: $0) } ?? "none",
+                ])
+                completion?(spaceID)
+            }
+            if Thread.isMainThread { finish() } else { DispatchQueue.main.async(execute: finish) }
+        }
+    }
+
+    /// Removes the desktop behind a space that is not showing. Its windows join the showing
+    /// space, which is where macOS puts them. Completes on the main queue.
+    public func removeDesktop(spaceID: UUID, completion: (@Sendable (Bool) -> Void)? = nil) {
+        guard let switcher = spaceSwitcher, switcher.canManageDesktops,
+              let stackID = spaceManager.spaceStackID(containingSpaceID: spaceID),
+              let stack = spaceManager.spaceStacks.first(where: { $0.id == stackID }),
+              let index = stack.spaces.firstIndex(where: { $0.id == spaceID }),
+              let location = switcher.spaceTopology().stack(id: stackID)?.location(at: index)
+        else {
+            diag.report("desktop_remove_refused", details: [
+                "space": spaceLabel(forID: spaceID), "reason": "unsupported",
+            ])
+            completion?(false)
+            return
+        }
+        switcher.removeDesktop(location) { [weak self] removed in
+            let controller = self
+            let finish: @Sendable () -> Void = {
+                guard let controller, removed else {
+                    completion?(false)
+                    return
+                }
+                let showingID = controller.spaceManager.spaceStacks
+                    .first(where: { $0.id == stackID })?.activeSpaceID
+                let label = controller.spaceLabel(forID: spaceID)
+                if let showingID {
+                    controller.spaceManager.mergeSpace(id: spaceID, intoSpaceID: showingID)
+                }
+                controller.reconcileSpacesWithDesktops()
+                controller.diag.report("desktop_removed", details: [
+                    "stackID": stackID,
+                    "desktopID": "\(location.desktopID)",
+                    "space": label,
+                ])
+                controller.delegate?.spaceControllerDidMutateState(controller)
+                completion?(true)
+            }
+            if Thread.isMainThread { finish() } else { DispatchQueue.main.async(execute: finish) }
+        }
     }
 
     /// Re-reads the topology and files every window assigned to all desktops under the desktop
