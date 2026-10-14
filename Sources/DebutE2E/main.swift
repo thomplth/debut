@@ -1326,6 +1326,15 @@ func focusedStackOffset(
     )
 }
 
+// A stage resting at the bottom of the stack can put a card's centre below the overlay, and a
+// drag started there grabs nothing.
+func visiblePickupPoint(cardCenter: CGPoint, cardHeight: CGFloat) -> CGPoint {
+    let top = max(cardCenter.y - cardHeight / 2, overlayBounds.minY)
+    let bottom = min(cardCenter.y + cardHeight / 2, overlayBounds.maxY)
+    guard bottom > top else { return cardCenter }
+    return CGPoint(x: cardCenter.x, y: (top + bottom) / 2)
+}
+
 /// Lifts a point from the overlay's own coordinate space into the screen's.
 func onScreen(_ pointInOverlay: CGPoint) -> CGPoint {
     CGPoint(
@@ -2813,9 +2822,13 @@ func scenario_window_drop() {
         ) {
             // Pick the card up where the normal overlay rests it, then drop it on the source
             // stage as the drag view draws it.
-            let destinationPoint = CGPoint(x: centered.x, y: centered.y + offset)
+            let cardCenter = CGPoint(x: centered.x, y: centered.y + offset)
+            let cardHeight = drawnMetrics(cardAspects: movedCardAspects).cardHeight
+                * pow(inactiveScale, CGFloat(abs(destinationSpaceIndex - movedSelectedSpaceIndex)))
+            let destinationPoint = visiblePickupPoint(cardCenter: cardCenter, cardHeight: cardHeight)
             info("  Reverse drag path: \(destinationPoint) -> \(returnedSpacePoint)"
-                + " (selected=\(movedSelectedSpaceIndex), active=\(movedActiveSpaceIndex))")
+                + " (selected=\(movedSelectedSpaceIndex), active=\(movedActiveSpaceIndex),"
+                + " card centre=\(cardCenter), card height=\(cardHeight), overlay=\(overlayBounds))")
             postMouseDrag(from: destinationPoint, to: returnedSpacePoint)
             for _ in 0..<(skipsSyntheticDrags ? 0 : 30) {
                 if dragMovesSinceDropStarted() > 1 {
