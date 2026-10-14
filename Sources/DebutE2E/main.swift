@@ -3842,9 +3842,22 @@ func scenario_native_retarget() {
         // Most recent last: the second target, then the first, then a window on the origin, so one
         // Tab selects the first target and two select the second. The recent-window order does
         // not change until a switch lands, so the second selection still counts from the origin.
-        let ordered = goTo(2) && frontUntilHeld(second, using: windows)
-            && goTo(1) && frontUntilHeld(first, using: windows)
-            && goTo(0) && frontUntilHeld(origin, using: windows)
+        // Names the first step that failed, since a failure leaves the run on that step's desktop.
+        func order() -> String? {
+            for (desktop, window, name) in [(2, second, "second"), (1, first, "first"), (0, origin, "origin")] {
+                guard goTo(desktop) else {
+                    return "visit\(desktop):\(spaces.currentDesktopIndex().map(String.init) ?? "none")"
+                }
+                guard frontUntilHeld(window, using: windows) else {
+                    let focus = liveKeyboardFocus()
+                    return "\(name):focus=\(focus.map { "\($0.ownerPID)/\($0.windowID)" } ?? "none")"
+                        + " desktop=\(spaces.desktopIndex(forWindow: window.windowID).map(String.init) ?? "none")"
+                }
+            }
+            return nil
+        }
+        let orderFailure = order()
+        let ordered = orderFailure == nil
         wait(0.5)
 
         func select(tabs: Int) {
@@ -3874,7 +3887,7 @@ func scenario_native_retarget() {
         let commits = committed.joined(separator: ",")
         let committedBothTargets = committed.count == 2
             && committed[0].hasSuffix("Space 2") && committed[1].hasSuffix("Space 3")
-        info("  Native retarget: placed=\(placed) ready=\(ready) ordered=\(ordered) commits=\(commits) "
+        info("  Native retarget: placed=\(placed) ready=\(ready) ordered=\(orderFailure ?? "true") commits=\(commits) "
             + "observed=\(observed.joined(separator: ">")) landed=\(landed) focused=\(focused)")
         test("A faster-off switch requested mid-transition lands on its own desktop") {
             placed && ready && ordered && committedBothTargets && landed && focused
