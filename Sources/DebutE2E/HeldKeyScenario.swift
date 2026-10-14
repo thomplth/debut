@@ -36,6 +36,15 @@ func focusedText(of pid: pid_t) -> String? {
     return value as? String
 }
 
+/// The file a document window shows, as a path.
+func documentPath(of window: AXUIElement) -> String? {
+    var document: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(
+        window, kAXDocumentAttribute as CFString, &document
+    ) == .success, let url = document as? String else { return nil }
+    return URL(string: url)?.resolvingSymlinksInPath().path
+}
+
 /// KHA-930: a key held as the overlay opens is released while the overlay owns the keyboard.
 /// Its key-down already reached the app, so swallowing that release left the key logically held
 /// and every later press of it arrived as a repeat — the second "D stopped working" report.
@@ -46,12 +55,19 @@ func scenario_held_key_across_overlay() {
     let pid = launchNewTextEditInstance(opening: [fixture])
     defer { if pid > 0 { NSRunningApplication(processIdentifier: pid)?.terminate() } }
     let editor = NSRunningApplication(processIdentifier: pid)
+    // The fixture is empty, so empty focused text is its document. Any focused text was not
+    // enough: another TextEdit window can hold focus, and the first D lands there (KHA-1107).
     let ready = pid > 0 && waitFor(timeout: 15) {
         _ = editor?.activate()
         return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
-            && focusedText(of: pid) != nil
+            && focusedWindowElement(for: pid).flatMap(documentPath(of:)) == fixture.resolvingSymlinksInPath().path
+            && focusedText(of: pid) == ""
     }
     guard ready else {
+        info("  Held-key fixture: pid=\(pid) "
+            + "front=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1) "
+            + "document=\(focusedWindowElement(for: pid).flatMap(documentPath(of:)) ?? "none") "
+            + "text=\(focusedText(of: pid).map { "\($0.count) characters" } ?? "none")")
         test("TextEdit fixture is frontmost with a focused document") { false }
         return
     }
@@ -83,7 +99,14 @@ func scenario_held_key_across_overlay() {
     }
     typeD()
     test("D types before the overlay opens") {
-        waitFor { focusedText(of: pid)?.contains("d") == true }
+        let typed = waitFor { focusedText(of: pid)?.contains("d") == true }
+        if !typed {
+            info("  First D: \(recorder.keyDowns.count) passed Debut, "
+                + "front=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1) "
+                + "document=\(focusedWindowElement(for: pid).flatMap(documentPath(of:)) ?? "none") "
+                + "text=\(focusedText(of: pid).map { "\($0.count) characters" } ?? "none")")
+        }
+        return typed
     }
 
     // Hold D, open the overlay, and let D's release land while the overlay owns the keyboard.
