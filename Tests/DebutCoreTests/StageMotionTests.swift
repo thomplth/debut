@@ -1211,6 +1211,29 @@ struct StageMotionTests {
         #expect(OverlayScrollAxis.windowSteps(fromScrollSteps: 0) == 0)
     }
 
+    /// A fast swipe must not step windows faster than a held Tab would. Steps inside the pace
+    /// are dropped rather than queued, so the selector stops where the scroll stopped.
+    @Test("Scroll window steps are paced like held-key cycling")
+    func windowScrollStepsArePaced() {
+        var pacer = ScrollStepPacer()
+        let pace = 0.1
+
+        #expect(pacer.admit(steps: 1, interval: pace, now: 10.00, isGestureStart: true) == 1)
+        #expect(pacer.admit(steps: 1, interval: pace, now: 10.02, isGestureStart: false) == 0)
+        #expect(pacer.admit(steps: -1, interval: pace, now: 10.05, isGestureStart: false) == 0)
+        #expect(pacer.admit(steps: 3, interval: pace, now: 10.11, isGestureStart: false) == 1)
+        #expect(pacer.admit(steps: -2, interval: pace, now: 10.22, isGestureStart: false) == -1)
+        #expect(pacer.admit(steps: 0, interval: pace, now: 10.40, isGestureStart: false) == 0)
+
+        // A new gesture is a fresh press, never paced however soon it follows the last step.
+        #expect(pacer.admit(steps: 1, interval: pace, now: 10.23, isGestureStart: true) == 1)
+
+        // Off leaves scrolling exactly as fast as the travel asks.
+        var unpaced = ScrollStepPacer()
+        #expect(unpaced.admit(steps: 3, interval: 0, now: 1, isGestureStart: false) == 3)
+        #expect(unpaced.admit(steps: -2, interval: 0, now: 1, isGestureStart: false) == -2)
+    }
+
     /// A flick left over from the last gesture must not leak into the next one.
     @Test("Resetting the accumulator drops the leftover travel")
     func spaceScrollResetDropsLeftover() {

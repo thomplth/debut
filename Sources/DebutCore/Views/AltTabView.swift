@@ -17,6 +17,7 @@ public struct AltTabOverlayView: View {
 
     @State private var pointerSelectionIndex: Int?
     @State private var scrollAccumulator = ScrollStepAccumulator()
+    @State private var scrollPacer = ScrollStepPacer()
     @State private var pointerMovementGate: PointerMovementGate
     @State private var lastHandledKeyboardInteractionSequence: Int
 
@@ -139,7 +140,13 @@ public struct AltTabOverlayView: View {
             steps: steps,
             destination: nil
         ))
-        guard steps != 0 else { return }
-        onWindowScrollStepped?(OverlayScrollAxis.windowSteps(fromScrollSteps: steps))
+        let paced = scrollPacer.admit(
+            steps: steps,
+            interval: viewModel.appearance.heldCycleMinimumInterval,
+            now: ProcessInfo.processInfo.systemUptime,
+            isGestureStart: event.isGestureStart
+        )
+        guard paced != 0 else { return }
+        onWindowScrollStepped?(OverlayScrollAxis.windowSteps(fromScrollSteps: paced))
     }
 }

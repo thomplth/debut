@@ -422,7 +422,7 @@ public struct SettingsView: View {
                         .monospacedDigit()
                 }
                 Slider(value: $viewModel.settings.heldCycleMinimumInterval, in: 0...0.3, step: 0.01)
-                Text("Minimum time between held-key steps. Off uses your system repeat rate.")
+                Text("Minimum time between held-key or scroll steps. Off uses your system repeat rate.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -867,6 +867,27 @@ struct ScrollStepAccumulator {
     }
 }
 
+/// A fast swipe would otherwise blur through windows quicker than a held Tab ever could, so
+/// scroll steps share the held cycling pace. Steps inside it are dropped rather than queued, the
+/// same as key repeats, and a new gesture is a fresh press that is never paced.
+struct ScrollStepPacer {
+    private var lastAccepted: TimeInterval?
+
+    mutating func admit(
+        steps: Int,
+        interval: TimeInterval,
+        now: TimeInterval,
+        isGestureStart: Bool
+    ) -> Int {
+        if isGestureStart { lastAccepted = nil }
+        guard steps != 0 else { return 0 }
+        guard interval > 0 else { return steps }
+        if let lastAccepted, now >= lastAccepted, now - lastAccepted < interval { return 0 }
+        lastAccepted = now
+        return steps.signum()
+    }
+}
+
 struct PointerMovementGate {
     private var initialLocation: CGPoint?
     private(set) var hasMoved = false
@@ -1252,6 +1273,7 @@ public struct StageOverlayView: View {
     @State private var hoveredSpaceIndex: Int?
     @State private var scrollAccumulator = ScrollStepAccumulator()
     @State private var windowScrollAccumulator = ScrollStepAccumulator()
+    @State private var windowScrollPacer = ScrollStepPacer()
     @HostReducesMotion private var reduceMotion
 
     public init(
@@ -2038,6 +2060,7 @@ public struct StageOverlayView: View {
         if event.isGestureStart {
             scrollAccumulator.reset()
             windowScrollAccumulator.reset()
+            windowScrollPacer = ScrollStepPacer()
         }
         let axis = OverlayScrollAxis(deltaX: event.deltaX, deltaY: event.deltaY)
         let inArea = !dragSession.suppressesNavigation
@@ -2070,8 +2093,16 @@ public struct StageOverlayView: View {
             destination: destination
         ))
 
-        if axis == .horizontal, steps != 0 {
-            onWindowScrollStepped?(OverlayScrollAxis.windowSteps(fromScrollSteps: steps))
+        if axis == .horizontal {
+            let paced = windowScrollPacer.admit(
+                steps: steps,
+                interval: viewModel.appearance.heldCycleMinimumInterval,
+                now: ProcessInfo.processInfo.systemUptime,
+                isGestureStart: event.isGestureStart
+            )
+            if paced != 0 {
+                onWindowScrollStepped?(OverlayScrollAxis.windowSteps(fromScrollSteps: paced))
+            }
             return
         }
         guard let destination else { return }
