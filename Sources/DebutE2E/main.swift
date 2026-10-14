@@ -4306,12 +4306,13 @@ func scenario_onboarding_journey() {
     }
 
     @MainActor
-    func onboardingMainMenuPress(_ title: String) -> Bool {
-        guard let application = onboardingApplication else { return false }
-        _ = application.activate(options: [.activateAllWindows])
-        guard waitFor({
-            NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier
-        }) else { return false }
+    /// Chooses a Debut menu item until `completed` holds. A posted click is not an outcome: one
+    /// that never landed used to pass here and fail the next check silently (KHA-1108).
+    func onboardingMainMenuPress(_ title: String, until completed: () -> Bool) -> Bool {
+        guard let application = onboardingApplication else {
+            info("  Menu \(title): no onboarding application")
+            return false
+        }
         let appElement = AXUIElementCreateApplication(application.processIdentifier)
 
         func find(_ element: AXUIElement, role wantedRole: String, title: String) -> AXUIElement? {
@@ -4363,22 +4364,44 @@ func scenario_onboarding_journey() {
         // invoking AppKit menu actions in the virtualized session, while HID clicks follow the same
         // path as a user. Re-read the opened menu subtree so a closed menu's cached AX item cannot
         // supply a stale frame.
+        var failures: [String] = []
         for _ in 0..<3 {
             postKeyDown(keyCode: CGKeyCode(kVK_Escape))
             postKeyUp(keyCode: CGKeyCode(kVK_Escape))
-            guard let menuBar = readMenuBar(),
-                  let appMenu = find(menuBar, role: kAXMenuBarItemRole, title: "Debut"),
-                  let appMenuFrame = frame(of: appMenu) else { continue }
+            _ = application.activate(options: [.activateAllWindows])
+            guard waitFor({
+                NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier
+            }) else {
+                failures.append("front=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none")")
+                continue
+            }
+            var appMenuFrame: CGRect?
+            guard waitFor(timeout: 2, {
+                appMenuFrame = readMenuBar()
+                    .flatMap { find($0, role: kAXMenuBarItemRole, title: "Debut") }
+                    .flatMap(frame(of:))
+                return appMenuFrame != nil
+            }), let appMenuFrame else {
+                failures.append("menu bar")
+                continue
+            }
             postHIDMouseClick(at: CGPoint(x: appMenuFrame.midX, y: appMenuFrame.midY))
-            wait(0.35)
-            guard let openedMenuBar = readMenuBar(),
-                let openedAppMenu = find(openedMenuBar, role: kAXMenuBarItemRole, title: "Debut"),
-                let item = find(openedAppMenu, role: kAXMenuItemRole, title: title),
-                let itemFrame = frame(of: item) else { continue }
+            var itemFrame: CGRect?
+            guard waitFor(timeout: 2, {
+                itemFrame = readMenuBar()
+                    .flatMap { find($0, role: kAXMenuBarItemRole, title: "Debut") }
+                    .flatMap { find($0, role: kAXMenuItemRole, title: title) }
+                    .flatMap(frame(of:))
+                return itemFrame != nil
+            }), let itemFrame else {
+                failures.append("item")
+                continue
+            }
             postHIDMouseClick(at: CGPoint(x: itemFrame.midX, y: itemFrame.midY))
-            wait(0.3)
-            return true
+            if waitFor(completed) { return true }
+            failures.append("outcome")
         }
+        info("  Menu \(title) never took effect: \(failures.joined(separator: ", "))")
         return false
     }
 
@@ -4480,8 +4503,11 @@ func scenario_onboarding_journey() {
         guard waitFor({
             let liveIDs = Set(AccessibilityWindowService().listWindows().map(\.windowID))
             return !liveIDs.contains(lessonID) && !liveIDs.contains(targetID)
-        }), onboardingMainMenuPress("Tutorial...") else { return false }
-        return waitFor {
+        }) else {
+            info("  Tutorial close left windows: \(AccessibilityWindowService().listWindows().map(\.windowID))")
+            return false
+        }
+        return onboardingMainMenuPress("Tutorial...") {
             currentOnboardingTarget()?["lessonWindowID"] != String(lessonID)
                 && onboardingContains("Hold Command and press Tab")
         }
@@ -4592,8 +4618,8 @@ func scenario_onboarding_journey() {
             && !onboardingContains("Welcome to Debut")
     }
     test("Tutorial can be replayed and exited without changing settings") {
-        guard let before = loadOnboardingSettings(), onboardingMainMenuPress("Tutorial..."),
-              waitFor({ onboardingContains("Hold Command and press Tab") }),
+        guard let before = loadOnboardingSettings(),
+              onboardingMainMenuPress("Tutorial...", until: { onboardingContains("Hold Command and press Tab") }),
               onboardingPress("Skip lesson"), onboardingPress("Exit tutorial") else { return false }
         return waitFor { !onboardingContains("Debut tutorial") }
             && loadOnboardingSettings() == before
