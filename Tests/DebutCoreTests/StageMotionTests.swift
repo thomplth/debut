@@ -1202,11 +1202,12 @@ struct StageMotionTests {
         #expect(OverlayScrollAxis(deltaX: 0, deltaY: 0) == .vertical)
     }
 
-    /// Scrolling up or left is travel toward the start, which steps the selector back a window.
-    @Test("Scroll toward the start steps the window selector back")
+    /// Window steps run opposite to the space scroll: a scroll that would move the stack up a
+    /// space moves the window selector forward, to the right.
+    @Test("Window scroll steps run opposite to the space scroll")
     func windowScrollStepsFollowDirection() {
-        #expect(OverlayScrollAxis.windowSteps(fromScrollSteps: 1) == -1)
-        #expect(OverlayScrollAxis.windowSteps(fromScrollSteps: -2) == 2)
+        #expect(OverlayScrollAxis.windowSteps(fromScrollSteps: 1) == 1)
+        #expect(OverlayScrollAxis.windowSteps(fromScrollSteps: -2) == -2)
         #expect(OverlayScrollAxis.windowSteps(fromScrollSteps: 0) == 0)
     }
 

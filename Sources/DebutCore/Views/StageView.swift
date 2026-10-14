@@ -841,9 +841,10 @@ enum OverlayScrollAxis: Equatable {
         self = abs(deltaX) > abs(deltaY) ? .horizontal : .vertical
     }
 
-    /// Scroll steps count toward the start of the list, which for windows is to the left.
+    /// Scroll steps count toward the top of the stack, but window steps run the other way: the
+    /// scroll that moves the stack up a space moves the window selector forward, to the right.
     static func windowSteps(fromScrollSteps steps: Int) -> Int {
-        -steps
+        steps
     }
 }
 

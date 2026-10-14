@@ -122,8 +122,9 @@ public struct AltTabOverlayView: View {
         }
     }
 
-    /// The list is one row that wraps, so both axes step through it: up and left go back a
-    /// window, down and right go forward. The ends stop the selector rather than wrapping.
+    /// The list is one row that wraps, so both axes step through it, each in the direction
+    /// opposite to the stage overlay's space scroll. The ends stop the selector rather than
+    /// wrapping.
     private func handleScroll(_ event: OverlayScrollEvent) {
         if event.isGestureStart { scrollAccumulator.reset() }
         let axis = OverlayScrollAxis(deltaX: event.deltaX, deltaY: event.deltaY)
