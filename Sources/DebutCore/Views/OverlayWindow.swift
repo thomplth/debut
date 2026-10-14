@@ -4,6 +4,7 @@ import SwiftUI
 /// A scroll the window received, in the hosting view's coordinate space. The sequence number is
 /// what makes two identical scrolls distinguishable to `onChange`.
 struct OverlayScrollEvent: Equatable {
+    let deltaX: CGFloat
     let deltaY: CGFloat
     let isPrecise: Bool
     let isGestureStart: Bool
@@ -65,6 +66,8 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     var reducesMotion: () -> Bool = { HostEnvironment.current.reducesMotion }
     private var scrollMonitor: Any?
     public var onSpaceScrollSelected: ((Int) -> Void)?
+    /// Signed window steps, positive to the right; the switcher showing decides what they move.
+    public var onWindowScrollStepped: ((Int) -> Void)?
     var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     public var onWindowSelected: ((Int, Int) -> Void)?
     public var onAltTabWindowSelected: ((Int) -> Void)?
@@ -144,6 +147,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         view.compactDragSession = compactDragSession
         view.onPointerWindowDrop = onPointerWindowDrop
         view.onSpaceScrollSelected = onSpaceScrollSelected
+        view.onWindowScrollStepped = onWindowScrollStepped
         view.onSpaceScrollRouted = onSpaceScrollRouted
         return present(
             .stages(view),
@@ -158,12 +162,16 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     public func update(altTab viewModel: AltTabOverlayViewModel) -> Bool {
         synchronizeFrameToTargetScreen(display: false)
         renderedWindowIDs = Set(viewModel.windows.map(\.windowID))
+        var view = AltTabOverlayView(
+            viewModel: viewModel,
+            onWindowSelected: onAltTabWindowSelected,
+            onPointerSelectionChanged: onAltTabPointerSelectionChanged
+        )
+        view.scrollRelay = scrollRelay
+        view.onWindowScrollStepped = onWindowScrollStepped
+        view.onScrollRouted = onSpaceScrollRouted
         return present(
-            .altTab(AltTabOverlayView(
-                viewModel: viewModel,
-                onWindowSelected: onAltTabWindowSelected,
-                onPointerSelectionChanged: onAltTabPointerSelectionChanged
-            )),
+            .altTab(view),
             removedWindowIDs: [],
             generation: renderGeneration
         )
@@ -328,6 +336,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         let inWindow = event.locationInWindow
         scrollSequence += 1
         scrollRelay.latest = OverlayScrollEvent(
+            deltaX: event.scrollingDeltaX,
             deltaY: event.scrollingDeltaY,
             isPrecise: event.hasPreciseScrollingDeltas,
             isGestureStart: event.phase == .began,

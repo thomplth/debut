@@ -2566,6 +2566,24 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
+    /// A scroll steps the drawn cursor the way a held arrow does: it takes the selection from
+    /// hover, and stops at the ends rather than wrapping or crossing into another stage.
+    public func stepWindowSelection(by steps: Int) {
+        guard isSpaceManagerVisible, !isOverlaySessionYielded, steps != 0 else { return }
+        let overlayViewUpdateSequenceBeforeScroll = overlayViewUpdateSequence
+        promoteProvisionalPointerTarget()
+        overlayKeyboardInteractionSequence += 1
+        for _ in 0..<abs(steps) {
+            stepWindow(forward: steps > 0, wraps: false)
+        }
+        // A scroll past the end moves nothing, but the view still has to drop the hover.
+        if overlayViewUpdateSequence == overlayViewUpdateSequenceBeforeScroll,
+           !isStageStackCommitInFlight {
+            notifyOverlayUpdated()
+        }
+        diag.refreshState()
+    }
+
     private func openOrCycleAltTab(forward: Bool) {
         // The stage session owns the held Cmd. Reusing its overlay for a second switcher would
         // leave the user holding a modifier that no longer commits what they are looking at.

@@ -11,8 +11,12 @@ public struct AltTabOverlayView: View {
     public let viewModel: AltTabOverlayViewModel
     public var onWindowSelected: ((Int) -> Void)?
     public var onPointerSelectionChanged: ((Int?) -> Void)?
+    var onWindowScrollStepped: ((Int) -> Void)?
+    var onScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
+    var scrollRelay: OverlayScrollRelay?
 
     @State private var pointerSelectionIndex: Int?
+    @State private var scrollAccumulator = ScrollStepAccumulator()
     @State private var pointerMovementGate: PointerMovementGate
     @State private var lastHandledKeyboardInteractionSequence: Int
 
@@ -107,11 +111,34 @@ public struct AltTabOverlayView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+        .onChange(of: scrollRelay?.latest) { _, event in
+            if let event { handleScroll(event) }
+        }
         .onChange(of: viewModel.overlayKeyboardInteractionSequence) { _, sequence in
             guard sequence > lastHandledKeyboardInteractionSequence else { return }
             lastHandledKeyboardInteractionSequence = sequence
             pointerSelectionIndex = nil
             pointerMovementGate.reset(at: NSEvent.mouseLocation)
         }
+    }
+
+    /// The list is one row that wraps, so both axes step through it: up and left go back a
+    /// window, down and right go forward. The ends stop the selector rather than wrapping.
+    private func handleScroll(_ event: OverlayScrollEvent) {
+        if event.isGestureStart { scrollAccumulator.reset() }
+        let axis = OverlayScrollAxis(deltaX: event.deltaX, deltaY: event.deltaY)
+        let travel = axis == .horizontal ? event.deltaX : event.deltaY
+        let steps = scrollAccumulator.steps(delta: travel, isPrecise: event.isPrecise)
+        onScrollRouted?(OverlayScrollDiagnostic(
+            location: event.location,
+            deltaX: event.deltaX,
+            deltaY: event.deltaY,
+            axis: axis,
+            isInScrollArea: true,
+            steps: steps,
+            destination: nil
+        ))
+        guard steps != 0 else { return }
+        onWindowScrollStepped?(OverlayScrollAxis.windowSteps(fromScrollSteps: steps))
     }
 }

@@ -814,7 +814,9 @@ struct OverlayTapDiagnostic {
 /// never received.
 struct OverlayScrollDiagnostic {
     let location: CGPoint
+    let deltaX: CGFloat
     let deltaY: CGFloat
+    let axis: OverlayScrollAxis
     let isInScrollArea: Bool
     let steps: Int
     let destination: Int?
@@ -829,14 +831,30 @@ struct OverlayPointerRegionDiagnostic {
     let bottomBoundary: CGFloat?
 }
 
+/// Vertical scroll chooses the space and horizontal scroll steps the window inside it, so one
+/// gesture must drive exactly one of them. A trackpad never scrolls perfectly straight.
+enum OverlayScrollAxis: Equatable {
+    case vertical
+    case horizontal
+
+    init(deltaX: CGFloat, deltaY: CGFloat) {
+        self = abs(deltaX) > abs(deltaY) ? .horizontal : .vertical
+    }
+
+    /// Scroll steps count toward the start of the list, which for windows is to the left.
+    static func windowSteps(fromScrollSteps steps: Int) -> Int {
+        -steps
+    }
+}
+
 /// A wheel reports whole notches and a trackpad a stream of points, and both have to become
-/// whole space steps. The leftover travel has to survive between events, or a slow scroll would
-/// never accumulate into a step at all.
-struct SpaceScrollAccumulator {
+/// whole steps. The leftover travel has to survive between events, or a slow scroll would never
+/// accumulate into a step at all.
+struct ScrollStepAccumulator {
     private var travel: CGFloat = 0
 
-    mutating func steps(deltaY: CGFloat, isPrecise: Bool) -> Int {
-        travel += isPrecise ? deltaY : deltaY * StageConstants.spaceScrollTravelPerSpace
+    mutating func steps(delta: CGFloat, isPrecise: Bool) -> Int {
+        travel += isPrecise ? delta : delta * StageConstants.spaceScrollTravelPerSpace
         let whole = (travel / StageConstants.spaceScrollTravelPerSpace).rounded(.towardZero)
         travel -= whole * StageConstants.spaceScrollTravelPerSpace
         return Int(whole)
@@ -1212,6 +1230,7 @@ public struct StageOverlayView: View {
     public var onBackdropDismissed: (() -> Void)?
     var onOverlayTapRouted: ((OverlayTapDiagnostic) -> Void)?
     var onSpaceScrollSelected: ((Int) -> Void)?
+    var onWindowScrollStepped: ((Int) -> Void)?
     var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     var scrollRelay: OverlayScrollRelay?
     var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
@@ -1230,7 +1249,8 @@ public struct StageOverlayView: View {
     @State private var stageFrames: [Int: CGRect] = [:]
     @State private var windowFrames: [WindowFrameID: CGRect] = [:]
     @State private var hoveredSpaceIndex: Int?
-    @State private var scrollAccumulator = SpaceScrollAccumulator()
+    @State private var scrollAccumulator = ScrollStepAccumulator()
+    @State private var windowScrollAccumulator = ScrollStepAccumulator()
     @HostReducesMotion private var reduceMotion
 
     public init(
@@ -2011,30 +2031,48 @@ public struct StageOverlayView: View {
 
     /// Reported at every space, because a scroll that changes nothing is otherwise
     /// indistinguishable from a scroll the window never received.
+    /// Vertical scroll chooses the space and horizontal scroll steps the window within it, so a
+    /// sideways scroll can never carry the selection into another stage.
     private func handleSpaceScroll(_ event: OverlayScrollEvent, containerSize: CGSize) {
-        if event.isGestureStart { scrollAccumulator.reset() }
+        if event.isGestureStart {
+            scrollAccumulator.reset()
+            windowScrollAccumulator.reset()
+        }
+        let axis = OverlayScrollAxis(deltaX: event.deltaX, deltaY: event.deltaY)
         let inArea = !dragSession.suppressesNavigation
             && StageInteraction.isInSpaceScrollArea(
                 event.location,
                 containerSize: containerSize
             )
-        let steps = inArea
-            ? scrollAccumulator.steps(deltaY: event.deltaY, isPrecise: event.isPrecise)
-            : 0
-        let destination = StageInteraction.spaceScrollDestination(
-            current: viewModel.activeSpaceIndex,
-            steps: steps,
-            spaceCount: viewModel.stages.count
-        )
+        let steps = switch (inArea, axis) {
+        case (false, _): 0
+        case (true, .vertical):
+            scrollAccumulator.steps(delta: event.deltaY, isPrecise: event.isPrecise)
+        case (true, .horizontal):
+            windowScrollAccumulator.steps(delta: event.deltaX, isPrecise: event.isPrecise)
+        }
+        let destination = axis == .vertical
+            ? StageInteraction.spaceScrollDestination(
+                current: viewModel.activeSpaceIndex,
+                steps: steps,
+                spaceCount: viewModel.stages.count
+            )
+            : nil
 
         onSpaceScrollRouted?(OverlayScrollDiagnostic(
             location: event.location,
+            deltaX: event.deltaX,
             deltaY: event.deltaY,
+            axis: axis,
             isInScrollArea: inArea,
             steps: steps,
             destination: destination
         ))
 
+        if axis == .horizontal, steps != 0 {
+            onWindowScrollStepped?(OverlayScrollAxis.windowSteps(fromScrollSteps: steps))
+            return
+        }
         guard let destination else { return }
         // The stack re-lays out under a stationary pointer, and whichever stage lands beneath it
         // would otherwise take the magnify straight back off the space the scroll just chose.

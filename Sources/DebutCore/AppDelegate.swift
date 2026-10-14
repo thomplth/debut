@@ -1038,10 +1038,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             ])
         }
 
+        overlayWindow.onWindowScrollStepped = { [weak self] steps in
+            guard let self, let ctrl = self.spaceController else { return }
+            ctrl.stepWindowSelection(by: steps)
+            self.diag.report("window_scrolled_from_overlay", level: .transient, details: [
+                "steps": "\(steps)",
+            ])
+        }
+
         overlayWindow.onSpaceScrollRouted = { [weak self] scroll in
             self?.diag.report("overlay_scroll_routed", level: .transient, details: [
                 "location": formatOverlayPoint(scroll.location),
+                "deltaX": String(format: "%.1f", scroll.deltaX),
                 "deltaY": String(format: "%.1f", scroll.deltaY),
+                "axis": scroll.axis == .horizontal ? "horizontal" : "vertical",
                 "inScrollArea": "\(scroll.isInScrollArea)",
                 "steps": "\(scroll.steps)",
                 "destination": scroll.destination.map(String.init) ?? "none",

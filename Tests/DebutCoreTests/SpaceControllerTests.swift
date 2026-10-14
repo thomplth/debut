@@ -1452,6 +1452,53 @@ struct SpaceControllerTests {
         #expect(controller.selectedWindowIndex == 0) // release and press Tab again
     }
 
+    @Test("Scrolling steps the window selector within its stage and stops at the ends")
+    func scrollStepsWindowWithinStage() {
+        let (controller, _, _) = makeController()
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addFixtureDesktop()
+        let otherSpaceID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 404, ownerBundleID: "com.d", ownerName: "D", windowTitle: "T4"), toSpaceID: otherSpaceID)
+        controller.spaceManager.activateSpace(id: spaceID)
+
+        controller.handleKeyEvent(.cmdTabHold)
+        #expect(controller.selectedWindowIndex == 1)
+        controller.stepWindowSelection(by: 1)
+        #expect(controller.selectedWindowIndex == 2)
+        controller.stepWindowSelection(by: 3)
+        #expect(controller.selectedSpaceIndex == 0)
+        #expect(controller.selectedWindowIndex == 2)
+        controller.stepWindowSelection(by: -9)
+        #expect(controller.selectedSpaceIndex == 0)
+        #expect(controller.selectedWindowIndex == 0)
+
+        // Like an arrow key, a scroll steps from the hovered card rather than the old cursor.
+        controller.updateOverlayPointerSelection(spaceIndex: 0, windowIndex: 2)
+        controller.stepWindowSelection(by: -1)
+        #expect(controller.selectedWindowIndex == 1)
+    }
+
+    @Test("Scrolling steps the flat switcher's selector and stops at the ends")
+    func scrollStepsAltTabSelection() {
+        let (controller, _, _) = makeController()
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T1"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B", windowTitle: "T2"), toSpaceID: spaceID)
+        controller.spaceManager.addWindow(SpaceWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "T3"), toSpaceID: spaceID)
+
+        controller.handleKeyEvent(.altTabHold)
+        #expect(controller.altTabSelectionIndex == 1)
+        controller.stepWindowSelection(by: 1)
+        #expect(controller.altTabSelectionIndex == 2)
+        controller.stepWindowSelection(by: 1)
+        #expect(controller.altTabSelectionIndex == 2)
+        controller.stepWindowSelection(by: -5)
+        #expect(controller.altTabSelectionIndex == 0)
+    }
+
     @Test("Left and right arrows preview a reorder and apply it only on commit")
     func reorderWindowWithinSpace() {
         let (controller, _, keyboardSvc) = makeController()

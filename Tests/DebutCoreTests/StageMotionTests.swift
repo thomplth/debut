@@ -1177,29 +1177,48 @@ struct StageMotionTests {
     /// survive between events, or a slow scroll would never accumulate into a step at all.
     @Test("Scroll travel accumulates into whole space steps")
     func spaceScrollAccumulatesIntoSteps() {
-        var accumulator = SpaceScrollAccumulator()
+        var accumulator = ScrollStepAccumulator()
         let perSpace = StageConstants.spaceScrollTravelPerSpace
 
-        #expect(accumulator.steps(deltaY: perSpace / 3, isPrecise: true) == 0)
-        #expect(accumulator.steps(deltaY: perSpace / 3, isPrecise: true) == 0)
-        #expect(accumulator.steps(deltaY: perSpace / 3, isPrecise: true) == 1)
-        #expect(accumulator.steps(deltaY: -perSpace, isPrecise: true) == -1)
+        #expect(accumulator.steps(delta: perSpace / 3, isPrecise: true) == 0)
+        #expect(accumulator.steps(delta: perSpace / 3, isPrecise: true) == 0)
+        #expect(accumulator.steps(delta: perSpace / 3, isPrecise: true) == 1)
+        #expect(accumulator.steps(delta: -perSpace, isPrecise: true) == -1)
 
         // One wheel notch is one space, however small its reported delta.
-        var wheel = SpaceScrollAccumulator()
-        #expect(wheel.steps(deltaY: 1, isPrecise: false) == 1)
-        #expect(wheel.steps(deltaY: -1, isPrecise: false) == -1)
+        var wheel = ScrollStepAccumulator()
+        #expect(wheel.steps(delta: 1, isPrecise: false) == 1)
+        #expect(wheel.steps(delta: -1, isPrecise: false) == -1)
+    }
+
+    /// A trackpad never scrolls perfectly straight, so the axis is whichever one the event mostly
+    /// travels along. A tie keeps the vertical scroll it has always been.
+    @Test("A scroll moves along the axis it mostly travels")
+    func scrollAxisFollowsDominantTravel() {
+        #expect(OverlayScrollAxis(deltaX: 0, deltaY: 3) == .vertical)
+        #expect(OverlayScrollAxis(deltaX: -4, deltaY: 1) == .horizontal)
+        #expect(OverlayScrollAxis(deltaX: 6, deltaY: -2) == .horizontal)
+        #expect(OverlayScrollAxis(deltaX: 2, deltaY: -2) == .vertical)
+        #expect(OverlayScrollAxis(deltaX: 0, deltaY: 0) == .vertical)
+    }
+
+    /// Scrolling up or left is travel toward the start, which steps the selector back a window.
+    @Test("Scroll toward the start steps the window selector back")
+    func windowScrollStepsFollowDirection() {
+        #expect(OverlayScrollAxis.windowSteps(fromScrollSteps: 1) == -1)
+        #expect(OverlayScrollAxis.windowSteps(fromScrollSteps: -2) == 2)
+        #expect(OverlayScrollAxis.windowSteps(fromScrollSteps: 0) == 0)
     }
 
     /// A flick left over from the last gesture must not leak into the next one.
     @Test("Resetting the accumulator drops the leftover travel")
     func spaceScrollResetDropsLeftover() {
-        var accumulator = SpaceScrollAccumulator()
+        var accumulator = ScrollStepAccumulator()
         let perSpace = StageConstants.spaceScrollTravelPerSpace
 
-        #expect(accumulator.steps(deltaY: perSpace * 0.9, isPrecise: true) == 0)
+        #expect(accumulator.steps(delta: perSpace * 0.9, isPrecise: true) == 0)
         accumulator.reset()
-        #expect(accumulator.steps(deltaY: perSpace * 0.9, isPrecise: true) == 0)
+        #expect(accumulator.steps(delta: perSpace * 0.9, isPrecise: true) == 0)
     }
 
     /// Scrolling stops at the ends rather than wrapping, so a long flick cannot land somewhere
