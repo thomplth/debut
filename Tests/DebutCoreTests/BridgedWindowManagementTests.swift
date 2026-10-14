@@ -100,8 +100,11 @@ struct BridgedWindowManagementTests {
         #expect(service.spaceTopology().stack(id: stackID)?.desktopIDs == before)
     }
 
+    /// A fullscreen Space showing on the live host has no desktop index to aim at (KHA-1102).
     @Test("Removing the showing desktop is refused before anything is sent",
-          .enabled(if: SpaceService().canManageDesktops, "needs macOS 27 with a live bridge"))
+          .enabled(if: SpaceService().canManageDesktops, "needs macOS 27 with a live bridge"),
+          .enabled(if: SpaceService().spaceTopology().stacks.first?.currentDesktopIndex != nil,
+                   "needs an ordinary desktop showing, not a fullscreen Space"))
     func showingDesktopIsNotRemoved() async throws {
         let service = SpaceService()
         let stack = try #require(service.spaceTopology().stacks.first)
