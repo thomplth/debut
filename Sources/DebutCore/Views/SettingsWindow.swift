@@ -101,8 +101,6 @@ public struct SettingsView: View {
             // The sidebar is the only way between pages, so it can never be hidden (KHA-1093).
             .toolbar(removing: .sidebarToggle)
             .background(UncollapsibleSidebar())
-            // Applied after the toolbar removal, which otherwise drops the width to 144pt.
-            .navigationSplitViewColumnWidth(180)
         } detail: {
             VStack(spacing: 0) {
                 if selectedSection == .appearance {

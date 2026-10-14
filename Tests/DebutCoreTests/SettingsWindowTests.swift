@@ -53,7 +53,9 @@ struct SettingsPageTitleTests {
         var previous: CGFloat?
         while Date.now < deadline {
             RunLoop.main.run(until: .now + 0.05)
-            let top = titleTop(in: root)
+            let sidebar = window.contentView?.superview
+                .flatMap(SettingsSidebarTests.splitViewController(in:))?.splitView.arrangedSubviews.first
+            let top = sidebar.flatMap { titleTop(in: root, sidebarWidth: $0.frame.width) }
             if let top, top == previous { return top }
             previous = top
         }
@@ -61,16 +63,17 @@ struct SettingsPageTitleTests {
         return -1
     }
 
-    /// Titles start 24pt into the detail column, which starts after the sidebar: 180pt wide on
-    /// macOS 27, inset to end at 188pt on macOS 26.
-    static func titleTop(in root: CALayer) -> CGFloat? {
+    /// Titles start 24pt into the detail column, which starts after the sidebar: right at its edge
+    /// on macOS 27, and 8pt past it on macOS 26, which insets the sidebar.
+    static func titleTop(in root: CALayer, sidebarWidth: CGFloat) -> CGFloat? {
+        let titleColumn = (sidebarWidth + 20)...(sidebarWidth + 40)
         var top: CGFloat?
         func walk(_ layer: CALayer) {
             guard !layer.isHidden, layer.opacity > 0 else { return }
             if layer.contents != nil {
                 let frame = layer.convert(layer.bounds, to: root)
                 let fromTop = root.contentsAreFlipped() ? frame.minY : root.bounds.height - frame.maxY
-                if (200...220).contains(frame.minX), fromTop < top ?? .infinity { top = fromTop }
+                if titleColumn.contains(frame.minX), fromTop < top ?? .infinity { top = fromTop }
             }
             layer.sublayers?.forEach(walk)
         }
@@ -138,8 +141,8 @@ struct SettingsSegmentedPickerTests {
 @MainActor
 @Suite("Settings sidebar", .serialized)
 struct SettingsSidebarTests {
-    static func shownWindow() -> SettingsWindow {
-        let window = SettingsWindow(rootView: SettingsView())
+    static func shownWindow<Content: View>(_ rootView: Content = SettingsView()) -> SettingsWindow {
+        let window = SettingsWindow(rootView: rootView)
         OffDesktop.hide(window)
         window.orderFrontRegardless()
         RunLoop.main.run(until: .now + 0.3)
@@ -151,6 +154,24 @@ struct SettingsSidebarTests {
             return controller
         }
         return view.subviews.lazy.compactMap(splitViewController(in:)).first
+    }
+
+    static func sidebarWidth<Content: View>(_ rootView: Content) throws -> CGFloat {
+        let window = shownWindow(rootView)
+        defer { window.close() }
+        let root = try #require(window.contentView?.superview)
+        let controller = try #require(splitViewController(in: root))
+        return try #require(controller.splitView.arrangedSubviews.first).frame.width
+    }
+
+    @Test("The sidebar keeps the system's default width")
+    func sidebarUsesNativeWidth() throws {
+        let native = try Self.sidebarWidth(NavigationSplitView {
+            List(["Page"], id: \.self) { Text($0) }.listStyle(.sidebar)
+        } detail: {
+            Color.clear
+        })
+        #expect(try Self.sidebarWidth(SettingsView()) == native)
     }
 
     @Test("The toolbar has no sidebar toggle button")
