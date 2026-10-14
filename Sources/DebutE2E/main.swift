@@ -3273,9 +3273,14 @@ func scenario_fullscreen_navigation() {
             let controlReturnedFullscreen = waitFor {
                 featureSpaces.currentDesktop() == fullscreenSpaceID
             }
-            let controlEvents = events(since: controlEventsBefore) {
-                ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
-            }.count
+            // The key-event diagnostics trail the moves they record (KHA-1106).
+            var controlEvents = 0
+            _ = waitFor {
+                controlEvents = events(since: controlEventsBefore) {
+                    ($0["keyEvent"] ?? "").contains("switchAdjacentSpace")
+                }.count
+                return controlEvents >= 2
+            }
             info(
                 "Fullscreen Control-arrow: order=\(stack.orderedSpaceIDs) "
                     + "fullscreen=\(fullscreenSpaceID) adjacent=\(adjacentSpaceID) "
