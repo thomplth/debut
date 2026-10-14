@@ -186,6 +186,27 @@ public struct UnavailableProcessResourceReader: ProcessResourceReading {
 public struct SystemProcessResourceReader: ProcessResourceReading {
     public init() {}
 
+    /// `proc_pid_rusage` counts CPU in Mach absolute-time ticks, which are nanoseconds only on
+    /// Intel. Apple Silicon's timebase is 125/3, so reading ticks as nanoseconds understated
+    /// every CPU figure by ~42x (KHA-1088).
+    static func nanoseconds(ticks: UInt64) -> UInt64 {
+        nanoseconds(ticks: ticks, numerator: timebase.numer, denominator: timebase.denom)
+    }
+
+    private static let timebase: mach_timebase_info_data_t = {
+        var timebase = mach_timebase_info_data_t()
+        mach_timebase_info(&timebase)
+        return timebase
+    }()
+
+    static func nanoseconds(ticks: UInt64, numerator: UInt32, denominator: UInt32) -> UInt64 {
+        guard numerator != denominator, denominator > 0 else { return ticks }
+        let product = ticks.multipliedFullWidth(by: UInt64(numerator))
+        guard product.high < UInt64(denominator) else { return .max }
+        let (quotient, _) = UInt64(denominator).dividingFullWidth(product)
+        return quotient
+    }
+
     public func read() -> ProcessResourceSnapshot? {
         var usage = rusage_info_v4()
         let usageResult = withUnsafeMutablePointer(to: &usage) { pointer in
@@ -198,6 +219,11 @@ public struct SystemProcessResourceReader: ProcessResourceReading {
         var threadCount: mach_msg_type_number_t = 0
         let result = task_threads(mach_task_self_, &threadList, &threadCount)
         if result == KERN_SUCCESS, let threadList {
+            // Each entry is a send right this call added; freeing only the array leaked one
+            // reference per thread per read.
+            for index in 0..<Int(threadCount) {
+                mach_port_deallocate(mach_task_self_, threadList[index])
+            }
             vm_deallocate(
                 mach_task_self_,
                 vm_address_t(UInt(bitPattern: threadList)),
@@ -206,8 +232,8 @@ public struct SystemProcessResourceReader: ProcessResourceReading {
         }
         return ProcessResourceSnapshot(
             monotonicNanoseconds: DispatchTime.now().uptimeNanoseconds,
-            userCPUNanoseconds: usage.ri_user_time,
-            systemCPUNanoseconds: usage.ri_system_time,
+            userCPUNanoseconds: Self.nanoseconds(ticks: usage.ri_user_time),
+            systemCPUNanoseconds: Self.nanoseconds(ticks: usage.ri_system_time),
             physicalFootprintBytes: usage.ri_phys_footprint,
             peakPhysicalFootprintBytes: usage.ri_lifetime_max_phys_footprint,
             threadCount: result == KERN_SUCCESS ? Int(threadCount) : 0,
