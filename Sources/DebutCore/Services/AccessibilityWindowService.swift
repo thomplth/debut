@@ -1260,14 +1260,14 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
     public func captureWindowImages(
         windowIDs: [CGWindowID],
-        maxPointDimension: CGFloat,
+        budget: PreviewCaptureBudget,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
         await captureWindowImages(
             windowIDs: windowIDs,
             windowSizes: [:],
-            maxPointDimension: maxPointDimension,
+            budget: budget,
             onEnumerated: onEnumerated,
             onCapture: onCapture
         )
@@ -1278,7 +1278,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     public func captureWindowImages(
         windowIDs: [CGWindowID],
         windowSizes: [CGWindowID: CGSize],
-        maxPointDimension: CGFloat,
+        budget: PreviewCaptureBudget,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
@@ -1305,34 +1305,39 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         for captureWindow in windows {
             let window = captureWindow.window
             let filter = SCContentFilter(desktopIndependentWindow: window)
-            let pixelSize = PreviewCaptureSize.pixelSize(
+            let sizes = PreviewCaptureSize.pixelSizes(
                 contentSize: windowSizes[window.windowID] ?? filter.contentRect.size,
                 pointPixelScale: CGFloat(filter.pointPixelScale),
-                maxPointDimension: maxPointDimension
+                budget: budget
             )
             do {
                 let image = try await PreviewCaptureRoute.capture(
                     filter: filter,
-                    width: pixelSize.width,
-                    height: pixelSize.height
+                    width: sizes.captured.width,
+                    height: sizes.captured.height
                 )
                 guard !PreviewCaptureRoute.isPartialFrame(
                     width: image.width,
                     height: image.height,
-                    requestedWidth: pixelSize.width,
-                    requestedHeight: pixelSize.height
+                    requestedWidth: sizes.captured.width,
+                    requestedHeight: sizes.captured.height
                 ) else {
                     DiagnosticReporter.shared.report("preview_capture_discarded", details: [
                         "height": "\(image.height)",
                         "reason": "partial_frame",
-                        "requestedHeight": "\(pixelSize.height)",
-                        "requestedWidth": "\(pixelSize.width)",
+                        "requestedHeight": "\(sizes.captured.height)",
+                        "requestedWidth": "\(sizes.captured.width)",
                         "width": "\(image.width)",
                         "windowID": "\(window.windowID)",
                     ])
                     continue
                 }
-                onCapture(WindowImageCapture(windowID: window.windowID, image: image))
+                // Kept at exactly the drawn pixels, so the card draws it 1:1 rather than
+                // through the GPU's linear filter (KHA-1098).
+                onCapture(WindowImageCapture(
+                    windowID: window.windowID,
+                    image: PreviewCaptureSize.downsampled(image, to: sizes.drawn)
+                ))
             } catch {
                 // A handle can outlive its window; fetch the list again next time.
                 await captureHandles.evict(window.windowID)

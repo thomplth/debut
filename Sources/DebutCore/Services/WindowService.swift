@@ -1,3 +1,4 @@
+import Accelerate
 import CoreGraphics
 
 /// A bundleless exclusive-fullscreen process has no durable application identity. Keep its
@@ -135,35 +136,111 @@ public struct WindowImageCapture: @unchecked Sendable {
     }
 }
 
-enum PreviewCaptureSize {
-    /// The longest edge, in points, the overlay can draw a preview at with this size setting on
-    /// any of these displays. A native-resolution capture costs orders of magnitude more memory
-    /// and render work than the overlay can use (a 4412x2880 capture is ~50MB, and the cache
-    /// holds one per window), but a fixed pixel cap left a 400% preview with half the pixels it
-    /// is drawn at on a Retina display (KHA-1067). Stages only shrink from their resting size,
-    /// and the drag view never grows past the focused stage, so the resting card is the bound.
-    static func drawnPointDimension(stageScale: CGFloat, displaySizes: [CGSize]) -> CGFloat {
-        let sizes = displaySizes.isEmpty ? [CGSize.zero] : displaySizes
-        return sizes.map { display in
-            let metrics = StageMetrics.shaped(forDisplay: display).withPreviewScale(stageScale)
-            return max(metrics.thumbnailWidth, metrics.thumbnailHeight)
-        }.max() ?? 0
+/// The cards a preview can be drawn in for one size setting: one shape per display. A capture
+/// sized to these is recaptured when they change (KHA-1067).
+public struct PreviewCaptureBudget: Equatable, Sendable {
+    public let stageScale: CGFloat
+    public let displaySizes: [CGSize]
+
+    public init(stageScale: CGFloat, displaySizes: [CGSize]) {
+        self.stageScale = stageScale
+        self.displaySizes = displaySizes
     }
 
-    static func pixelSize(
+    /// The largest size, in points, a window of this shape is drawn at on any of the displays.
+    ///
+    /// The window is fitted into its card exactly as the card draws it, rather than bounded by
+    /// the card's longest edge: a portrait window in a 430x242-point card is drawn 157 points
+    /// wide, and a capture 430 points tall was downsampled 1.8x on screen by the GPU's linear
+    /// filter, which aliases text (KHA-1098). Stages only shrink from their resting size, and
+    /// the drag view never grows past the focused stage, so the resting card is the bound.
+    public func drawnPointSize(forContentSize contentSize: CGSize) -> CGSize {
+        let aspect: CGFloat? = contentSize.width > 0 && contentSize.height > 0
+            ? contentSize.width / contentSize.height
+            : nil
+        let sizes = displaySizes.isEmpty ? [CGSize.zero] : displaySizes
+        return sizes.map { display in
+            StageMetrics.shaped(forDisplay: display)
+                .withPreviewScale(stageScale)
+                .adapted(toContentAspect: aspect)
+                .previewImageRect(forImageAspect: aspect)
+                .size
+        }.max { $0.width * $0.height < $1.width * $1.height } ?? .zero
+    }
+}
+
+enum PreviewCaptureSize {
+    struct Pixels: Equatable {
+        let width: Int
+        let height: Int
+    }
+
+    /// How many times the drawn size ScreenCaptureKit is asked for. Its own scaling is soft:
+    /// measured on three live windows, a capture at the drawn size was visibly blurrier than one
+    /// at twice that downsampled with Lanczos, which came within ~10% of native + Lanczos
+    /// (sharpness 870 vs 976; native costs 7-27ms more and a ~50MB frame) (KHA-1098).
+    static let oversample: CGFloat = 2
+
+    /// The pixels a preview is drawn at, and the larger frame captured to make them. A native
+    /// capture costs far more memory and render work than the overlay can use (a 4412x2880
+    /// capture is ~50MB, and the cache holds one per window), so neither exceeds the window's
+    /// own pixels, and only the drawn size is kept.
+    static func pixelSizes(
         contentSize: CGSize,
         pointPixelScale: CGFloat,
-        maxPointDimension: CGFloat
-    ) -> (width: Int, height: Int) {
+        budget: PreviewCaptureBudget
+    ) -> (drawn: Pixels, captured: Pixels) {
         let nativeWidth = contentSize.width * pointPixelScale
         let nativeHeight = contentSize.height * pointPixelScale
-        let longest = max(nativeWidth, nativeHeight)
-        let maxPixelDimension = (maxPointDimension * pointPixelScale).rounded(.up)
-        let scale = longest > maxPixelDimension ? maxPixelDimension / longest : 1
+        let drawnPoints = budget.drawnPointSize(forContentSize: contentSize)
+        let drawnLongest = max(drawnPoints.width, drawnPoints.height) * pointPixelScale
+        let nativeLongest = max(nativeWidth, nativeHeight)
+        func pixels(longest: CGFloat) -> Pixels {
+            let scale = nativeLongest > longest && nativeLongest > 0 ? longest / nativeLongest : 1
+            return Pixels(
+                width: max(1, Int((nativeWidth * scale).rounded())),
+                height: max(1, Int((nativeHeight * scale).rounded()))
+            )
+        }
         return (
-            width: max(1, Int(ceil(nativeWidth * scale))),
-            height: max(1, Int(ceil(nativeHeight * scale)))
+            drawn: pixels(longest: drawnLongest),
+            captured: pixels(longest: drawnLongest * oversample)
         )
+    }
+
+    /// The capture reduced to the drawn size with Lanczos resampling, or the capture itself if
+    /// it already is that size or cannot be resampled.
+    static func downsampled(_ image: CGImage, to size: Pixels) -> CGImage {
+        guard image.width > size.width || image.height > size.height else { return image }
+        guard var format = vImage_CGImageFormat(
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            colorSpace: image.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue
+                | CGBitmapInfo.byteOrder32Little.rawValue)
+        ) else { return image }
+        var source = vImage_Buffer()
+        guard vImageBuffer_InitWithCGImage(
+            &source, &format, nil, image, vImage_Flags(kvImageNoFlags)
+        ) == kvImageNoError else { return image }
+        defer { free(source.data) }
+        var destination = vImage_Buffer()
+        guard vImageBuffer_Init(
+            &destination,
+            vImagePixelCount(size.height),
+            vImagePixelCount(size.width),
+            32,
+            vImage_Flags(kvImageNoFlags)
+        ) == kvImageNoError else { return image }
+        defer { free(destination.data) }
+        guard vImageScale_ARGB8888(
+            &source, &destination, nil, vImage_Flags(kvImageHighQualityResampling)
+        ) == kvImageNoError else { return image }
+        var error = vImage_Error(kvImageNoError)
+        let scaled = vImageCreateCGImageFromBuffer(
+            &destination, &format, nil, nil, vImage_Flags(kvImageNoFlags), &error
+        )
+        return scaled?.takeRetainedValue() ?? image
     }
 }
 
@@ -316,14 +393,14 @@ public protocol WindowService: Sendable {
     /// would classify all apps' AX windows reuses the first classification taken in the pass,
     /// so a caller asking several questions of the same moment pays for one sweep, not one each.
     func withSharedAccessibilitySweep<T>(_ body: () -> T) -> T
-    /// `maxPointDimension` is the longest edge, in points, a preview is drawn at; each window
-    /// is captured at that size times its display's pixel density, or its own size if smaller.
+    /// `budget` holds the cards a preview is drawn in; each window is kept at the pixels its
+    /// card draws it at on its display, or its own size if smaller.
     /// `onEnumerated` reports which requested windows the shareable-content
     /// snapshot actually matched, before any of them is captured. Without it a
     /// caller cannot tell the shared enumeration wait apart from capture time.
     func captureWindowImages(
         windowIDs: [CGWindowID],
-        maxPointDimension: CGFloat,
+        budget: PreviewCaptureBudget,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async
@@ -332,7 +409,7 @@ public protocol WindowService: Sendable {
     func captureWindowImages(
         windowIDs: [CGWindowID],
         windowSizes: [CGWindowID: CGSize],
-        maxPointDimension: CGFloat,
+        budget: PreviewCaptureBudget,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async
@@ -398,13 +475,13 @@ public extension WindowService {
     func captureWindowImages(
         windowIDs: [CGWindowID],
         windowSizes: [CGWindowID: CGSize],
-        maxPointDimension: CGFloat,
+        budget: PreviewCaptureBudget,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
         await captureWindowImages(
             windowIDs: windowIDs,
-            maxPointDimension: maxPointDimension,
+            budget: budget,
             onEnumerated: onEnumerated,
             onCapture: onCapture
         )

@@ -51,7 +51,7 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
 
     private let captureLock = NSLock()
     private var recordedCaptureRequests: [[CGWindowID]] = []
-    private var recordedCaptureDimensions: [CGFloat] = []
+    private var recordedCaptureBudgets: [PreviewCaptureBudget] = []
 
     /// One entry per `captureWindowImages` call, in call order.
     public var captureRequests: [[CGWindowID]] {
@@ -59,8 +59,8 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     }
 
     /// The size budget each `captureWindowImages` call asked for, in call order.
-    public var captureDimensions: [CGFloat] {
-        captureLock.withLock { recordedCaptureDimensions }
+    public var captureBudgets: [PreviewCaptureBudget] {
+        captureLock.withLock { recordedCaptureBudgets }
     }
 
     public init() {}
@@ -122,13 +122,13 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
 
     public func captureWindowImages(
         windowIDs: [CGWindowID],
-        maxPointDimension: CGFloat,
+        budget: PreviewCaptureBudget,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
         captureLock.withLock {
             recordedCaptureRequests.append(windowIDs)
-            recordedCaptureDimensions.append(maxPointDimension)
+            recordedCaptureBudgets.append(budget)
         }
         onEnumerated(windowIDs.filter { capturedImages[$0] != nil })
         for windowID in windowIDs {

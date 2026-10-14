@@ -25,7 +25,7 @@ private final class DelayedCaptureWindowService: WindowService, @unchecked Senda
 
     func captureWindowImages(
         windowIDs: [CGWindowID],
-        maxPointDimension: CGFloat,
+        budget: PreviewCaptureBudget,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
     ) async {
@@ -1180,19 +1180,21 @@ struct SpaceControllerTests {
             )
         }
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeTestImage(), 303: makeTestImage()]
-        controller.previewCaptureDimension = 245
+        let small = PreviewCaptureBudget(stageScale: 1.5, displaySizes: [])
+        let large = PreviewCaptureBudget(stageScale: 4, displaySizes: [])
+        controller.previewCaptureBudget = small
 
         controller.prewarmWindowPreviews()
         #expect(waitUntil { controller.windowPreviews.count == 3 })
 
-        controller.previewCaptureDimension = 650
+        controller.previewCaptureBudget = large
         let mark = windowSvc.captureRequests.count
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
         #expect(waitUntil { requestedIDs(windowSvc, since: mark) == [101, 202, 303] },
                 "Every preview captured at the old size must be recaptured")
-        #expect(windowSvc.captureDimensions.first == 245)
-        #expect(windowSvc.captureDimensions.dropFirst(mark).allSatisfy { $0 == 650 })
+        #expect(windowSvc.captureBudgets.first == small)
+        #expect(windowSvc.captureBudgets.dropFirst(mark).allSatisfy { $0 == large })
         keyboardSvc.simulateEvent(.escape)
     }
 

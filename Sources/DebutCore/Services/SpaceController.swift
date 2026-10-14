@@ -134,7 +134,7 @@ final class PreviewCaptureTally: @unchecked Sendable {
 private struct PreviewCacheEntry {
     let capturedAt: Date
     let windowTitle: String
-    let captureDimension: CGFloat
+    let captureBudget: PreviewCaptureBudget
     /// The window's size when it was captured, in points; `nil` when it had not been measured.
     let windowSize: CGSize?
     /// Which system appearance the window was drawn in: every window restyles on a light/dark
@@ -372,9 +372,9 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
     public var previewCacheTTL: TimeInterval
-    /// The longest edge, in points, a preview is drawn at with the current size setting. A
-    /// cached preview captured under another size is recaptured at the next activation.
-    public var previewCaptureDimension: CGFloat = PreviewCaptureSize.drawnPointDimension(
+    /// The cards a preview is drawn in with the current size setting. A cached preview
+    /// captured under another size is recaptured at the next activation.
+    public var previewCaptureBudget = PreviewCaptureBudget(
         stageScale: CGFloat(AppSettings.defaultStageScale),
         displaySizes: []
     )
@@ -2953,7 +2953,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             if entry.windowTitle != window.windowTitle { return window.windowID }
             // Captured for another size setting: too few pixels to draw sharp, or more than
             // the overlay will ever draw.
-            if entry.captureDimension != previewCaptureDimension { return window.windowID }
+            if entry.captureBudget != previewCaptureBudget { return window.windowID }
             if entry.appearanceGeneration != appearanceGeneration { return window.windowID }
             // Resized since: the old picture would be drawn letterboxed in the new card shape.
             if entry.windowWasResized(to: windowSizes[window.windowID]) { return window.windowID }
@@ -3052,7 +3052,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             overlayPresentationRecorder: overlayPresentationRecorder
         )
         let clock = self.clock
-        let captureDimension = previewCaptureDimension
+        let captureBudget = previewCaptureBudget
         // A capture that started before a light/dark switch shows the old appearance.
         let appearanceGeneration = self.appearanceGeneration
         let windowSizes = self.windowSizes
@@ -3064,7 +3064,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             await windowService.captureWindowImages(
                 windowIDs: windowIDs,
                 windowSizes: windowSizes,
-                maxPointDimension: captureDimension,
+                budget: captureBudget,
                 onEnumerated: { matchedWindowIDs in
                     metrics.recordEnumeration(matchedWindowIDs: matchedWindowIDs)
                 }
@@ -3122,7 +3122,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                     self.previewCacheEntries[capture.windowID] = PreviewCacheEntry(
                         capturedAt: capturedAt,
                         windowTitle: window.windowTitle,
-                        captureDimension: captureDimension,
+                        captureBudget: captureBudget,
                         windowSize: windowSizes[capture.windowID],
                         appearanceGeneration: appearanceGeneration
                     )

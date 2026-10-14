@@ -330,7 +330,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             previewCacheTTL: currentSettings.previewCacheTTL
         )
         controller.delegate = self
-        controller.previewCaptureDimension = previewCaptureDimension(for: currentSettings)
+        controller.previewCaptureBudget = previewCaptureBudget(for: currentSettings)
         controller.onTutorialSelectionVerified = { [weak self] windowID, practice in
             DispatchQueue.main.async { self?.completeTutorialSelection(windowID: windowID, practice: practice) }
         }
@@ -794,8 +794,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     /// Previews are captured at the size the overlay draws them on the largest display shape,
     /// so changing the size setting or the displays recaptures them at the new size.
-    private func previewCaptureDimension(for settings: AppSettings) -> CGFloat {
-        PreviewCaptureSize.drawnPointDimension(
+    private func previewCaptureBudget(for settings: AppSettings) -> PreviewCaptureBudget {
+        PreviewCaptureBudget(
             stageScale: CGFloat(settings.stageScale),
             displaySizes: NSScreen.screens.map(\.frame.size)
         )
@@ -805,8 +805,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.overviewWindowProbe?.invalidate()
-            self.spaceController?.previewCaptureDimension =
-                self.previewCaptureDimension(for: self.currentSettings)
+            self.spaceController?.previewCaptureBudget =
+                self.previewCaptureBudget(for: self.currentSettings)
             self.spaceController?.reconcileSpacesWithDesktops()
             self.windowDiscovery?.refreshDesktopAssignmentsInBackground()
         }
@@ -1892,7 +1892,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         self.spaceController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
         self.spaceController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
         self.spaceController?.previewCacheTTL = newSettings.previewCacheTTL
-        self.spaceController?.previewCaptureDimension = previewCaptureDimension(for: newSettings)
+        self.spaceController?.previewCaptureBudget = previewCaptureBudget(for: newSettings)
         self.spaceService?.switchDuration = newSettings.spaceSwitchDuration
         self.spaceController?.fasterDesktopSwitchingEnabled =
             newSettings.features.fasterDesktopSwitching
