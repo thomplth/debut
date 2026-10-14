@@ -107,8 +107,18 @@ struct BridgedWindowManagementTests {
                    "needs an ordinary desktop showing, not a fullscreen Space"))
     func showingDesktopIsNotRemoved() async throws {
         let service = SpaceService()
-        let stack = try #require(service.spaceTopology().stacks.first)
-        let showing = try #require(stack.currentDesktopIndex.flatMap(stack.location(at:)))
+        // The gate above is read before the previous test removes the desktop it created, and
+        // the host reports no showing desktop for a moment after a removal (KHA-1101).
+        let deadline = Date().addingTimeInterval(5)
+        var stack = try #require(service.spaceTopology().stacks.first)
+        while stack.currentDesktopIndex == nil, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+            stack = try #require(service.spaceTopology().stacks.first)
+        }
+        let showing = try #require(
+            stack.currentDesktopIndex.flatMap(stack.location(at:)),
+            "no showing desktop: current \(String(describing: stack.currentDesktopID)), desktops \(stack.desktopIDs), spaces \(stack.orderedSpaceIDs)"
+        )
         let removed = await withCheckedContinuation { continuation in
             service.removeDesktop(showing) { continuation.resume(returning: $0) }
         }
