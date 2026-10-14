@@ -33,6 +33,29 @@ public final class SettingsWindow: NSWindow {
     }
 }
 
+/// Stops the enclosing split view's sidebar from collapsing. SwiftUI has no setting for it:
+/// a constant `columnVisibility` binding still lets View > Hide Sidebar and a divider drag hide it.
+private struct UncollapsibleSidebar: NSViewRepresentable {
+    final class Anchor: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            var view = superview
+            while let current = view {
+                if let split = current as? NSSplitView, let controller = split.delegate as? NSSplitViewController {
+                    for item in controller.splitViewItems where item.behavior == .sidebar {
+                        item.canCollapse = false
+                    }
+                    return
+                }
+                view = current.superview
+            }
+        }
+    }
+
+    func makeNSView(context: Context) -> Anchor { Anchor() }
+    func updateNSView(_ nsView: Anchor, context: Context) {}
+}
+
 public struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
     @State private var selectedSection: SettingsSection = .general
@@ -74,8 +97,12 @@ public struct SettingsView: View {
             List(SettingsSection.allCases, id: \.self, selection: $selectedSection) { section in
                 Label(section.rawValue, systemImage: sectionIcon(section))
             }
-            .navigationSplitViewColumnWidth(180)
             .listStyle(.sidebar)
+            // The sidebar is the only way between pages, so it can never be hidden (KHA-1093).
+            .toolbar(removing: .sidebarToggle)
+            .background(UncollapsibleSidebar())
+            // Applied after the toolbar removal, which otherwise drops the width to 144pt.
+            .navigationSplitViewColumnWidth(180)
         } detail: {
             VStack(spacing: 0) {
                 if selectedSection == .appearance {

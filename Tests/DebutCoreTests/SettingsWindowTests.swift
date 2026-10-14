@@ -134,3 +134,46 @@ struct SettingsSegmentedPickerTests {
     }
 }
 
+
+@MainActor
+@Suite("Settings sidebar", .serialized)
+struct SettingsSidebarTests {
+    static func shownWindow() -> SettingsWindow {
+        let window = SettingsWindow(rootView: SettingsView())
+        OffDesktop.hide(window)
+        window.orderFrontRegardless()
+        RunLoop.main.run(until: .now + 0.3)
+        return window
+    }
+
+    static func splitViewController(in view: NSView) -> NSSplitViewController? {
+        if let split = view as? NSSplitView, let controller = split.delegate as? NSSplitViewController {
+            return controller
+        }
+        return view.subviews.lazy.compactMap(splitViewController(in:)).first
+    }
+
+    @Test("The toolbar has no sidebar toggle button")
+    func noSidebarToggleButton() throws {
+        let window = Self.shownWindow()
+        defer { window.close() }
+        let identifiers = window.toolbar?.items.map(\.itemIdentifier.rawValue) ?? []
+        #expect(!identifiers.contains { $0.localizedCaseInsensitiveContains("toggleSidebar") }, "toolbar items \(identifiers)")
+    }
+
+    /// View > Hide Sidebar and its shortcut send `toggleSidebar:` down the responder chain.
+    @Test("Toggling the sidebar leaves it visible")
+    func sidebarCannotBeHidden() throws {
+        let window = Self.shownWindow()
+        defer { window.close() }
+        let root = try #require(window.contentView?.superview)
+        let controller = try #require(Self.splitViewController(in: root))
+        controller.toggleSidebar(nil)
+        let deadline = Date.now + 2
+        while Date.now < deadline, !controller.splitViewItems[0].isCollapsed {
+            RunLoop.main.run(until: .now + 0.05)
+        }
+        let items = controller.splitViewItems.map { "collapsed=\($0.isCollapsed) width=\($0.viewController.view.frame.width)" }
+        #expect(!controller.splitViewItems[0].isCollapsed, "split items \(items)")
+    }
+}
