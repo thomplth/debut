@@ -42,12 +42,13 @@ struct MoveFocusedWindowTests {
         }
     }
 
-    private func fixture() -> (SpaceController, MockWindowService, MockSpaceSwitcher) {
+    private func fixture(settleDelay: TimeInterval = 0) -> (SpaceController, MockWindowService, MockSpaceSwitcher) {
         let windows = MockWindowService()
         let spaces = MockSpaceSwitcher(desktops: 4)
         spaces.switchChangesDesktop = false
         let controller = SpaceController(windowService: windows, keyboardService: MockKeyboardService(),
-            focusedWindowSnapshotProvider: { .init(windowID: 102, frame: nil, isFullscreen: false) })
+            focusedWindowSnapshotProvider: { .init(windowID: 102, frame: nil, isFullscreen: false) },
+            windowMoveSettleDelay: settleDelay)
         controller.spaceSwitcher = spaces
         controller.reconcileSpacesWithDesktops()
         for id in [101, 102] {
@@ -129,6 +130,42 @@ struct MoveFocusedWindowTests {
         #expect(spaces.moveRequests.map(\.desktop) == [1, 2, 3])
         #expect(spaces.switchRequests == [1, 2, 3])
         #expect(controller.spaceManager.spaces[3].windows.map(\.windowID) == [102])
+    }
+
+    /// The Dock posts the desktop-change notification before it accepts another swipe. A hop
+    /// posted inside that gap is sometimes answered by a swipe the opposite way, stranding the
+    /// screen on the desktop the chain just left while the window sits at the end (KHA-1095).
+    @Test("A chain waits for the Dock to settle after each desktop before its next hop")
+    func chainWaitsForDockToSettle() async throws {
+        let (controller, _, spaces) = fixture(settleDelay: 0.05)
+        for _ in 0..<3 { controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1)) }
+        #expect(spaces.switchRequests == [1])
+        spaces.current = 1
+        let arrived = ContinuousClock.now
+        controller.desktopDidChange()
+        #expect(spaces.moveRequests.map(\.desktop) == [1])
+        let deadline = arrived + .seconds(2)
+        while spaces.moveRequests.count < 2, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(ContinuousClock.now - arrived >= .milliseconds(50))
+        #expect(spaces.moveRequests.map(\.desktop) == [1, 2])
+        #expect(spaces.switchRequests == [1, 2])
+    }
+
+    /// An intermediate stop is not announced, as on any other Debut-owned route. Left showing
+    /// through the settle wait, its first draw blocked the main queue for up to 500ms and held
+    /// the next hop behind it.
+    @Test("A chain announces only the desktop the window ends on")
+    func chainAnnouncesOnlyItsEnd() {
+        let (controller, _, spaces) = fixture()
+        for _ in 0..<3 { controller.handleKeyEvent(.moveFocusedWindowToAdjacentSpace(1)) }
+        var announced: [Int] = []
+        for desktop in 1...3 {
+            spaces.current = desktop
+            announced += controller.desktopDidChange().map(\.desktopPosition)
+        }
+        #expect(announced == [4])
     }
 
     @Test("A desktop reported early cannot start the next move before its notification")

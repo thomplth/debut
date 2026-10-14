@@ -597,6 +597,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var focusDeliveryRevision: UInt = 0
     private let focusDeliveryProbe: FocusDeliveryProbe?
     private let focusDeliveryVerificationDelay: TimeInterval
+    private let windowMoveSettleDelay: TimeInterval
     private let diag: DiagnosticReporter
     private let overlayPresentationRecorder: OverlayPresentationRecorder
     private var activeOverlayPresentation: OverlayPresentationContext?
@@ -610,6 +611,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         ownKeyWindowProvider: (() -> FocusedWindowSnapshot?)? = nil,
         focusDeliveryProbe: FocusDeliveryProbe? = nil,
         focusDeliveryVerificationDelay: TimeInterval = 0.12,
+        windowMoveSettleDelay: TimeInterval = SpaceController.defaultWindowMoveSettleDelay,
         overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
         previewRefreshPolicy: PreviewRefreshPolicy = .lastActiveOnly,
         previewCacheTTL: TimeInterval = AppSettings.defaultPreviewCacheTTL,
@@ -627,6 +629,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             ?? focusedWindowSnapshotProvider.map { _ in { nil } }
         self.focusDeliveryProbe = focusDeliveryProbe
         self.focusDeliveryVerificationDelay = focusDeliveryVerificationDelay
+        self.windowMoveSettleDelay = windowMoveSettleDelay
         self.overlayPresentationRecorder = overlayPresentationRecorder
         self.previewRefreshPolicy = previewRefreshPolicy
         self.previewCacheTTL = previewCacheTTL
@@ -878,6 +881,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// the earliest honest point to re-ask.
     @discardableResult
     public func desktopDidChange() -> [DesktopSwitchIndicatorPresentation] {
+        lastDesktopArrival = clock()
         // Let the switcher confirm the completed hop before reconciling the model. A far
         // target may start its next adjacent hop here, which also tells deferred focus that
         // an intermediate desktop is expected rather than a user overtaking the switch.
@@ -892,8 +896,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // Keep the tracker's confirmed baseline current, but do not visually announce a
         // desktop that is only an intermediate stop on a Debut-owned route. Unexpected
         // landings clear the route above and remain visible; the final endpoint does too.
+        // A window move chain posts each hop separately, so its stops are filtered by route.
         let indicatorPresentations = confirmedChanges.filter { presentation in
             !(spaceSwitcher?.isSwitchInFlight(stackID: presentation.stackID) ?? false)
+                && !isIntermediateWindowMoveStop(presentation)
         }
         let previousActiveSpaceID = spaceManager.activeSpaceID
         if let topology {
@@ -2410,9 +2416,28 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                      destinationID: sourceID, ignoredSourceID: sourceID)
     }
 
+    private func isIntermediateWindowMoveStop(_ presentation: DesktopSwitchIndicatorPresentation) -> Bool {
+        guard let request = followingWindowMove, request.stackID == presentation.stackID,
+              let destinationIndex = spaceManager.spaceIndex(id: request.destinationID)
+        else { return false }
+        return destinationIndex + 1 != presentation.desktopPosition
+    }
+
+    /// How long a move chain waits after a desktop arrives before taking its next hop.
+    ///
+    /// The Dock posts the desktop-change notification before it accepts another swipe. A hop
+    /// posted inside that gap is sometimes answered with a swipe the opposite way, leaving the
+    /// screen on the desktop the chain just left (KHA-1095). In Tart, 50ms still failed 1 of 20
+    /// chains; 100ms failed none.
+    public static let defaultWindowMoveSettleDelay: TimeInterval = 0.1
+
+    private var lastDesktopArrival: Date?
+    private var windowMoveSettleScheduled = false
+
     /// Move and follow one adjacent desktop at a time. Moving the focused window past an
     /// unconfirmed swipe lets macOS change desktops out of sequence. Presses update the final
-    /// destination immediately, but the next relocation waits for the preceding desktop event.
+    /// destination immediately, but the next relocation waits for the preceding desktop event
+    /// and for the Dock to settle after it.
     private func continueFollowingWindowMove() {
         guard var request = followingWindowMove, !request.relocating else { return }
         guard let switcher = spaceSwitcher,
@@ -2435,6 +2460,19 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             followingWindowMove = nil
             return
         }
+        // Only the next hop waits; focusing the window where it already is does not swipe.
+        if let lastDesktopArrival {
+            let wait = windowMoveSettleDelay - clock().timeIntervalSince(lastDesktopArrival)
+            if wait > 0 {
+                guard !windowMoveSettleScheduled else { return }
+                windowMoveSettleScheduled = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+                    self?.windowMoveSettleScheduled = false
+                    self?.continueFollowingWindowMove()
+                }
+                return
+            }
+        }
         let index = sourceIndex + (finalIndex > sourceIndex ? 1 : -1)
         guard let location = stack.location(at: index),
               let destinationID = spaceManager.spaceID(stackID: request.stackID, at: index) else {
@@ -2453,6 +2491,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let ownerPID = request.ownerPID
         let requestID = request.id
         let ignored = request.ignoredSourceID != nil
+        // The move reports on confirmation, so this marks how long the settle wait held the hop.
+        diag.report("focused_window_move_started", details: [
+            "windowID": "\(windowID)", "toSpaceIndex": "\(index)",
+            "sinceArrivalMilliseconds": lastDesktopArrival.map {
+                String(format: "%.0f", clock().timeIntervalSince($0) * 1_000)
+            } ?? "none",
+        ])
         switcher.moveWindow(windowID: windowID, to: location) { [weak self] moved in
             let finish: @Sendable () -> Void = { [weak self] in
                 guard let self else { return }
