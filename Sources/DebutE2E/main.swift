@@ -5599,7 +5599,11 @@ func scenario_move_duration_sweep() {
                 info("  \(focusThiefDescription(since: chainEventsBefore))")
             }
             // Leave margin for guest scheduling, but catch per-key delays or stalled confirmations.
-            let responsivenessBudget = 3 * settings.spaceSwitchDuration + 1.0
+            // Every hop after the first waits for the Dock to settle on purpose (KHA-1095); left
+            // out, those waits ate 0.2s of the margin and a guest stall failed a chain that
+            // landed correctly (KHA-1109).
+            let settleWaits = 2 * SpaceController.defaultWindowMoveSettleDelay
+            let responsivenessBudget = 3 * settings.spaceSwitchDuration + settleWaits + 1.0
             test("Command-Option arrows chain 1→4→1 with focus at \(milliseconds) ms") {
                 ready && atFirst && focused && forwardLanded && stillFocused
                     && reverseLanded && forwardElapsed < responsivenessBudget && reverseElapsed < responsivenessBudget
