@@ -39,8 +39,12 @@ struct OverlayGlassFocusTests {
     }
 
     /// The tint override is one setting for every material (KHA-1072): a fixed tint must reach
-    /// the glass filter whichever material draws, not only Native.
-    @Test("A fixed tint reaches every glass style", arguments: GlassStyle.allCases)
+    /// the glass filter whichever material draws, not only Native. macOS 26's filter has no fill
+    /// inputs, so DockGlass leaves its glass on the system tint there.
+    @Test("A fixed tint reaches every glass style",
+          .enabled(if: ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27,
+                   "macOS 26's glass filter has no fill inputs to tint"),
+          arguments: GlassStyle.allCases)
     func fixedTintReachesEveryStyle(style: GlassStyle) throws {
         // Full tint frosts every material completely; none does at zero. Pick the end the system
         // tint is not at, so the override is what shows.

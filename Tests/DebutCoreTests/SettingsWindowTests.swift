@@ -37,31 +37,45 @@ struct SettingsWindowTests {
 @Suite("Settings page titles", .serialized)
 struct SettingsPageTitleTests {
     /// The top edge of a page's title in a real settings window, in points from the window top:
-    /// the first row of title ink where the detail column's content starts. In-process SwiftUI
-    /// publishes no accessibility frames without a client, so this reads pixels instead.
+    /// the highest drawn layer that starts where the detail column's content does. In-process
+    /// SwiftUI publishes no accessibility frames without a client, and on macOS 26 neither
+    /// `cacheDisplay` nor `CALayer.render(in:)` draws a scroll view's content under the titlebar,
+    /// so this reads the layer tree SwiftUI drew into instead of pixels.
     static func titleTop(of section: SettingsSection) throws -> CGFloat {
         let window = SettingsWindow(rootView: SettingsView(selectedSection: section))
         window.appearance = NSAppearance(named: .aqua)
         OffDesktop.hide(window)
         defer { window.close() }
         window.orderFrontRegardless()
-        RunLoop.main.run(until: .now + 0.3)
-        let view = try #require(window.contentView)
-        let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-        view.cacheDisplay(in: view.bounds, to: rep)
-        let scale = CGFloat(rep.pixelsHigh) / view.bounds.height
-        // Titles start 24pt into the detail column, which starts after the 180pt sidebar.
-        let columns = Int(210 * scale)..<Int(260 * scale)
-        for y in 0..<rep.pixelsHigh {
-            for x in columns {
-                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
-                if color.alphaComponent > 0.5, color.redComponent + color.greenComponent + color.blueComponent < 0.9 {
-                    return CGFloat(y) / scale
-                }
-            }
+        let root = try #require(window.contentView?.layer)
+        // Settled once two readings a run-loop turn apart agree.
+        let deadline = Date.now + 5
+        var previous: CGFloat?
+        while Date.now < deadline {
+            RunLoop.main.run(until: .now + 0.05)
+            let top = titleTop(in: root)
+            if let top, top == previous { return top }
+            previous = top
         }
-        Issue.record("no title ink on \(section.rawValue)")
+        Issue.record("no settled title layer on \(section.rawValue); last reading \(String(describing: previous))")
         return -1
+    }
+
+    /// Titles start 24pt into the detail column, which starts after the sidebar: 180pt wide on
+    /// macOS 27, inset to end at 188pt on macOS 26.
+    static func titleTop(in root: CALayer) -> CGFloat? {
+        var top: CGFloat?
+        func walk(_ layer: CALayer) {
+            guard !layer.isHidden, layer.opacity > 0 else { return }
+            if layer.contents != nil {
+                let frame = layer.convert(layer.bounds, to: root)
+                let fromTop = root.contentsAreFlipped() ? frame.minY : root.bounds.height - frame.maxY
+                if (200...220).contains(frame.minX), fromTop < top ?? .infinity { top = fromTop }
+            }
+            layer.sublayers?.forEach(walk)
+        }
+        walk(root)
+        return top
     }
 
     @Test("Every page's title starts at the same height")
@@ -70,8 +84,9 @@ struct SettingsPageTitleTests {
         for section in SettingsSection.allCases where section != .about {
             tops[section.rawValue] = try Self.titleTop(of: section)
         }
-        // Glyph shapes alone move the first inked row by up to half a point; the Appearance
-        // title sat 2pt low when its backdrop picker set the header row's height (KHA-1070).
+        // Every title is one line of the same font, so its layer tops agree exactly; the
+        // Appearance title sat 2pt low when its backdrop picker set the header row's height
+        // (KHA-1070).
         let spread = (tops.values.max() ?? 0) - (tops.values.min() ?? 0)
         #expect(spread <= 1, "title tops \(tops)")
     }
