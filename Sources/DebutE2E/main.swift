@@ -3687,14 +3687,19 @@ func scenario_prepared_arrival() {
                   let otherElement = accessibilityElement(of: other),
                   AXUIElementPerformAction(otherElement, kAXRaiseAction as CFString) == .success
             else { return "other" }
-            wait(0.3)
             // The trace below reads the window list, which Debut's own invisible panels cannot
-            // cover; the hit test is what the list has to agree with here first.
-            let drawn = windowDrawnOnTop(at: probePoint)
-            guard drawn == other.windowID else { return "drawn:\(label(drawn))" }
-            let listed = windowStackOrder(of: ids, onScreenOnly: true)
-            guard listed == [other.windowID, sibling.windowID, chosen.windowID] else {
-                return "listed:" + listed.map { label($0) }.joined(separator: ">")
+            // cover; the hit test is what the list has to agree with here first. One hit test
+            // can come back empty while the raised app's Accessibility server is busy, so both
+            // are awaited together.
+            var drawn: CGWindowID?
+            var listed: [CGWindowID] = []
+            let arranged = waitFor(timeout: 5) {
+                drawn = windowDrawnOnTop(at: probePoint)
+                listed = windowStackOrder(of: ids, onScreenOnly: true)
+                return drawn == other.windowID && listed == [other.windowID, sibling.windowID, chosen.windowID]
+            }
+            guard arranged else {
+                return "drawn:\(label(drawn)) listed:" + listed.map { label($0) }.joined(separator: ">")
             }
             guard goTo(originDesktop) else { return "return" }
             if let originWindow, !frontUntilHeld(originWindow, using: windows) { return "origin" }
