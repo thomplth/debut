@@ -31,14 +31,21 @@ struct SettingsViewModelTests {
         #expect(vm.settings.titleHaloStrength == 1)
         #expect(vm.settings.titleHaloSize == 0.5)
         #expect(vm.settings.showsDesktopSwitchIndicator)
-        // Must stay on the hold-delay slider's 25ms step grid, or the first drag moves it.
+        // Must stay on the hold-delay slider's step grid, or the first drag moves it.
         #expect(vm.settings.overlayPresentationDelay == 0.1)
+        let steps = vm.settings.overlayPresentationDelay / AppSettings.overlayPresentationDelayStep
+        #expect(abs(steps - steps.rounded()) < 0.0001)
         #expect(vm.settings.spaceSwitchDuration == 0)
         #expect(vm.settings.excludedBundleIDs.isEmpty)
         #expect(vm.settings.quickSwitchSameApplicationModifiers == ShortcutModifiers(
             control: true,
             option: true
         ))
+    }
+
+    @Test("The hold-delay slider adjusts in 5ms steps")
+    func holdDelaySliderStepsByFiveMilliseconds() {
+        #expect(AppSettings.overlayPresentationDelayStep == 0.005)
     }
 
     @Test("Update settings")

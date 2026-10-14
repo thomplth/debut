@@ -408,7 +408,11 @@ public struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                Slider(value: $viewModel.settings.overlayPresentationDelay, in: 0...0.5, step: 0.025)
+                Slider(
+                    value: $viewModel.settings.overlayPresentationDelay,
+                    in: 0...0.5,
+                    step: AppSettings.overlayPresentationDelayStep
+                )
             }
 
             VStack(alignment: .leading, spacing: 4) {

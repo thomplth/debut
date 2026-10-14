@@ -78,8 +78,9 @@ public struct ShortcutModifiers: Codable, Sendable, Equatable, Hashable {
 }
 
 public struct AppSettings: Codable, Sendable, Equatable {
-    /// Sits on the hold-delay slider's 25ms step grid, so the first drag does not shift it.
+    /// Sits on the hold-delay slider's step grid, so the first drag does not shift it.
     public static let defaultOverlayPresentationDelay: TimeInterval = 0.1
+    public static let overlayPresentationDelayStep: TimeInterval = 0.005
     public static let defaultPreviewCacheTTL: TimeInterval = 60
     /// Paces held cycling independently of the user's key-repeat rate.
     public static let defaultHeldCycleMinimumInterval: TimeInterval = 0.06
