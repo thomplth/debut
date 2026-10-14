@@ -185,6 +185,127 @@ struct AppIconCacheTests {
         #expect(cache.cached(bundleID: "com.example.a", size: 40) == nil)
     }
 
+    // An icon size warmed once — the slider passed 2x for a moment — used to stay for every app
+    // for the life of the process: 33 apps x 4 MB at 512 points, plus Core Animation's copy of
+    // each one drawn (KHA-1105).
+    @Test("Retaining drops the sizes that are no longer warmed and keeps the badge")
+    func retainDropsUnwarmedSizes() {
+        let cache = AppIconCache { _, size in self.stubIcon(size) }
+        cache.warm(bundleIDs: ["com.example.a"], sizes: [128, 256, 512], badgeSizes: [184])
+        waitForWarm(cache)
+        cache.retain(sizes: [128], badgeSizes: [184])
+        #expect(cache.cached(bundleID: "com.example.a", size: 128) != nil)
+        #expect(cache.cached(bundleID: "com.example.a", size: 184, badge: true) != nil)
+        #expect(cache.cached(bundleID: "com.example.a", size: 256) == nil)
+        #expect(cache.cached(bundleID: "com.example.a", size: 512) == nil)
+    }
+
+    @Test("Retaining overlay sizes leaves icons drawn elsewhere at their own size")
+    func retainKeepsNonOverlaySizes() {
+        let cache = AppIconCache { _, size in self.stubIcon(size) }
+        _ = cache.cachedOrRasterize(bundleID: "com.example.a", size: 20)
+        cache.retain(sizes: [128], badgeSizes: [184])
+        #expect(cache.cached(bundleID: "com.example.a", size: 20) != nil)
+    }
+
+    @Test("Evicting an app drops every icon it has")
+    func retainDropsAbsentApps() {
+        let cache = AppIconCache { _, size in self.stubIcon(size) }
+        cache.warm(bundleIDs: ["com.example.a", "com.example.b"], sizes: [128], badgeSizes: [184])
+        waitForWarm(cache)
+        cache.evict(bundleIDs: ["com.example.b"])
+        #expect(cache.cached(bundleID: "com.example.a", size: 128) != nil)
+        #expect(cache.cached(bundleID: "com.example.b", size: 128) == nil)
+        #expect(cache.cached(bundleID: "com.example.b", size: 184, badge: true) == nil)
+    }
+
+    @Test("An evicted icon is warmed again when its app comes back")
+    func evictedIconRewarms() {
+        let counter = Counter()
+        let cache = AppIconCache { _, size in
+            counter.record("hit")
+            return self.stubIcon(size)
+        }
+        cache.warm(bundleIDs: ["com.example.a"], sizes: [128])
+        waitForWarm(cache)
+        cache.evict(bundleIDs: ["com.example.a"])
+        cache.warm(bundleIDs: ["com.example.a"], sizes: [128])
+        waitForWarm(cache)
+        #expect(cache.cached(bundleID: "com.example.a", size: 128) != nil)
+        #expect(counter.total == 2)
+    }
+
+    @Test("A rasterize already running when its icon is evicted does not put it back")
+    func inFlightWarmDoesNotResurrect() {
+        let started = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let cache = AppIconCache { _, size in
+            started.signal()
+            _ = release.wait(timeout: .now() + 5)
+            return self.stubIcon(size)
+        }
+        cache.warm(bundleIDs: ["com.example.a"], sizes: [512])
+        _ = started.wait(timeout: .now() + 5)
+        cache.retain(sizes: [128], badgeSizes: [])
+        release.signal()
+        waitForWarm(cache)
+        #expect(cache.cached(bundleID: "com.example.a", size: 512) == nil)
+    }
+
+    @Test("Retention warms arriving window owners and evicts departing ones")
+    func retentionFollowsWindowOwners() {
+        let cache = AppIconCache { _, size in self.stubIcon(size) }
+        var retention = AppIconRetention(cache: cache, alwaysKept: ["com.example.sample"])
+        let size = AppIconCache.placeholderIconRasterSize
+        retention.update(windowOwnerBundleIDs: ["com.example.a", "com.example.sample"])
+        waitForWarm(cache)
+        #expect(cache.cached(bundleID: "com.example.a", size: size) != nil)
+        #expect(cache.cached(bundleID: "com.example.a", size: AppIconCache.badgeRasterSize, badge: true) != nil)
+
+        retention.update(windowOwnerBundleIDs: ["com.example.b"])
+        waitForWarm(cache)
+        #expect(cache.cached(bundleID: "com.example.a", size: size) == nil)
+        #expect(cache.cached(bundleID: "com.example.b", size: size) != nil)
+        #expect(cache.cached(bundleID: "com.example.sample", size: size) != nil)
+    }
+
+    // An app is warmed at launch, before discovery assigns its first window. Evicting it for not
+    // owning one yet would leave that first card to rasterize on the main thread (KHA-481).
+    @Test("Retention never evicts an app that has not owned a window yet")
+    func retentionKeepsLaunchingApps() {
+        let cache = AppIconCache { _, size in self.stubIcon(size) }
+        var retention = AppIconRetention(cache: cache)
+        let size = AppIconCache.placeholderIconRasterSize
+        cache.warm(bundleIDs: ["com.example.launching"], sizes: [size])
+        waitForWarm(cache)
+        retention.update(windowOwnerBundleIDs: ["com.example.a"])
+        retention.update(windowOwnerBundleIDs: ["com.example.b"])
+        #expect(cache.cached(bundleID: "com.example.launching", size: size) != nil)
+    }
+
+    @Test("Retention warms the sizes a new icon scale draws and drops the ones it no longer does")
+    func retentionFollowsIconScale() {
+        let cache = AppIconCache { _, size in self.stubIcon(size) }
+        var retention = AppIconRetention(cache: cache)
+        cache.iconScale = AppSettings.maximumStageScale
+        retention.update(windowOwnerBundleIDs: ["com.example.a"])
+        waitForWarm(cache)
+        let largest = AppIconCache.largestIconSlotRasterSize
+        #expect(cache.cached(bundleID: "com.example.a", size: largest) != nil)
+
+        cache.iconScale = 2
+        retention.update(windowOwnerBundleIDs: ["com.example.a"])
+        waitForWarm(cache)
+        #expect(cache.cached(bundleID: "com.example.a", size: AppIconCache.largeIconSlotRasterSize) != nil)
+
+        cache.iconScale = 1
+        retention.update(windowOwnerBundleIDs: ["com.example.a"])
+        waitForWarm(cache)
+        #expect(cache.cached(bundleID: "com.example.a", size: largest) == nil)
+        #expect(cache.cached(bundleID: "com.example.a", size: AppIconCache.largeIconSlotRasterSize) == nil)
+        #expect(cache.cached(bundleID: "com.example.a", size: AppIconCache.placeholderIconRasterSize) != nil)
+    }
+
     private func opaqueIcon(_ size: CGFloat) -> NSImage {
         let image = NSImage(size: NSSize(width: size, height: size))
         image.lockFocus()

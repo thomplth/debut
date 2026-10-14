@@ -286,7 +286,19 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let observedAt: Date
     }
 
-    public var spaceManager: SpaceManager
+    public var spaceManager: SpaceManager {
+        didSet { publishWindowOwnersIfChanged() }
+    }
+    /// The apps that own a live window, published from the model itself whenever they change.
+    /// Most discovery paths mutate `spaceManager` in place without telling the delegate — an app
+    /// quitting among them — and icon retention has to see every one (KHA-1105).
+    public var onWindowOwnersChanged: ((Set<String>) -> Void)? {
+        didSet {
+            publishedWindowOwners = nil
+            publishWindowOwnersIfChanged()
+        }
+    }
+    private var publishedWindowOwners: Set<String>?
     public let windowService: any WindowService
     public let keyboardService: any KeyboardService
     public weak var delegate: SpaceControllerDelegate?
@@ -688,7 +700,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             "tutorialCoachAction": tutorialCoachmark?.action ?? "",
             "windowPreviewCount": "\(windowPreviews.count)",
             "variedWindowPreviewCount": "\(variedWindowPreviewIDs.count)",
+            "appIconCount": "\(AppIconCache.shared.cachedCounts.icons)",
+            "appIconAppCount": "\(AppIconCache.shared.cachedCounts.apps)",
         ]
+    }
+
+    private func publishWindowOwnersIfChanged() {
+        guard let onWindowOwnersChanged else { return }
+        let owners = spaceManager.liveWindowOwnerBundleIDs
+        guard owners != publishedWindowOwners else { return }
+        publishedWindowOwners = owners
+        onWindowOwnersChanged(owners)
     }
 
     // MARK: - Space switching

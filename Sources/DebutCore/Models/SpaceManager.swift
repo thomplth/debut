@@ -145,11 +145,10 @@ public struct SpaceManager: Codable, Sendable {
         }.map(\.element)
     }
 
-    public var allWindowOwnerBundleIDs: [String] {
-        var seen: Set<String> = []
-        let live = allSpaces.flatMap(\.windows).map(\.ownerBundleID)
-        let dormant = dormantWindowAssignments.map(\.window.ownerBundleID)
-        return (live + dormant).filter { seen.insert($0).inserted }
+    /// The apps that own a live window. Dormant assignments are left out: their app has quit, and
+    /// it is warmed again when it relaunches.
+    public var liveWindowOwnerBundleIDs: Set<String> {
+        Set(allSpaces.flatMap(\.windows).map(\.ownerBundleID))
     }
 
     private var selectedStackIndex: Int? {

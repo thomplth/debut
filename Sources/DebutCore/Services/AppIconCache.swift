@@ -90,6 +90,13 @@ public final class AppIconCache: @unchecked Sendable {
         self.rasterize = rasterize
     }
 
+    /// How many icons, and of how many apps, are held: what retention is bounding (KHA-1105).
+    public var cachedCounts: (icons: Int, apps: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (icons.count, Set(icons.keys.map(\.bundleID)).count)
+    }
+
     public func cached(bundleID: String, size: CGFloat, badge: Bool = false) -> NSImage? {
         lock.lock()
         defer { lock.unlock() }
@@ -127,7 +134,9 @@ public final class AppIconCache: @unchecked Sendable {
             queue.async { [self] in
                 guard let icon = make(key) else { return }
                 lock.lock()
-                icons[key] = icon
+                // Evicted while it rasterized: inserting it now would keep it with nothing left
+                // to evict it again.
+                if requested.contains(key) { icons[key] = icon }
                 lock.unlock()
             }
         }
@@ -136,6 +145,39 @@ public final class AppIconCache: @unchecked Sendable {
     private func make(_ key: Key) -> NSImage? {
         guard let icon = rasterize(key.bundleID, key.size) else { return nil }
         return key.badge ? AppIconCache.withBadgeShadow(icon) : icon
+    }
+
+    /// Every size the overlay rasterizes at. Only these are managed by `retain(sizes:badgeSizes:)`;
+    /// an icon drawn elsewhere at its own size, such as Settings' excluded-app list, is left alone.
+    public static let overlayRasterSizes: Set<CGFloat> = [
+        placeholderIconRasterSize, largeIconSlotRasterSize, largestIconSlotRasterSize,
+    ]
+
+    /// Drops the overlay icons at sizes no longer warmed, and forgets they were warmed so a later
+    /// `warm` rasterizes them again.
+    ///
+    /// Nothing was ever evicted before: a size warmed once — the icon slider passing 2x for a
+    /// moment — stayed for every app, and Core Animation keeps a copy of each icon it drew for as
+    /// long as the image lives. 33 apps held ~300 MB that way (KHA-1105).
+    public func retain(sizes: Set<CGFloat>, badgeSizes: Set<CGFloat>) {
+        remove { key in
+            key.badge
+                ? !badgeSizes.contains(key.size)
+                : Self.overlayRasterSizes.contains(key.size) && !sizes.contains(key.size)
+        }
+    }
+
+    /// Drops every icon of these apps.
+    public func evict(bundleIDs: Set<String>) {
+        guard !bundleIDs.isEmpty else { return }
+        remove { bundleIDs.contains($0.bundleID) }
+    }
+
+    private func remove(where shouldRemove: (Key) -> Bool) {
+        lock.lock()
+        icons = icons.filter { !shouldRemove($0.key) }
+        requested = requested.filter { !shouldRemove($0) }
+        lock.unlock()
     }
 
     /// Runs once every warm request enqueued so far has finished. The queue is serial, so
@@ -222,5 +264,44 @@ public final class AppIconCache: @unchecked Sendable {
         let rasterized = NSImage(size: points)
         rasterized.addRepresentation(bitmap)
         return rasterized
+    }
+}
+
+
+/// Keeps the icon cache to the apps that own a window, at the sizes the overlay draws (KHA-1105).
+///
+/// An app is evicted when it stops owning a window, never merely for not owning one yet: a
+/// launching app is warmed before its first window is assigned, and evicting it in between would
+/// leave its first card to rasterize on the main thread (KHA-481). Arrivals are warmed in the same
+/// step, so an app that comes back is warm again before it is drawn.
+public struct AppIconRetention {
+    private let cache: AppIconCache
+    /// Drawn without owning a window, such as the Appearance page's sample stage.
+    private let alwaysKept: Set<String>
+    private var windowOwners: Set<String> = []
+    private var sizes: [CGFloat]?
+
+    public init(cache: AppIconCache = .shared, alwaysKept: Set<String> = []) {
+        self.cache = cache
+        self.alwaysKept = alwaysKept
+    }
+
+    public mutating func update(windowOwnerBundleIDs: Set<String>) {
+        let sizes = cache.warmSizes
+        let sizesChanged = sizes != self.sizes
+        guard sizesChanged || windowOwnerBundleIDs != windowOwners else { return }
+        if sizesChanged {
+            self.sizes = sizes
+            cache.retain(sizes: Set(sizes), badgeSizes: Set(AppIconCache.overlayBadgeIconSizes))
+        }
+        // A new size has to be warmed for every owner; otherwise only arrivals need it.
+        let warming = sizesChanged ? windowOwnerBundleIDs : windowOwnerBundleIDs.subtracting(windowOwners)
+        cache.evict(bundleIDs: windowOwners.subtracting(windowOwnerBundleIDs).subtracting(alwaysKept))
+        windowOwners = windowOwnerBundleIDs
+        cache.warm(
+            bundleIDs: warming.sorted(),
+            sizes: sizes,
+            badgeSizes: AppIconCache.overlayBadgeIconSizes
+        )
     }
 }

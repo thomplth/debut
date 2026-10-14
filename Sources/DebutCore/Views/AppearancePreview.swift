@@ -94,6 +94,9 @@ final class AppearancePreviewSample {
         uniqueKeysWithValues: windows.map { ($0.id, Self.mockWindow($0.kind)) }
     )
 
+    /// Drawn without owning a window, so icon retention keeps them (KHA-1105).
+    var bundleIDs: Set<String> { Set(windows.map(\.bundleID)) }
+
     func warmIcons() {
         AppIconCache.shared.warm(
             bundleIDs: windows.map(\.bundleID),

@@ -33,8 +33,8 @@ struct SpaceManagerTests {
         #expect(sm.liveWindowCount == 1)
     }
 
-    @Test("Owner bundle identifiers are deduplicated and include dormant assignments")
-    func allWindowOwnerBundleIDs() {
+    @Test("Live owner bundle identifiers are deduplicated and leave out dormant assignments")
+    func liveWindowOwnerBundleIDs() {
         var sm = SpaceManager()
         let firstSpaceID = sm.activeSpaceID
         sm.addFixtureDesktop()
@@ -52,11 +52,11 @@ struct SpaceManagerTests {
             toSpaceID: secondSpaceID
         )
 
-        #expect(Set(sm.allWindowOwnerBundleIDs) == ["com.a", "com.b"])
+        #expect(sm.liveWindowOwnerBundleIDs == ["com.a", "com.b"])
 
-        // A dormant app still gets a stage once it relaunches, so its icon is worth warming.
+        // A dormant app has quit, so its icon is evicted; relaunching warms it again (KHA-1105).
         _ = sm.makeWindowsDormant(forOwnerPID: 20)
-        #expect(Set(sm.allWindowOwnerBundleIDs) == ["com.a", "com.b"])
+        #expect(sm.liveWindowOwnerBundleIDs == ["com.a"])
     }
 
     @Test("Add and move window")

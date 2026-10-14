@@ -58,6 +58,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var currentSettings: AppSettings = AppSettings()
     private var pendingSpaceManager: SpaceManager?
     private var debouncedSaver: DebouncedSaver?
+    private var iconRetention = AppIconRetention(alwaysKept: AppearancePreviewSample.shared.bundleIDs)
     private var runtimeWindowReconciler = RuntimeWindowReconciler()
     private var hiddenIdlePerformanceID: UUID?
     private let forceDisplayStackIndicator =
@@ -315,11 +316,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         spaceManager.activateLaunchSpace(focusedWindowID: focusedWindowID)
 
         AppIconCache.shared.iconScale = currentSettings.iconAppearance.stageScale
-        AppIconCache.shared.warm(
-            bundleIDs: spaceManager.allWindowOwnerBundleIDs,
-            sizes: AppIconCache.shared.warmSizes,
-            badgeSizes: AppIconCache.overlayBadgeIconSizes
-        )
 
         let controller = SpaceController(
             windowService: windowService,
@@ -330,6 +326,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             previewCacheTTL: currentSettings.previewCacheTTL
         )
         controller.delegate = self
+        // Publishes the restored owners at once, so their icons warm before discovery finishes.
+        controller.onWindowOwnersChanged = { [weak self] owners in
+            self?.iconRetention.update(windowOwnerBundleIDs: owners)
+        }
         controller.previewCaptureBudget = previewCaptureBudget(for: currentSettings)
         controller.onTutorialSelectionVerified = { [weak self] windowID, practice in
             DispatchQueue.main.async { self?.completeTutorialSelection(windowID: windowID, practice: practice) }
@@ -1911,10 +1911,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         keyboardService?.features = newSettings.features
         if AppIconCache.shared.iconScale != newSettings.iconAppearance.stageScale {
             AppIconCache.shared.iconScale = newSettings.iconAppearance.stageScale
-            // Off the main thread, before an overlay asks for the size.
-            AppIconCache.shared.warm(
-                bundleIDs: spaceController?.spaceManager.allWindowOwnerBundleIDs ?? [],
-                sizes: AppIconCache.shared.warmSizes
+            // Warms the new size off the main thread, before an overlay asks for it, and drops
+            // the sizes the old scale drew.
+            iconRetention.update(
+                windowOwnerBundleIDs: spaceController?.spaceManager.liveWindowOwnerBundleIDs ?? []
             )
         }
         spaceController?.windowPreviewsEnabled = OnboardingCapturePolicy.isEnabled(
