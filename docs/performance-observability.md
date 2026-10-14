@@ -30,6 +30,38 @@ Durations use a monotonic clock and milliseconds. Event-driven process samples e
 
 Tart baselines require at least 20 iterations where practical. A regression gates only when it exceeds both the absolute budget and the recorded baseline by the configured percentage. Hidden-idle checks use CPU, wakeups, memory growth, and layout/signpost activity. System budgets remain separate from deterministic algorithm responsiveness tests.
 
+## Preview freshness and capture cost
+
+Every overlay session that reaches its reveal writes one durable `preview_freshness` event when
+it closes. It records what the cards showed at the reveal (`cards`, `withPreview`, median and
+maximum preview age, `shapeMismatches` for previews drawn letterboxed because the window changed
+shape, `pendingCaptures`) and what changed while the overlay was up: `replacementsAfterReveal`
+(a card's image swapped for a newer one), `fillsAfterReveal` (an app icon replaced by a
+preview), and the first and last change in milliseconds after the reveal. A replacement after
+the reveal is a change the user could see happen; the goal is none.
+
+Each capture batch reports `preview_capture_batch` (reason, requested, captured, discarded,
+failed, wall time), and batches roll up into a durable `preview_capture_rollup` once an hour has
+passed: captures per hour by reason. Capture power scales with that count. Each capture costs
+~80 CPU-ms in macOS's privacy services (`systemstatusd`, `ControlCenter`, `tccd`, `replayd`)
+regardless of the ScreenCaptureKit API (capbench, 2026-10-13). The rollup is emitted by the first
+batch after the hour, not by a timer.
+
+### Development-only measurements
+
+Measurements that cost real work run only when `DebutCore.version` is `0.0.0-dev` in the Debut
+app itself (`DevelopmentMeasurements.isEnabled`); release builds never pay for them:
+
+- a visual change score for every replacement after the reveal (mean luminance difference on a
+  16x16 grid, in percent): `changesScored`, `visibleChanges` (score >= 2%), maximum and mean
+- `preview_capture_batch` becomes durable instead of transient
+- each rollup adds the interval's CPU milliseconds for `WindowServer`, `systemstatusd`,
+  `ControlCenter`, `tccd`, `replayd` and Debut, and energy in millijoules where the kernel
+  reports it to an unprivileged reader. Root-owned daemons are read through `ps`. These are
+  system-wide figures, so another app recording the screen is counted too.
+
+Reading Debut's own process counters (~5 us per read) stays on in every build.
+
 ## Local-only boundary
 
 Performance observations remain on the Mac. They feed `diagnostic.json`, local

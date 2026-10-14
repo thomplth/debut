@@ -116,6 +116,14 @@ final class PreviewCaptureMetrics: @unchecked Sendable {
     }
 }
 
+/// Counts across a capture batch's concurrent completions.
+final class PreviewCaptureTally: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func increment() { lock.withLock { value += 1 } }
+}
+
 /// What a cached preview was captured from, so the next activation can tell whether it is
 /// still trustworthy without re-capturing to find out.
 private struct PreviewCacheEntry {
@@ -485,6 +493,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var pendingPreviewCaptureIDs: [CGWindowID] = []
     private let clock: @Sendable () -> Date
     private var pendingPreviewFlush = false
+    let previewFreshness: PreviewFreshnessRecorder
 
     /// Activation carries a bare window ID, so the controller has to answer the exclusion
     /// question itself rather than relying on discovery's already-filtered snapshots.
@@ -550,7 +559,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         previewRefreshPolicy: PreviewRefreshPolicy = .lastActiveOnly,
         previewCacheTTL: TimeInterval = AppSettings.defaultPreviewCacheTTL,
         clock: @escaping @Sendable () -> Date = Date.init,
-        diagnosticReporter: DiagnosticReporter = .shared
+        diagnosticReporter: DiagnosticReporter = .shared,
+        previewFreshness: PreviewFreshnessRecorder? = nil
     ) {
         self.windowService = windowService
         self.keyboardService = keyboardService
@@ -567,6 +577,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         self.previewCacheTTL = previewCacheTTL
         self.clock = clock
         self.diag = diagnosticReporter
+        self.previewFreshness = previewFreshness ?? PreviewFreshnessRecorder(
+            report: { [diagnosticReporter] event, level, details in
+                diagnosticReporter.report(event, level: level, details: details)
+            }
+        )
 
         let started = keyboardService.start(delegate: self)
         self.keyboardServiceStarted = started
@@ -2709,6 +2724,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             else { return }
 
             self.isOverlayPresented = true
+            self.previewFreshness.sessionRevealed(
+                cards: self.previewCardFreshness(),
+                pendingCaptures: self.pendingPreviewCaptureIDs.count
+            )
             let presentation = self.activeOverlayPresentation
             if let presentation {
                 self.overlayPresentationRecorder.mark(.presentationDeadlineFired, for: presentation)
@@ -2741,6 +2760,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
         isOverlayPresented = false
+        previewFreshness.sessionEnded()
         delegate?.spaceControllerDidCloseOverlay(
             self,
             overlayPresentation: activeOverlayPresentation,
@@ -2910,6 +2930,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         let clock = self.clock
         let captureDimension = previewCaptureDimension
+        let discarded = PreviewCaptureTally()
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         previewCaptureTask = Task { [weak self, windowService] in
             await windowService.captureWindowImages(
                 windowIDs: windowIDs,
@@ -2937,6 +2959,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 // timestamp instead retries on every overlay open, unbounded, and resolves
                 // itself the moment the window is on screen again.
                 guard holdsContent else {
+                    discarded.increment()
                     // Durable: discarding a capture the window server did return is the one
                     // outcome no other event records, so an unreported drop is unfalsifiable
                     // afterwards. A silent one hid every sparse window being thrown away
@@ -2958,7 +2981,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                               .first(where: { $0.windowID == capture.windowID })
                     else { return }
 
+                    let previous = self.windowPreviews[capture.windowID]
                     self.windowPreviews[capture.windowID] = capture.image
+                    if self.isOverlayPresented {
+                        self.previewFreshness.previewDelivered(
+                            windowID: capture.windowID,
+                            previous: previous,
+                            replacement: capture.image
+                        )
+                    }
                     self.previewCacheEntries[capture.windowID] = PreviewCacheEntry(
                         capturedAt: capturedAt,
                         windowTitle: window.windowTitle,
@@ -2969,6 +3000,17 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 }
             }
             let capturedCount = metrics.finish()
+            let wallMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+            let discardedCount = discarded.count
+            DispatchQueue.main.async { [weak self] in
+                self?.previewFreshness.batchFinished(
+                    reason: reason,
+                    requested: windowIDs.count,
+                    captured: capturedCount - discardedCount,
+                    discarded: discardedCount,
+                    wallMilliseconds: wallMilliseconds
+                )
+            }
             DiagnosticReporter.shared.report("preview_capture_completed", level: .transient, details: [
                 "requested": "\(windowIDs.count)",
                 "captured": "\(capturedCount)",
@@ -2982,6 +3024,34 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 self.scheduleOverlayPreviewFlush()
             }
         }
+    }
+
+    /// What each card the overlay is about to reveal will show, for `preview_freshness`.
+    private func previewCardFreshness() -> [PreviewCardFreshness] {
+        let now = clock()
+        return spaceManager.allSpaces.flatMap(\.windows)
+            .filter { activeTutorialScope?.windowIDs.contains($0.windowID) ?? true }
+            .map { window in
+                let preview = windowPreviews[window.windowID]
+                let age = preview == nil ? nil : previewCacheEntries[window.windowID]
+                    .map { max(0, now.timeIntervalSince($0.capturedAt)) }
+                return PreviewCardFreshness(
+                    windowID: window.windowID,
+                    ageSeconds: age,
+                    shapeMismatch: preview.map {
+                        Self.previewShapeDiffers($0, from: windowSizes[window.windowID])
+                    } ?? false
+                )
+            }
+    }
+
+    /// Captures land a pixel or two off the window's shape, so only a difference a letterbox
+    /// would show counts.
+    static func previewShapeDiffers(_ preview: CGImage, from size: CGSize?) -> Bool {
+        guard let size, size.width > 0, size.height > 0, preview.width > 0, preview.height > 0
+        else { return false }
+        let previewAspect = CGFloat(preview.width) / CGFloat(preview.height)
+        return abs(previewAspect / (size.width / size.height) - 1) > 0.03
     }
 
     /// Concurrent captures land in a burst, and each one otherwise rebuilt the whole overlay
