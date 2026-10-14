@@ -572,18 +572,21 @@ public struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                settingsToggle(
-                    "Follow system tint",
-                    isOn: $viewModel.settings.followsSystemGlassTint
-                )
-                if !viewModel.settings.followsSystemGlassTint {
-                    percentSlider("Tint", value: $viewModel.settings.glassTintAmount, in: 0...1)
+            // macOS 26 cannot draw a fixed tint, so its glass always follows the system's.
+            if AppSettings.supportsFixedGlassTint {
+                VStack(alignment: .leading, spacing: 4) {
+                    settingsToggle(
+                        "Follow system tint",
+                        isOn: $viewModel.settings.followsSystemGlassTint
+                    )
+                    if !viewModel.settings.followsSystemGlassTint {
+                        percentSlider("Tint", value: $viewModel.settings.glassTintAmount, in: 0...1)
+                    }
+                    Text("System Settings › Appearance › Liquid Glass sets the system tint.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("System Settings › Appearance › Liquid Glass sets the system tint.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if !usesNativeGlass {

@@ -20,13 +20,29 @@ extension AppSettings {
     /// no specular rim. The native switcher draws active (KHA-1065).
     static let overlayGlassFocusState: DockGlassStyle.FocusState = .active
 
+    /// Whether a fixed tint can be drawn. macOS 26's glass filter has no fill inputs, so DockGlass
+    /// draws a fixed tint only on the release its response was measured on (KHA-1091).
+    static func supportsFixedGlassTint(operatingSystemMajor: Int) -> Bool {
+        operatingSystemMajor == 27
+    }
+
+    static var supportsFixedGlassTint: Bool {
+        supportsFixedGlassTint(operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
+    }
+
     /// The Liquid Glass settings as DockGlass's adjustments to its fitted native look.
     public var dockGlassStyle: DockGlassStyle {
-        DockGlassStyle(
+        dockGlassStyle(operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
+    }
+
+    func dockGlassStyle(operatingSystemMajor: Int) -> DockGlassStyle {
+        let fixedTint = !followsSystemGlassTint
+            && Self.supportsFixedGlassTint(operatingSystemMajor: operatingSystemMajor)
+        return DockGlassStyle(
             rimStrength: glassRimStrength,
             edgeRefraction: glassEdgeRefraction,
             selectionStrength: selectionHighlightStrength,
-            tint: followsSystemGlassTint ? .system : .fixed(glassTintAmount),
+            tint: fixedTint ? .fixed(glassTintAmount) : .system,
             focusState: Self.overlayGlassFocusState
         )
     }

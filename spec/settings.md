@@ -30,7 +30,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Card spacing | 14 pt between selection highlights, as native; not adjustable. Wrapped rows in both switchers put each title midway between its previews and the next row's |
 | Glass / stage corner radius | Native / 47.5 pt continuous with previews, 58 pt (native) for icon cards; one slider edits whichever the switcher draws (0–72 pt) |
 | Liquid Glass rim / edge refraction | 100% / 100% of the native switcher's fitted look |
-| Liquid Glass tint | Follows System Settings; a fixed 0–100% tint is optional |
+| Liquid Glass tint | Follows System Settings; a fixed 0–100% tint is optional on macOS 27, and not offered on macOS 26, whose glass cannot draw one |
 | Title halo / size | 100% / 0.5 pt; 0% turns the halo off |
 | App icon position / growth | Title (before the title, outside its halo; also Corner, Bottom, Top) / 0.50: the badge grows with the preview size raised to this power (0 fixed, 1 proportional) |
 | Preview & selection highlight | Native switcher highlight at 100% strength, 6 pt surrounding space; previews rounded at 6 pt, the highlight concentric with them. Icon cards keep the icon's own corner |
@@ -115,7 +115,8 @@ confirmed Restore Defaults action that resets that page only.
 
 Native glass matches the macOS Command-Tab switcher through DockGlass. Every material follows
 the system Liquid Glass tint live unless a fixed tint is chosen; Clear and Regular then draw
-what macOS draws at that tint. Under Reduce Transparency, Increase Contrast, or a macOS version
+what macOS draws at that tint. macOS 26's glass has no fill to tint, so Settings offers no
+fixed tint there and a saved one is ignored. Under Reduce Transparency, Increase Contrast, or a macOS version
 without a fitted look, Native shows the system's own clear glass and reports why in diagnostics,
 and every material follows the system tint.
 

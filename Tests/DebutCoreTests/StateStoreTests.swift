@@ -566,6 +566,19 @@ struct StateStoreTests {
         #expect(settings.titleHaloStrength == 0.6)
     }
 
+    /// macOS 26's glass filter has no fill inputs, so a fixed tint would do nothing there and
+    /// would only move Clear and Regular off SwiftUI's own glass (KHA-1091).
+    @Test("A fixed glass tint applies only where macOS can draw it")
+    func fixedGlassTintNeedsMacOS27() {
+        #expect(!AppSettings.supportsFixedGlassTint(operatingSystemMajor: 26))
+        #expect(AppSettings.supportsFixedGlassTint(operatingSystemMajor: 27))
+        var settings = AppSettings()
+        settings.followsSystemGlassTint = false
+        settings.glassTintAmount = 0.25
+        #expect(settings.dockGlassStyle(operatingSystemMajor: 26).tint == .system)
+        #expect(settings.dockGlassStyle(operatingSystemMajor: 27).tint == .fixed(0.25))
+    }
+
     @Test("Liquid Glass settings map onto the DockGlass style and clamp")
     func liquidGlassSettingsMapToDockGlassStyle() throws {
         var settings = AppSettings()
@@ -573,7 +586,7 @@ struct StateStoreTests {
         settings.glassEdgeRefraction = 1.5
         settings.followsSystemGlassTint = false
         settings.glassTintAmount = 0.25
-        #expect(settings.dockGlassStyle == DockGlassStyle(
+        #expect(settings.dockGlassStyle(operatingSystemMajor: 27) == DockGlassStyle(
             rimStrength: 0.5,
             edgeRefraction: 1.5,
             tint: .fixed(0.25),
