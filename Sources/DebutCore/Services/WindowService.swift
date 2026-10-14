@@ -175,11 +175,14 @@ enum PreviewCaptureSize {
         let height: Int
     }
 
-    /// How many times the drawn size ScreenCaptureKit is asked for. Its own scaling is soft:
-    /// measured on three live windows, a capture at the drawn size was visibly blurrier than one
-    /// at twice that downsampled with Lanczos, which came within ~10% of native + Lanczos
-    /// (sharpness 870 vs 976; native costs 7-27ms more and a ~50MB frame) (KHA-1098).
-    static let oversample: CGFloat = 2
+    /// How many times the drawn size ScreenCaptureKit is asked for. Its own scaling is soft, so
+    /// the frame is taken larger and reduced with Lanczos. Benchmarked on five live windows at a
+    /// 250% size setting (KHA-1103), against native + Lanczos: 2x kept 0.91 of the detail, 3x
+    /// 0.95, 4x 1.01. 4x cost ~14ms more of Debut's CPU per capture than 2x (25 vs 11ms) and a
+    /// transient frame of up to ~52MB; the ~80ms the capture costs the system's own daemons, and
+    /// its latency, did not move with size. A native frame doubled Debut's cost again for no
+    /// gain. At ~130 captures an active hour, 4x over 2x is ~2mW, too little to offer a choice.
+    static let oversample: CGFloat = 4
 
     /// The pixels a preview is drawn at, and the larger frame captured to make them. A native
     /// capture costs far more memory and render work than the overlay can use (a 4412x2880

@@ -1002,10 +1002,12 @@ struct WindowServiceTests {
         #expect(sizes.drawn.height < 500)
     }
 
-    @Test("A preview is captured at twice its drawn pixels, for a sharp downsample")
+    /// 2x kept 0.91 of a native capture's detail at a 250% size setting, 4x 1.01, for ~14ms
+    /// more of Debut's CPU per capture against ~80ms the capture costs the system (KHA-1103).
+    @Test("A preview is captured at four times its drawn pixels, for a sharp downsample")
     func captureOversamplesDrawnSize() {
         let budget = PreviewCaptureBudget(
-            stageScale: 2.5,
+            stageScale: 1.5,
             displaySizes: [CGSize(width: 2560, height: 1440)]
         )
 
@@ -1015,8 +1017,24 @@ struct WindowServiceTests {
             budget: budget
         )
 
-        #expect(abs(sizes.captured.width - sizes.drawn.width * 2) <= 1)
-        #expect(abs(sizes.captured.height - sizes.drawn.height * 2) <= 1)
+        #expect(abs(sizes.captured.width - sizes.drawn.width * 4) <= 2)
+        #expect(abs(sizes.captured.height - sizes.drawn.height * 4) <= 2)
+    }
+
+    @Test("Oversampling never asks for more than the window's own pixels")
+    func oversampleStopsAtNativeSize() {
+        let budget = PreviewCaptureBudget(
+            stageScale: 4,
+            displaySizes: [CGSize(width: 2560, height: 1440)]
+        )
+
+        let sizes = PreviewCaptureSize.pixelSizes(
+            contentSize: CGSize(width: 1276, height: 738),
+            pointPixelScale: 2,
+            budget: budget
+        )
+
+        #expect(sizes.captured == .init(width: 2552, height: 1476))
     }
 
     @Test("A window smaller than its card is captured at native resolution")
