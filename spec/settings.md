@@ -42,6 +42,13 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Send crash reports automatically | Off; shown only in nightly and stable releases |
 | Excluded apps | Empty |
 
+The preview switcher and the icon switcher (drawn without previews) keep separate
+Appearance values: Liquid Glass material, rim, edge refraction and tint, title halo,
+stage corner radius, size, inactive stage scale, and selection highlight strength and
+surrounding space. Each mode has its own fresh defaults, the same as listed above except
+an icon size of 100% and a 58 pt stage corner; editing one mode never changes the other.
+Settings saved before the split give both modes the values they drew then.
+
 Cache age is evaluated when capture work is requested; it is not a recurring
 refresh timer. The code remains authoritative for control ranges, decoding
 fallbacks, and [default bindings](../Sources/DebutCore/Models/KeyBinding.swift).
@@ -59,7 +66,7 @@ Disabling previews stops window screenshot capture and clears cached images.
 Without previews, whether the toggle is off or Screen Recording is not granted,
 both switchers draw each window as a native Command-Tab icon slot with its title,
 at a separate icon size (default 100%, the native switcher) that the same size
-slider edits. A window whose capture failed keeps its card with the app's icon at
+slider edits while icons are drawn. A window whose capture failed keeps its card with the app's icon at
 the badge's size and no halo. The badge sits where App icon position puts it and grows on
 the App icon growth curve. Magnify, the former alternative selection style, is retired; a
 saved choice of it loads with the highlight.
@@ -101,7 +108,7 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | General | Login launch, Dock visibility, automatic crash reports, Reduce Motion guidance, and a running-app picker for applications ignored by window management. The menu-bar item remains available with the Dock icon off. |
 | Desktops | Faster switching and its number-key, Control-arrow, and trackpad methods, followed by transition duration and the desktop-change indicator. |
 | Switcher | Command-Tab desktop isolation, Option-Tab activation, window previews, display placement, preview freshness, overlay hold delay, and held cycling pace. |
-| Appearance | A live preview of the switcher pinned at the top (over a High Contrast, Text or Stripes backdrop), then card layout, adaptive preview sizing, inactive-stage scale, app icon position and growth, Liquid Glass (material, rim, edge refraction, title halo, tint), and the preview and selection highlight. |
+| Appearance | A live preview of the switcher pinned at the top (over a High Contrast, Text or Stripes backdrop), then card layout, adaptive preview sizing, inactive-stage scale, app icon position and growth, Liquid Glass (material, rim, edge refraction, title halo, tint), and the preview and selection highlight. It edits the mode the switchers currently draw: with previews, or as icons when previews are off or Screen Recording is not granted. App icon position, app icon growth, matching previews to windows and the preview corner radius apply only to previews and are shown only in that mode. |
 | Shortcuts | Activation and Space Manager session bindings including H/J/K/L selector movement, numbered modifier sets with a Disabled choice, a confirmed restore-defaults action, and reference for fixed move chords. Pressing Delete while recording clears a binding. An open session handles its own keys before global shortcuts, and Debut binding conflicts are checked within each context. |
 | Support | Bug reporting through a public GitHub issue form (requires a GitHub account), diagnostic export, a confirmed window-cache reset that preserves settings, and a confirmed reset of all settings that preserves window assignments. |
 | About | Debut icon and version, update checks, and links to the GitHub repository and creator's Twitter profile. |
@@ -111,7 +118,8 @@ are in General; desktop navigation and feedback are in Desktops; overlay behavio
 content, placement, freshness, and held-key timing are in Switcher; visual layout and selection are
 in Appearance; and all key assignments are in Shortcuts.
 Support contains actions rather than preferences. Every page with preferences ends with a
-confirmed Restore Defaults action that resets that page only.
+confirmed Restore Defaults action that resets that page only; on Appearance it resets
+only the mode shown.
 
 Native glass matches the macOS Command-Tab switcher through DockGlass. Every material follows
 the system Liquid Glass tint live unless a fixed tint is chosen; Clear and Regular then draw

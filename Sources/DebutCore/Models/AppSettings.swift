@@ -156,35 +156,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let defaultTitleHaloSize: Double = 0.5
     public static let defaultBadgePlacement: BadgePlacement = .titleRow
 
-    public var glassStyle: GlassStyle
-    /// Opacity of the hairline rim along the native glass's outline, relative to native.
-    public var glassRimStrength: Double
-    /// How far the native glass bends its backdrop at the edges, relative to native.
-    public var glassEdgeRefraction: Double
-    /// Follow System Settings › Appearance › Liquid Glass tint, as the native switcher does.
-    public var followsSystemGlassTint: Bool
-    /// The tint used when not following the system, from 0 (clear) to 1 (tinted).
-    public var glassTintAmount: Double
-    /// How strongly the native selection highlight darkens or lightens the glass, relative to
-    /// the native switcher.
-    public var selectionHighlightStrength: Double
-    /// The halo behind every title, from 0 (off) to 1 (two full-strength passes).
-    public var titleHaloStrength: Double
-    /// The halo's blur radius in points.
-    public var titleHaloSize: Double
-    /// The halo strength actually drawn: regular glass is opaque enough to keep titles
-    /// legible, so it has no halo whatever the saved strength.
-    public var effectiveTitleHaloStrength: Double {
-        glassStyle == .regular ? 0 : titleHaloStrength
-    }
-    /// The plate corner when previews show.
-    public var stageCornerRadius: Double
-    /// The plate corner for icon cards, drawn without previews.
-    public var iconStageCornerRadius: Double
-    public var inactiveStageScale: Double
-    public var stageScale: Double
-    /// The same size, for the icon cards drawn without previews. 100% is the native switcher.
-    public var iconScale: Double
+    /// What the switchers draw while previews show.
+    public var previewAppearance: SwitcherAppearance
+    /// What the switchers draw as icon cards, without previews. Stored and defaulted apart from
+    /// the preview appearance, so tuning one mode never moves the other (KHA-1099).
+    public var iconAppearance: SwitcherAppearance
     /// How the app badge grows with the preview; see `defaultBadgeGrowth`.
     public var badgeGrowth: Double
     /// Where each preview shows its app's icon.
@@ -201,7 +177,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var showsDesktopSwitchIndicator: Bool
 
     // Window selection
-    public var selectorOutset: Double
     /// The preview's corner on every card; the selection highlight is concentric with it.
     public var previewCornerRadius: Double
 
@@ -226,25 +201,13 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.excludedBundleIDs = []
         self.sendsCrashReportsAutomatically = false
 
-        self.glassStyle = .native
-        self.glassRimStrength = 1
-        self.glassEdgeRefraction = 1
-        self.followsSystemGlassTint = true
-        self.glassTintAmount = 0
-        self.selectionHighlightStrength = 1
-        self.titleHaloStrength = 1
-        self.titleHaloSize = Self.defaultTitleHaloSize
-        self.stageCornerRadius = Self.defaultStageCornerRadius
-        self.iconStageCornerRadius = Self.defaultIconStageCornerRadius
-        self.inactiveStageScale = 0.7
-        self.stageScale = Self.defaultStageScale
-        self.iconScale = Self.defaultIconScale
+        self.previewAppearance = .previewDefaults
+        self.iconAppearance = .iconDefaults
         self.badgeGrowth = Self.defaultBadgeGrowth
         self.badgePlacement = Self.defaultBadgePlacement
         self.adaptiveCardSizing = true
         self.overlayOnMainDisplayOnly = true
         self.showsDesktopSwitchIndicator = true
-        self.selectorOutset = Self.defaultSelectorOutset
         self.previewCornerRadius = Self.defaultPreviewCornerRadius
 
         self.overlayPresentationDelay = Self.defaultOverlayPresentationDelay
@@ -273,38 +236,34 @@ public struct AppSettings: Codable, Sendable, Equatable {
             Bool.self,
             forKey: .sendsCrashReportsAutomatically
         ) ?? false
-        glassStyle = try container.decode(GlassStyle.self, forKey: .glassStyle)
-        glassRimStrength = min(Self.maximumGlassRimStrength, max(
-            Self.minimumGlassRimStrength,
-            try container.decodeIfPresent(Double.self, forKey: .glassRimStrength) ?? 1
-        ))
-        glassEdgeRefraction = min(Self.maximumGlassEdgeRefraction, max(
-            Self.minimumGlassEdgeRefraction,
-            try container.decodeIfPresent(Double.self, forKey: .glassEdgeRefraction) ?? 1
-        ))
-        followsSystemGlassTint = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .followsSystemGlassTint
-        ) ?? true
-        glassTintAmount = min(1, max(
-            0,
-            try container.decodeIfPresent(Double.self, forKey: .glassTintAmount) ?? 0
-        ))
-        selectionHighlightStrength = min(Self.maximumSelectionHighlightStrength, max(
-            Self.minimumSelectionHighlightStrength,
-            try container.decodeIfPresent(Double.self, forKey: .selectionHighlightStrength) ?? 1
-        ))
-        stageCornerRadius = try container.decode(Double.self, forKey: .stageCornerRadius)
-        iconStageCornerRadius = try container.decodeIfPresent(
-            Double.self,
-            forKey: .iconStageCornerRadius
-        ) ?? Self.defaultIconStageCornerRadius
-        inactiveStageScale = try container.decode(Double.self, forKey: .inactiveStageScale)
-        let savedStageScale = try container.decodeIfPresent(
-            Double.self,
-            forKey: .stageScale
-        ) ?? Self.defaultStageScale
-        stageScale = min(Self.maximumStageScale, max(Self.minimumStageScale, savedStageScale))
+        if container.contains(.previewAppearance) {
+            previewAppearance = try SwitcherAppearance(
+                from: container.superDecoder(forKey: .previewAppearance),
+                defaults: .previewDefaults
+            )
+        } else {
+            // Written before KHA-1099, when the shared values sat at the top level.
+            previewAppearance = try SwitcherAppearance(from: decoder, defaults: .previewDefaults)
+        }
+        if container.contains(.iconAppearance) {
+            iconAppearance = try SwitcherAppearance(
+                from: container.superDecoder(forKey: .iconAppearance),
+                defaults: .iconDefaults
+            )
+        } else {
+            // Icons drew the shared values too, with only size and stage corner of their own.
+            let legacy = try decoder.container(keyedBy: LegacyIconCodingKeys.self)
+            var icons = previewAppearance
+            icons.stageCornerRadius = try legacy.decodeIfPresent(
+                Double.self,
+                forKey: .iconStageCornerRadius
+            ) ?? SwitcherAppearance.iconDefaults.stageCornerRadius
+            icons.stageScale = SwitcherAppearance.clampedScale(
+                try legacy.decodeIfPresent(Double.self, forKey: .iconScale)
+                    ?? SwitcherAppearance.iconDefaults.stageScale
+            )
+            iconAppearance = icons
+        }
         badgePlacement = (try? container.decodeIfPresent(
             BadgePlacement.self,
             forKey: .badgePlacement
@@ -312,18 +271,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
         badgeGrowth = min(Self.maximumBadgeGrowth, max(
             Self.minimumBadgeGrowth,
             try container.decodeIfPresent(Double.self, forKey: .badgeGrowth) ?? Self.defaultBadgeGrowth
-        ))
-        titleHaloStrength = min(1, max(
-            0,
-            try container.decodeIfPresent(Double.self, forKey: .titleHaloStrength) ?? 1
-        ))
-        titleHaloSize = min(Self.maximumTitleHaloSize, max(
-            Self.minimumTitleHaloSize,
-            try container.decodeIfPresent(Double.self, forKey: .titleHaloSize) ?? Self.defaultTitleHaloSize
-        ))
-        iconScale = min(Self.maximumStageScale, max(
-            Self.minimumStageScale,
-            try container.decodeIfPresent(Double.self, forKey: .iconScale) ?? Self.defaultIconScale
         ))
         adaptiveCardSizing = try container.decodeIfPresent(
             Bool.self,
@@ -337,10 +284,6 @@ public struct AppSettings: Codable, Sendable, Equatable {
             Bool.self,
             forKey: .showsDesktopSwitchIndicator
         ) ?? true
-        selectorOutset = try container.decodeIfPresent(
-            Double.self,
-            forKey: .selectorOutset
-        ) ?? Self.defaultSelectorOutset
         previewCornerRadius = min(Self.maximumPreviewCornerRadius, max(
             Self.minimumPreviewCornerRadius,
             try container.decodeIfPresent(Double.self, forKey: .previewCornerRadius)
@@ -379,13 +322,171 @@ public struct AppSettings: Codable, Sendable, Equatable {
 }
 
 extension AppSettings {
-    /// The size the switchers draw at for a card style: previews and icons are sized apart.
-    public func overlayScale(for cardStyle: OverlayCardStyle) -> Double {
-        cardStyle == .icons ? iconScale : stageScale
+    /// The values the switchers draw for a card style.
+    public func appearance(for cardStyle: OverlayCardStyle) -> SwitcherAppearance {
+        cardStyle == .icons ? iconAppearance : previewAppearance
     }
 
-    /// The plate corner the switchers draw for a card style.
-    public func stageCornerRadius(for cardStyle: OverlayCardStyle) -> Double {
-        cardStyle == .icons ? iconStageCornerRadius : stageCornerRadius
+    public mutating func setAppearance(_ appearance: SwitcherAppearance, for cardStyle: OverlayCardStyle) {
+        switch cardStyle {
+        case .previews: previewAppearance = appearance
+        case .icons: iconAppearance = appearance
+        }
+    }
+
+    /// The keys icon size and stage corner were saved under before KHA-1099.
+    private enum LegacyIconCodingKeys: String, CodingKey {
+        case iconScale
+        case iconStageCornerRadius
+    }
+}
+
+/// The values both switcher modes draw, each mode with its own copy and defaults: Liquid Glass,
+/// title halo, stage size and corner, and the selection highlight.
+public struct SwitcherAppearance: Encodable, Sendable, Equatable {
+    public var glassStyle: GlassStyle
+    /// Opacity of the hairline rim along the native glass's outline, relative to native.
+    public var glassRimStrength: Double
+    /// How far the native glass bends its backdrop at the edges, relative to native.
+    public var glassEdgeRefraction: Double
+    /// Follow System Settings › Appearance › Liquid Glass tint, as the native switcher does.
+    public var followsSystemGlassTint: Bool
+    /// The tint used when not following the system, from 0 (clear) to 1 (tinted).
+    public var glassTintAmount: Double
+    /// How strongly the native selection highlight darkens or lightens the glass, relative to
+    /// the native switcher.
+    public var selectionHighlightStrength: Double
+    /// The halo behind every title, from 0 (off) to 1 (two full-strength passes).
+    public var titleHaloStrength: Double
+    /// The halo's blur radius in points.
+    public var titleHaloSize: Double
+    /// The plate's continuous corner.
+    public var stageCornerRadius: Double
+    /// The preview's, or the icon's, size. 100% is the native switcher.
+    public var stageScale: Double
+    public var inactiveStageScale: Double
+    /// Space the selection highlight leaves around the preview or icon.
+    public var selectorOutset: Double
+
+    public init(
+        glassStyle: GlassStyle,
+        glassRimStrength: Double,
+        glassEdgeRefraction: Double,
+        followsSystemGlassTint: Bool,
+        glassTintAmount: Double,
+        selectionHighlightStrength: Double,
+        titleHaloStrength: Double,
+        titleHaloSize: Double,
+        stageCornerRadius: Double,
+        stageScale: Double,
+        inactiveStageScale: Double,
+        selectorOutset: Double
+    ) {
+        self.glassStyle = glassStyle
+        self.glassRimStrength = glassRimStrength
+        self.glassEdgeRefraction = glassEdgeRefraction
+        self.followsSystemGlassTint = followsSystemGlassTint
+        self.glassTintAmount = glassTintAmount
+        self.selectionHighlightStrength = selectionHighlightStrength
+        self.titleHaloStrength = titleHaloStrength
+        self.titleHaloSize = titleHaloSize
+        self.stageCornerRadius = stageCornerRadius
+        self.stageScale = stageScale
+        self.inactiveStageScale = inactiveStageScale
+        self.selectorOutset = selectorOutset
+    }
+
+    public static let previewDefaults = SwitcherAppearance(
+        glassStyle: .native,
+        glassRimStrength: 1,
+        glassEdgeRefraction: 1,
+        followsSystemGlassTint: true,
+        glassTintAmount: 0,
+        selectionHighlightStrength: 1,
+        titleHaloStrength: 1,
+        titleHaloSize: AppSettings.defaultTitleHaloSize,
+        stageCornerRadius: AppSettings.defaultStageCornerRadius,
+        stageScale: AppSettings.defaultStageScale,
+        inactiveStageScale: 0.7,
+        selectorOutset: AppSettings.defaultSelectorOutset
+    )
+
+    public static let iconDefaults = SwitcherAppearance(
+        glassStyle: .native,
+        glassRimStrength: 1,
+        glassEdgeRefraction: 1,
+        followsSystemGlassTint: true,
+        glassTintAmount: 0,
+        selectionHighlightStrength: 1,
+        titleHaloStrength: 1,
+        titleHaloSize: AppSettings.defaultTitleHaloSize,
+        stageCornerRadius: AppSettings.defaultIconStageCornerRadius,
+        stageScale: AppSettings.defaultIconScale,
+        inactiveStageScale: 0.7,
+        selectorOutset: AppSettings.defaultSelectorOutset
+    )
+
+    /// The halo strength actually drawn: regular glass is opaque enough to keep titles
+    /// legible, so it has no halo whatever the saved strength.
+    public var effectiveTitleHaloStrength: Double {
+        glassStyle == .regular ? 0 : titleHaloStrength
+    }
+
+    static func clampedScale(_ scale: Double) -> Double {
+        min(AppSettings.maximumStageScale, max(AppSettings.minimumStageScale, scale))
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case glassStyle
+        case glassRimStrength
+        case glassEdgeRefraction
+        case followsSystemGlassTint
+        case glassTintAmount
+        case selectionHighlightStrength
+        case titleHaloStrength
+        case titleHaloSize
+        case stageCornerRadius
+        case stageScale
+        case inactiveStageScale
+        case selectorOutset
+    }
+
+    /// Missing values take the mode's defaults; saved ones are clamped to the controls' ranges.
+    init(from decoder: Decoder, defaults: SwitcherAppearance) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) throws -> T {
+            try container.decodeIfPresent(T.self, forKey: key) ?? fallback
+        }
+        func clamped(_ key: CodingKeys, _ fallback: Double, _ range: ClosedRange<Double>) throws -> Double {
+            min(range.upperBound, max(range.lowerBound, try value(key, fallback)))
+        }
+        glassStyle = try value(.glassStyle, defaults.glassStyle)
+        glassRimStrength = try clamped(
+            .glassRimStrength,
+            defaults.glassRimStrength,
+            AppSettings.minimumGlassRimStrength...AppSettings.maximumGlassRimStrength
+        )
+        glassEdgeRefraction = try clamped(
+            .glassEdgeRefraction,
+            defaults.glassEdgeRefraction,
+            AppSettings.minimumGlassEdgeRefraction...AppSettings.maximumGlassEdgeRefraction
+        )
+        followsSystemGlassTint = try value(.followsSystemGlassTint, defaults.followsSystemGlassTint)
+        glassTintAmount = try clamped(.glassTintAmount, defaults.glassTintAmount, 0...1)
+        selectionHighlightStrength = try clamped(
+            .selectionHighlightStrength,
+            defaults.selectionHighlightStrength,
+            AppSettings.minimumSelectionHighlightStrength...AppSettings.maximumSelectionHighlightStrength
+        )
+        titleHaloStrength = try clamped(.titleHaloStrength, defaults.titleHaloStrength, 0...1)
+        titleHaloSize = try clamped(
+            .titleHaloSize,
+            defaults.titleHaloSize,
+            AppSettings.minimumTitleHaloSize...AppSettings.maximumTitleHaloSize
+        )
+        stageCornerRadius = try value(.stageCornerRadius, defaults.stageCornerRadius)
+        stageScale = Self.clampedScale(try value(.stageScale, defaults.stageScale))
+        inactiveStageScale = try value(.inactiveStageScale, defaults.inactiveStageScale)
+        selectorOutset = try value(.selectorOutset, defaults.selectorOutset)
     }
 }

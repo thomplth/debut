@@ -1335,7 +1335,7 @@ public struct StageOverlayView: View {
             // moves a card between spaces must not resize every other card while it is in
             // flight.
             let metrics = StageConstants.drawnMetrics(
-                stageScale: CGFloat(viewModel.appearance.overlayScale(for: viewModel.cardStyle)),
+                stageScale: CGFloat(viewModel.switcherAppearance.stageScale),
                 contentAspects: restingAspects,
                 containerSize: geo.size,
                 cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
@@ -1353,7 +1353,7 @@ public struct StageOverlayView: View {
             let stageHeights = displayedLayouts.map(\.stageSize.height)
             let tallestStageHeight = stageHeights.max() ?? 0
 
-            let inactiveScale = CGFloat(viewModel.appearance.inactiveStageScale)
+            let inactiveScale = CGFloat(viewModel.switcherAppearance.inactiveStageScale)
             let spacing = StageConstants.compactStageSpacing * metrics.scaleFactor
             let focusTransition = StageMotion.focusTransition(reduceMotion: reduceMotion)
             let layoutAnimationKey = StageMotion.layoutAnimationKey(
@@ -1508,11 +1508,9 @@ public struct StageOverlayView: View {
                             StageSurfaceView(
                                 spaceIndex: index,
                                 size: CGSize(width: stageWidth, height: stageHeight),
-                                cornerRadius: CGFloat(viewModel.appearance.stageCornerRadius(
-                                    for: viewModel.cardStyle
-                                ))
+                                cornerRadius: CGFloat(viewModel.switcherAppearance.stageCornerRadius)
                                     * visualScale,
-                                appearance: viewModel.appearance,
+                                appearance: viewModel.switcherAppearance,
                                 shadow: StageSurfaceShadow.forStage(
                                     lift: lift,
                                     visualScale: visualScale,
@@ -1557,8 +1555,8 @@ public struct StageOverlayView: View {
                         }
                         // The shortcut keeps its own darkened capsule, so only the text is haloed.
                         .titleHalo(
-                            strength: viewModel.appearance.effectiveTitleHaloStrength,
-                            size: CGFloat(viewModel.appearance.titleHaloSize)
+                            strength: viewModel.switcherAppearance.effectiveTitleHaloStrength,
+                            size: CGFloat(viewModel.switcherAppearance.titleHaloSize)
                         )
                         if !viewModel.displayStackShortcut.isEmpty {
                             HStack(spacing: viewModel.displayStackShortcutSpacing) {
@@ -1575,8 +1573,8 @@ public struct StageOverlayView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .modifier(OverlayGlassCapsuleModifier(
-                        glassStyle: viewModel.appearance.glassStyle,
-                        dockGlassStyle: viewModel.appearance.dockGlassStyle
+                        glassStyle: viewModel.switcherAppearance.glassStyle,
+                        dockGlassStyle: viewModel.switcherAppearance.dockGlassStyle
                     ))
                     .frame(width: geo.size.width)
                     .padding(.top, 18)
@@ -1798,14 +1796,14 @@ public struct StageOverlayView: View {
             move: move
         )
         let sourceMetrics = StageConstants.drawnMetrics(
-            stageScale: CGFloat(viewModel.appearance.overlayScale(for: viewModel.cardStyle)),
+            stageScale: CGFloat(viewModel.switcherAppearance.stageScale),
             contentAspects: beforeAspects,
             containerSize: containerSize,
             cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
             cardStyle: viewModel.cardStyle,
             badgeGrowth: CGFloat(viewModel.appearance.badgeGrowth)
         )
-        let inactiveScale = CGFloat(viewModel.appearance.inactiveStageScale)
+        let inactiveScale = CGFloat(viewModel.switcherAppearance.inactiveStageScale)
         guard let source = StageConstants.windowCardCenter(
             spaceIndex: move.fromSpaceIndex,
             windowIndex: move.fromWindowIndex,
@@ -1904,7 +1902,7 @@ public struct StageOverlayView: View {
     ) -> CompactDragSnapshot? {
         let aspects = viewModel.stages.map { $0.windows.map(\.contentAspect) }
         let metrics = StageConstants.drawnMetrics(
-            stageScale: CGFloat(viewModel.appearance.overlayScale(for: viewModel.cardStyle)),
+            stageScale: CGFloat(viewModel.switcherAppearance.stageScale),
             contentAspects: aspects,
             containerSize: containerSize,
             cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
@@ -2327,7 +2325,7 @@ private struct StageSurfaceView: View {
     let spaceIndex: Int
     let size: CGSize
     let cornerRadius: CGFloat
-    let appearance: AppSettings
+    let appearance: SwitcherAppearance
     let shadow: StageSurfaceShadow
 
     var body: some View {
@@ -2369,6 +2367,8 @@ struct WindowPreviewView: View {
             isDragging: isDragging
         )
         let previewCorner = metrics.previewCornerRadius(userRadius: appearance.previewCornerRadius)
+        // The values of the mode this card is drawn in: previews and icons are tuned apart.
+        let drawn = appearance.appearance(for: metrics.cardStyle)
         return VStack(spacing: metrics.titleSpacing) {
             ZStack(alignment: .topLeading) {
                 Group {
@@ -2377,7 +2377,7 @@ struct WindowPreviewView: View {
                             window: window,
                             isSelected: isWindowSelected,
                             metrics: metrics,
-                            iconScale: appearance.iconScale
+                            iconScale: drawn.stageScale
                         )
                     } else if let cgImage = window.currentPreview {
                         Image(decorative: cgImage, scale: 1.0)
@@ -2478,18 +2478,18 @@ struct WindowPreviewView: View {
                             width: metrics.thumbnailWidth,
                             height: metrics.thumbnailHeight
                         ),
-                        outset: CGFloat(appearance.selectorOutset) * metrics.scaleFactor
+                        outset: CGFloat(drawn.selectorOutset) * metrics.scaleFactor
                     )
                     // Blends with the stage's glass, so nothing between the two may form a
                     // compositing group: the card's lift shadow is applied only for Magnify.
                     DockGlassSelectionHighlight(RoundedRectangle(
                         cornerRadius: metrics.selectorCornerRadius(
                             userRadius: appearance.previewCornerRadius,
-                            outset: appearance.selectorOutset
+                            outset: drawn.selectorOutset
                         ),
                         style: .continuous
                     ))
-                    .dockGlassStyle(appearance.dockGlassStyle)
+                    .dockGlassStyle(drawn.dockGlassStyle)
                     .frame(width: selectorSize.width, height: selectorSize.height)
                     // Native nudges an icon's highlight with the icon itself.
                     .offset(metrics.cardStyle == .icons
@@ -2521,8 +2521,8 @@ struct WindowPreviewView: View {
                 WindowTitleLabel(
                     title: window.displayTitle,
                     fontSize: metrics.titleFontSize,
-                    haloStrength: appearance.effectiveTitleHaloStrength,
-                    haloSize: CGFloat(appearance.titleHaloSize) * metrics.scaleFactor
+                    haloStrength: drawn.effectiveTitleHaloStrength,
+                    haloSize: CGFloat(drawn.titleHaloSize) * metrics.scaleFactor
                 )
             }
                 // The preview's own width, not the highlight padding around it, before
@@ -2646,7 +2646,7 @@ struct PlateShadow: ViewModifier {
 
 struct LiquidGlassModifier: ViewModifier {
     let cornerRadius: CGFloat
-    let appearance: AppSettings
+    let appearance: SwitcherAppearance
 
     func body(content: Content) -> some View {
         // Continuous, like the native switcher's plate; the glass honours the squircle.

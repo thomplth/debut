@@ -29,7 +29,9 @@ extension AppSettings {
     static var supportsFixedGlassTint: Bool {
         supportsFixedGlassTint(operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
     }
+}
 
+extension SwitcherAppearance {
     /// The Liquid Glass settings as DockGlass's adjustments to its fitted native look.
     public var dockGlassStyle: DockGlassStyle {
         dockGlassStyle(operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
@@ -37,13 +39,13 @@ extension AppSettings {
 
     func dockGlassStyle(operatingSystemMajor: Int) -> DockGlassStyle {
         let fixedTint = !followsSystemGlassTint
-            && Self.supportsFixedGlassTint(operatingSystemMajor: operatingSystemMajor)
+            && AppSettings.supportsFixedGlassTint(operatingSystemMajor: operatingSystemMajor)
         return DockGlassStyle(
             rimStrength: glassRimStrength,
             edgeRefraction: glassEdgeRefraction,
             selectionStrength: selectionHighlightStrength,
             tint: fixedTint ? .fixed(glassTintAmount) : .system,
-            focusState: Self.overlayGlassFocusState
+            focusState: AppSettings.overlayGlassFocusState
         )
     }
 }

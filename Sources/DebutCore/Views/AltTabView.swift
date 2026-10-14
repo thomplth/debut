@@ -95,11 +95,9 @@ public struct AltTabOverlayView: View {
             .frame(width: plateSize.width, height: plateSize.height)
             .background {
                 Color.clear.modifier(LiquidGlassModifier(
-                    cornerRadius: CGFloat(viewModel.appearance.stageCornerRadius(
-                        for: viewModel.cardStyle
-                    ))
+                    cornerRadius: CGFloat(viewModel.switcherAppearance.stageCornerRadius)
                         * metrics.scaleFactor,
-                    appearance: viewModel.appearance
+                    appearance: viewModel.switcherAppearance
                 ))
                 // Cast from the glass alone: filtering the card subtree re-rasterizes every
                 // icon and preview during selection. Placeholders carry their own baked halo.
@@ -107,7 +105,7 @@ public struct AltTabOverlayView: View {
                     opacity: lift.shadowOpacity,
                     radius: lift.shadowRadius * metrics.scaleFactor,
                     y: lift.shadowY * metrics.scaleFactor,
-                    glassStyle: viewModel.appearance.glassStyle
+                    glassStyle: viewModel.switcherAppearance.glassStyle
                 ))
             }
             .frame(width: geo.size.width, height: geo.size.height)

@@ -121,6 +121,8 @@ public struct StageOverlayViewModel: Sendable {
     public var appearance: AppSettings
     /// Icons when previews are off or Screen Recording is not granted.
     public var cardStyle: OverlayCardStyle = .previews
+    /// The values this card style draws with.
+    public var switcherAppearance: SwitcherAppearance { appearance.appearance(for: cardStyle) }
     /// Test-only presentation mode used by the single-display Tart guest so screenshots can
     /// review the display indicator without changing normal display-stack behavior.
     public var forceDisplayStackIndicator: Bool

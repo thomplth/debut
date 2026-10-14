@@ -101,6 +101,15 @@ enum SettingsOption: String, CaseIterable, Sendable {
     case quickSwitchSameApplicationModifiers
     case overlayPresentationDelay
     case heldCycleMinimumInterval
+
+    /// Appearance options only preview cards draw; icon cards have no badge, take no window's
+    /// shape, and keep the icon's own corner.
+    static let previewOnlyAppearance: [SettingsOption] = [
+        .badgePlacement,
+        .badgeGrowth,
+        .adaptiveCardSizing,
+        .previewCornerRadius,
+    ]
 }
 
 public struct SettingsViewModel: Sendable {
@@ -113,7 +122,7 @@ public struct SettingsViewModel: Sendable {
     public var onCheckForUpdates: (@Sendable () -> Void)?
     /// Hides the crash report preference in builds that have nowhere to send reports.
     public var crashReportingAvailable = false
-    /// Without it the switchers draw icons, so the size slider edits the icon size.
+    /// Without it the switchers draw icons, so the Appearance page edits the icon mode.
     public var screenRecordingGranted = true
 
     /// What the switchers are drawing with the current settings and permission.
@@ -121,27 +130,16 @@ public struct SettingsViewModel: Sendable {
         OverlayCardStyle(previewsAvailable: settings.features.windowPreviews && screenRecordingGranted)
     }
 
-    /// The one corner slider: the preview plate's corner, or the icon plate's while icons show.
-    public var overlayCornerRadius: Double {
-        get { settings.stageCornerRadius(for: overlayCardStyle) }
-        set {
-            switch overlayCardStyle {
-            case .previews: settings.stageCornerRadius = newValue
-            case .icons: settings.iconStageCornerRadius = newValue
-            }
-        }
+    /// The Appearance page's values: those of the mode the switchers are drawing. Previews and
+    /// icons are stored apart, so editing one never moves the other (KHA-1099).
+    public var appearance: SwitcherAppearance {
+        get { settings.appearance(for: overlayCardStyle) }
+        set { settings.setAppearance(newValue, for: overlayCardStyle) }
     }
 
-    /// The one size slider: the preview size, or the icon size while icons are drawn.
-    public var overlaySize: Double {
-        get { settings.overlayScale(for: overlayCardStyle) }
-        set {
-            switch overlayCardStyle {
-            case .previews: settings.stageScale = newValue
-            case .icons: settings.iconScale = newValue
-            }
-        }
-    }
+    /// Icon position, icon growth, window-shaped cards and the preview corner mean nothing to
+    /// icon cards, so the page shows them only while previews are drawn.
+    public var showsPreviewOnlyAppearance: Bool { overlayCardStyle == .previews }
 
     public init(settings: AppSettings = AppSettings(), spaceManager: SpaceManager = SpaceManager()) {
         self.settings = settings
@@ -168,11 +166,14 @@ public struct SettingsViewModel: Sendable {
     public mutating func restoreDefaults(for section: SettingsSection) {
         let defaults = AppSettings()
         for option in section.options {
+            // Appearance restores only the mode it shows; hidden preview-only values are kept.
+            if !showsPreviewOnlyAppearance, SettingsOption.previewOnlyAppearance.contains(option) { continue }
             restore(option, from: defaults)
         }
     }
 
     private mutating func restore(_ option: SettingsOption, from defaults: AppSettings) {
+        let modeDefaults = defaults.appearance(for: overlayCardStyle)
         switch option {
         case .launchAtLogin: settings.launchAtLogin = defaults.launchAtLogin
         case .showInDock: settings.showsDockIcon = defaults.showsDockIcon
@@ -188,30 +189,24 @@ public struct SettingsViewModel: Sendable {
         case .optionTab: settings.features.optionTab = defaults.features.optionTab
         case .windowPreviews: settings.features.windowPreviews = defaults.features.windowPreviews
         case .mainDisplayOnly: settings.overlayOnMainDisplayOnly = defaults.overlayOnMainDisplayOnly
-        case .glassStyle: settings.glassStyle = defaults.glassStyle
-        case .glassRimStrength: settings.glassRimStrength = defaults.glassRimStrength
-        case .glassEdgeRefraction: settings.glassEdgeRefraction = defaults.glassEdgeRefraction
-        case .selectionHighlightStrength: settings.selectionHighlightStrength = defaults.selectionHighlightStrength
+        case .glassStyle: appearance.glassStyle = modeDefaults.glassStyle
+        case .glassRimStrength: appearance.glassRimStrength = modeDefaults.glassRimStrength
+        case .glassEdgeRefraction: appearance.glassEdgeRefraction = modeDefaults.glassEdgeRefraction
+        case .selectionHighlightStrength: appearance.selectionHighlightStrength = modeDefaults.selectionHighlightStrength
         case .glassTint:
-            settings.followsSystemGlassTint = defaults.followsSystemGlassTint
-            settings.glassTintAmount = defaults.glassTintAmount
-        case .titleHaloStrength: settings.titleHaloStrength = defaults.titleHaloStrength
-        case .titleHaloSize: settings.titleHaloSize = defaults.titleHaloSize
+            appearance.followsSystemGlassTint = modeDefaults.followsSystemGlassTint
+            appearance.glassTintAmount = modeDefaults.glassTintAmount
+        case .titleHaloStrength: appearance.titleHaloStrength = modeDefaults.titleHaloStrength
+        case .titleHaloSize: appearance.titleHaloSize = modeDefaults.titleHaloSize
         case .badgeGrowth: settings.badgeGrowth = defaults.badgeGrowth
         case .badgePlacement: settings.badgePlacement = defaults.badgePlacement
-        case .stageCornerRadius:
-            // One slider edits both corners, so both return to their defaults.
-            settings.stageCornerRadius = defaults.stageCornerRadius
-            settings.iconStageCornerRadius = defaults.iconStageCornerRadius
-        case .stageScale:
-            // One slider edits both sizes, so both return to their defaults.
-            settings.stageScale = defaults.stageScale
-            settings.iconScale = defaults.iconScale
+        case .stageCornerRadius: appearance.stageCornerRadius = modeDefaults.stageCornerRadius
+        case .stageScale: appearance.stageScale = modeDefaults.stageScale
         case .adaptiveCardSizing: settings.adaptiveCardSizing = defaults.adaptiveCardSizing
-        case .inactiveStageScale: settings.inactiveStageScale = defaults.inactiveStageScale
+        case .inactiveStageScale: appearance.inactiveStageScale = modeDefaults.inactiveStageScale
         case .previewRefreshPolicy: settings.previewRefreshPolicy = defaults.previewRefreshPolicy
         case .previewCacheTTL: settings.previewCacheTTL = defaults.previewCacheTTL
-        case .selectorOutset: settings.selectorOutset = defaults.selectorOutset
+        case .selectorOutset: appearance.selectorOutset = modeDefaults.selectorOutset
         case .previewCornerRadius: settings.previewCornerRadius = defaults.previewCornerRadius
         case .keyBindings: settings.keyBindings = defaults.keyBindings
         case .quickSwitchModifiers: settings.quickSwitchModifiers = defaults.quickSwitchModifiers

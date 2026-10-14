@@ -132,7 +132,7 @@ final class AppearancePreviewSample {
         }
         // Cards take the display's shape, so this must be the real display's size.
         let metrics = StageConstants.drawnMetrics(
-            stageScale: CGFloat(settings.overlayScale(for: cardStyle)),
+            stageScale: CGFloat(settings.appearance(for: cardStyle).stageScale),
             contentAspects: [aspects],
             containerSize: screen,
             cardSpacing: CGFloat(settings.previewCardSpacing),

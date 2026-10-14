@@ -266,11 +266,11 @@ struct StateStoreTests {
         let store = StateStore(directory: dir)
         var settings = AppSettings()
         settings.launchAtLogin = true
-        settings.stageCornerRadius = 30
+        settings.previewAppearance.stageCornerRadius = 30
         settings.overlayOnMainDisplayOnly = true
         settings.showsDesktopSwitchIndicator = false
-        settings.iconStageCornerRadius = 40
-        settings.selectorOutset = 3
+        settings.iconAppearance.stageCornerRadius = 40
+        settings.previewAppearance.selectorOutset = 3
         settings.previewCornerRadius = 18
         settings.badgePlacement = .top
         settings.overlayPresentationDelay = 0.25
@@ -280,11 +280,11 @@ struct StateStoreTests {
         try store.saveSettings(settings)
         let loaded = try store.loadSettings()
         #expect(loaded.launchAtLogin == true)
-        #expect(loaded.stageCornerRadius == 30)
+        #expect(loaded.previewAppearance.stageCornerRadius == 30)
         #expect(loaded.overlayOnMainDisplayOnly)
         #expect(!loaded.showsDesktopSwitchIndicator)
-        #expect(loaded.iconStageCornerRadius == 40)
-        #expect(loaded.selectorOutset == 3)
+        #expect(loaded.iconAppearance.stageCornerRadius == 40)
+        #expect(loaded.previewAppearance.selectorOutset == 3)
         #expect(loaded.previewCornerRadius == 18)
         #expect(loaded.badgePlacement == .top)
         #expect(loaded.overlayPresentationDelay == 0.25)
@@ -399,24 +399,21 @@ struct StateStoreTests {
     @Test("Saved preview scales respect the current setting range", arguments: [0.5, 0.75, 1.0, 1.5, 2.5, 3.0, 4.0, 4.5])
     func savedStageScaleRange(scale: Double) throws {
         var settings = AppSettings()
-        settings.stageScale = scale
+        settings.previewAppearance.stageScale = scale
         let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
         #expect(AppSettings.maximumStageScale == 4)
-        #expect(decoded.stageScale == min(AppSettings.maximumStageScale, max(1, scale)))
+        #expect(decoded.previewAppearance.stageScale == min(AppSettings.maximumStageScale, max(1, scale)))
     }
 
     @Test("Settings written before the stage scale existed use the 150 percent default")
     func legacySettingsDefaultStageScale() throws {
-        let encoded = try JSONEncoder().encode(AppSettings())
-        var object = try #require(
-            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
-        )
+        var object = try Self.legacySettingsObject()
         object.removeValue(forKey: "stageScale")
         let legacyData = try JSONSerialization.data(withJSONObject: object)
 
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
-        #expect(decoded.stageScale == AppSettings.defaultStageScale)
+        #expect(decoded.previewAppearance.stageScale == AppSettings.defaultStageScale)
         #expect(AppSettings.defaultStageScale == 1.5)
     }
 
@@ -424,10 +421,7 @@ struct StateStoreTests {
     /// highlight corner, loads with the highlight and the default preview corner.
     @Test("Settings that chose Magnify load with the highlight")
     func legacySettingsDropMagnify() throws {
-        let encoded = try JSONEncoder().encode(AppSettings())
-        var object = try #require(
-            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
-        )
+        var object = try Self.legacySettingsObject()
         #expect(object["windowSelectionStyle"] == nil)
         #expect(object["magnifyScale"] == nil)
         #expect(object["previewCardSpacing"] == nil, "card spacing is no longer a setting")
@@ -443,9 +437,9 @@ struct StateStoreTests {
 
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
-        #expect(decoded.selectorOutset == AppSettings.defaultSelectorOutset)
+        #expect(decoded.previewAppearance.selectorOutset == AppSettings.defaultSelectorOutset)
         #expect(decoded.previewCornerRadius == AppSettings.defaultPreviewCornerRadius)
-        #expect(decoded.iconStageCornerRadius == AppSettings.defaultIconStageCornerRadius)
+        #expect(decoded.iconAppearance.stageCornerRadius == AppSettings.defaultIconStageCornerRadius)
         #expect(decoded.previewCardSpacing == AppSettings.defaultPreviewCardSpacing)
     }
 
@@ -473,7 +467,7 @@ struct StateStoreTests {
 
         var settings = AppSettings()
         settings.launchAtLogin = true
-        settings.stageCornerRadius = 12
+        settings.previewAppearance.stageCornerRadius = 12
         let encoded = try JSONEncoder().encode(settings)
         var object = try #require(
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
@@ -495,7 +489,7 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.launchAtLogin == true)
-        #expect(decoded.stageCornerRadius == 12)
+        #expect(decoded.previewAppearance.stageCornerRadius == 12)
     }
 
     @Test("Settings defaults when no file")
@@ -506,16 +500,13 @@ struct StateStoreTests {
         let store = StateStore(directory: dir)
         let settings = try store.loadSettings()
         #expect(settings.launchAtLogin == true)
-        #expect(settings.glassStyle == .native)
+        #expect(settings.previewAppearance.glassStyle == .native)
         #expect(settings.badgePlacement == .titleRow)
     }
 
     @Test("Settings written before Liquid Glass tuning use the native look")
     func legacySettingsDefaultLiquidGlass() throws {
-        let encoded = try JSONEncoder().encode(AppSettings())
-        var object = try #require(
-            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
-        )
+        var object = try Self.legacySettingsObject()
         for key in ["glassRimStrength", "glassEdgeRefraction", "followsSystemGlassTint", "glassTintAmount",
                     "badgeGrowth", "titleHaloStrength", "titleHaloSize"] {
             object.removeValue(forKey: key)
@@ -525,22 +516,19 @@ struct StateStoreTests {
 
         let decoded = try JSONDecoder().decode(AppSettings.self, from: data)
 
-        #expect(decoded.glassStyle == .native)
-        #expect(decoded.glassRimStrength == 1)
-        #expect(decoded.glassEdgeRefraction == 1)
-        #expect(decoded.followsSystemGlassTint)
-        #expect(decoded.dockGlassStyle == DockGlassStyle(focusState: .active))
+        #expect(decoded.previewAppearance.glassStyle == .native)
+        #expect(decoded.previewAppearance.glassRimStrength == 1)
+        #expect(decoded.previewAppearance.glassEdgeRefraction == 1)
+        #expect(decoded.previewAppearance.followsSystemGlassTint)
+        #expect(decoded.previewAppearance.dockGlassStyle == DockGlassStyle(focusState: .active))
         #expect(decoded.badgeGrowth == AppSettings.defaultBadgeGrowth)
-        #expect(decoded.titleHaloStrength == 1)
-        #expect(decoded.titleHaloSize == AppSettings.defaultTitleHaloSize)
+        #expect(decoded.previewAppearance.titleHaloStrength == 1)
+        #expect(decoded.previewAppearance.titleHaloSize == AppSettings.defaultTitleHaloSize)
     }
 
     @Test("Badge growth and title halo settings clamp to their ranges")
     func badgeAndHaloSettingsClamp() throws {
-        let encoded = try JSONEncoder().encode(AppSettings())
-        var object = try #require(
-            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
-        )
+        var object = try Self.legacySettingsObject()
         object["badgeGrowth"] = 3
         object["titleHaloStrength"] = -1
         object["titleHaloSize"] = 99
@@ -549,21 +537,21 @@ struct StateStoreTests {
             from: JSONSerialization.data(withJSONObject: object)
         )
         #expect(decoded.badgeGrowth == AppSettings.maximumBadgeGrowth)
-        #expect(decoded.titleHaloStrength == 0)
-        #expect(decoded.titleHaloSize == AppSettings.maximumTitleHaloSize)
+        #expect(decoded.previewAppearance.titleHaloStrength == 0)
+        #expect(decoded.previewAppearance.titleHaloSize == AppSettings.maximumTitleHaloSize)
     }
 
     @Test("The title halo only applies to the native and clear materials")
     func titleHaloIsOffOnRegularGlass() {
         var settings = AppSettings()
-        settings.titleHaloStrength = 0.6
+        settings.previewAppearance.titleHaloStrength = 0.6
         for style in [GlassStyle.native, .clear] {
-            settings.glassStyle = style
-            #expect(settings.effectiveTitleHaloStrength == 0.6)
+            settings.previewAppearance.glassStyle = style
+            #expect(settings.previewAppearance.effectiveTitleHaloStrength == 0.6)
         }
-        settings.glassStyle = .regular
-        #expect(settings.effectiveTitleHaloStrength == 0)
-        #expect(settings.titleHaloStrength == 0.6)
+        settings.previewAppearance.glassStyle = .regular
+        #expect(settings.previewAppearance.effectiveTitleHaloStrength == 0)
+        #expect(settings.previewAppearance.titleHaloStrength == 0.6)
     }
 
     /// macOS 26's glass filter has no fill inputs, so a fixed tint would do nothing there and
@@ -573,30 +561,27 @@ struct StateStoreTests {
         #expect(!AppSettings.supportsFixedGlassTint(operatingSystemMajor: 26))
         #expect(AppSettings.supportsFixedGlassTint(operatingSystemMajor: 27))
         var settings = AppSettings()
-        settings.followsSystemGlassTint = false
-        settings.glassTintAmount = 0.25
-        #expect(settings.dockGlassStyle(operatingSystemMajor: 26).tint == .system)
-        #expect(settings.dockGlassStyle(operatingSystemMajor: 27).tint == .fixed(0.25))
+        settings.previewAppearance.followsSystemGlassTint = false
+        settings.previewAppearance.glassTintAmount = 0.25
+        #expect(settings.previewAppearance.dockGlassStyle(operatingSystemMajor: 26).tint == .system)
+        #expect(settings.previewAppearance.dockGlassStyle(operatingSystemMajor: 27).tint == .fixed(0.25))
     }
 
     @Test("Liquid Glass settings map onto the DockGlass style and clamp")
     func liquidGlassSettingsMapToDockGlassStyle() throws {
         var settings = AppSettings()
-        settings.glassRimStrength = 0.5
-        settings.glassEdgeRefraction = 1.5
-        settings.followsSystemGlassTint = false
-        settings.glassTintAmount = 0.25
-        #expect(settings.dockGlassStyle(operatingSystemMajor: 27) == DockGlassStyle(
+        settings.previewAppearance.glassRimStrength = 0.5
+        settings.previewAppearance.glassEdgeRefraction = 1.5
+        settings.previewAppearance.followsSystemGlassTint = false
+        settings.previewAppearance.glassTintAmount = 0.25
+        #expect(settings.previewAppearance.dockGlassStyle(operatingSystemMajor: 27) == DockGlassStyle(
             rimStrength: 0.5,
             edgeRefraction: 1.5,
             tint: .fixed(0.25),
             focusState: .active
         ))
 
-        let encoded = try JSONEncoder().encode(settings)
-        var object = try #require(
-            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
-        )
+        var object = try Self.legacySettingsObject(settings)
         object["glassRimStrength"] = 9
         object["glassEdgeRefraction"] = -1
         object["glassTintAmount"] = 4
@@ -604,8 +589,22 @@ struct StateStoreTests {
             AppSettings.self,
             from: JSONSerialization.data(withJSONObject: object)
         )
-        #expect(decoded.glassRimStrength == AppSettings.maximumGlassRimStrength)
-        #expect(decoded.glassEdgeRefraction == AppSettings.minimumGlassEdgeRefraction)
-        #expect(decoded.glassTintAmount == 1)
+        #expect(decoded.previewAppearance.glassRimStrength == AppSettings.maximumGlassRimStrength)
+        #expect(decoded.previewAppearance.glassEdgeRefraction == AppSettings.minimumGlassEdgeRefraction)
+        #expect(decoded.previewAppearance.glassTintAmount == 1)
+    }
+
+    /// Settings as written before KHA-1099, when both switcher modes shared one set of
+    /// appearance values at the top level and icons kept only their size and stage corner.
+    static func legacySettingsObject(_ settings: AppSettings = AppSettings()) throws -> [String: Any] {
+        var object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any]
+        )
+        let preview = try #require(object.removeValue(forKey: "previewAppearance") as? [String: Any])
+        let icons = try #require(object.removeValue(forKey: "iconAppearance") as? [String: Any])
+        object.merge(preview) { current, _ in current }
+        object["iconScale"] = icons["stageScale"]
+        object["iconStageCornerRadius"] = icons["stageCornerRadius"]
+        return object
     }
 }

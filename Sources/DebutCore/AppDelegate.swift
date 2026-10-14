@@ -314,7 +314,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         spaceManager.activateLaunchSpace(focusedWindowID: focusedWindowID)
 
-        AppIconCache.shared.iconScale = currentSettings.iconScale
+        AppIconCache.shared.iconScale = currentSettings.iconAppearance.stageScale
         AppIconCache.shared.warm(
             bundleIDs: spaceManager.allWindowOwnerBundleIDs,
             sizes: AppIconCache.shared.warmSizes,
@@ -723,13 +723,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let window = desktopSwitchIndicatorWindows[presentation.stackID]
             ?? DesktopSwitchIndicatorWindow()
         desktopSwitchIndicatorWindows[presentation.stackID] = window
+        // Drawn in the glass of the switcher mode in use, so it matches the overlay.
+        let appearance = currentSettings.appearance(for: OverlayCardStyle(
+            previewsAvailable: spaceController?.windowPreviewsEnabled ?? true
+        ))
         window.present(
             presentation,
             on: screen,
-            glassStyle: currentSettings.glassStyle,
-            dockGlassStyle: currentSettings.dockGlassStyle,
-            haloStrength: currentSettings.effectiveTitleHaloStrength,
-            haloSize: CGFloat(currentSettings.titleHaloSize)
+            glassStyle: appearance.glassStyle,
+            dockGlassStyle: appearance.dockGlassStyle,
+            haloStrength: appearance.effectiveTitleHaloStrength,
+            haloSize: CGFloat(appearance.titleHaloSize)
         )
         diag.report("desktop_switch_indicator_shown", level: .transient, details: [
             "desktopCount": "\(presentation.desktopCount)",
@@ -796,7 +800,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     /// so changing the size setting or the displays recaptures them at the new size.
     private func previewCaptureBudget(for settings: AppSettings) -> PreviewCaptureBudget {
         PreviewCaptureBudget(
-            stageScale: CGFloat(settings.stageScale),
+            stageScale: CGFloat(settings.previewAppearance.stageScale),
             displaySizes: NSScreen.screens.map(\.frame.size)
         )
     }
@@ -1905,8 +1909,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             diag.report("desktop_swipe_tap_failed")
         }
         keyboardService?.features = newSettings.features
-        if AppIconCache.shared.iconScale != newSettings.iconScale {
-            AppIconCache.shared.iconScale = newSettings.iconScale
+        if AppIconCache.shared.iconScale != newSettings.iconAppearance.stageScale {
+            AppIconCache.shared.iconScale = newSettings.iconAppearance.stageScale
             // Off the main thread, before an overlay asks for the size.
             AppIconCache.shared.warm(
                 bundleIDs: spaceController?.spaceManager.allWindowOwnerBundleIDs ?? [],

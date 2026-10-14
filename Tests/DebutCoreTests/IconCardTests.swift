@@ -50,32 +50,35 @@ struct IconCardTests {
     @Test("Icon size is stored apart from preview size and defaults to native")
     func iconScaleDefaultsAndPersists() throws {
         var settings = AppSettings()
-        #expect(settings.iconScale == 1)
-        #expect(settings.overlayScale(for: .icons) == 1)
-        #expect(settings.overlayScale(for: .previews) == AppSettings.defaultStageScale)
+        #expect(settings.iconAppearance.stageScale == 1)
+        #expect(settings.appearance(for: .icons).stageScale == 1)
+        #expect(settings.appearance(for: .previews).stageScale == AppSettings.defaultStageScale)
 
-        settings.iconScale = 1.3
+        settings.iconAppearance.stageScale = 1.3
         let encoded = try JSONEncoder().encode(settings)
-        #expect(try JSONDecoder().decode(AppSettings.self, from: encoded).iconScale == 1.3)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: encoded).iconAppearance.stageScale == 1.3)
 
         var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-        object.removeValue(forKey: "iconScale")
+        var icons = try #require(object["iconAppearance"] as? [String: Any])
+        icons.removeValue(forKey: "stageScale")
+        object["iconAppearance"] = icons
         #expect(try JSONDecoder().decode(
             AppSettings.self, from: JSONSerialization.data(withJSONObject: object)
-        ).iconScale == 1)
-        object["iconScale"] = 9
+        ).iconAppearance.stageScale == 1)
+        icons["stageScale"] = 9
+        object["iconAppearance"] = icons
         #expect(try JSONDecoder().decode(
             AppSettings.self, from: JSONSerialization.data(withJSONObject: object)
-        ).iconScale == AppSettings.maximumStageScale)
+        ).iconAppearance.stageScale == AppSettings.maximumStageScale)
     }
 
     @Test("Fitting draws icons at the icon size and ignores window shapes")
     func fittingUsesIconScale() {
         var settings = AppSettings()
-        settings.iconScale = 1.2
+        settings.iconAppearance.stageScale = 1.2
         let display = CGSize(width: 1600, height: 1000)
         let metrics = StageConstants.drawnMetrics(
-            stageScale: CGFloat(settings.overlayScale(for: .icons)),
+            stageScale: CGFloat(settings.appearance(for: .icons).stageScale),
             contentAspects: [[0.4, 3, nil]],
             containerSize: display,
             cardSpacing: CGFloat(settings.previewCardSpacing),
@@ -121,15 +124,15 @@ struct IconCardTests {
     func sizeSliderFollowsTheCardStyle() {
         var vm = SettingsViewModel()
         vm.screenRecordingGranted = true
-        vm.overlaySize = 1.6
-        #expect(vm.settings.stageScale == 1.6)
-        #expect(vm.settings.iconScale == 1)
+        vm.appearance.stageScale = 1.6
+        #expect(vm.settings.previewAppearance.stageScale == 1.6)
+        #expect(vm.settings.iconAppearance.stageScale == 1)
 
         vm.screenRecordingGranted = false
-        #expect(vm.overlaySize == 1)
-        vm.overlaySize = 1.25
-        #expect(vm.settings.iconScale == 1.25)
-        #expect(vm.settings.stageScale == 1.6)
+        #expect(vm.appearance.stageScale == 1)
+        vm.appearance.stageScale = 1.25
+        #expect(vm.settings.iconAppearance.stageScale == 1.25)
+        #expect(vm.settings.previewAppearance.stageScale == 1.6)
     }
 
     @Test("Drag drops aim at icon slots when icons are drawn")

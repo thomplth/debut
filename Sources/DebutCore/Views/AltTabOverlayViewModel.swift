@@ -12,6 +12,8 @@ public struct AltTabOverlayViewModel: Sendable {
     public var appearance: AppSettings
     /// Icons when previews are off or Screen Recording is not granted.
     public var cardStyle: OverlayCardStyle = .previews
+    /// The values this card style draws with.
+    public var switcherAppearance: SwitcherAppearance { appearance.appearance(for: cardStyle) }
     public var overlayKeyboardInteractionSequence: Int
 
     public init(
@@ -68,7 +70,7 @@ public struct AltTabOverlayViewModel: Sendable {
         cardStyle: OverlayCardStyle = .previews
     ) -> StageMetrics {
         StageConstants.drawnMetrics(
-            stageScale: CGFloat(appearance.overlayScale(for: cardStyle)),
+            stageScale: CGFloat(appearance.appearance(for: cardStyle).stageScale),
             contentAspects: [contentAspects],
             containerSize: containerSize,
             cardSpacing: CGFloat(appearance.previewCardSpacing),

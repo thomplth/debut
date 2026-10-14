@@ -656,7 +656,7 @@ func captureDesktopIndicatorGlassVariants() -> Bool {
 
     for glassStyle in GlassStyle.allCases {
         var settings = AppSettings()
-        settings.glassStyle = glassStyle
+        settings.previewAppearance.glassStyle = glassStyle
         let overlayModel = StageOverlayViewModel(
             spaceManager: SpaceManager(),
             activeSpaceIndex: 0,
@@ -1137,7 +1137,7 @@ let overlayBounds = OverlayDisplayResolver.overlayBounds(
 /// setting and how many windows the display has to hold.
 func drawnMetrics(cardAspects: [[CGFloat?]]) -> StageMetrics {
     StageConstants.drawnMetrics(
-        stageScale: CGFloat(interactionSettings.overlayScale(for: reportedCardStyle)),
+        stageScale: CGFloat(interactionSettings.appearance(for: reportedCardStyle).stageScale),
         contentAspects: cardAspects,
         containerSize: overlayBounds.size,
         cardSpacing: CGFloat(interactionSettings.previewCardSpacing),
@@ -1188,7 +1188,7 @@ func dragViewDropPoint(
         || NSScreen.screens.count > 1
     return StageConstants.dragViewDropPoint(
         contentAspects: cardAspects,
-        stageScale: CGFloat(interactionSettings.overlayScale(for: reportedCardStyle)),
+        stageScale: CGFloat(interactionSettings.appearance(for: reportedCardStyle).stageScale),
         cardSpacing: CGFloat(interactionSettings.previewCardSpacing),
         containerSize: overlayBounds.size,
         reservesDisplayIndicator: reservesIndicator,
@@ -2663,7 +2663,7 @@ func scenario_window_drop() {
             windowIndex: dragWindowIndex ?? 0,
             cardAspects: preparedCardAspects,
             activeSpaceIndex: stageActiveSpaceIndex,
-            inactiveScale: CGFloat(interactionSettings.inactiveStageScale)
+            inactiveScale: CGFloat(interactionSettings.appearance(for: reportedCardStyle).inactiveStageScale)
        ),
        let dropPoint = dragViewDropPoint(
             cardAspects: preparedCardAspects,
@@ -2702,7 +2702,7 @@ func scenario_window_drop() {
             ?? destinationSpaceIndex
         let movedActiveSpaceIndex = Int(movedDropState["activeSpaceIndex"] ?? "")
             ?? stageActiveSpaceIndex
-        let inactiveScale = CGFloat(interactionSettings.inactiveStageScale)
+        let inactiveScale = CGFloat(interactionSettings.appearance(for: reportedCardStyle).inactiveStageScale)
         if let centered = windowCenter(
             spaceIndex: destinationSpaceIndex,
             windowIndex: 0,

@@ -42,7 +42,7 @@ struct NativeSwitcherGeometryTests {
         let appearance = AppSettings()
         let aspects: [CGFloat?] = Array(repeating: 1.6, count: 30)
         let stage = StageConstants.drawnMetrics(
-            stageScale: CGFloat(appearance.stageScale),
+            stageScale: CGFloat(appearance.previewAppearance.stageScale),
             contentAspects: [aspects],
             containerSize: display,
             cardSpacing: CGFloat(appearance.previewCardSpacing)
@@ -58,13 +58,13 @@ struct NativeSwitcherGeometryTests {
     @Test("Native appearance defaults")
     func nativeDefaults() {
         let settings = AppSettings()
-        #expect(settings.stageScale == 1.5)
-        #expect(settings.stageCornerRadius == 47.5)
+        #expect(settings.previewAppearance.stageScale == 1.5)
+        #expect(settings.previewAppearance.stageCornerRadius == 47.5)
         // Icon cards are the native switcher, so they keep its plate corner.
-        #expect(CGFloat(settings.iconStageCornerRadius) == native.plateCornerRadius)
+        #expect(CGFloat(settings.iconAppearance.stageCornerRadius) == native.plateCornerRadius)
         #expect(CGFloat(settings.previewCardSpacing) == native.iconSpacing - native.selectionPadding * 2)
-        #expect(settings.selectionHighlightStrength == 1)
-        #expect(settings.dockGlassStyle.selectionStrength == 1)
+        #expect(settings.previewAppearance.selectionHighlightStrength == 1)
+        #expect(settings.previewAppearance.dockGlassStyle.selectionStrength == 1)
         #expect(CGFloat(AppSettings.maximumStageCornerRadius) >= native.plateCornerRadius)
     }
 

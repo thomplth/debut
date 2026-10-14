@@ -439,16 +439,23 @@ public struct SettingsView: View {
             Text("Layout")
                 .font(.headline)
 
+            Text(viewModel.overlayCardStyle == .icons
+                ? "Without window previews, windows show as app icons. These settings style the icon switcher; previews keep their own."
+                : "These settings style the switcher with window previews; the icon switcher, used without previews, keeps its own.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Stage corner radius")
                     Spacer()
-                    Text("\(viewModel.overlayCornerRadius.formatted(.number.precision(.fractionLength(0...1)))) pt")
+                    Text("\(viewModel.appearance.stageCornerRadius.formatted(.number.precision(.fractionLength(0...1)))) pt")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(
-                    value: $viewModel.overlayCornerRadius,
+                    value: $viewModel.appearance.stageCornerRadius,
                     in: AppSettings.minimumStageCornerRadius...AppSettings.maximumStageCornerRadius,
                     step: 0.5
                 )
@@ -458,81 +465,84 @@ public struct SettingsView: View {
                 HStack {
                     Text(viewModel.overlayCardStyle == .icons ? "Icon size" : "Window size")
                     Spacer()
-                    Text("\(Int((viewModel.overlaySize * 100).rounded()))%")
+                    Text("\(Int((viewModel.appearance.stageScale * 100).rounded()))%")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(
-                    value: $viewModel.overlaySize,
+                    value: $viewModel.appearance.stageScale,
                     in: AppSettings.minimumStageScale...AppSettings.maximumStageScale,
                     step: AppSettings.stageScaleStep
                 )
                 Text(viewModel.overlayCardStyle == .icons
-                    ? "Without window previews, windows show as app icons. 100% matches the macOS app switcher."
+                    ? "100% matches the macOS app switcher."
                     : "100% matches the macOS app switcher. Large workspaces scale down automatically to fit.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("App icon position")
-                    Spacer()
-                    Picker("", selection: $viewModel.settings.badgePlacement) {
-                        Text("Corner").tag(BadgePlacement.corner)
-                        Text("Bottom").tag(BadgePlacement.bottom)
-                        Text("Title").tag(BadgePlacement.titleRow)
-                        Text("Top").tag(BadgePlacement.top)
+            if viewModel.showsPreviewOnlyAppearance {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("App icon position")
+                        Spacer()
+                        Picker("", selection: $viewModel.settings.badgePlacement) {
+                            Text("Corner").tag(BadgePlacement.corner)
+                            Text("Bottom").tag(BadgePlacement.bottom)
+                            Text("Title").tag(BadgePlacement.titleRow)
+                            Text("Top").tag(BadgePlacement.top)
+                        }
+                        .pickerStyle(.segmented)
+                        // A fixed width squeezed it below its natural width; AppKit then drew it
+                        // past its frame, at a different size on each relayout as sliders moved
+                        // (KHA-1071).
+                        .fixedSize()
                     }
-                    .pickerStyle(.segmented)
-                    // A fixed width squeezed it below its natural width; AppKit then drew it past
-                    // its frame, at a different size on each relayout as sliders moved (KHA-1071).
-                    .fixedSize()
-                }
-                Text("Where each preview shows its app's icon.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("App icon growth")
-                    Spacer()
-                    Text(viewModel.settings.badgeGrowth.formatted(.number.precision(.fractionLength(2))))
+                    Text("Where each preview shows its app's icon.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .monospacedDigit()
                 }
-                Slider(
-                    value: $viewModel.settings.badgeGrowth,
-                    in: AppSettings.minimumBadgeGrowth...AppSettings.maximumBadgeGrowth,
-                    step: 0.05
-                )
-                Text("How the app icon on each preview grows with the window size: 0 keeps it at its native size, 1 grows it with the preview.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
 
-            VStack(alignment: .leading, spacing: 4) {
-                settingsToggle(
-                    "Match each preview to its window",
-                    isOn: $viewModel.settings.adaptiveCardSizing
-                )
-                Text("Use each window’s proportions up to the display-shaped card size.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("App icon growth")
+                        Spacer()
+                        Text(viewModel.settings.badgeGrowth.formatted(.number.precision(.fractionLength(2))))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Slider(
+                        value: $viewModel.settings.badgeGrowth,
+                        in: AppSettings.minimumBadgeGrowth...AppSettings.maximumBadgeGrowth,
+                        step: 0.05
+                    )
+                    Text("How the app icon on each preview grows with the window size: 0 keeps it at its native size, 1 grows it with the preview.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    settingsToggle(
+                        "Match each preview to its window",
+                        isOn: $viewModel.settings.adaptiveCardSizing
+                    )
+                    Text("Use each window’s proportions up to the display-shaped card size.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Inactive stage scale")
                     Spacer()
-                    Text("\(Int((viewModel.settings.inactiveStageScale * 100).rounded()))%")
+                    Text("\(Int((viewModel.appearance.inactiveStageScale * 100).rounded()))%")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                Slider(value: $viewModel.settings.inactiveStageScale, in: 0.4...1.0, step: 0.05)
+                Slider(value: $viewModel.appearance.inactiveStageScale, in: 0.4...1.0, step: 0.05)
                 Text("Size of the other spaces relative to the selected space.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -541,8 +551,8 @@ public struct SettingsView: View {
     }
 
     private var liquidGlassSection: some View {
-        let usesNativeGlass = viewModel.settings.glassStyle.usesDockGlass
-        let usesHalo = viewModel.settings.glassStyle != .regular
+        let usesNativeGlass = viewModel.appearance.glassStyle.usesDockGlass
+        let usesHalo = viewModel.appearance.glassStyle != .regular
         return VStack(alignment: .leading, spacing: 12) {
             Text("Liquid Glass")
                 .font(.headline)
@@ -551,7 +561,7 @@ public struct SettingsView: View {
                 HStack {
                     Text("Material")
                     Spacer()
-                    Picker("", selection: $viewModel.settings.glassStyle) {
+                    Picker("", selection: $viewModel.appearance.glassStyle) {
                         Text("Native").tag(GlassStyle.native)
                         Text("Clear").tag(GlassStyle.clear)
                         Text("Regular").tag(GlassStyle.regular)
@@ -567,34 +577,34 @@ public struct SettingsView: View {
 
             percentSlider(
                 "Rim",
-                value: $viewModel.settings.glassRimStrength,
+                value: $viewModel.appearance.glassRimStrength,
                 in: AppSettings.minimumGlassRimStrength...AppSettings.maximumGlassRimStrength
             )
             .disabled(!usesNativeGlass)
 
             percentSlider(
                 "Edge refraction",
-                value: $viewModel.settings.glassEdgeRefraction,
+                value: $viewModel.appearance.glassEdgeRefraction,
                 in: AppSettings.minimumGlassEdgeRefraction...AppSettings.maximumGlassEdgeRefraction
             )
             .disabled(!usesNativeGlass)
 
             VStack(alignment: .leading, spacing: 4) {
-                percentSlider("Title halo", value: $viewModel.settings.titleHaloStrength, in: 0...1)
+                percentSlider("Title halo", value: $viewModel.appearance.titleHaloStrength, in: 0...1)
                     .disabled(!usesHalo)
                 HStack {
                     Text("Title halo size")
                     Spacer()
-                    Text("\(viewModel.settings.titleHaloSize.formatted(.number.precision(.fractionLength(0...2)))) pt")
+                    Text("\(viewModel.appearance.titleHaloSize.formatted(.number.precision(.fractionLength(0...2)))) pt")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(
-                    value: $viewModel.settings.titleHaloSize,
+                    value: $viewModel.appearance.titleHaloSize,
                     in: AppSettings.minimumTitleHaloSize...AppSettings.maximumTitleHaloSize,
                     step: 0.25
                 )
-                .disabled(!usesHalo || viewModel.settings.titleHaloStrength == 0)
+                .disabled(!usesHalo || viewModel.appearance.titleHaloStrength == 0)
                 Text("A glow behind window titles in the opposite colour, so they stay legible over clear glass. Regular glass has none.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -606,10 +616,10 @@ public struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     settingsToggle(
                         "Follow system tint",
-                        isOn: $viewModel.settings.followsSystemGlassTint
+                        isOn: $viewModel.appearance.followsSystemGlassTint
                     )
-                    if !viewModel.settings.followsSystemGlassTint {
-                        percentSlider("Tint", value: $viewModel.settings.glassTintAmount, in: 0...1)
+                    if !viewModel.appearance.followsSystemGlassTint {
+                        percentSlider("Tint", value: $viewModel.appearance.glassTintAmount, in: 0...1)
                     }
                     Text("System Settings › Appearance › Liquid Glass sets the system tint.")
                         .font(.caption)
@@ -645,7 +655,7 @@ public struct SettingsView: View {
 
     private var selectorSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Preview & selection highlight")
+            Text(viewModel.showsPreviewOnlyAppearance ? "Preview & selection highlight" : "Selection highlight")
                 .font(.headline)
 
             Text("The selected window sits on a highlight that darkens the glass in light mode and lightens it in dark mode, as the macOS app switcher does. It hides while you drag a window.")
@@ -655,7 +665,7 @@ public struct SettingsView: View {
 
             percentSlider(
                 "Strength",
-                value: $viewModel.settings.selectionHighlightStrength,
+                value: $viewModel.appearance.selectionHighlightStrength,
                 in: AppSettings.minimumSelectionHighlightStrength...AppSettings.maximumSelectionHighlightStrength
             )
 
@@ -663,34 +673,36 @@ public struct SettingsView: View {
                 HStack {
                     Text("Surrounding space")
                     Spacer()
-                    Text("\(Int(viewModel.settings.selectorOutset.rounded())) pt")
+                    Text("\(Int(viewModel.appearance.selectorOutset.rounded())) pt")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(
-                    value: $viewModel.settings.selectorOutset,
+                    value: $viewModel.appearance.selectorOutset,
                     in: AppSettings.minimumSelectorOutset...AppSettings.maximumSelectorOutset,
                     step: 1
                 )
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Corner radius")
-                    Spacer()
-                    Text("\(Int(viewModel.settings.previewCornerRadius.rounded())) pt")
+            if viewModel.showsPreviewOnlyAppearance {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Corner radius")
+                        Spacer()
+                        Text("\(Int(viewModel.settings.previewCornerRadius.rounded())) pt")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Slider(
+                        value: $viewModel.settings.previewCornerRadius,
+                        in: AppSettings.minimumPreviewCornerRadius...AppSettings.maximumPreviewCornerRadius,
+                        step: 1
+                    )
+                    Text("Rounds every preview, selected or not. The highlight keeps the same curve around it.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .monospacedDigit()
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Slider(
-                    value: $viewModel.settings.previewCornerRadius,
-                    in: AppSettings.minimumPreviewCornerRadius...AppSettings.maximumPreviewCornerRadius,
-                    step: 1
-                )
-                Text("Rounds every preview, selected or not. The highlight keeps the same curve around it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

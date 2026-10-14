@@ -79,7 +79,7 @@ struct CompactDragLayoutTests {
           arguments: [CGSize(width: 1024, height: 768), CGSize(width: 1280, height: 800)])
     func everyStageFitsForEveryInsertion(size: CGSize) throws {
         var appearance = AppSettings()
-        appearance.stageScale = AppSettings.maximumStageScale
+        appearance.previewAppearance.stageScale = AppSettings.maximumStageScale
         let snapshot = try #require(Self.snapshot(
             [9, 3, 0, 6], source: (1, 1), size: size, appearance: appearance
         ))
@@ -105,7 +105,7 @@ struct CompactDragLayoutTests {
     @Test("The compact scale ignores the active stage and the inactive-stage preference")
     func scaleIgnoresFocusInputs() throws {
         var shrunk = AppSettings()
-        shrunk.inactiveStageScale = 0.3
+        shrunk.previewAppearance.inactiveStageScale = 0.3
         let a = try #require(Self.snapshot([3, 4, 2, 5]))
         let b = try #require(StageOverlayView.compactDragSnapshot(
             viewModel: Self.viewModel([3, 4, 2, 5], active: 3, appearance: shrunk),
@@ -157,7 +157,7 @@ struct CompactDragLayoutTests {
         let snapshot = try #require(Self.snapshot(counts, source: (0, 1), size: size))
         let point = try #require(StageConstants.dragViewDropPoint(
             contentAspects: counts.map { Array(repeating: nil, count: $0) },
-            stageScale: CGFloat(AppSettings().stageScale),
+            stageScale: CGFloat(AppSettings().previewAppearance.stageScale),
             cardSpacing: CGFloat(AppSettings().previewCardSpacing),
             containerSize: size,
             reservesDisplayIndicator: false,

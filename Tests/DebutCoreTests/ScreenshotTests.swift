@@ -314,7 +314,7 @@ struct ScreenshotTests {
         // projection and the E2E hit tests aim at a card that is not there.
         let aspects = vm.stages.map { $0.windows.map(\.contentAspect) }
         let metrics = StageConstants.drawnMetrics(
-            stageScale: CGFloat(vm.appearance.stageScale),
+            stageScale: CGFloat(vm.appearance.previewAppearance.stageScale),
             contentAspects: aspects,
             containerSize: size
         )
@@ -458,7 +458,7 @@ struct ScreenshotTests {
                 // a wide letterbox and selector to its right, so use its bottom edge instead.
                 // Unselected narrow images are still sampled inside that letterbox.
                 let below = selected && imageWidth < metrics.thumbnailWidth
-                let outset = selected ? CGFloat(AppSettings().selectorOutset) * scale : 0
+                let outset = selected ? CGFloat(AppSettings().previewAppearance.selectorOutset) * scale : 0
                 let point = below
                     ? CGPoint(x: size.width / 2,
                               y: centerY + metrics.thumbnailHeight / 2 + outset + 4 * scale)
@@ -727,7 +727,7 @@ struct ScreenshotTests {
 
     private func unscaledAppearance() -> AppSettings {
         var settings = AppSettings()
-        settings.stageScale = 1
+        settings.previewAppearance.stageScale = 1
         return settings
     }
 
@@ -791,7 +791,7 @@ struct ScreenshotTests {
 
         func cardSize(stageScale: Double) -> CGSize {
             var settings = AppSettings()
-            settings.stageScale = stageScale
+            settings.previewAppearance.stageScale = stageScale
             let vm = makeSampleViewModel(
                 spaceCount: 1,
                 windowsPerSpace: counts,
@@ -901,7 +901,7 @@ struct ScreenshotTests {
         let size = NSSize(width: 1_600, height: 1_000)
         func stage(_ scale: Double) throws -> CGRect {
             var appearance = AppSettings()
-            appearance.stageScale = scale
+            appearance.previewAppearance.stageScale = scale
             let vm = makeSampleViewModel(spaceCount: 1, windowsPerSpace: [3], activeIndex: 0, appearance: appearance)
             return try #require(renderStageSurfaceFrames(StageOverlayView(viewModel: vm), size: size)[0])
         }
@@ -976,7 +976,7 @@ struct ScreenshotTests {
           arguments: [NSSize(width: 1024, height: 768), NSSize(width: 1280, height: 800)])
     func compactDragFitsOverflowingStages(size: NSSize) throws {
         var appearance = AppSettings()
-        appearance.stageScale = AppSettings.maximumStageScale
+        appearance.previewAppearance.stageScale = AppSettings.maximumStageScale
         let vm = makeSampleViewModel(
             spaceCount: 4, windowsPerSpace: [6, 3, 0, 5], activeIndex: 0, appearance: appearance
         )
@@ -1055,7 +1055,7 @@ struct ScreenshotTests {
             ),
         ]))
         var appearance = AppSettings()
-        appearance.glassStyle = glassStyle
+        appearance.previewAppearance.glassStyle = glassStyle
         let vm = StageOverlayViewModel(
             spaceManager: manager,
             activeSpaceIndex: 1,
@@ -1099,9 +1099,9 @@ struct ScreenshotTests {
                 ),
             ]))
             var appearance = AppSettings()
-            appearance.glassStyle = .clear
-            appearance.titleHaloStrength = strength
-            appearance.titleHaloSize = 1
+            appearance.previewAppearance.glassStyle = .clear
+            appearance.previewAppearance.titleHaloStrength = strength
+            appearance.previewAppearance.titleHaloSize = 1
             let vm = StageOverlayViewModel(
                 spaceManager: manager,
                 activeSpaceIndex: 1,

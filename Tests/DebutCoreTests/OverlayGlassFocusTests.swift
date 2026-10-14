@@ -19,9 +19,9 @@ struct OverlayGlassFocusTests {
     func drawsActive(style: GlassStyle, followsSystemTint: Bool) throws {
         try #require(DockGlass.canOverrideFocusState)
         var settings = AppSettings()
-        settings.followsSystemGlassTint = followsSystemTint
-        settings.glassTintAmount = 0.5
-        let window = Self.host(style: style, dockGlassStyle: settings.dockGlassStyle)
+        settings.previewAppearance.followsSystemGlassTint = followsSystemTint
+        settings.previewAppearance.glassTintAmount = 0.5
+        let window = Self.host(style: style, dockGlassStyle: settings.previewAppearance.dockGlassStyle)
         defer { window.orderOut(nil) }
         #expect(!window.isKeyWindow)
         let opacities = Self.rimOpacities(in: try #require(window.contentView?.layer))
@@ -50,10 +50,10 @@ struct OverlayGlassFocusTests {
         let systemTint = UserDefaults.standard.double(forKey: "NSGlassTintAmount")
         let tint: Double = systemTint > 0.5 ? 0 : 1
         var settings = AppSettings()
-        settings.glassStyle = style
-        settings.followsSystemGlassTint = false
-        settings.glassTintAmount = tint
-        let window = Self.host(style: style, dockGlassStyle: settings.dockGlassStyle)
+        settings.previewAppearance.glassStyle = style
+        settings.previewAppearance.followsSystemGlassTint = false
+        settings.previewAppearance.glassTintAmount = tint
+        let window = Self.host(style: style, dockGlassStyle: settings.previewAppearance.dockGlassStyle)
         defer { window.orderOut(nil) }
         let fills = Self.fillOpacities(in: try #require(window.contentView?.layer))
         #expect(!fills.isEmpty, "no glass backdrop for \(style)")
@@ -62,7 +62,7 @@ struct OverlayGlassFocusTests {
 
     @Test("Debut asks DockGlass for the active state")
     func dockGlassStyleIsActive() {
-        #expect(AppSettings().dockGlassStyle.focusState == .active)
+        #expect(AppSettings().previewAppearance.dockGlassStyle.focusState == .active)
     }
 
     static func host(style: GlassStyle, dockGlassStyle: DockGlassStyle) -> NSWindow {
