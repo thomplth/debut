@@ -195,6 +195,32 @@ struct SpaceManagerTests {
         #expect(sm.dormantWindowAssignments.isEmpty)
     }
 
+    @Test("A shared stack losing a middle desktop keeps every other space by uuid")
+    func sharedStackRemovesTheRightSpace() {
+        func shared(_ uuids: [String]) -> SpaceTopology {
+            let ids = uuids.indices.map { CGSSpaceID($0 + 3) }
+            return SpaceTopology(separateSpaces: false, stacks: [
+                SpaceStackDescriptor(
+                    id: SpaceTopology.sharedStackID, displayID: nil, displayName: "All Displays",
+                    frame: .zero, desktopIDs: ids, desktopUUIDs: uuids,
+                    currentDesktopID: ids[0], currentDesktopUUID: uuids[0]
+                ),
+            ])
+        }
+        var sm = SpaceManager()
+        sm.reconcileSpaceStacks(with: shared(["A", "B", "C"]))
+        let spaceIDs = sm.spaces.map(\.id)
+        sm.addWindow(
+            SpaceWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C", windowTitle: "C"),
+            toSpaceID: spaceIDs[2]
+        )
+
+        sm.reconcileSpaceStacks(with: shared(["A", "C"]))
+
+        #expect(sm.spaces.map(\.id) == [spaceIDs[0], spaceIDs[2]])
+        #expect(sm.spaceContainingWindow(windowID: 303) == spaceIDs[2])
+    }
+
     @Test("Update window title")
     func updateTitle() {
         var sm = SpaceManager()

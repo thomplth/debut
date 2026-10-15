@@ -244,6 +244,10 @@ public struct SpaceManager: Codable, Sendable {
         guard let firstDescriptor = topology.stacks.first else { return }
 
         if !topology.separateSpaces, topology.stacks.count == 1 {
+            // Already the one shared stack: nothing to fold, and a resize by count here would
+            // drop the last space before `alignStack` could match a removed middle desktop by
+            // uuid, piling the last desktop's windows onto its neighbour.
+            if spaceStacks.count == 1, spaceStacks[0].id == firstDescriptor.id { return }
             let baseIndex = spaceStacks.firstIndex(where: {
                 $0.id == SpaceTopology.sharedStackID
             }) ?? selectedStackIndex ?? 0
