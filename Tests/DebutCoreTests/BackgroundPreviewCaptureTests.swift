@@ -164,6 +164,48 @@ struct BackgroundPreviewCaptureTests {
         #expect(waitFor { reports.events("preview_capture_batch").contains { $0["reason"] == "focus_left" } })
     }
 
+    @Test("The controller reports focus changes, desktop arrivals, suspension and fallbacks")
+    func telemetryReachesRecorder() throws {
+        let reports = RecordedReports()
+        let windowService = MockWindowService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: MockKeyboardService(),
+            focusedWindowSnapshotProvider: { .unfocused },
+            previewFreshness: PreviewFreshnessRecorder(
+                report: reports.report,
+                measuresDevelopmentCosts: false,
+                background: { $0() },
+                main: { $0() }
+            )
+        )
+        controller.backgroundPreviewSettleDelay = 30
+        for windowID in [CGWindowID(101), 102] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T"),
+                toSpaceID: controller.spaceManager.activeSpaceID
+            )
+        }
+        windowService.capturedImages = [101: contentImage(), 102: contentImage()]
+        windowService.fallbackWindowIDs = [101]
+        DispatchQueue.main.sync {
+            controller.recordWindowActivation(windowID: 101)
+            controller.recordWindowActivation(windowID: 102)
+        }
+        #expect(waitFor { reports.events("preview_capture_batch").contains { $0["reason"] == "focus_left" } })
+        let batch = try #require(reports.events("preview_capture_batch").first { $0["reason"] == "focus_left" })
+        #expect(batch["windowIDs"] == "101")
+        #expect(batch["fellBack"] == "1")
+        DispatchQueue.main.sync {
+            controller.desktopDidChange()
+            controller.previewCaptureSuspended = true
+        }
+        let rollup = try #require(reports.events("preview_capture_rollup").first)
+        #expect(rollup["focusChanges"] == "2")
+        #expect(rollup["desktopArrivals"] == "1")
+        #expect(rollup["fellBack"] == "1")
+    }
+
     @Test("A light/dark switch recaptures showing windows once redrawn, and the rest at the next open")
     func appearanceChange() {
         let (controller, service, keyboard, _, _) = makeController(settleDelay: 0.1)

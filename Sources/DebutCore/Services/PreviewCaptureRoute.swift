@@ -16,7 +16,12 @@ import ScreenCaptureKit
 /// fallback for that error only. Its frame is an IOSurface that alt-tab-macos found leaking
 /// WindowServer memory when held (#5786), so it is copied into memory Debut owns at once.
 enum PreviewCaptureRoute {
-    static func capture(filter: SCContentFilter, width: Int, height: Int) async throws -> CGImage {
+    /// `fellBack` says the -3811 fallback took it, so a batch can count how often that happens.
+    static func capture(
+        filter: SCContentFilter,
+        width: Int,
+        height: Int
+    ) async throws -> (image: CGImage, fellBack: Bool) {
         let configuration = SCScreenshotConfiguration()
         configuration.width = width
         configuration.height = height
@@ -28,7 +33,7 @@ enum PreviewCaptureRoute {
                 configuration: configuration
             )
             guard let image = output.sdrImage else { throw CaptureError.noImage }
-            return image
+            return (image, false)
         } catch where fallsBackToSampleBuffer(after: error) {
             let streamConfiguration = SCStreamConfiguration()
             streamConfiguration.width = width
@@ -43,7 +48,7 @@ enum PreviewCaptureRoute {
                   let image = image(copying: pixelBuffer)
             else { throw CaptureError.noImage }
             DiagnosticReporter.shared.report("window_preview_capture_fell_back", level: .transient)
-            return image
+            return (image, true)
         }
     }
 

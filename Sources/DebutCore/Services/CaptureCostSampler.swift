@@ -51,7 +51,10 @@ protocol CaptureCostSampling: Sendable {
 /// kernel refuses their counters to an unprivileged caller. Development builds only: it spawns
 /// a process.
 struct SystemCaptureCostSampler: CaptureCostSampling {
-    static let processNames = ["WindowServer", "systemstatusd", "ControlCenter", "tccd", "replayd"]
+    /// Over the KHA-1100 review, replayd CPU (22.9 ms per capture, r² 0.97) and ControlCenter
+    /// energy (60 mJ per capture, r² 0.76) tracked the capture count; tccd and systemstatusd
+    /// regressed to 0 ms per capture, so they are no longer read.
+    static let processNames = ["WindowServer", "ControlCenter", "replayd"]
     static let ownName = "Debut"
 
     func sample() -> CaptureCostSample {
@@ -85,10 +88,16 @@ struct SystemCaptureCostSampler: CaptureCostSampling {
         return Array(pids.prefix(max(0, count))).filter { $0 > 0 }
     }
 
+    /// `proc_name` refuses WindowServer with EPERM, which is why it was never reported; the
+    /// short BSD info answers for it. Its command name is cut to `MAXCOMLEN`, which every name
+    /// read here fits.
     private static func name(of pid: pid_t) -> String {
-        var buffer = [CChar](repeating: 0, count: Int(MAXCOMLEN) * 2 + 1)
-        guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return "" }
-        return String(cString: buffer)
+        var info = proc_bsdshortinfo()
+        let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, size) == size else { return "" }
+        return withUnsafeBytes(of: info.pbsi_comm) { bytes in
+            String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
+        }
     }
 
     private static func usage(of pid: pid_t) -> rusage_info_v6? {

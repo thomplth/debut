@@ -537,6 +537,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 previewCaptureScheduler.dropBackground()
                 previewDebouncer.cancelAll()
             }
+            previewFreshness.captureSuspensionChanged(previewCaptureSuspended)
             diag.report("preview_capture_availability", details: [
                 "suspended": "\(previewCaptureSuspended)",
             ])
@@ -2043,6 +2044,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             capturePreviewInBackground(previous, reason: "focus_left", settled: true)
         }
         if focusedWindowID != windowID {
+            previewFreshness.recordFocusChange()
             capturePreviewInBackground(windowID, reason: "focus_arrived", settled: false)
         }
         focusedWindowID = windowID
@@ -3124,7 +3126,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let appearanceGeneration = self.appearanceGeneration
         let windowSizes = self.windowSizes
         let discarded = PreviewCaptureTally()
-        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let fellBack = PreviewCaptureTally()
+        let timing = previewFreshness.batchStarted()
         // Only ever called back on the main queue, where the scheduler lives.
         let completion = MainQueueCompletion(run: completion)
         Task { [weak self, windowService] in
@@ -3137,6 +3140,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 }
             ) { [weak self] capture in
                 metrics.recordCapture(windowID: capture.windowID)
+                if capture.fellBack { fellBack.increment() }
                 // Luminance analysis draws the capture through Core Graphics. Doing it here
                 // rather than in the main-queue hop keeps the render path free.
                 let holdsContent = WindowImageStatistics.holdsContent(capture.image)
@@ -3199,15 +3203,16 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 }
             }
             let capturedCount = metrics.finish()
-            let wallMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
             let discardedCount = discarded.count
+            let fellBackCount = fellBack.count
             DispatchQueue.main.async { [weak self] in
                 self?.previewFreshness.batchFinished(
                     reason: reason,
-                    requested: windowIDs.count,
+                    windowIDs: windowIDs,
                     captured: capturedCount - discardedCount,
                     discarded: discardedCount,
-                    wallMilliseconds: wallMilliseconds
+                    fellBack: fellBackCount,
+                    timing: timing
                 )
                 completion.run()
             }
@@ -3289,6 +3294,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         guard !isSpaceManagerVisible,
               spaceSwitcher?.isSwitchInFlight(stackID: spaceManager.selectedSpaceStackID) != true
         else { return }
+        previewFreshness.recordDesktopArrival()
         let windowIDs = showingSpaceIDs.flatMap { spaceID in
             spaceManager.allSpaces.first { $0.id == spaceID }?.windows.map(\.windowID) ?? []
         }

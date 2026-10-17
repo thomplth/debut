@@ -1311,7 +1311,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                 budget: budget
             )
             do {
-                let image = try await PreviewCaptureRoute.capture(
+                let (image, fellBack) = try await PreviewCaptureRoute.capture(
                     filter: filter,
                     width: sizes.captured.width,
                     height: sizes.captured.height
@@ -1336,7 +1336,8 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
                 // through the GPU's linear filter (KHA-1098).
                 onCapture(WindowImageCapture(
                     windowID: window.windowID,
-                    image: PreviewCaptureSize.downsampled(image, to: sizes.drawn)
+                    image: PreviewCaptureSize.downsampled(image, to: sizes.drawn),
+                    fellBack: fellBack
                 ))
             } catch {
                 // A handle can outlive its window; fetch the list again next time.

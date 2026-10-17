@@ -137,17 +137,48 @@ struct PreviewFreshnessTests {
         #expect(reports.events("preview_freshness").isEmpty)
     }
 
-    @Test("Capture batches roll up into captures per hour once the interval has passed")
-    func hourlyRollup() throws {
+    private func finishBatch(
+        _ recorder: PreviewFreshnessRecorder,
+        reason: String = "overlay_refresh",
+        windowIDs: [CGWindowID],
+        captured: Int,
+        discarded: Int = 0,
+        fellBack: Int = 0,
+        uptime: ManualUptime? = nil,
+        milliseconds: Double = 0
+    ) {
+        let timing = recorder.batchStarted()
+        uptime?.advance(milliseconds: milliseconds)
+        recorder.batchFinished(
+            reason: reason,
+            windowIDs: windowIDs,
+            captured: captured,
+            discarded: discarded,
+            fellBack: fellBack,
+            timing: timing
+        )
+    }
+
+    @Test("Capture batches roll up into captures per user action once the interval has passed")
+    func rollupPerAction() throws {
         let reports = RecordedReports()
         let uptime = ManualUptime()
         let recorder = recorder(reports, uptime: uptime, rollupInterval: 60)
-        recorder.batchFinished(reason: "overlay_refresh", requested: 3, captured: 2, discarded: 1, wallMilliseconds: 80)
+        finishBatch(recorder, windowIDs: [1, 2, 3], captured: 2, discarded: 1, fellBack: 1)
+        recorder.sessionRevealed(cards: [], pendingCaptures: 0)
+        recorder.sessionEnded()
+        recorder.sessionRevealed(cards: [], pendingCaptures: 0)
+        recorder.sessionEnded()
+        recorder.recordDesktopArrival()
+        recorder.recordFocusChange()
+        recorder.recordFocusChange()
+        recorder.recordFocusChange()
+        recorder.recordFocusChange()
         uptime.advance(milliseconds: 30_000)
-        recorder.batchFinished(reason: "focus_left", requested: 1, captured: 1, discarded: 0, wallMilliseconds: 40)
+        finishBatch(recorder, reason: "focus_left", windowIDs: [4], captured: 1)
         #expect(reports.events("preview_capture_rollup").isEmpty)
         uptime.advance(milliseconds: 30_000)
-        recorder.batchFinished(reason: "overlay_refresh", requested: 2, captured: 1, discarded: 0, wallMilliseconds: 50)
+        finishBatch(recorder, windowIDs: [5, 6], captured: 1)
 
         let rollup = try #require(reports.events("preview_capture_rollup").first)
         #expect(rollup["batches"] == "3")
@@ -155,14 +186,85 @@ struct PreviewFreshnessTests {
         #expect(rollup["captured"] == "4")
         #expect(rollup["discarded"] == "1")
         #expect(rollup["failed"] == "1")
+        #expect(rollup["fellBack"] == "1")
         #expect(rollup["intervalSeconds"] == "60.0")
-        #expect(rollup["capturesPerHour"] == "240.0")
+        #expect(rollup["capturesPerHour"] == nil, "wall-clock rates cannot tell use from idle time")
+        #expect(rollup["reveals"] == "2")
+        #expect(rollup["desktopArrivals"] == "1")
+        #expect(rollup["focusChanges"] == "4")
+        #expect(rollup["capturesPerReveal"] == "2.0")
+        #expect(rollup["capturesPerDesktopArrival"] == "4.0")
+        #expect(rollup["capturesPerFocusChange"] == "1.0")
         #expect(rollup["capturedByReason"] == "focus_left:1,overlay_refresh:3")
 
         let batches = reports.all.filter { $0.event == "preview_capture_batch" }
         #expect(batches.count == 3)
         #expect(batches.allSatisfy { $0.level == .transient }, "per-batch events are durable only in development")
         #expect(batches[0].details["failed"] == "0")
+        #expect(batches[0].details["fellBack"] == "1")
+        #expect(batches[0].details["windowIDs"] == "1,2,3", "superseded captures are only measurable per window")
+    }
+
+    @Test("A rollup with no user action of a kind leaves that rate out")
+    func rollupOmitsRatesWithoutActions() throws {
+        let reports = RecordedReports()
+        let uptime = ManualUptime()
+        let recorder = recorder(reports, uptime: uptime, rollupInterval: 10)
+        finishBatch(recorder, windowIDs: [1], captured: 1)
+        uptime.advance(milliseconds: 11_000)
+        finishBatch(recorder, windowIDs: [1], captured: 1)
+
+        let rollup = try #require(reports.events("preview_capture_rollup").first)
+        #expect(rollup["reveals"] == "0")
+        #expect(rollup["capturesPerReveal"] == nil)
+    }
+
+    @Test("Suspending capture closes the rollup, so it never spans time nobody was using the Mac")
+    func suspensionClosesRollup() throws {
+        let reports = RecordedReports()
+        let uptime = ManualUptime()
+        let recorder = recorder(reports, uptime: uptime, rollupInterval: 3600)
+        finishBatch(recorder, windowIDs: [1], captured: 1)
+        uptime.advance(milliseconds: 20_000)
+        recorder.captureSuspensionChanged(true)
+        uptime.advance(milliseconds: 25 * 3_600_000)
+        recorder.captureSuspensionChanged(false)
+
+        let rollup = try #require(reports.events("preview_capture_rollup").first)
+        #expect(reports.events("preview_capture_rollup").count == 1)
+        #expect(rollup["intervalSeconds"] == "20.0")
+        #expect(rollup["captured"] == "1")
+
+        finishBatch(recorder, windowIDs: [2], captured: 1)
+        recorder.captureSuspensionChanged(true)
+        let next = try #require(reports.events("preview_capture_rollup").last)
+        #expect(reports.events("preview_capture_rollup").count == 2)
+        #expect(next["intervalSeconds"] == "0.0", "the next rollup starts at its first batch, not at the resume")
+    }
+
+    @Test("A batch's wall time leaves out the time capture was suspended")
+    func batchWallTimeExcludesSuspension() throws {
+        let reports = RecordedReports()
+        let uptime = ManualUptime()
+        let recorder = recorder(reports, uptime: uptime)
+        let timing = recorder.batchStarted()
+        uptime.advance(milliseconds: 40)
+        recorder.captureSuspensionChanged(true)
+        uptime.advance(milliseconds: 2.9 * 3_600_000)
+        recorder.captureSuspensionChanged(false)
+        uptime.advance(milliseconds: 10)
+        recorder.batchFinished(
+            reason: "startup_prewarm", windowIDs: [1], captured: 1, discarded: 0, fellBack: 0, timing: timing
+        )
+
+        let batch = try #require(reports.events("preview_capture_batch").first)
+        #expect(batch["wallMilliseconds"] == "50.0")
+        #expect(batch["suspendedMilliseconds"] == "10440000.0")
+
+        finishBatch(recorder, windowIDs: [2], captured: 1, uptime: uptime, milliseconds: 30)
+        let attended = try #require(reports.events("preview_capture_batch").last)
+        #expect(attended["wallMilliseconds"] == "30.0")
+        #expect(attended["suspendedMilliseconds"] == nil)
     }
 
     @Test("Development rollups carry the capture machinery's CPU and energy over the interval")
@@ -170,21 +272,28 @@ struct PreviewFreshnessTests {
         let reports = RecordedReports()
         let uptime = ManualUptime()
         let sampler = ScriptedCostSampler(samples: LockedBox([
-            CaptureCostSample(cpuNanoseconds: ["systemstatusd": 1_000_000_000, "Debut": 5_000_000],
-                              energyNanojoules: ["replayd": 2_000_000]),
-            CaptureCostSample(cpuNanoseconds: ["systemstatusd": 1_330_000_000, "Debut": 9_000_000],
-                              energyNanojoules: ["replayd": 9_000_000]),
+            CaptureCostSample(cpuNanoseconds: ["replayd": 1_000_000_000, "Debut": 5_000_000],
+                              energyNanojoules: ["ControlCenter": 2_000_000]),
+            CaptureCostSample(cpuNanoseconds: ["replayd": 1_330_000_000, "Debut": 9_000_000],
+                              energyNanojoules: ["ControlCenter": 9_000_000]),
         ]))
         let recorder = recorder(reports, uptime: uptime, development: true, rollupInterval: 10, sampler: sampler)
-        recorder.batchFinished(reason: "overlay_refresh", requested: 1, captured: 1, discarded: 0, wallMilliseconds: 40)
+        finishBatch(recorder, windowIDs: [1], captured: 1)
         uptime.advance(milliseconds: 11_000)
-        recorder.batchFinished(reason: "overlay_refresh", requested: 1, captured: 1, discarded: 0, wallMilliseconds: 40)
+        finishBatch(recorder, windowIDs: [1], captured: 1)
 
         let rollup = try #require(reports.events("preview_capture_rollup").first)
-        #expect(rollup["cpuMilliseconds.systemstatusd"] == "330")
+        #expect(rollup["cpuMilliseconds.replayd"] == "330")
         #expect(rollup["cpuMilliseconds.Debut"] == "4")
-        #expect(rollup["energyMillijoules.replayd"] == "7")
+        #expect(rollup["energyMillijoules.ControlCenter"] == "7")
         #expect(reports.all.filter { $0.event == "preview_capture_batch" }.allSatisfy { $0.level == .lifecycle })
+    }
+
+    @Test("The cost sampler reads WindowServer, which proc_name refuses to name")
+    func samplerReadsWindowServer() {
+        #expect(SystemCaptureCostSampler.processNames == ["WindowServer", "ControlCenter", "replayd"])
+        let sample = SystemCaptureCostSampler().sample()
+        #expect(sample.cpuNanoseconds["WindowServer"] != nil, "sampled: \(sample.cpuNanoseconds.keys.sorted())")
     }
 
     @Test("A restarted process is left out of the cost delta")

@@ -17,9 +17,11 @@ struct PreviewCardFreshness: Equatable, Sendable {
 /// reveal, then every preview that lands while the overlay is up: each one is a change the user
 /// could see happen. One durable `preview_freshness` event summarises the session.
 ///
-/// Capture batches roll up into an hourly `preview_capture_rollup`, so captures per hour, the
-/// number power scales with, can be compared before and after a change. The rollup is emitted
-/// by the first batch after the interval ends rather than by a timer, so an idle Debut runs none.
+/// Capture batches roll up into an hourly `preview_capture_rollup`. Power scales with the capture
+/// count, and it is reported per user action — per reveal, desktop arrival and focus change —
+/// because a wall-clock rate cannot tell use of the Mac from idle time (KHA-1113). The rollup is
+/// emitted by the first batch after the interval ends rather than by a timer, so an idle Debut
+/// runs none, and it closes when capture is suspended, so it never spans a locked screen.
 ///
 /// Main-queue confined, like the controller that drives it.
 public final class PreviewFreshnessRecorder: @unchecked Sendable {
@@ -44,7 +46,17 @@ public final class PreviewFreshnessRecorder: @unchecked Sendable {
         var requested = 0
         var captured = 0
         var discarded = 0
+        var fellBack = 0
         var capturedByReason: [String: Int] = [:]
+        var reveals = 0
+        var desktopArrivals = 0
+        var focusChanges = 0
+    }
+
+    /// Where a batch started, so its wall time can leave out any suspension it waited through.
+    struct BatchTiming: Sendable {
+        let startedAt: UInt64
+        let suspendedBefore: UInt64
     }
 
     /// A mean luminance difference below this, in percent of full scale, is colour-conversion
@@ -62,7 +74,11 @@ public final class PreviewFreshnessRecorder: @unchecked Sendable {
     private var session: Session?
     private var nextSessionID = 0
     private var rollup: Rollup?
+    /// User actions seen before the rollup's first batch, carried into it when it opens.
+    private var pendingActions = Rollup(startedAt: 0)
     private var lastCostSample: CaptureCostSample?
+    private var suspendedTotal: UInt64 = 0
+    private var suspendedSince: UInt64?
 
     init(
         report: @escaping Report,
@@ -87,6 +103,7 @@ public final class PreviewFreshnessRecorder: @unchecked Sendable {
     // MARK: - Overlay sessions
 
     func sessionRevealed(cards: [PreviewCardFreshness], pendingCaptures: Int) {
+        countAction { $0.reveals += 1 }
         nextSessionID += 1
         session = Session(
             id: nextSessionID,
@@ -156,36 +173,77 @@ public final class PreviewFreshnessRecorder: @unchecked Sendable {
 
     // MARK: - Capture accounting
 
+    /// A desktop switch settled, which is when the arriving desktop's windows are captured.
+    func recordDesktopArrival() {
+        countAction { $0.desktopArrivals += 1 }
+    }
+
+    /// Focus moved to another window, which captures the one it left.
+    func recordFocusChange() {
+        countAction { $0.focusChanges += 1 }
+    }
+
+    /// The screen locked, the displays slept or another session came in front, or the reverse.
+    /// Suspending closes the open rollup: what follows is time nobody was using this Mac.
+    func captureSuspensionChanged(_ suspended: Bool) {
+        let now = uptime()
+        if suspended {
+            guard suspendedSince == nil else { return }
+            suspendedSince = now
+            if let current = rollup {
+                emitRollup(current, endedAt: now)
+                rollup = nil
+            }
+        } else if let since = suspendedSince {
+            suspendedTotal += now - since
+            suspendedSince = nil
+        }
+    }
+
+    func batchStarted() -> BatchTiming {
+        let now = uptime()
+        return BatchTiming(startedAt: now, suspendedBefore: suspendedNanoseconds(at: now))
+    }
+
     func batchFinished(
         reason: String,
-        requested: Int,
+        windowIDs: [CGWindowID],
         captured: Int,
         discarded: Int,
-        wallMilliseconds: Double
+        fellBack: Int,
+        timing: BatchTiming
     ) {
+        let now = uptime()
+        let requested = windowIDs.count
         let failed = max(0, requested - captured - discarded)
+        // A capture asked for just before the screen locked waits until it unlocks; counting
+        // that wait made two startup batches read as hours long.
+        let suspended = suspendedNanoseconds(at: now) - timing.suspendedBefore
+        let wall = (now - timing.startedAt) - min(suspended, now - timing.startedAt)
+        var details = [
+            "reason": reason,
+            "requested": "\(requested)",
+            "captured": "\(captured)",
+            "discarded": "\(discarded)",
+            "failed": "\(failed)",
+            "fellBack": "\(fellBack)",
+            "wallMilliseconds": Self.format(Double(wall) / 1_000_000),
+            // Which windows, so a capture superseded before any reveal can be counted.
+            "windowIDs": windowIDs.map(String.init).joined(separator: ","),
+        ]
+        if suspended > 0 {
+            details["suspendedMilliseconds"] = Self.format(Double(suspended) / 1_000_000)
+        }
         // Durable only where it is being studied: background capture makes batches frequent, and
         // the hourly rollup already carries the counts a shipped build needs.
-        report(
-            "preview_capture_batch",
-            measuresDevelopmentCosts ? .lifecycle : .transient,
-            [
-                "reason": reason,
-                "requested": "\(requested)",
-                "captured": "\(captured)",
-                "discarded": "\(discarded)",
-                "failed": "\(failed)",
-                "wallMilliseconds": Self.format(wallMilliseconds),
-            ]
-        )
+        report("preview_capture_batch", measuresDevelopmentCosts ? .lifecycle : .transient, details)
 
-        let now = uptime()
-        var current = rollup ?? Rollup(startedAt: now)
-        if rollup == nil { sampleCostBaseline() }
+        var current = rollup ?? openRollup(at: now)
         current.batches += 1
         current.requested += requested
         current.captured += captured
         current.discarded += discarded
+        current.fellBack += fellBack
         current.capturedByReason[reason, default: 0] += captured
         if now - current.startedAt >= rollupIntervalNanoseconds {
             emitRollup(current, endedAt: now)
@@ -193,6 +251,28 @@ public final class PreviewFreshnessRecorder: @unchecked Sendable {
         } else {
             rollup = current
         }
+    }
+
+    private func openRollup(at now: UInt64) -> Rollup {
+        sampleCostBaseline()
+        var opened = Rollup(startedAt: now)
+        opened.reveals = pendingActions.reveals
+        opened.desktopArrivals = pendingActions.desktopArrivals
+        opened.focusChanges = pendingActions.focusChanges
+        pendingActions = Rollup(startedAt: 0)
+        return opened
+    }
+
+    private func countAction(_ count: (inout Rollup) -> Void) {
+        if rollup != nil {
+            count(&rollup!)
+        } else {
+            count(&pendingActions)
+        }
+    }
+
+    private func suspendedNanoseconds(at now: UInt64) -> UInt64 {
+        suspendedTotal + (suspendedSince.map { now - $0 } ?? 0)
     }
 
     private func emitRollup(_ finished: Rollup, endedAt: UInt64) {
@@ -204,12 +284,22 @@ public final class PreviewFreshnessRecorder: @unchecked Sendable {
             "captured": "\(finished.captured)",
             "discarded": "\(finished.discarded)",
             "failed": "\(max(0, finished.requested - finished.captured - finished.discarded))",
-            "capturesPerHour": Self.format(seconds > 0 ? Double(finished.captured) * 3600 / seconds : 0),
+            "fellBack": "\(finished.fellBack)",
             "capturedByReason": finished.capturedByReason
                 .sorted { $0.key < $1.key }
                 .map { "\($0.key):\($0.value)" }
                 .joined(separator: ","),
+            "reveals": "\(finished.reveals)",
+            "desktopArrivals": "\(finished.desktopArrivals)",
+            "focusChanges": "\(finished.focusChanges)",
         ]
+        for (name, actions) in [
+            ("capturesPerReveal", finished.reveals),
+            ("capturesPerDesktopArrival", finished.desktopArrivals),
+            ("capturesPerFocusChange", finished.focusChanges),
+        ] where actions > 0 {
+            details[name] = Self.format(Double(finished.captured) / Double(actions))
+        }
         guard let costSampler, let baseline = lastCostSample else {
             report("preview_capture_rollup", .lifecycle, details)
             return

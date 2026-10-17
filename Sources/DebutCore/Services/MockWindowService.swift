@@ -47,6 +47,8 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     public var terminatedPIDs: [pid_t] = []
     public var terminateAppResult: Bool = true
     public var capturedImages: [CGWindowID: CGImage] = [:]
+    /// Windows whose capture reports the -3811 fallback took it.
+    public var fallbackWindowIDs: Set<CGWindowID> = []
     public var accessibilityEnabled: Bool = true
 
     private let captureLock = NSLock()
@@ -133,7 +135,11 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
         onEnumerated(windowIDs.filter { capturedImages[$0] != nil })
         for windowID in windowIDs {
             guard let image = capturedImages[windowID] else { continue }
-            onCapture(WindowImageCapture(windowID: windowID, image: image))
+            onCapture(WindowImageCapture(
+                windowID: windowID,
+                image: image,
+                fellBack: fallbackWindowIDs.contains(windowID)
+            ))
         }
     }
 

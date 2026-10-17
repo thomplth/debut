@@ -129,10 +129,13 @@ public struct FrontWindowDeliveryTrace: Sendable, Equatable {
 public struct WindowImageCapture: @unchecked Sendable {
     public let windowID: CGWindowID
     public let image: CGImage
+    /// Taken by the -3811 fallback rather than the usual screenshot call (KHA-1081).
+    public let fellBack: Bool
 
-    public init(windowID: CGWindowID, image: CGImage) {
+    public init(windowID: CGWindowID, image: CGImage, fellBack: Bool = false) {
         self.windowID = windowID
         self.image = image
+        self.fellBack = fellBack
     }
 }
 

@@ -40,12 +40,17 @@ shape, `pendingCaptures`) and what changed while the overlay was up: `replacemen
 preview), and the first and last change in milliseconds after the reveal. A replacement after
 the reveal is a change the user could see happen; the goal is none.
 
-Each capture batch reports `preview_capture_batch` (reason, requested, captured, discarded,
-failed, wall time), and batches roll up into a durable `preview_capture_rollup` once an hour has
-passed: captures per hour by reason. Capture power scales with that count. Each capture costs
-~80 CPU-ms in macOS's privacy services (`systemstatusd`, `ControlCenter`, `tccd`, `replayd`)
+Each capture batch reports `preview_capture_batch` (reason, the window IDs asked for, requested,
+captured, discarded, failed, `fellBack` for captures the -3811 fallback took, and wall time).
+Wall time leaves out any time capture was suspended while the batch waited, reported separately
+as `suspendedMilliseconds`. Batches roll up into a durable `preview_capture_rollup` once an hour
+has passed: captures by reason, and captures per user action (`capturesPerReveal`,
+`capturesPerDesktopArrival`, `capturesPerFocusChange`, with the action counts). Capture power
+scales with the capture count, and a per-action rate is what can tell use of the Mac from idle
+time; a wall-clock rate cannot. Each capture costs ~80 CPU-ms in macOS's privacy services
 regardless of the ScreenCaptureKit API (capbench, 2026-10-13). The rollup is emitted by the first
-batch after the hour, not by a timer.
+batch after the hour, not by a timer, and closes when capture is suspended, so it never spans a
+locked screen.
 
 Captures go through `PreviewCaptureScheduler`: one batch in flight at a time, captured one
 window after another in priority order (selected card, its stage, other stages, background).
@@ -76,10 +81,11 @@ app itself (`DevelopmentMeasurements.isEnabled`); release builds never pay for t
 - a visual change score for every replacement after the reveal (mean luminance difference on a
   16x16 grid, in percent): `changesScored`, `visibleChanges` (score >= 2%), maximum and mean
 - `preview_capture_batch` becomes durable instead of transient
-- each rollup adds the interval's CPU milliseconds for `WindowServer`, `systemstatusd`,
-  `ControlCenter`, `tccd`, `replayd` and Debut, and energy in millijoules where the kernel
-  reports it to an unprivileged reader. Root-owned daemons are read through `ps`. These are
-  system-wide figures, so another app recording the screen is counted too.
+- each rollup adds the interval's CPU milliseconds for `WindowServer`, `ControlCenter`,
+  `replayd` and Debut, and energy in millijoules where the kernel reports it to an unprivileged
+  reader. Root-owned daemons are read through `ps`. These are system-wide figures, so another
+  app recording the screen is counted too. Over the KHA-1100 review, `replayd` CPU and
+  `ControlCenter` energy tracked the capture count; `tccd` and `systemstatusd` did not.
 
 Reading Debut's own process counters (~5 us per read) stays on in every build.
 
