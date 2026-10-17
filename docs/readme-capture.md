@@ -54,16 +54,50 @@ and that its sidebar has no extra cities.
 | `onboarding` | Four lossless transparent UI screenshots: Command-Tab and Option-Tab, each with previews enabled and disabled; same nine-window scene, no keystroke captions |
 | `onboarding-speed` | Matched Control-Right then Control-Left at 60 fps, space 2 → 3 → 2; macOS default left, Debut Instant right; MP4 and first-frame poster for setup |
 | `cover` | Both `overlay.png` and native dark-mode `overlay-dark.png`, with space 2 expanded |
-| `command-tab` | Terminal fronted in space 3, then space 2 → hold Command-Tab → 3 → Tab → release → Project notes, second window in space 3 |
-| `organize-windows` | Space 2 → hold Command-Tab, Weather selected → Up → release → Weather in space 1 |
-| `option-tab` | Safari in space 2 → hold Option-Tab → release → Field Notes Safari window, first in space 1 |
-| `faster-space-switching` | Matched Control-Right then Control-Left, space 2 → 3 → 2; macOS default left, Instant right |
+| `overview` | Planned (KHA-1122), not yet in the driver; see [Overview clip](#overview-clip). `overview.gif`: space 2, Weekend Guide → hold Command-Tab, Stocks selected → Up → release → Stocks focused in space 1 → hold Command-Tab → Shift-Tab, Stocks selected → Down → Tab, Weekend Guide selected → release → Weekend Guide focused in space 2; fixture as at start |
+| `command-tab` | Retired from the README. Terminal fronted in space 3, then space 2 → hold Command-Tab → 3 → Tab → release → Project notes, second window in space 3 |
+| `organize-windows` | Retired from the README. Space 2 → hold Command-Tab, Weather selected → Up → release → Weather in space 1 |
+| `option-tab` | Retired from the README. Safari in space 2 → hold Option-Tab → release → Field Notes Safari window, first in space 1 |
+| `faster-space-switching` | Retired from the README. Matched Control-Right then Control-Left, space 2 → 3 → 2; macOS default left, Instant right |
+
+The README embeds only the covers and `overview.gif`; per-feature demos live on
+debutspace.com. The four retired clips stay in the driver and their GIFs stay in
+`docs/media` until the overview capture lands and removes them. The `onboarding` and
+`onboarding-speed` clips are unaffected: the app bundles their assets.
 
 Cards in a space follow its MRU order, not the fixture order, so each switcher clip reads
 Debut's live selection and fails before releasing the modifier if the intended card is not
-selected. Faster switching stays disabled in the first three demos. The comparison preserves
-elapsed time: do not accelerate either recording or trim the two sides independently
-around transitions.
+selected. Faster switching stays disabled in the overview and the retired single-window demos.
+The comparison preserves elapsed time: do not accelerate either recording or trim
+the two sides independently around transitions.
+
+### Overview clip
+
+One loop of at most about 12 seconds that shows Command-Tab across spaces and a
+window move, and ends on the frame it began with, using the visual baseline above.
+
+Before recording, set recency so Field Notes leads space 1 and space 2 reads Weekend
+Guide, Stocks, Weather, then show space 2 with Weekend Guide frontmost. Wait until every
+preview, including Chess, has loaded.
+
+| Time (s) | Input | Verified result |
+| --- | --- | --- |
+| 0.0 | None | Space 2, Weekend Guide focused |
+| 1.0 | Hold Command, Tab | Overlay with space 2 expanded; Stocks (second by recency) selected |
+| 1.8 | Up | Stocks staged first in space 1; selection follows it |
+| 2.8 | Release Command | Space 1 showing, Stocks frontmost and assigned to space 1 |
+| 4.6 | Hold Command, Tab | Overlay with space 1 expanded; Field Notes selected |
+| 5.3 | Shift-Tab | Stocks selected |
+| 6.0 | Down | Stocks staged first in space 2; selection follows it |
+| 6.8 | Tab | Weekend Guide selected |
+| 7.6 | Release Command | Space 2 showing, Weekend Guide frontmost, Stocks assigned to space 2 |
+| 9.4–11.2 | None | Desktop indicator dismissed; 1.8 s final hold |
+
+Times are targets; let each transition settle rather than cutting it short. The
+driver asserts each selection from diagnostics before the next key, the space
+membership and frontmost window after each release, and space 2's recency order at
+the end. Compare decoded first and last frames for a clean loop boundary. KeyCastr
+shows every key at 64 pt.
 
 ## Running a scoped capture
 
@@ -95,7 +129,8 @@ both sides in one run at 60 fps and produces `onboarding-speed.mp4` plus a lossl
 first-frame `onboarding-speed.png` poster. Playback loops silently in setup and
 pauses when the page is hidden; the poster remains visible while video loads.
 
-Omitting `--clips` regenerates both covers and all four README GIFs. Keep raw output
+Omitting `--clips` regenerates both covers and the four retired GIFs; `overview` is
+not implemented yet. Keep raw output
 until visual review passes. The script starts the guest without graphics, audio,
 clipboard, pointer, or keyboard, and installs KeyCastr only inside the guest. Do not
 run the guest script on the host.
