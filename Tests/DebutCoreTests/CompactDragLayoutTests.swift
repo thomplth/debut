@@ -201,6 +201,35 @@ struct CompactDragLayoutTests {
         #expect(landed.stageIndex == 0)
     }
 
+    @Test("The E2E drop point is the drawn row of a desktop-managing drag view")
+    func dragViewDropPointCountsNewDesktopTargets() throws {
+        // macOS 27 (KHA-1118): a window that can start a desktop gets a + at each end of the
+        // drag view, which moves every plate. window-drop's drops aimed at the layout without
+        // them failed three runs in a row on the guest and pass once aimed at the drawn one.
+        let counts = [2, 0, 0, 0]
+        let size = CGSize(width: 1024, height: 738)
+        var viewModel = Self.viewModel(counts)
+        viewModel.canManageDesktops = true
+        let snapshot = try #require(StageOverlayView.compactDragSnapshot(
+            viewModel: viewModel, spaceIndex: 0, windowIndex: 0, containerSize: size,
+            newDesktopIDs: [.top: UUID(), .bottom: UUID()]
+        ))
+        let point = try #require(StageConstants.dragViewDropPoint(
+            contentAspects: counts.map { Array(repeating: nil, count: $0) },
+            stageScale: CGFloat(AppSettings().previewAppearance.stageScale),
+            cardSpacing: CGFloat(AppSettings().previewCardSpacing),
+            containerSize: size,
+            reservesDisplayIndicator: false,
+            sourceSpaceIndex: 0,
+            sourceWindowIndex: 0,
+            destinationSpaceIndex: 1,
+            offersNewDesktops: true
+        ))
+        let stage = snapshot.stages[1]
+        #expect(abs(point.y - (stage.centerY + (stage.rowOffsets.first ?? 0) * snapshot.scale)) < 0.001)
+        #expect(snapshot.resolve(at: point, current: nil)?.stageIndex == 1)
+    }
+
     @Test("No drag starts without a positive usable rectangle")
     func invalidBoundsStartNothing() {
         #expect(Self.snapshot([3, 2], size: CGSize(width: 100, height: 40)) == nil)

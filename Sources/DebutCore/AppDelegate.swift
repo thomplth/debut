@@ -682,10 +682,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         desktopNavigationStackID = stackID
         guard let spaceService else { return }
         overviewWindowProbe?.resolveIfNeeded()
+        let topology = spaceService.spaceTopology()
+        let overviewActive = DockOverviewDetector.isActive()
+        // With no overview up, a backdrop gone over an ordinary desktop is one that orders out.
+        overviewWindowProbe?.learnTrust(showingOrdinaryDesktop: !overviewActive
+            && stackID.flatMap { topology.stack(id: $0)?.currentDesktopIndex } != nil)
         desktopNavigationEligibility?.update(
             stackID: stackID,
-            topology: spaceService.spaceTopology(),
-            overviewActive: DockOverviewDetector.isActive(),
+            topology: topology,
+            overviewActive: overviewActive,
             consumeOverviewRecovery: consumingOverviewRecovery
         )
     }

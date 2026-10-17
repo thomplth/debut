@@ -1204,6 +1204,7 @@ public struct StageConstants {
         sourceSpaceIndex: Int,
         sourceWindowIndex: Int?,
         destinationSpaceIndex: Int,
+        offersNewDesktops: Bool = false,
         cardStyle: OverlayCardStyle = .previews,
         badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
     ) -> CGPoint? {
@@ -1222,7 +1223,7 @@ public struct StageConstants {
             cardStyle: cardStyle,
             badgeGrowth: badgeGrowth
         )
-        guard let snapshot = CompactDragSnapshot.make(
+        guard let snapshot = CompactDragSnapshot.makeVariants(
             sessionID: UUID(),
             generation: 1,
             fingerprint: fingerprint,
@@ -1238,8 +1239,10 @@ public struct StageConstants {
             usableBounds: CompactDragSnapshot.usableBounds(
                 containerSize: containerSize,
                 reservesDisplayIndicator: reservesDisplayIndicator
-            )
-        ), let stage = snapshot.stages[safe: destinationSpaceIndex]
+            ),
+            // A window that can start a new desktop gets a + at each end, which moves every plate.
+            newDesktopIDs: offersNewDesktops && sourceWindowIndex != nil ? [.top: UUID(), .bottom: UUID()] : [:]
+        )?.collapsed, let stage = snapshot.stages[safe: destinationSpaceIndex]
         else { return nil }
         return CGPoint(
             x: snapshot.centerX,

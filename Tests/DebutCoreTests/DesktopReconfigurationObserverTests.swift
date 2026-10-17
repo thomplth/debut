@@ -72,45 +72,75 @@ struct DesktopReconfigurationObserverTests {
         let switching: [[String: Any]] = [
             ["kCGWindowLayer": 14, "kCGWindowOwnerName": "WindowManager",
              "kCGWindowBounds": CGRect(x: 0, y: 0, width: 2_560, height: 96).dictionaryRepresentation],
-            ["kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
+            ["kCGWindowNumber": 59_051, "kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
              "kCGWindowBounds": display.dictionaryRepresentation],
         ]
         let dockBadge: [[String: Any]] = [
-            ["kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
+            ["kCGWindowNumber": 7, "kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
              "kCGWindowBounds": CGRect(x: 0, y: 0, width: 91, height: 30).dictionaryRepresentation],
         ]
 
         #expect(DockOverviewDetector.isActive(
-            in: switching, operatingSystemMajor: 27, displayBounds: [display]
+            in: switching, operatingSystemMajor: 27, displayBounds: [display],
+            trustsDockBackdrop: { _ in true }
         ))
         #expect(!DockOverviewDetector.isActive(
-            in: dockBadge, operatingSystemMajor: 27, displayBounds: [display]
+            in: dockBadge, operatingSystemMajor: 27, displayBounds: [display],
+            trustsDockBackdrop: { _ in true }
         ))
     }
 
-    @Test("The Dock backdrop is found while ordered out, and an empty by-id answer means ordered out")
-    func dockBackdropIsReadByWindowID() {
-        let display = CGRect(x: 0, y: 0, width: 2_560, height: 1_440)
-        let everyWindow: [[String: Any]] = [
-            ["kCGWindowNumber": 59_051, "kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
-             "kCGWindowBounds": display.dictionaryRepresentation],
-            ["kCGWindowNumber": 7, "kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
-             "kCGWindowBounds": CGRect(x: 0, y: 0, width: 91, height: 30).dictionaryRepresentation],
-            ["kCGWindowNumber": 8, "kCGWindowLayer": 20, "kCGWindowOwnerName": "Other",
-             "kCGWindowBounds": display.dictionaryRepresentation],
+    /// Measured in the macOS 27.0 (26A428) Tart guest (KHA-1137): the Dock's display-sized
+    /// layer-20 window stays on screen with Mission Control open, closed and after ordinary
+    /// switches, with identical properties. Counting it there yielded every navigation input.
+    @Test("A Dock backdrop never seen ordered out is not an overview on its own")
+    func untrustedDockBackdropIsNotAnOverview() {
+        let display = CGRect(x: 0, y: 0, width: 1_024, height: 768)
+        let backdrop: [String: Any] = [
+            "kCGWindowNumber": 26, "kCGWindowLayer": 20, "kCGWindowOwnerName": "Dock",
+            "kCGWindowBounds": display.dictionaryRepresentation,
         ]
-        #expect(DockOverviewWindowProbe.backdropWindowIDs(
-            in: everyWindow, displayBounds: [display]
-        ) == [59_051])
-
-        #expect(DockOverviewWindowProbe.anyOnScreen(
-            [["kCGWindowNumber": 59_051, "kCGWindowIsOnscreen": true]]
+        let missionControl: [String: Any] = [
+            "kCGWindowNumber": 267, "kCGWindowLayer": 19, "kCGWindowOwnerName": "WindowManager",
+            "kCGWindowBounds": display.dictionaryRepresentation,
+        ]
+        #expect(!DockOverviewDetector.isActive(
+            in: [backdrop], operatingSystemMajor: 27, displayBounds: [display],
+            trustsDockBackdrop: { _ in false }
         ))
-        // Measured on macOS 27.0: a by-id query returns nothing at all for the ordered-out
-        // backdrop, exactly as for a window that no longer exists. Reading that as unknown
-        // sent every input back to the stale cache, so the first swipe was still claimed.
-        #expect(!DockOverviewWindowProbe.anyOnScreen([]))
-        #expect(!DockOverviewWindowProbe.anyOnScreen([["kCGWindowNumber": 59_051]]))
+        #expect(DockOverviewDetector.isActive(
+            in: [backdrop, missionControl], operatingSystemMajor: 27, displayBounds: [display],
+            trustsDockBackdrop: { _ in false }
+        ))
+        #expect(DockOverviewDetector.isActive(
+            in: [backdrop], operatingSystemMajor: 27, displayBounds: [display],
+            trustsDockBackdrop: { $0 == 26 }
+        ))
+    }
+
+    @Test("The probe trusts a backdrop only once it is seen ordered out over an ordinary desktop")
+    func probeTrustsBackdropOnlyAfterOrderOutOnADesktop() {
+        let onScreen = Locked(true)
+        let trust = DockBackdropTrust()
+        let probe = DockOverviewWindowProbe(
+            trust: trust, windowIDs: [26], describe: { _ in onScreen.value ? [["kCGWindowIsOnscreen": true]] : [] }
+        )
+        // Never seen ordered out: the window cannot vouch, so the cache decides.
+        #expect(probe.isOverviewActive() == nil)
+        // A fullscreen Space hides the Dock's windows whatever the overview does (KHA-1137):
+        // gone there proves nothing, and reading it at input time teaches nothing either.
+        onScreen.value = false
+        probe.learnTrust(showingOrdinaryDesktop: false)
+        #expect(probe.isOverviewActive() == nil)
+        #expect(!trust.trusts(26))
+        probe.learnTrust(showingOrdinaryDesktop: true)
+        #expect(trust.trusts(26))
+        #expect(probe.isOverviewActive() == false)
+        onScreen.value = true
+        #expect(probe.isOverviewActive() == true)
+        // A Dock relaunch reissues its windows, so what was learned about the old ones goes.
+        probe.invalidate()
+        #expect(!trust.trusts(26))
     }
 
     @Test("A live Mission Control reading overrides stale cached overview state")
@@ -450,5 +480,15 @@ private final class NavigationEligibilityState: @unchecked Sendable {
                 currentDesktopID: current
             ),
         ])
+    }
+}
+
+private final class Locked<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+    init(_ value: Value) { stored = value }
+    var value: Value {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }

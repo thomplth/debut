@@ -1251,6 +1251,7 @@ func dragViewDropPoint(
         sourceSpaceIndex: sourceSpaceIndex,
         sourceWindowIndex: sourceWindowIndex,
         destinationSpaceIndex: destinationSpaceIndex,
+        offersNewDesktops: SpaceService().canManageDesktops,
         cardStyle: reportedCardStyle,
         badgeGrowth: CGFloat(interactionSettings.badgeGrowth)
     ).map { CGPoint(x: overlayBounds.minX + $0.x, y: overlayBounds.minY + $0.y) }
@@ -1626,21 +1627,12 @@ func dismissSystemWindowOverview(
     return waitUntil { !isActive() }
 }
 
-/// Whether Mission Control, App Exposé or Show Desktop is visibly up, for deciding whether to
-/// dismiss one. On macOS 27 the Dock's layer-20 backdrop that Debut also counts can stay on
-/// screen after an ordinary desktop switch with no overview showing (KHA-1137); toggling then
-/// opened Mission Control instead of closing it. Only WindowManager's display-sized overlay is
-/// trusted here, read through Debut's own detector with the Dock marker left out.
+/// Whether Mission Control, App Exposé or Show Desktop is up, read the way Debut reads it, so
+/// the harness and the product cannot disagree about a release's overview markers. This
+/// process never learns to trust the Dock's backdrop (KHA-1137), so on macOS 27 only
+/// WindowManager's overlay counts here.
 func systemWindowOverviewActive() -> Bool {
-    guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 else {
-        return DockOverviewDetector.isActive()
-    }
-    let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
-    return DockOverviewDetector.isActive(
-        in: windows.filter { ($0[kCGWindowOwnerName as String] as? String) != "Dock" },
-        operatingSystemMajor: 27,
-        displayBounds: DockOverviewDetector.activeDisplayBounds()
-    )
+    DockOverviewDetector.isActive()
 }
 
 /// The on-screen Dock and WindowManager windows the overview detector weighs, for a failure log.
@@ -3366,6 +3358,7 @@ func scenario_fullscreen_navigation() {
                     + "events=\(controlEvents)"
             )
             if controlEvents < 2 {
+                info("    Overview markers in fullscreen: \(systemOverviewMarkers())")
                 // Which press went unclaimed, and whether Debut saw it at all.
                 for event in events(since: controlEventsBefore) {
                     let details = event.keys.sorted()
@@ -4094,18 +4087,26 @@ func onboardingPress(_ title: String, role: String = kAXButtonRole) -> Bool {
 @MainActor
 func onboardingPressUniqueControl(role wantedRole: String) -> Bool {
     guard let application = onboardingApplication else { return false }
-    var visited = Set<CFHashCode>()
     var controls: [AXUIElement] = []
-    func visit(_ element: AXUIElement) {
-        guard visited.insert(CFHash(element)).inserted else { return }
-        var role: CFTypeRef?
-        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
-        if role as? String == wantedRole { controls.append(element) }
-        var children: CFTypeRef?
-        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
-        for child in children as? [AXUIElement] ?? [] { visit(child) }
+    func collect() {
+        var visited = Set<CFHashCode>()
+        controls = []
+        func visit(_ element: AXUIElement) {
+            guard visited.insert(CFHash(element)).inserted else { return }
+            var role: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+            if role as? String == wantedRole { controls.append(element) }
+            var children: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+            for child in children as? [AXUIElement] ?? [] { visit(child) }
+        }
+        visit(AXUIElementCreateApplication(application.processIdentifier))
     }
-    visit(AXUIElementCreateApplication(application.processIdentifier))
+    // A saved setting rebuilds the page's controls, so one look can land mid-rebuild.
+    _ = waitFor {
+        collect()
+        return controls.count == 1
+    }
     guard controls.count == 1, let control = controls.first else {
         info("  Expected one \(wantedRole), found \(controls.count): \(onboardingControls(role: wantedRole))")
         return false
@@ -4169,6 +4170,9 @@ func verifySetupDurationPersistence() -> Bool {
     guard enabled as? Bool == false, abs((loadOnboardingSettings()?.spaceSwitchDuration ?? -1) - 0.23) < 0.0001,
           onboardingPress("Continue"), onboardingPress("Back"),
           onboardingContains("230 ms"),
+          // Returning to the page rebuilds its controls; the label can be exposed before the
+          // toggle is, as on macOS 27 (KHA-1118).
+          waitFor({ onboardingControls(role: kAXCheckBoxRole).contains { $0.contains("onboarding-faster-desktop-switching") } }),
           onboardingPressUniqueControl(role: kAXCheckBoxRole) else { return false }
     let windows = AccessibilityWindowService()
     guard let setup = windows.listWindows().first(where: {

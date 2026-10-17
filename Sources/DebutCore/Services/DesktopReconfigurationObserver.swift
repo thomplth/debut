@@ -54,7 +54,9 @@ public extension Notification.Name {
 /// The layer-19 overlay is not continuous: measured on macOS 27.0 it orders out for 40-80ms
 /// around every desktop switch inside Mission Control, and a refresh that lands in that gap
 /// read the overview as closed. The Dock's display-sized layer-20 backdrop stays up from
-/// open to close, so it is a marker too.
+/// open to close, so it is a marker too, but only where it has been seen ordered out: in a
+/// macOS 27.0 VM it never leaves the screen (KHA-1137), and counting it there handed every
+/// navigation input to macOS.
 public enum DockOverviewDetector {
     public static func isActive() -> Bool {
         guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
@@ -63,14 +65,16 @@ public enum DockOverviewDetector {
         return isActive(
             in: windows,
             operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
-            displayBounds: activeDisplayBounds()
+            displayBounds: activeDisplayBounds(),
+            trustsDockBackdrop: DockBackdropTrust.shared.trusts
         )
     }
 
     public static func isActive(
         in windows: [[String: Any]],
         operatingSystemMajor: Int,
-        displayBounds: [CGRect]
+        displayBounds: [CGRect],
+        trustsDockBackdrop: (CGWindowID) -> Bool = { _ in false }
     ) -> Bool {
         guard operatingSystemMajor >= 27 else {
             return windows.contains { window in
@@ -84,7 +88,12 @@ public enum DockOverviewDetector {
                   let layer = (window[kCGWindowLayer as String] as? NSNumber)?.int32Value
             else { return false }
             switch (owner, layer) {
-            case ("WindowManager", 18), ("WindowManager", 19), ("Dock", 20):
+            case ("WindowManager", 18), ("WindowManager", 19):
+                return isDisplaySized(window, displayBounds: displayBounds)
+            case ("Dock", 20):
+                guard let id = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                      trustsDockBackdrop(id)
+                else { return false }
                 return isDisplaySized(window, displayBounds: displayBounds)
             default:
                 return false
@@ -181,6 +190,20 @@ final class OverviewSignalConfirmer {
 final class DockOverviewWindowProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var windowIDs: [CGWindowID] = []
+    private let trust: DockBackdropTrust
+    private let describe: @Sendable (CGWindowID) -> [[String: Any]]
+
+    init(
+        trust: DockBackdropTrust = .shared,
+        windowIDs: [CGWindowID] = [],
+        describe: @escaping @Sendable (CGWindowID) -> [[String: Any]] = { id in
+            CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]] ?? []
+        }
+    ) {
+        self.trust = trust
+        self.windowIDs = windowIDs
+        self.describe = describe
+    }
 
     /// Looks up the backdrop windows when none are known. Main thread, never from a tap.
     func resolveIfNeeded() {
@@ -198,16 +221,26 @@ final class DockOverviewWindowProbe: @unchecked Sendable {
     /// change.
     func invalidate() {
         lock.withLock { windowIDs = [] }
+        trust.reset()
     }
 
-    /// Whether an overview is up now, or nil when the backdrop is not known.
+    /// Whether an overview is up now, or nil when the backdrop is not known or cannot vouch:
+    /// one never seen ordered out says nothing, and the cache decides.
     func isOverviewActive() -> Bool? {
         let ids = lock.withLock { windowIDs }
         guard !ids.isEmpty else { return nil }
-        return ids.contains { id in
-            Self.anyOnScreen(
-                CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]] ?? []
-            )
+        guard ids.allSatisfy(trust.trusts) else { return nil }
+        return ids.contains { Self.anyOnScreen(describe($0)) }
+    }
+
+    /// Learns which backdrops order out with the overview, from the main thread's refresh.
+    /// Only an ordinary desktop counts: a fullscreen Space hides the Dock's windows whatever
+    /// the overview does, which taught trust in a backdrop that is otherwise never ordered out
+    /// (KHA-1137).
+    func learnTrust(showingOrdinaryDesktop: Bool) {
+        guard showingOrdinaryDesktop else { return }
+        for id in lock.withLock({ windowIDs }) where !Self.anyOnScreen(describe(id)) {
+            trust.noteOrderedOut(id)
         }
     }
 
@@ -360,4 +393,19 @@ public enum DesktopReconfigurationObserver {
             slsRegisterNotifyProc(callback, event, nil) == 0 ? event : nil
         }
     }
+}
+
+/// The Dock backdrops seen ordered out over an ordinary desktop since the Dock last launched.
+/// Only those mark an overview: a backdrop that stays on screen there, as in a macOS 27.0 VM,
+/// cannot tell an open overview from a closed one (KHA-1137).
+public final class DockBackdropTrust: @unchecked Sendable {
+    public static let shared = DockBackdropTrust()
+    private let lock = NSLock()
+    private var orderedOut: Set<CGWindowID> = []
+
+    public init() {}
+
+    public func trusts(_ id: CGWindowID) -> Bool { lock.withLock { orderedOut.contains(id) } }
+    func noteOrderedOut(_ id: CGWindowID) { lock.withLock { _ = orderedOut.insert(id) } }
+    func reset() { lock.withLock { orderedOut = [] } }
 }
