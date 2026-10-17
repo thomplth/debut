@@ -218,6 +218,57 @@ if arguments.contains("--reset-settings") {
     exit(0)
 }
 
+// macOS 27 keeps Apple Events consent where the guest's TCC rows do not reach, so scripting
+// Notes raises a consent prompt in the disposable guest. Allow only that prompt: a system
+// consent window that names Notes. Needs no capture permission.
+if let target = value(after: "--allow-automation") {
+    guard AXIsProcessTrusted() else { log("FAILED: the demo driver needs Accessibility"); exit(1) }
+    let deadline = Date().addingTimeInterval(20)
+    var allowed = false
+    while !allowed, Date() < deadline {
+        for owner in ["UserNotificationCenter", "universalAccessAuthWarn", "tccd"] {
+            for app in NSWorkspace.shared.runningApplications where app.localizedName == owner
+                || app.bundleIdentifier == "com.apple.UserNotificationCenter" {
+                let root = AXUIElementCreateApplication(app.processIdentifier)
+                var windows: CFTypeRef?
+                AXUIElementCopyAttributeValue(root, kAXWindowsAttribute as CFString, &windows)
+                for window in windows as? [AXUIElement] ?? [] {
+                    var texts: [String] = []
+                    var allow: AXUIElement?
+                    func walk(_ element: AXUIElement, _ depth: Int) {
+                        guard depth < 10 else { return }
+                        var role: CFTypeRef?, value: CFTypeRef?, title: CFTypeRef?
+                        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+                        AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
+                        AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &title)
+                        if let text = value as? String { texts.append(text) }
+                        if role as? String == kAXButtonRole, title as? String == "Allow" { allow = element }
+                        var children: CFTypeRef?
+                        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+                        for child in children as? [AXUIElement] ?? [] { walk(child, depth + 1) }
+                    }
+                    walk(window, 0)
+                    let prompt = texts.joined(separator: " ")
+                    guard prompt.contains("wants access to control"), prompt.contains("\u{201C}\(target)\u{201D}"),
+                          let allow else { continue }
+                    allowed = AXUIElementPerformAction(allow, kAXPressAction as CFString) == .success
+                    log("allowed automation prompt: \(prompt)")
+                }
+            }
+        }
+        if !allowed { wait(0.5) }
+    }
+    exit(allowed ? 0 : 3)
+}
+
+// A fresh guest opens apps on first-launch welcomes that block scripting; press through them
+// with Accessibility before the fixture is scripted. Needs no capture permission.
+if arguments.contains("--dismiss-onboarding") {
+    guard AXIsProcessTrusted() else { log("FAILED: the demo driver needs Accessibility"); exit(1) }
+    dismissDemoOnboarding()
+    exit(0)
+}
+
 try? FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
 guard CGPreflightScreenCaptureAccess() else {

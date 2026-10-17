@@ -146,8 +146,14 @@ as_console open -a Weather
 as_console open -a Stocks
 as_console open -a Notes
 sleep 5
+# A fresh guest opens Notes on its first-launch welcome, which leaves AppleScript waiting
+# until it times out. The driver presses through it with Accessibility.
+as_console env HOME="$console_home" "$DEMO_SOURCE" --dismiss-onboarding
 # Use Apple Notes' native separate-note windows; no TextEdit substitutes.
-as_console osascript <<'APPLESCRIPT'
+# Allow the one Notes automation prompt macOS 27 raises despite the rows above (guest only).
+as_console env HOME="$console_home" "$DEMO_SOURCE" --allow-automation Notes &
+allow_pid=$!
+if ! as_console osascript <<'APPLESCRIPT'
 tell application "Notes"
     activate
     if not (exists folder "Debut Demo") then make new folder with properties {name:"Debut Demo"}
@@ -170,6 +176,16 @@ tell application "Notes"
     end repeat
 end tell
 APPLESCRIPT
+then
+    kill "$allow_pid" 2>/dev/null || true
+    # Keep what was on screen, so the cause is visible rather than inferred.
+    as_console env HOME="$console_home" "$DEMO_SOURCE" --snapshot "$SHARE_DIR/notes-failure.png" || true
+    echo "Notes could not be scripted; see notes-failure.png in the share." >&2
+    exit 1
+fi
+wait "$allow_pid" 2>/dev/null || true
+echo "Apple Events rows after consent:"
+sudo sqlite3 "$SYSTEM_TCC_DB" "select service,client,client_type,auth_value,auth_reason,indirect_object_identifier from access where service='kTCCServiceAppleEvents';" 2>&1 | head -10
 sleep 3
 cat > "$DESK_DIR/Research.command" <<'SH'
 #!/bin/zsh
