@@ -49,8 +49,9 @@ surrounding space. Each mode has its own fresh defaults, the same as listed abov
 an icon size of 100% and a 58 pt stage corner; editing one mode never changes the other.
 Settings saved before the split give both modes the values they drew then.
 
-Cache age is evaluated when capture work is requested; it is not a recurring
-refresh timer. The code remains authoritative for control ranges, decoding
+Cache age is evaluated when a desktop settles into view: only its windows with
+previews older than the cache age are recaptured. It is not a recurring refresh
+timer, and an overlay open never recaptures a preview for age alone. The code remains authoritative for control ranges, decoding
 fallbacks, and [default bindings](../Sources/DebutCore/Models/KeyBinding.swift).
 
 ## Feature behavior and permissions

@@ -1304,8 +1304,8 @@ struct SpaceControllerTests {
         keyboardSvc.simulateEvent(.escape)
     }
 
-    @Test("An expired preview is re-captured on a showing desktop and left alone on another")
-    func ttlExpiryForcesRecapture() {
+    @Test("Age alone does not recapture a preview at an overlay open")
+    func ttlExpiryLeavesOpenAlone() {
         let clock = TestClock()
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(ttl: 60, clock: clock)
         let activeSpaceID = controller.spaceManager.spaces[0].id
@@ -1334,14 +1334,17 @@ struct SpaceControllerTests {
 
         keyboardSvc.simulateEvent(.cmdTabHold)
         #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { windowSvc.captureRequests[afterFirstOpen...].flatMap { $0 }.contains(303) },
-                "an expired preview on a showing desktop must be refreshed")
-        #expect(!windowSvc.captureRequests[afterFirstOpen...].flatMap { $0 }.contains(202),
-                "age alone does not justify capturing a window that is not on screen")
+        // The front window is always recaptured; wait for it, so a TTL refresh would have queued.
+        #expect(waitUntil { windowSvc.captureRequests[afterFirstOpen...].flatMap { $0 }.contains(101) })
+        Thread.sleep(forTimeInterval: 0.3)
+        let requested = windowSvc.captureRequests[afterFirstOpen...].flatMap { $0 }
+        // 178 of 216 such captures replaced a card after the reveal, 8 of them visibly (KHA-1114).
+        #expect(!requested.contains(303), "an expired preview swaps in after the reveal: \(requested)")
+        #expect(!requested.contains(202), "nor one on another desktop: \(requested)")
         keyboardSvc.simulateEvent(.escape)
     }
 
-    @Test("An expired preview stays visible until a valid refresh replaces it")
+    @Test("An expired preview stays visible until a valid arrival refresh replaces it")
     func expiredPreviewUsesStaleWhileRevalidate() throws {
         let clock = TestClock()
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController(ttl: 60, clock: clock)
@@ -1370,22 +1373,19 @@ struct SpaceControllerTests {
         clock.advance(by: 61)
         windowSvc.capturedImages = [101: makeTestImage(), 202: makeBlankWindowCaptureImage()]
         let expiredMark = windowSvc.captureRequests.count
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
+        DispatchQueue.main.sync { _ = controller.desktopDidChange() }
         #expect(waitUntil { requestedIDs(windowSvc, since: expiredMark).contains(202) })
         #expect(controller.windowPreviews[202] === staleImage,
                 "A corrupt refresh must not evict the last good preview")
-        keyboardSvc.simulateEvent(.escape)
 
         let refreshedImage = makeTestImage()
         windowSvc.capturedImages = [101: makeTestImage(), 202: refreshedImage]
-        let retryMark = windowSvc.captureRequests.count
-        keyboardSvc.simulateEvent(.cmdTabHold)
-        #expect(delegate.overlayOpened.wait(timeout: .now() + livenessTimeout) == .success)
-        #expect(waitUntil { requestedIDs(windowSvc, since: retryMark).contains(202) },
-                "A failed refresh must leave the stale preview eligible for retry")
-        #expect(waitUntil { controller.windowPreviews[202] === refreshedImage })
-        keyboardSvc.simulateEvent(.escape)
+        // The blank capture may still be in flight, and a request for a window being captured is
+        // dropped, so arrive again until one is taken.
+        #expect(waitUntil {
+            DispatchQueue.main.sync { _ = controller.desktopDidChange() }
+            return controller.windowPreviews[202] === refreshedImage
+        }, "A failed refresh must leave the stale preview eligible for retry")
     }
 
     @Test("The all-previews policy re-captures every window")

@@ -73,9 +73,11 @@ stops while the screen is locked, the displays sleep or another session is in fr
 
 At an overlay open, the window in use when the shortcut was pressed is captured straight away,
 before the reveal, since focus has not left it and no background capture has seen its current
-content; everything else that is stale is captured after the reveal. Age alone (the TTL) makes a
-preview stale only for a window on a showing desktop; a window elsewhere is refreshed when its
-desktop settles into view.
+content; everything else that is stale (a changed title, shape, size setting or appearance) is
+captured after the reveal. Age alone (the TTL) never makes a preview stale at an open: recapturing
+showing windows past it replaced a card after the reveal in 178 of 216 captures and changed one
+visibly in 8 (KHA-1114). A window that changes on its own is refreshed when its desktop settles
+into view.
 
 ### Development-only measurements
 

@@ -390,7 +390,7 @@ public struct SettingsView: View {
                         .monospacedDigit()
                 }
                 Slider(value: $viewModel.settings.previewCacheTTL, in: 5...600, step: 5)
-                Text("Keeps previews current for windows that change on their own, such as video or chat.")
+                Text("Applied when a desktop comes into view, so windows that change on their own, such as video or chat, stay current.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

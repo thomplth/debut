@@ -3018,7 +3018,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // The window in front of the active space is the one that was just being used, so its
         // content is the one most likely to have moved on since the last capture.
         let lastActiveWindowID = spaceManager.activeSpace.windows.first?.windowID
-        let now = clock()
         return assignedWindows.compactMap { window in
             if window.windowID == lastActiveWindowID { return window.windowID }
             guard windowPreviews[window.windowID] != nil,
@@ -3031,14 +3030,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             if entry.appearanceGeneration != appearanceGeneration { return window.windowID }
             // Resized since: the old picture would be drawn letterboxed in the new card shape.
             if entry.windowWasResized(to: windowSizes[window.windowID]) { return window.windowID }
-            // Dirty tracking alone goes stale for windows that change without ever being
-            // activated — video, chat, dashboards. Age is a guess rather than evidence, so it
-            // only pays for a window on screen; one on another desktop is captured when that
-            // desktop settles into view (KHA-1086).
-            if now.timeIntervalSince(entry.capturedAt) >= previewCacheTTL,
-               isOnShowingDesktop(window.windowID) {
-                return window.windowID
-            }
+            // Age alone is not evidence. Recapturing showing windows past the TTL here replaced
+            // a card after the reveal in 178 of 216 captures and changed it visibly in 8
+            // (KHA-1114), so a window that changes on its own — video, chat, dashboards — is
+            // refreshed only when its desktop settles into view, focus leaves it, or it retitles.
             return nil
         }
     }
