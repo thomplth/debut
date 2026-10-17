@@ -17,13 +17,14 @@ struct SettingsViewModelTests {
         #expect(vm.settings.previewAppearance.glassEdgeRefraction == 1)
         #expect(vm.settings.previewAppearance.followsSystemGlassTint)
         #expect(vm.settings.previewAppearance.glassTintAmount == 0)
-        #expect(vm.settings.previewAppearance.stageCornerRadius == 47.5)
+        #expect(vm.settings.previewAppearance.stageCornerRadius == 40)
         #expect(vm.settings.iconAppearance.stageCornerRadius == AppSettings.defaultIconStageCornerRadius)
         #expect(vm.settings.previewAppearance.inactiveStageScale == 0.7)
         #expect(vm.settings.previewAppearance.stageScale == 1.5)
         #expect(vm.settings.previewCardSpacing == 14)
         #expect(vm.settings.overlayOnMainDisplayOnly)
-        #expect(vm.settings.previewAppearance.selectorOutset == 6)
+        #expect(vm.settings.previewAppearance.selectorOutset == 8)
+        #expect(vm.settings.iconAppearance.selectorOutset == 9)
         #expect(vm.settings.previewCornerRadius == 6)
         #expect(vm.settings.previewAppearance.selectionHighlightStrength == 1)
         #expect(vm.settings.badgePlacement == .titleRow)
@@ -228,18 +229,18 @@ struct SettingsViewModelTests {
     func cornerSliderFollowsTheCardStyle() {
         var vm = SettingsViewModel()
         vm.screenRecordingGranted = true
-        #expect(vm.appearance.stageCornerRadius == 47.5)
-        vm.appearance.stageCornerRadius = 40
-        #expect(vm.settings.previewAppearance.stageCornerRadius == 40)
+        #expect(vm.appearance.stageCornerRadius == 40)
+        vm.appearance.stageCornerRadius = 30
+        #expect(vm.settings.previewAppearance.stageCornerRadius == 30)
         #expect(vm.settings.iconAppearance.stageCornerRadius == AppSettings.defaultIconStageCornerRadius)
 
         vm.screenRecordingGranted = false
         #expect(vm.appearance.stageCornerRadius == AppSettings.defaultIconStageCornerRadius)
         vm.appearance.stageCornerRadius = 50
         #expect(vm.settings.iconAppearance.stageCornerRadius == 50)
-        #expect(vm.settings.previewAppearance.stageCornerRadius == 40)
+        #expect(vm.settings.previewAppearance.stageCornerRadius == 30)
         #expect(vm.settings.appearance(for: .icons).stageCornerRadius == 50)
-        #expect(vm.settings.appearance(for: .previews).stageCornerRadius == 40)
+        #expect(vm.settings.appearance(for: .previews).stageCornerRadius == 30)
     }
 
     @Test("Troubleshooting actions are forwarded to the app")

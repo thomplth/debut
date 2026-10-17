@@ -121,8 +121,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let minimumPreviewCardSpacing: Double = 0
     public static let maximumPreviewCardSpacing: Double = 36
 
-    /// Native's highlight padding around its icon.
-    public static let defaultSelectorOutset: Double = 6
+    /// The highlight's space around the selected preview, and around the selected icon on icon
+    /// cards, whose default sits at the maximum (KHA-1116).
+    public static let defaultSelectorOutset: Double = 8
+    public static let defaultIconSelectorOutset: Double = 9
     public static let minimumSelectorOutset: Double = 2
     /// The fill stays inside the card's reserved preview outset, clear of the title.
     public static let maximumSelectorOutset: Double = 9
@@ -151,7 +153,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let maximumTitleHaloSize: Double = 3
     /// The plate's continuous corner when previews show. Icon cards keep the native
     /// switcher's corner, so the two are stored apart behind one slider.
-    public static let defaultStageCornerRadius: Double = 47.5
+    public static let defaultStageCornerRadius: Double = 40
     public static let defaultIconStageCornerRadius = Double(DockGlass.Metrics.standard.plateCornerRadius)
     public static let defaultTitleHaloSize: Double = 0.5
     public static let defaultBadgePlacement: BadgePlacement = .titleRow
@@ -252,8 +254,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
             )
         } else {
             // Icons drew the shared values too, with only size and stage corner of their own.
+            // The top-level corner and size were the previews'; anything never saved takes
+            // the icon defaults.
             let legacy = try decoder.container(keyedBy: LegacyIconCodingKeys.self)
-            var icons = previewAppearance
+            var icons = try SwitcherAppearance(from: decoder, defaults: .iconDefaults)
             icons.stageCornerRadius = try legacy.decodeIfPresent(
                 Double.self,
                 forKey: .iconStageCornerRadius
@@ -423,7 +427,7 @@ public struct SwitcherAppearance: Encodable, Sendable, Equatable {
         stageCornerRadius: AppSettings.defaultIconStageCornerRadius,
         stageScale: AppSettings.defaultIconScale,
         inactiveStageScale: 0.7,
-        selectorOutset: AppSettings.defaultSelectorOutset
+        selectorOutset: AppSettings.defaultIconSelectorOutset
     )
 
     /// The halo strength actually drawn: regular glass is opaque enough to keep titles

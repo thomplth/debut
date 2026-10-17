@@ -59,7 +59,9 @@ struct NativeSwitcherGeometryTests {
     func nativeDefaults() {
         let settings = AppSettings()
         #expect(settings.previewAppearance.stageScale == 1.5)
-        #expect(settings.previewAppearance.stageCornerRadius == 47.5)
+        #expect(settings.previewAppearance.stageCornerRadius == 40)
+        #expect(settings.previewAppearance.selectorOutset == 8)
+        #expect(settings.iconAppearance.selectorOutset == 9)
         // Icon cards are the native switcher, so they keep its plate corner.
         #expect(CGFloat(settings.iconAppearance.stageCornerRadius) == native.plateCornerRadius)
         #expect(CGFloat(settings.previewCardSpacing) == native.iconSpacing - native.selectionPadding * 2)

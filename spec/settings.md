@@ -28,12 +28,12 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Adaptive card sizing | On |
 | Window size / inactive stage scale | 150% / 70%; 100% is the native Command-Tab switcher plate (102 pt slots, 176 pt one-row plate), up to 400%. The size enlarges only previews or icons; titles, plate margins, card gaps, highlight padding and corners keep native points |
 | Card spacing | 14 pt between selection highlights, as native; not adjustable. Wrapped rows in both switchers put each title midway between its previews and the next row's |
-| Glass / stage corner radius | Native / 47.5 pt continuous with previews, 58 pt (native) for icon cards; one slider edits whichever the switcher draws (0–72 pt) |
+| Glass / stage corner radius | Native / 40 pt continuous with previews, 58 pt (native) for icon cards; one slider edits whichever the switcher draws (0–72 pt) |
 | Liquid Glass rim / edge refraction | 100% / 100% of the native switcher's fitted look |
 | Liquid Glass tint | Follows System Settings; a fixed 0–100% tint is optional on macOS 27, and not offered on macOS 26, whose glass cannot draw one |
 | Title halo / size | 100% / 0.5 pt; 0% turns the halo off |
 | App icon position / growth | Title (before the title, outside its halo; also Corner, Bottom, Top) / 0.50: the badge grows with the preview size raised to this power (0 fixed, 1 proportional) |
-| Preview & selection highlight | Native switcher highlight at 100% strength, 6 pt surrounding space; previews rounded at 6 pt, the highlight concentric with them. Icon cards keep the icon's own corner |
+| Preview & selection highlight | Native switcher highlight at 100% strength, 8 pt surrounding space with previews and 9 pt for icon cards; previews rounded at 6 pt, the highlight concentric with them. Icon cards keep the icon's own corner |
 | Overlay hold delay / held cycling pace | 100 ms / 60 ms minimum between repeats |
 | Preview refresh / cache age | Only windows that may have changed / 60 seconds |
 | Numbered / same-app numbered modifiers | Control / Control-Option |
@@ -46,8 +46,10 @@ The preview switcher and the icon switcher (drawn without previews) keep separat
 Appearance values: Liquid Glass material, rim, edge refraction and tint, title halo,
 stage corner radius, size, inactive stage scale, and selection highlight strength and
 surrounding space. Each mode has its own fresh defaults, the same as listed above except
-an icon size of 100% and a 58 pt stage corner; editing one mode never changes the other.
-Settings saved before the split give both modes the values they drew then.
+that icon mode uses a 100% icon size, the native 58 pt stage corner, and 9 pt of
+surrounding space, against 150%, 40 pt and 8 pt with previews; editing one mode never
+changes the other. Settings saved before the split give both modes the values they drew
+then, and a value either mode never saved takes that mode's default.
 
 Cache age is evaluated when a desktop settles into view: only its windows with
 previews older than the cache age are recaptured. It is not a recurring refresh

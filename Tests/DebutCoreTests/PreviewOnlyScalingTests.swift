@@ -60,8 +60,8 @@ struct PreviewOnlyScalingTests {
         let iconCorner = native.selectionCornerRadius - native.selectionPadding
         #expect(abs(icons.thumbnailCornerRadius - iconCorner * 2) < 1e-9)
         // Concentric: the icon's own corner plus the fixed highlight padding.
-        #expect(abs(icons.selectorCornerRadius(userRadius: settings.previewCornerRadius, outset: settings.previewAppearance.selectorOutset)
-            - (iconCorner * 2 + CGFloat(settings.previewAppearance.selectorOutset))) < 1e-9)
+        #expect(abs(icons.selectorCornerRadius(userRadius: settings.previewCornerRadius, outset: settings.iconAppearance.selectorOutset)
+            - (iconCorner * 2 + CGFloat(settings.iconAppearance.selectorOutset))) < 1e-9)
     }
 
     @Test("The drag view still zooms a stage uniformly")

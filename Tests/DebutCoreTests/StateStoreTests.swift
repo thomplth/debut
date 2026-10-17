@@ -438,6 +438,7 @@ struct StateStoreTests {
         let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
 
         #expect(decoded.previewAppearance.selectorOutset == AppSettings.defaultSelectorOutset)
+        #expect(decoded.iconAppearance.selectorOutset == SwitcherAppearance.iconDefaults.selectorOutset)
         #expect(decoded.previewCornerRadius == AppSettings.defaultPreviewCornerRadius)
         #expect(decoded.iconAppearance.stageCornerRadius == AppSettings.defaultIconStageCornerRadius)
         #expect(decoded.previewCardSpacing == AppSettings.defaultPreviewCardSpacing)

@@ -1,3 +1,4 @@
+import DockGlass
 import Foundation
 import Testing
 @testable import DebutCore
@@ -43,6 +44,27 @@ struct AppearanceModeIsolationTests {
         }
     }
 
+    /// Fresh installs draw a 40 pt preview plate with 8 pt around the selected preview, and
+    /// the native 58 pt icon plate with 9 pt around the selected icon (KHA-1116).
+    @Test("Fresh defaults differ per mode in corner and highlight space")
+    func freshDefaultsPerMode() {
+        let previews = SwitcherAppearance.previewDefaults
+        #expect(previews.stageCornerRadius == 40)
+        #expect(previews.selectorOutset == 8)
+        #expect(previews.stageScale == 1.5)
+        let icons = SwitcherAppearance.iconDefaults
+        #expect(icons.stageCornerRadius == 58)
+        #expect(CGFloat(icons.stageCornerRadius) == DockGlass.Metrics.standard.plateCornerRadius)
+        #expect(icons.selectorOutset == 9)
+        #expect(icons.stageScale == 1)
+        // Everything else is shared between the two modes' defaults.
+        var aligned = icons
+        aligned.stageCornerRadius = previews.stageCornerRadius
+        aligned.selectorOutset = previews.selectorOutset
+        aligned.stageScale = previews.stageScale
+        #expect(aligned == previews)
+    }
+
     @Test("Editing one mode leaves the other's values alone", arguments: [OverlayCardStyle.previews, .icons])
     func editingOneModeLeavesTheOtherAlone(edited mode: OverlayCardStyle) {
         let other: OverlayCardStyle = mode == .previews ? .icons : .previews
@@ -84,6 +106,8 @@ struct AppearanceModeIsolationTests {
         let other: OverlayCardStyle = mode == .previews ? .icons : .previews
         #expect(vm.settings.appearance(for: mode) == defaults.appearance(for: mode))
         #expect(vm.settings.appearance(for: other) == Self.edited)
+        #expect(vm.appearance.selectorOutset == (mode == .previews ? 8 : 9))
+        #expect(vm.appearance.stageCornerRadius == (mode == .previews ? 40 : 58))
         // Preview-only values are not shown in icon mode, so its restore keeps them.
         let previewOnlyRestored = mode == .previews
         #expect((vm.settings.badgePlacement == defaults.badgePlacement) == previewOnlyRestored)
@@ -156,6 +180,38 @@ struct AppearanceModeIsolationTests {
         let decoded = try JSONDecoder().decode(
             AppSettings.self,
             from: JSONSerialization.data(withJSONObject: legacy)
+        )
+        // The saved corner stays; what was never saved takes each mode's fresh defaults.
+        var previews = SwitcherAppearance.previewDefaults
+        previews.stageCornerRadius = 47.5
+        #expect(decoded.previewAppearance == previews)
+        #expect(decoded.iconAppearance == .iconDefaults)
+    }
+
+    /// The old shared defaults were saved explicitly, so an upgrade keeps drawing them.
+    @Test("Saved values are kept over the new per-mode defaults")
+    func savedValuesOutliveNewDefaults() throws {
+        var settings = AppSettings()
+        settings.previewAppearance.stageCornerRadius = 47.5
+        settings.previewAppearance.selectorOutset = 6
+        settings.iconAppearance.selectorOutset = 6
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+        #expect(decoded.previewAppearance.stageCornerRadius == 47.5)
+        #expect(decoded.previewAppearance.selectorOutset == 6)
+        #expect(decoded.iconAppearance.selectorOutset == 6)
+    }
+
+    @Test("Each mode missing its values decodes to that mode's defaults")
+    func missingModeValuesTakeModeDefaults() throws {
+        let saved: [String: Any] = [
+            "launchAtLogin": true,
+            "excludedBundleIDs": [String](),
+            "previewAppearance": [String: Any](),
+            "iconAppearance": [String: Any](),
+        ]
+        let decoded = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONSerialization.data(withJSONObject: saved)
         )
         #expect(decoded.previewAppearance == .previewDefaults)
         #expect(decoded.iconAppearance == .iconDefaults)
