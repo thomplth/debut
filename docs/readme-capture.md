@@ -29,15 +29,20 @@ than working around them per run.
 
 | Item | Baseline |
 | --- | --- |
-| Space 1 | Terminal / Research, Safari / Field Notes, Chess |
+| Space 1 | Safari / Field Notes, Terminal / Research, Notes / Reading list |
 | Space 2 | Safari / Weekend Guide, Weather / Cupertino, Stocks |
-| Space 3 | Terminal / Project, TextEdit / Project notes, TextEdit / Reading list |
+| Space 3 | Notes / Project notes, Chess, Terminal / Project |
 | Display | 1440×900 logical pixels at 2× |
 | Debut | Fresh `AppSettings()` defaults: previews use the preview appearance, the two no-preview onboarding stills the icon appearance. `Sources/DebutDemo/CaptureSettings.swift` adds only login launch off, no exclusions, and faster switching per clip |
 | GIF appearance | Light mode, with light rendered overlay plates |
 | Weather | Cupertino, California, search closed, no other saved locations visible |
 | KeyCastr | Pinned 0.11.1; 64 pt for individual demos, 128 pt before half-width comparison scaling |
 | Captions | No modifier-release caption; comparison labels only |
+
+This is the site's fixture, shared by README, onboarding, and site media (KHA-1119); the
+driver's `captureFixture` and debut.site's recorder must change together. Notes uses two
+real Apple Notes windows opened separately from a "Debut Demo" folder, and Safari loads the
+offline pages in `Tests/Fixtures/Demo/html`, copied from debut.site's `native/Fixtures/html`.
 
 Dismiss Weather and Stocks onboarding and tutorials, native dialogs, notification
 banners, and capture reminders before recording. The fixture must not use the host's
@@ -49,12 +54,14 @@ and that its sidebar has no extra cities.
 | `onboarding` | Four lossless transparent UI screenshots: Command-Tab and Option-Tab, each with previews enabled and disabled; same nine-window scene, no keystroke captions |
 | `onboarding-speed` | Matched Control-Right then Control-Left at 60 fps, space 2 → 3 → 2; macOS default left, Debut Instant right; MP4 and first-frame poster for setup |
 | `cover` | Both `overlay.png` and native dark-mode `overlay-dark.png`, with space 2 expanded |
-| `command-tab` | Space 2 → hold Command-Tab → 3 → Tab → release → Project notes, second window in space 3 |
+| `command-tab` | Terminal fronted in space 3, then space 2 → hold Command-Tab → 3 → Tab → release → Project notes, second window in space 3 |
 | `organize-windows` | Space 2 → hold Command-Tab, Weather selected → Up → release → Weather in space 1 |
-| `option-tab` | Safari in space 2 → hold Option-Tab → release → Field Notes Safari window in space 1 |
+| `option-tab` | Safari in space 2 → hold Option-Tab → release → Field Notes Safari window, first in space 1 |
 | `faster-space-switching` | Matched Control-Right then Control-Left, space 2 → 3 → 2; macOS default left, Instant right |
 
-Faster switching stays disabled in the first three demos. The comparison preserves
+Cards in a space follow its MRU order, not the fixture order, so each switcher clip reads
+Debut's live selection and fails before releasing the modifier if the intended card is not
+selected. Faster switching stays disabled in the first three demos. The comparison preserves
 elapsed time: do not accelerate either recording or trim the two sides independently
 around transitions.
 
@@ -217,8 +224,9 @@ containing the dialog must be discarded even if destination assertions pass.
 
 The guest script grants Screen Recording, Accessibility, event posting, and Apple
 Events using the actual signed executable requirements in the guest's TCC databases.
-Appearance control needs Apple Events to `com.apple.systemevents` for the
-driver/SSH/osascript responsibility chain.
+Appearance control needs Apple Events to `com.apple.systemevents`, and the fixture's
+note windows Apple Events to `com.apple.Notes`, for the driver/SSH/osascript
+responsibility chain.
 
 Use direct SSH or the script's loopback SSH path. A raw `tart exec` launch of a GUI
 driver can inherit a different responsible process and prompt despite existing grants.
@@ -241,7 +249,7 @@ pass, and do not run unrelated UI commands while recording.
 
 The fixture reset kills apps before deleting saved state. Tahoe restores windows from
 `~/Library/Daemon Containers/**/*.savedState` as well as the conventional saved-state
-location; skipping that accumulates Terminal or TextEdit windows and breaks the 3/3/3
+location; skipping that accumulates Terminal or Notes windows and breaks the 3/3/3
 layout.
 
 Weather can leave search open after selecting a saved city, display tips, or ask for

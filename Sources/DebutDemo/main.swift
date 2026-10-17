@@ -208,43 +208,6 @@ func clip(_ name: String, seconds: Int, _ body: () -> Void) {
     }
 }
 
-// MARK: - Onboarding media
-
-func resetOnboardingDesktop() {
-    let service = SpaceService()
-    service.switchDuration = 0
-    service.switchToDesktop(index: 0)
-    wait(1)
-    guard service.currentDesktopIndex() == 0 else { log("FAILED: comparison did not reset to Desktop 1"); exit(1) }
-}
-
-func arrangeOnboardingWindows() {
-    let windows = AccessibilityWindowService().listWindows()
-    let service = SpaceService()
-    for window in windows where window.ownerBundleID == "com.apple.TextEdit" {
-        let desktop = window.title.contains("Notes") ? 1 : 0
-        service.moveWindow(windowID: window.windowID, toDesktop: desktop) { _ in }
-        wait(0.3)
-        guard service.desktopIndex(forWindow: window.windowID) == desktop else {
-            log("FAILED: example window did not reach its desktop"); exit(1)
-        }
-    }
-    resetOnboardingDesktop()
-    _ = run("/usr/bin/pkill", ["-x", "Debut"])
-    wait(0.7)
-    _ = run("/usr/bin/open", ["/Applications/Debut.app"])
-    wait(3)
-    guard let notes = windows.first(where: { $0.title.contains("Notes") }) else { exit(1) }
-    let row = (readState()["windowIDsBySpace"] ?? "").split(separator: ";", omittingEmptySubsequences: false)
-    guard row.count > 1, row[1].split(separator: ",").contains(Substring(String(notes.windowID))) else {
-        log("FAILED: Debut's screenshot would show Notes on the wrong desktop"); exit(1)
-    }
-    if let work = windows.first(where: { $0.title.contains("Work") }) {
-        _ = AccessibilityWindowService().raiseWindow(windowID: work.windowID)
-    }
-    wait(1)
-}
-
 // MARK: - Main
 
 // The guest resets Debut before it first launches; this needs no capture permission.

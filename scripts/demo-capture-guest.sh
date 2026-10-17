@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Guest half of the README media capture. Mirrors tart-e2e-guest.sh — install the host
-# build, grant TCC, space windows, run a driver — but the windows here are meant to look
-# like a desk someone works at, not like deterministic fixtures.
+# Guest half of the README and onboarding media capture. Mirrors tart-e2e-guest.sh — install
+# the host build, grant TCC, space windows, run a driver — but the windows here are meant to
+# look like a desk someone works at, not like deterministic fixtures.
 
 SHARE_DIR="/Volumes/My Shared Files"
 APP_ARCHIVE="$SHARE_DIR/${1:?missing app archive name}"
@@ -66,6 +66,7 @@ done
 # The cover switches the disposable guest's native appearance via System Events.
 for client in "$DEMO_SOURCE" /usr/libexec/sshd-keygen-wrapper /usr/bin/osascript; do
     grant kTCCServiceAppleEvents "$client" 1 "$client" com.apple.systemevents
+    grant kTCCServiceAppleEvents "$client" 1 "$client" com.apple.Notes
 done
 sudo killall tccd 2>/dev/null || true
 # Clear periodic capture reminders in the disposable guest, as the E2E fixture does.
@@ -91,7 +92,7 @@ done
 # keeps that state under Daemon Containers, not the `~/Library/Saved Application State` every
 # recipe names — that path does not even exist here, which is why deleting it changed nothing.
 sleep 4
-echo "  survivors after the kill: $(pgrep -lx Terminal | wc -l | tr -d ' ') Terminal, $(pgrep -lx TextEdit | wc -l | tr -d ' ') TextEdit, $(pgrep -lx Safari | wc -l | tr -d ' ') Safari"
+echo "  survivors after the kill: $(pgrep -lx Terminal | wc -l | tr -d ' ') Terminal, $(pgrep -lx Notes | wc -l | tr -d ' ') Notes, $(pgrep -lx Safari | wc -l | tr -d ' ') Safari"
 as_console rm -rf "$console_home/Library/Saved Application State"
 sudo find "$console_home/Library/Daemon Containers" -type d -name "*.savedState" -maxdepth 5 -exec rm -rf {} + 2>/dev/null || true
 rm -rf /tmp/debut-e2e-fixtures
@@ -105,7 +106,7 @@ as_console killall Dock 2>/dev/null || true
 # another tab of the one it already has.
 as_console env HOME="$console_home" defaults write com.apple.Safari TabCreationPolicy -int 0
 as_console env HOME="$console_home" defaults write com.apple.Safari AlwaysRestoreSessionAtLaunch -bool false
-as_console env HOME="$console_home" defaults write com.apple.TextEdit NSFixedPitchFontSize -int 16
+as_console env HOME="$console_home" defaults write com.apple.Notes AccountsListVisible -bool true
 as_console rm -rf "$console_home/Library/Application Support/Debut"
 as_console env HOME="$console_home" defaults write com.thomplth.Debut hasCompletedOnboarding -bool true
 # Focus stays on for the whole capture so no banner lands mid-clip.
@@ -127,16 +128,13 @@ as_console env HOME="$console_home" "$PROVISION_SOURCE" switch-to-desktop 0
 as_console pkill -f "Debut.app" 2>/dev/null || true
 sleep 2
 
-echo "Opening the nine README example windows..."
+# The shared capture fixture, identical to debut.site's scripts/speed-guest.sh (KHA-1119):
+# 1 Safari/Field Notes, Terminal/Research, Notes/Reading list; 2 Safari/Weekend Guide,
+# Weather/Cupertino, Stocks; 3 Notes/Project notes, Chess, Terminal/Project.
+echo "Opening the nine capture fixture windows..."
 rm -rf "$DESK_DIR"
 mkdir -p "$DESK_DIR"
 ditto -x -k "$DOCS_ARCHIVE" "$DESK_DIR"
-cat > "$DESK_DIR/Project notes.rtf" <<'RTF'
-{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}{\colortbl;\red45\green105\blue180;}\f0\fs64\cf1 Project notes\par\cf0\fs32\par Monday, September 21\par\par A few things to work on this week.\par\par 1. Review the latest designs\par 2. Finish the prototype\par 3. Share a short update\par\par Keep the first version simple.}
-RTF
-cat > "$DESK_DIR/Reading list.rtf" <<'RTF'
-{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}{\colortbl;\red150\green85\blue55;}\f0\fs64\cf1 Reading list\par\cf0\fs32\par Books for a quiet afternoon\par\par The Design of Everyday Things\par A Field Guide to Getting Lost\par The Creative Act\par\par Notes\par Pick one book for the weekend.}
-RTF
 chown -R "$console_user" "$DESK_DIR"
 as_console touch "$console_home/.hushlogin"
 as_console open -a Safari "$DESK_DIR/html/index.html"
@@ -146,11 +144,33 @@ sleep 3
 as_console open -a Chess
 as_console open -a Weather
 as_console open -a Stocks
+as_console open -a Notes
 sleep 5
-as_console open -a TextEdit "$DESK_DIR/Project notes.rtf"
-sleep 2
-as_console open -a TextEdit "$DESK_DIR/Reading list.rtf"
-sleep 2
+# Use Apple Notes' native separate-note windows; no TextEdit substitutes.
+as_console osascript <<'APPLESCRIPT'
+tell application "Notes"
+    activate
+    if not (exists folder "Debut Demo") then make new folder with properties {name:"Debut Demo"}
+    set fixtureFolder to folder "Debut Demo"
+    repeat with noteTitle in {"Reading list", "Project notes"}
+        if not (exists note (noteTitle as text) of fixtureFolder) then
+            if noteTitle as text is "Reading list" then
+                set noteBody to "<h1>Reading list</h1><div><br></div><div>Books for a quiet afternoon</div><div><br></div><div>The Design of Everyday Things</div><div>A Field Guide to Getting Lost</div><div>The Creative Act</div><div><br></div><div>Pick one book for the weekend.</div>"
+            else
+                set noteBody to "<h1>Project notes</h1><div><br></div><div>Monday, September 21</div><div><br></div><div>A few things to work on this week.</div><div><br></div><div>1. Review the latest designs</div><div>2. Finish the prototype</div><div>3. Share a short update</div><div><br></div><div>Keep the first version simple.</div>"
+            end if
+            make new note at fixtureFolder with properties {body:noteBody}
+        end if
+    end repeat
+    close every window
+    show note "Reading list" of fixtureFolder with separately
+    show note "Project notes" of fixtureFolder with separately
+    repeat with windowIndex from (count of windows) to 1 by -1
+        if name of window windowIndex is not in {"Reading list", "Project notes"} then close window windowIndex
+    end repeat
+end tell
+APPLESCRIPT
+sleep 3
 cat > "$DESK_DIR/Research.command" <<'SH'
 #!/bin/zsh
 clear

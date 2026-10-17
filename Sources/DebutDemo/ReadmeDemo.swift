@@ -27,7 +27,7 @@ func dismissDemoOnboarding() {
         }
         return false
     }
-    for bundle in ["com.apple.weather", "com.apple.stocks", "com.apple.Chess", "com.apple.Safari"] {
+    for bundle in ["com.apple.weather", "com.apple.stocks", "com.apple.Chess", "com.apple.Safari", "com.apple.Notes"] {
         guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first else { continue }
         app.activate(options: [])
         wait(1)
@@ -171,6 +171,29 @@ func setDemoAppearance(dark: Bool) {
     wait(2)
 }
 
+/// One window of the capture fixture: its app and a title fragment that identifies it.
+struct CaptureFixtureWindow: Equatable, CustomStringConvertible {
+    let bundle: String
+    let title: String
+    init(_ bundle: String, _ title: String = "") {
+        self.bundle = bundle
+        self.title = title
+    }
+    var description: String { title.isEmpty ? bundle : "\(bundle) / \(title)" }
+}
+
+/// The nine windows every README, onboarding and site capture shows, by desktop. Identical to
+/// debut.site's `native/Sources/SpeedRecorder/ReadmeDemo.swift` and `scripts/capture-fixture.mjs`
+/// (KHA-1119); change both repositories together.
+let captureFixture: [[CaptureFixtureWindow]] = [
+    [.init("com.apple.Safari", "Field Notes"), .init("com.apple.Terminal", "Research"),
+     .init("com.apple.Notes", "Reading list")],
+    [.init("com.apple.Safari", "Weekend Guide"), .init("com.apple.weather", "Cupertino"),
+     .init("com.apple.stocks")],
+    [.init("com.apple.Notes", "Project notes"), .init("com.apple.Chess"),
+     .init("com.apple.Terminal", "Project")],
+]
+
 struct ReadmeScene {
     let windows: [WindowInfo]
     let groups: [[WindowInfo]]
@@ -183,20 +206,16 @@ struct ReadmeScene {
         discovery.spaceSwitcher = SpaceService()
         let allWindows = discovery.listWindows()
         windows = allWindows
-        func window(_ bundle: String, _ title: String = "") -> WindowInfo {
+        func window(_ fixture: CaptureFixtureWindow) -> WindowInfo {
             guard let result = allWindows.first(where: {
-                $0.ownerBundleID == bundle && (title.isEmpty || $0.title.contains(title))
+                $0.ownerBundleID == fixture.bundle && (fixture.title.isEmpty || $0.title.contains(fixture.title))
             }) else {
-                log("FAILED: missing fixture \(bundle) / \(title); found \(allWindows.map { $0.ownerBundleID + "/" + $0.title })")
+                log("FAILED: missing fixture \(fixture); found \(allWindows.map { $0.ownerBundleID + "/" + $0.title })")
                 exit(1)
             }
             return result
         }
-        groups = [
-            [window("com.apple.Terminal", "Research"), window("com.apple.Safari", "Field Notes"), window("com.apple.Chess")],
-            [window("com.apple.Safari", "Weekend Guide"), window("com.apple.weather"), window("com.apple.stocks")],
-            [window("com.apple.Terminal", "Project"), window("com.apple.TextEdit", "Project notes"), window("com.apple.TextEdit", "Reading list")],
-        ]
+        groups = captureFixture.map { $0.map(window) }
     }
 
     func focus(_ window: WindowInfo) {
@@ -279,6 +298,31 @@ struct ReadmeScene {
         focus(groups[1][0])
         wait(2)
     }
+}
+
+/// The window the open switcher has selected, read from Debut rather than inferred from a
+/// Tab count: a space's cards follow its MRU order, not the fixture order.
+func demoSelectedWindowID() -> CGWindowID? {
+    let state = readState()
+    let rows = (state["windowIDsBySpace"] ?? "").split(separator: ";", omittingEmptySubsequences: false)
+    guard let space = Int(state["selectedSpaceIndex"] ?? ""), rows.indices.contains(space),
+          let selection = Int(state["selectedWindowIndex"] ?? "") else { return nil }
+    let ids = rows[space].split(separator: ",")
+    guard ids.indices.contains(selection) else { return nil }
+    return CGWindowID(ids[selection])
+}
+
+/// Confirms the selection before the modifier is released, so a wrong card fails the take
+/// instead of focusing an unintended window.
+func verifyDemoSelection(_ target: WindowInfo) {
+    let deadline = Date().addingTimeInterval(2)
+    while demoSelectedWindowID() != target.windowID, Date() < deadline { wait(0.05) }
+    guard demoSelectedWindowID() == target.windowID else {
+        log("FAILED: switcher selected \(demoSelectedWindowID().map(String.init) ?? "nothing") instead of "
+            + "\(target.ownerName)/\(target.title) (\(target.windowID)); state \(readState())")
+        exit(1)
+    }
+    log("verified overlay selection: \(target.ownerName)/\(target.title)")
 }
 
 func releaseDemoModifier() {
@@ -384,6 +428,8 @@ func recordReadme() {
         // Start each interaction with fresh light glass; reused surfaces can retain a dark backing.
         setDemoAppearance(dark: false)
         setDemoInstant(false)
+        // Front Terminal in space 3 so its MRU order makes Project notes the second card.
+        scene.focus(scene.groups[2][2])
         scene.startKeys()
         clip("command-tab", seconds: 7) {
             postFlags(.maskCommand)
@@ -393,8 +439,9 @@ func recordReadme() {
             wait(1.1)
             postTap(Key.tab, flags: .maskCommand, duration: 0.2)
             wait(1.1)
+            verifyDemoSelection(scene.groups[2][0])
             releaseDemoModifier()
-            scene.verifyFocus(scene.groups[2][1], space: 2)
+            scene.verifyFocus(scene.groups[2][0], space: 2)
         }
     }
     if requestedClips.isEmpty || requestedClips.contains("organize-windows") {
@@ -408,6 +455,7 @@ func recordReadme() {
             postFlags(.maskCommand)
             postTap(Key.tab, flags: .maskCommand, duration: 0.2)
             wait(1.2)
+            verifyDemoSelection(scene.groups[1][1])
             postTap(Key.upArrow, flags: .maskCommand, duration: 0.2)
             wait(1.4)
             releaseDemoModifier()
@@ -419,14 +467,15 @@ func recordReadme() {
         setDemoAppearance(dark: false)
         setDemoInstant(false)
         scene.startKeys()
-        scene.focus(scene.groups[0][1])
+        scene.focus(scene.groups[0][0])
         scene.focus(scene.groups[1][0])
         clip("option-tab", seconds: 5) {
             postFlags(.maskAlternate)
             postTap(Key.tab, flags: .maskAlternate, duration: 0.2)
             wait(1.5)
+            verifyDemoSelection(scene.groups[0][0])
             releaseDemoModifier()
-            scene.verifyFocus(scene.groups[0][1], space: 0)
+            scene.verifyFocus(scene.groups[0][0], space: 0)
         }
     }
     if requestedClips.contains("faster-space-switching") || requestedClips.contains("onboarding-speed") || requestedClips.isEmpty {
@@ -458,7 +507,7 @@ func recordReadme() {
             scene.startKeys(fontSize: 128)
             let name = (onboarding ? "onboarding-" : "") + (instant ? "speed-instant" : "speed-native")
             do {
-                let switchesBefore = recordedDemoSwitchCount()
+                let switchesBefore = recordedDemoSwitches()
                 let url = outputDirectory.appendingPathComponent(name + ".mov")
                 try? FileManager.default.removeItem(at: url)
                 let recorder = try startDemoMovie(at: url, framesPerSecond: onboarding ? 60 : 30)
@@ -476,7 +525,7 @@ func recordReadme() {
                 guard SpaceService().currentDesktopIndex() == 1 else { log("FAILED: \(name) did not return to space 2"); exit(1) }
                 scene.verifyFocus(scene.groups[1][0], space: 1)
                 try awaitCapture { try await recorder.stop() }
-                let switches = recordedDemoSwitchCount() - switchesBefore
+                let switches = recordedDemoSwitches().subtracting(switchesBefore).count
                 guard switches == (instant ? 2 : 0) else {
                     log("FAILED: \(name) expected \(instant ? 2 : 0) Debut switches, observed \(switches)")
                     exit(1)
@@ -489,14 +538,21 @@ func recordReadme() {
     describeState("final")
 }
 
-private func recordedDemoSwitchCount() -> Int {
-    let url = DebutCore.applicationSupportDirectory.appendingPathComponent("diagnostic.jsonl")
-    guard let text = try? String(contentsOf: url, encoding: .utf8) else { return 0 }
-    return text.split(separator: "\n").filter { line in
-        guard let data = line.data(using: .utf8),
-              let event = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return false }
-        return event["event"] == "space_switched"
-    }.count
+/// Adjacent Control-arrow switches go straight through SpaceService and report no
+/// `space_switched`. Count the distinct key events Debut handled instead, as debut.site's
+/// recorder does; the destination desktop and focus are verified separately around each take.
+func handledAdjacentSwitches(in snapshot: Data) -> Set<String> {
+    guard let json = try? JSONSerialization.jsonObject(with: snapshot) as? [String: Any],
+          let events = json["events"] as? [[String: String]] else { return [] }
+    return Set(events.compactMap { event in
+        guard event["event"] == "key_event",
+              event["keyEvent"]?.hasPrefix("switchAdjacentSpace(") == true else { return nil }
+        return event["uptimeNanoseconds"]
+    })
+}
+
+private func recordedDemoSwitches() -> Set<String> {
+    (try? Data(contentsOf: diagnosticFile)).map(handledAdjacentSwitches) ?? []
 }
 
 /// A quiet, identical backdrop makes the windows and keys clear and GIF deltas compact.
