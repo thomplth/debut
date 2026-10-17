@@ -110,7 +110,7 @@ struct PreviewFreshnessTests {
         #expect(reports.all.first { $0.event == "preview_freshness" }?.level == .lifecycle)
     }
 
-    @Test("Development builds score how visibly each replacement changed")
+    @Test("Development builds score how visibly each replacement changed and retain the summary")
     func developmentChangeScores() throws {
         let reports = RecordedReports()
         let recorder = recorder(reports, development: true, sampler: ScriptedCostSampler(samples: LockedBox([])))
@@ -126,6 +126,7 @@ struct PreviewFreshnessTests {
         #expect(event["changesScored"] == "2")
         #expect(event["visibleChanges"] == "1", "a one-level difference is noise")
         #expect(event["changeScoreMaxPercent"] == "100.0")
+        #expect(reports.all.first { $0.event == "preview_freshness" }?.level == .retained)
     }
 
     @Test("No session means no freshness event")

@@ -5,6 +5,9 @@ import Foundation
 public enum DiagnosticLevel: Sendable {
     case lifecycle
     case transient
+    /// Lifecycle, and also appended to `health.jsonl`, which never rotates: health goals are
+    /// judged over weeks, and `diagnostic.jsonl` holds about two days.
+    case retained
 }
 
 public final class DiagnosticReporter: NSObject, @unchecked Sendable {
@@ -58,6 +61,7 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     private var snapshotFile: URL { directory.appendingPathComponent("diagnostic.json") }
     private var durableFile: URL { directory.appendingPathComponent("diagnostic.jsonl") }
     private var rotatedFile: URL { directory.appendingPathComponent("diagnostic.jsonl.1") }
+    private var retainedFile: URL { directory.appendingPathComponent("health.jsonl") }
 
     private override convenience init() {
         self.init(directory: Self.defaultDirectory)
@@ -108,7 +112,8 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
             if self.eventLog.count > 100 {
                 self.eventLog.removeFirst(self.eventLog.count - 100)
             }
-            if level == .lifecycle { self.appendDurableEvent(entry) }
+            if level != .transient { self.appendDurableEvent(entry) }
+            if level == .retained { self.appendRetainedEvent(entry) }
             self.scheduleSnapshotWrite(
                 state: state,
                 performance: performance,
@@ -239,22 +244,36 @@ public final class DiagnosticReporter: NSObject, @unchecked Sendable {
     /// is capped, overwritten in place, and never outlives the session, so it
     /// stays readable for local debugging without accumulating history.
     private func appendDurableEvent(_ entry: [String: String]) {
+        guard let line = jsonLine(entry) else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        rotateIfNeeded(incomingByteCount: line.count)
+        append(line, to: durableFile)
+    }
+
+    /// Must be called on `queue`.
+    private func appendRetainedEvent(_ entry: [String: String]) {
+        guard let line = jsonLine(entry) else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        append(line, to: retainedFile)
+    }
+
+    private func jsonLine(_ entry: [String: String]) -> Data? {
         guard var line = try? JSONSerialization.data(
             withJSONObject: redactor.redact(entry),
             options: [.sortedKeys]
         )
-        else { return }
+        else { return nil }
         line.append(0x0A)
+        return line
+    }
 
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        rotateIfNeeded(incomingByteCount: line.count)
-
-        if let handle = try? FileHandle(forWritingTo: durableFile) {
+    private func append(_ line: Data, to file: URL) {
+        if let handle = try? FileHandle(forWritingTo: file) {
             defer { try? handle.close() }
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: line)
         } else {
-            try? line.write(to: durableFile, options: .atomic)
+            try? line.write(to: file, options: .atomic)
         }
     }
 

@@ -95,6 +95,44 @@ app itself (`DevelopmentMeasurements.isEnabled`); release builds never pay for t
 
 Reading Debut's own process counters (~5 us per read) stays on in every build.
 
+## Health goals
+
+Development builds also measure Debut against absolute goals, and append every measurement to
+`health.jsonl` beside the diagnostic log (`DiagnosticLevel.retained`). That file never
+rotates, so `scripts/health-report.py [--days 7]` can judge weeks of use; `diagnostic.jsonl`
+holds about two days. Release builds record none of it. Nothing runs on a timer: each
+measurement rides on a user action, the overlay being up, or the main run loop's own
+callbacks.
+
+| Goal | Target | Measured by |
+| --- | --- | --- |
+| R1 press to visible, beyond the hold delay | p99 <= 60 ms | `overlay_session_cost` from the overlay trace |
+| R2 event tap to main queue | p99 <= 5 ms | `overlay_session_cost` from the overlay trace |
+| R3 main run-loop stalls over 100 ms | 0 per day | `main_run_loop_stalled`: a run-loop observer times each pass, leaving out sleep |
+| R4 commit to focus, same desktop | p90 <= 150 ms, max <= 250 ms | `focus_commit_settled`: commit to the accepted focus report |
+| R5 focus after the desktop arrives | p90 <= 100 ms | `focus_commit_settled`: commit to the desktop-change notification and to focus |
+| R6 launch to ready | p90 <= 1 s | `launch_ready`, from the process start time |
+| C1 reveals with a visible change after the reveal | <= 2% | `preview_freshness` change scores |
+| C2 windows that never took the front | 0 per day | `window_front_outcome`: a front refusal recovered if focus arrives within 1 s |
+| C3 overlay frames over 1.5x the refresh interval | <= 1% | `overlay_session_cost`: a display link that runs only while the overlay is up |
+| P1 idle | <= 0.05% core, <= 0.5 mW | `health_rollup` intervals of kind `idle` |
+| P2 heaviest active interval | <= 1% core, <= 20 mW | `health_rollup` intervals of kind `active`, 15 minutes or longer |
+| P3 Debut CPU energy per reveal | mean <= 1 J | `overlay_session_cost`, Debut's counters at show and hide |
+| P4 GPU power added while the overlay is up | <= 0.3 W | `overlay_session_cost` GPU energy against the active intervals' rate |
+| P5 memory footprint | steady <= 200 MB, peak <= 250 MB, growth <= 10 MB/day | `health_rollup` footprint by process age |
+
+`health_rollup` intervals close at the first user action (a reveal, a desktop change, an
+accepted focus) an hour after they opened. A gap of ten minutes or more without one becomes its
+own `idle` interval, and a lock, display sleep or quit closes whatever is open, so locked time
+is never counted. Each carries Debut's CPU, energy, wakeups, footprint and peak, and the
+system's GPU energy.
+
+GPU energy is IOReport's "Energy Model" GPU channel, read without root through the private
+library; its CPU channels read zero for an unprivileged process on macOS 27. It is system-wide,
+since WindowServer composites Debut's drawing and is billed for it. The display link and the
+run-loop observer both run on the main run loop, so they see Debut's own hitches; a frame
+WindowServer drops while compositing never reaches them, and stays a Tart measurement.
+
 ## Local-only boundary
 
 Performance observations remain on the Mac. They feed `diagnostic.json`, local

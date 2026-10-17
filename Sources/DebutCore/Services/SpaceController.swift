@@ -1540,6 +1540,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             "requested": "\(request.ownerPID)",
             "frontmost": "\(frontmost)",
         ])
+        DevelopmentHealthRecorder.shared?.frontNotTaken(windowID: request.windowID)
         return false
     }
 
@@ -2055,6 +2056,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// Only cache focus after the callback survives the stale-switch, cycle, retired-window,
     /// and exclusion checks above. Those callbacks can name a window that is no longer focused.
     private func cacheAcceptedFocus(windowID: CGWindowID) {
+        DevelopmentHealthRecorder.shared?.focusAccepted(windowID: windowID)
         if let previous = focusedWindowID, previous != windowID {
             capturePreviewInBackground(previous, reason: "focus_left", settled: true)
         }
@@ -3458,6 +3460,13 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         if activeTutorialScope != nil && raiseWindowID == nil { return }
         let focusCommand = overlayFocusCommand
         overlayFocusCommand = .general
+        if let health = DevelopmentHealthRecorder.shared, let raiseWindowID {
+            let showing = Set(spaceManager.connectedSpaceStacks.map(\.activeSpaceID))
+            health.overlayCommitted(
+                windowID: raiseWindowID,
+                crossesDesktop: !showing.contains(targetSpace.id)
+            )
+        }
         performSpaceSwitch(
             id: targetSpace.id,
             raiseWindowID: raiseWindowID,

@@ -162,7 +162,8 @@ public final class PreviewFreshnessRecorder: @unchecked Sendable {
                 details["changeScoreMeanPercent"] = Self.format(mean)
             }
         }
-        report("preview_freshness", .lifecycle, details)
+        // Retained in development so `health.jsonl` can judge the visible-change goal over weeks.
+        report("preview_freshness", measuresDevelopmentCosts ? .retained : .lifecycle, details)
     }
 
     private func recordChangeScore(_ score: Double, sessionID: Int) {

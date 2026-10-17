@@ -63,6 +63,30 @@ struct DiagnosticReporterTests {
         #expect(lines.first?["event"] == "window_assigned")
     }
 
+    @Test("Retained events reach the durable log and a health log that never rotates")
+    func retainedEventsSurviveRotation() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reporter = DiagnosticReporter(directory: dir, rotationByteLimit: 512)
+        reporter.report("health_rollup", level: .retained, details: ["kind": "idle"])
+        for index in 0..<20 {
+            reporter.report("window_assigned", level: .lifecycle, details: ["windowID": "\(index)"])
+        }
+        reporter.report("health_rollup", level: .retained, details: ["kind": "active"])
+        reporter.flush()
+
+        let health = try String(
+            contentsOf: dir.appendingPathComponent("health.jsonl"),
+            encoding: .utf8
+        )
+        .split(separator: "\n")
+        .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: String] }
+        #expect(health.map { $0["kind"] } == ["idle", "active"])
+        #expect(health.allSatisfy { $0["event"] == "health_rollup" && $0["uptimeNanoseconds"] != nil })
+        #expect(durableLines(in: dir).contains { $0["event"] == "health_rollup" && $0["kind"] == "active" })
+    }
+
     @Test("Bursty events coalesce full snapshot rewrites")
     func burstyEventsCoalesceSnapshotWrites() throws {
         let dir = try makeTempDirectory()

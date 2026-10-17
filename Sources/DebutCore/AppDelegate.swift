@@ -134,6 +134,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         processResponsivenessActivity.start()
         NSApp.setActivationPolicy(.accessory)
         diag.report("app_launched")
+        DevelopmentHealthRecorder.shared?.startObservingMainRunLoop()
         NSApp.mainMenu = Self.makeMainMenu(target: self)
 
         let store = StateStore()
@@ -220,6 +221,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         diag.report("app_ready")
+        DevelopmentHealthRecorder.shared?.launchReady()
         DispatchQueue.main.async { [weak self] in self?.crashReports.resolveUnsentCrashReport() }
         hiddenIdlePerformanceID = PerformanceRecorder.shared.begin(.hiddenIdle)
     }
@@ -340,7 +342,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             currentSettings.features.fasterDesktopSwitching
         spaceController = controller
         captureAvailability = CaptureAvailabilityMonitor { [weak controller] suspended in
-            DispatchQueue.main.async { controller?.previewCaptureSuspended = suspended }
+            DispatchQueue.main.async {
+                controller?.previewCaptureSuspended = suspended
+                DevelopmentHealthRecorder.shared?.suspensionChanged(suspended)
+            }
         }
         appearanceObserver = DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
@@ -690,6 +695,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     /// only needs the active space adopted.
     @objc private func activeSpaceDidChange(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
+            DevelopmentHealthRecorder.shared?.desktopChangeNotified()
             self?.handleDesktopDidChange()
         }
     }
@@ -871,6 +877,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     nonisolated public func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { self.onboardingPermissionGuide.dismiss() }
         OverlayPresentationRecorder.shared.finalizeAll(outcome: .appTerminated)
+        if let health = DevelopmentHealthRecorder.shared {
+            health.terminating()
+            DiagnosticReporter.shared.flush()
+        }
         // Quitting is how a user frees a key Debut appears to hold, so record what the tap
         // held at that moment (KHA-930); flushed because the process exits right after.
         if let keyboardService = MainActor.assumeIsolated({ self.keyboardService }) {
@@ -1193,6 +1203,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             _ = PerformanceRecorder.shared.end(renderSubmissionID)
         }
         diag.report("overlay_shown")
+        DevelopmentHealthRecorder.shared?.overlayShown(
+            traceID: overlayPresentation?.traceID,
+            screen: overlayWindow.screen
+        )
     }
 
     private func hideSpaceManagerOverlay(
@@ -1207,6 +1221,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         overlayWindow?.hideOverlay(fadeDuration: fadeDuration)
         diag.report("overlay_hidden")
+        DevelopmentHealthRecorder.shared?.overlayHidden()
         if hiddenIdlePerformanceID == nil {
             hiddenIdlePerformanceID = PerformanceRecorder.shared.begin(.hiddenIdle)
         }
