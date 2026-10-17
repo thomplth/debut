@@ -54,7 +54,7 @@ and that its sidebar has no extra cities.
 | `onboarding` | Four lossless transparent UI screenshots: Command-Tab and Option-Tab, each with previews enabled and disabled; same nine-window scene, no keystroke captions |
 | `onboarding-speed` | Matched Control-Right then Control-Left at 60 fps, space 2 → 3 → 2; macOS default left, Debut Instant right; MP4 and first-frame poster for setup |
 | `cover` | Both `overlay.png` and native dark-mode `overlay-dark.png`, with space 2 expanded |
-| `overview` | Planned (KHA-1122), not yet in the driver; see [Overview clip](#overview-clip). `overview.gif`: space 2, Weekend Guide → hold Command-Tab, Stocks selected → Up → release → Stocks focused in space 1 → hold Command-Tab → Shift-Tab, Stocks selected → Down → Tab, Weekend Guide selected → release → Weekend Guide focused in space 2; fixture as at start |
+| `overview` | See [Overview clip](#overview-clip). `overview.gif`: space 2, Weekend Guide → hold Command-Tab, Stocks selected → Up → release → Stocks focused in space 1 → hold Command-Tab → Shift-Tab, Stocks selected → Down → Tab, Weekend Guide selected → release → Weekend Guide focused in space 2; fixture as at start |
 | `command-tab` | Retired from the README. Terminal fronted in space 3, then space 2 → hold Command-Tab → 3 → Tab → release → Project notes, second window in space 3 |
 | `organize-windows` | Retired from the README. Space 2 → hold Command-Tab, Weather selected → Up → release → Weather in space 1 |
 | `option-tab` | Retired from the README. Safari in space 2 → hold Option-Tab → release → Field Notes Safari window, first in space 1 |
@@ -67,7 +67,7 @@ debutspace.com. The four retired clips stay in the driver and their GIFs stay in
 
 Cards in a space follow its MRU order, not the fixture order, so each switcher clip reads
 Debut's live selection and fails before releasing the modifier if the intended card is not
-selected. Faster switching stays disabled in the overview and the retired single-window demos.
+selected. Faster switching stays disabled in the retired single-window demos; the overview uses the default, Instant.
 The comparison preserves elapsed time: do not accelerate either recording or trim
 the two sides independently around transitions.
 
@@ -77,7 +77,11 @@ One loop of at most about 12 seconds that shows Command-Tab across spaces and a
 window move, and ends on the frame it began with, using the visual baseline above.
 
 Before recording, set recency so Field Notes leads space 1 and space 2 reads Weekend
-Guide, Stocks, Weather, then show space 2 with Weekend Guide frontmost. Wait until every
+Guide, Stocks, Weather, then show space 2 with Weekend Guide frontmost. Set that order
+through Debut's Command-Tab: an Accessibility raise does not restack across apps on
+macOS 27, and the loop ends in that order. Faster switching is Debut's default, Instant;
+with it off, macOS 27 switches through the system's Control-number shortcut, which
+KeyCastr captions as a press nobody made. Wait until every
 preview, including Chess, has loaded.
 
 | Time (s) | Input | Verified result |
@@ -133,8 +137,8 @@ both sides in one run at 60 fps and produces `onboarding-speed.mp4` plus a lossl
 first-frame `onboarding-speed.png` poster. Playback loops silently in setup and
 pauses when the page is hidden; the poster remains visible while video loads.
 
-Omitting `--clips` regenerates both covers and the four retired GIFs; `overview` is
-not implemented yet. Keep raw output
+Omitting `--clips` regenerates both covers, `overview.gif` and the four retired GIFs,
+which the README no longer uses; capture `--clips cover,overview` for the README. Keep raw output
 until visual review passes. The script starts the guest without graphics, audio,
 clipboard, pointer, or keyboard, and installs KeyCastr only inside the guest. Do not
 run the guest script on the host.
@@ -209,12 +213,12 @@ Inspect every changed asset, including the encoded GIF rather than only its raw
 movie. Extract representative frames or a contact sheet:
 
 ```bash
-ffmpeg -loglevel error -y -i docs/media/option-tab.gif \
-  -vf 'fps=1,scale=480:-1,tile=3x3' -frames:v 1 /tmp/debut-option-contact.png
-ffmpeg -loglevel error -y -ss 1.3 -i docs/media/option-tab.gif \
-  -frames:v 1 /tmp/debut-option-overlay.png
+ffmpeg -loglevel error -y -i docs/media/overview.gif \
+  -vf 'fps=1,scale=480:-1,tile=3x3' -frames:v 1 /tmp/debut-overview-contact.png
+ffmpeg -loglevel error -y -ss 1.3 -i docs/media/overview.gif \
+  -frames:v 1 /tmp/debut-overview-overlay.png
 ffprobe -v error -show_entries stream=width,height,nb_frames,duration \
-  -show_entries format=size -of json docs/media/option-tab.gif
+  -show_entries format=size -of json docs/media/overview.gif
 ```
 
 Open the images and check plate color and label contrast, readable keys, Cupertino,

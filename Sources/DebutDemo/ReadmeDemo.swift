@@ -462,6 +462,57 @@ func recordReadme() {
             scene.verifyFocus(scene.groups[1][1], space: 0)
         }
     }
+    if requestedClips.isEmpty || requestedClips.contains("overview") {
+        // README overview (KHA-1122): Command-Tab across spaces and a window move, out and back.
+        // Space 2 opens Weekend Guide, Stocks, Weather, so Stocks is the first Tab and returns
+        // to the same place, and Field Notes leads space 1.
+        let (guide, weather, stocks) = (scene.groups[1][0], scene.groups[1][1], scene.groups[1][2])
+        scene.restore()
+        setDemoAppearance(dark: false)
+        // Debut's default, Instant: with faster switching off, macOS 27 switches through the
+        // system's Control-number shortcut, which KeyCastr would caption as a press.
+        setDemoInstant(true)
+        scene.focus(scene.groups[0][0])
+        scene.focus(weather)
+        // An Accessibility raise does not restack across apps on macOS 27, so the opening
+        // order, the one the loop ends in, is set through Command-Tab before keys are shown.
+        activateThroughSwitcher(stocks)
+        activateThroughSwitcher(guide)
+        scene.verifyFocus(guide, space: 1)
+        scene.startKeys()
+        waitForDemoIndicatorToHide()
+        clip("overview", seconds: 11) {
+            postFlags(.maskCommand)
+            postTap(Key.tab, flags: .maskCommand, duration: 0.2)
+            wait(0.8)
+            verifyDemoSelection(stocks)
+            postTap(Key.upArrow, flags: .maskCommand, duration: 0.2)
+            wait(1.0)
+            verifyDemoSelection(stocks)
+            releaseDemoModifier()
+            scene.verifyFocus(stocks, space: 0)
+            wait(1.2)
+            postFlags(.maskCommand)
+            postTap(Key.tab, flags: .maskCommand, duration: 0.2)
+            wait(0.7)
+            verifyDemoSelection(scene.groups[0][0])
+            postTap(Key.tab, flags: [.maskCommand, .maskShift], duration: 0.16)
+            wait(0.7)
+            verifyDemoSelection(stocks)
+            postTap(Key.downArrow, flags: .maskCommand, duration: 0.2)
+            wait(0.8)
+            verifyDemoSelection(stocks)
+            postTap(Key.tab, flags: .maskCommand, duration: 0.16)
+            wait(0.8)
+            verifyDemoSelection(guide)
+            releaseDemoModifier()
+            scene.verifyFocus(guide, space: 1)
+            guard scene.service.desktopIndex(forWindow: stocks.windowID) == 1 else {
+                log("FAILED: Stocks did not return to space 2"); exit(1)
+            }
+            waitForDemoIndicatorToHide()
+        }
+    }
     if requestedClips.isEmpty || requestedClips.contains("option-tab") {
         scene.restore()
         setDemoAppearance(dark: false)
@@ -572,4 +623,36 @@ func prepareReadmeBackdrop() {
             options: [.imageScaling: NSImageScaling.scaleAxesIndependently.rawValue])
     }
     wait(0.2)
+}
+
+/// Waits for Debut's desktop indicator to finish, so a loop does not end on it.
+func waitForDemoIndicatorToHide() {
+    let deadline = Date().addingTimeInterval(4)
+    while Date() < deadline {
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]] ?? []
+        let showing = windows.contains { window in
+            guard window[kCGWindowOwnerName as String] as? String == "Debut",
+                  window[kCGWindowLayer as String] as? Int == Int(NSWindow.Level.statusBar.rawValue),
+                  let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
+                  let width = bounds["Width"], let height = bounds["Height"] else { return false }
+            return width > 70 && width < 500 && height > 35 && height < 150
+        }
+        if !showing { wait(0.2); return }
+        wait(0.1)
+    }
+    log("FAILED: desktop indicator did not finish before the loop boundary"); exit(1)
+}
+
+/// Brings `target` forward through Debut's Command-Tab, reading the selection back from Debut.
+func activateThroughSwitcher(_ target: WindowInfo) {
+    postFlags(.maskCommand)
+    postTap(Key.tab, flags: .maskCommand, duration: 0.2)
+    wait(0.6)
+    for _ in 0..<8 where demoSelectedWindowID() != target.windowID {
+        postTap(Key.tab, flags: .maskCommand, duration: 0.16)
+        wait(0.4)
+    }
+    verifyDemoSelection(target)
+    releaseDemoModifier()
 }
