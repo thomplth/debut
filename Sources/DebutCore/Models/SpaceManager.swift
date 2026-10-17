@@ -708,6 +708,66 @@ public struct SpaceManager: Codable, Sendable {
         }
     }
 
+    /// Merges a space into another at a chosen place: its windows, in their order, go into the
+    /// destination at `placement`, as a held plate dropped into a gap shows them. Dormant
+    /// assignments follow as `mergeSpace` files them.
+    mutating func mergeSpace(id sourceID: UUID, intoSpaceID destinationID: UUID,
+                                    at placement: PointerPlacement) {
+        guard sourceID != destinationID,
+              let source = spaceLocation(id: sourceID),
+              let remaining = windowIDs(inSpaceID: destinationID)
+        else { return }
+        let windows = spaceStacks[source.stack].spaces[source.space].windows
+        var index = placement.resolvedIndex(in: remaining) ?? remaining.count
+        for window in windows {
+            removeLiveWindowFromAllSpaces(windowID: window.windowID)
+            insertWindow(window, at: index, inSpaceID: destinationID)
+            index += 1
+        }
+        mergeSpace(id: sourceID, intoSpaceID: destinationID)
+    }
+
+    /// Overlay preview only: moves a space straight after `predecessorID`, or to the top.
+    mutating func moveStagedSpace(id: UUID, after predecessorID: UUID?) {
+        guard let location = spaceLocation(id: id), predecessorID != id else { return }
+        let space = spaceStacks[location.stack].spaces.remove(at: location.space)
+        let spaces = spaceStacks[location.stack].spaces
+        let index = predecessorID.map { predecessor in
+            spaces.firstIndex { $0.id == predecessor }.map { $0 + 1 } ?? spaces.count
+        } ?? 0
+        spaceStacks[location.stack].spaces.insert(space, at: index)
+    }
+
+    /// Overlay preview only. A staged desktop is drawn as a space before macOS has it, and only
+    /// the session's copy of the model may hold one: the persisted model still gains its spaces
+    /// by reconciliation alone. It goes straight after `predecessorID`, or first when that is
+    /// nil, or last when the predecessor is no longer in the stack.
+    mutating func insertStagedSpace(id: UUID, after predecessorID: UUID?, toStackID stackID: String) {
+        guard spaceLocation(id: id) == nil,
+              let stack = spaceStacks.firstIndex(where: { $0.id == stackID })
+        else { return }
+        let spaces = spaceStacks[stack].spaces
+        let index = predecessorID.map { predecessor in
+            spaces.firstIndex { $0.id == predecessor }.map { $0 + 1 } ?? spaces.count
+        } ?? 0
+        spaceStacks[stack].spaces.insert(Space(id: id), at: index)
+    }
+
+    /// Overlay preview only: hides a space the session will remove on commit. Its windows and
+    /// dormant assignments must already have been merged elsewhere. Removing the space showing
+    /// shows `successorID` instead, the desktop the commit switches to.
+    mutating func dropStagedSpace(id: UUID, showing successorID: UUID) {
+        guard let location = spaceLocation(id: id),
+              spaceStacks[location.stack].spaces.count > 1
+        else { return }
+        spaceStacks[location.stack].spaces.remove(at: location.space)
+        if spaceStacks[location.stack].activeSpaceID == id {
+            let spaces = spaceStacks[location.stack].spaces
+            spaceStacks[location.stack].activeSpaceID =
+                spaces.first { $0.id == successorID }?.id ?? spaces[0].id
+        }
+    }
+
     func windowIDs(inSpaceID id: UUID) -> [CGWindowID]? {
         guard let location = spaceLocation(id: id) else { return nil }
         return spaceStacks[location.stack].spaces[location.space].windows.map(\.windowID)

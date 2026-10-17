@@ -13,7 +13,13 @@ public struct Space: Codable, Identifiable, Equatable, Sendable {
     public private(set) var desktopUUID: String?
 
     public init(desktopUUID: String? = nil) {
-        self.id = UUID()
+        self.init(id: UUID(), desktopUUID: desktopUUID)
+    }
+
+    /// A space whose id was chosen before it existed: an overlay session names a desktop it has
+    /// only staged, so the edits aimed at it survive until the desktop is created.
+    init(id: UUID, desktopUUID: String? = nil) {
+        self.id = id
         self.windows = []
         self.desktopUUID = desktopUUID
     }

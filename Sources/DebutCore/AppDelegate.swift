@@ -1052,6 +1052,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             return result
         }
 
+        overlayWindow.onAddDesktop = { [weak self] position in
+            self?.spaceController?.stageNewDesktop(at: position)
+        }
+
+        overlayWindow.onPlateDrop = { [weak self] request in
+            self?.spaceController?.stagePlateDrop(request) ?? .rejected("no controller")
+        }
+
         overlayWindow.onSpaceScrollSelected = { [weak self] index in
             guard let self, let ctrl = self.spaceController else { return }
             ctrl.jumpToSpace(index: index)
@@ -1232,6 +1240,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         vm.cardStyle = OverlayCardStyle(previewsAvailable: spaceController.windowPreviewsEnabled)
         vm.tutorialScope = spaceController.activeTutorialScope
         vm.tutorialCoachmark = spaceController.tutorialCoachmark
+        vm.canManageDesktops = spaceController.canStageDesktopChanges
         return vm
     }
 

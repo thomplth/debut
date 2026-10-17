@@ -21,9 +21,25 @@ enum DesktopManagementCompatibility {
         operatingSystemMajor == 27
     }
 
-    static var isSupported: Bool {
-        supports(operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
+    /// Shows the desktop controls on an unsupported release so their staging and motion can be
+    /// exercised in the macOS 26 guest. A commit there still makes a desktop the Dock never adopts.
+    static var isForced: Bool {
+        ProcessInfo.processInfo.environment["DEBUT_FORCE_DESKTOP_MANAGEMENT"] == "1"
     }
+
+    static var isSupported: Bool {
+        isForced
+            || supports(operatingSystemMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
+    }
+}
+
+/// Where a new desktop goes in its display's order. macOS appends every new desktop; anything
+/// else is a reorder afterwards.
+public enum DesktopPlacement: Equatable, Sendable {
+    case start
+    case end
+    /// Straight after this desktop, ahead of any fullscreen Space that follows it.
+    case after(CGSSpaceID)
 }
 
 /// Why a desktop removal was refused before anything was sent to the window server.
@@ -55,6 +71,29 @@ enum DesktopManagementPlan {
               location.stackID == stackID
         else { return nil }
         return location
+    }
+
+    /// Where `desktopID` must stand in the stack's complete Space order to honour `placement`,
+    /// or nil when it already does or the anchor is gone. The window server takes the desktop
+    /// out and reinserts it at this index, so the index is counted in the finished order.
+    static func orderedIndex(
+        placing desktopID: CGSSpaceID,
+        at placement: DesktopPlacement,
+        in stack: SpaceStackDescriptor
+    ) -> Int? {
+        guard let current = stack.orderedSpaceIDs.firstIndex(of: desktopID) else { return nil }
+        let others = stack.orderedSpaceIDs.filter { $0 != desktopID }
+        let target: Int
+        switch placement {
+        case .end:
+            return nil
+        case .start:
+            target = 0
+        case let .after(anchor):
+            guard let anchorIndex = others.firstIndex(of: anchor) else { return nil }
+            target = anchorIndex + 1
+        }
+        return target == current ? nil : target
     }
 
     static func removalRefusal(

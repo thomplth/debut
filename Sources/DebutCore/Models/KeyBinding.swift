@@ -43,6 +43,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case selectRight
     case quitSelectedApp
     case closeSelectedWindow
+    case addDesktop
+    case removeDesktop
     case dismissOverlay
 
     public var displayName: String {
@@ -93,6 +95,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .moveWindowRight: "Move window right in space"
         case .quitSelectedApp: "Quit selected app"
         case .closeSelectedWindow: "Close selected window"
+        case .addDesktop: "Add desktop"
+        case .removeDesktop: "Remove selected desktop"
         case .dismissOverlay: "Close overlay"
         }
     }
@@ -146,6 +150,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .moveWindowRight: .moveWindowRight
         case .quitSelectedApp: .quitSelectedApp
         case .closeSelectedWindow: .closeSelectedWindow
+        case .addDesktop: .addDesktop
+        case .removeDesktop: .removeDesktop
         case .dismissOverlay: .escape
         }
     }
@@ -277,6 +283,13 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     public static let globalActions =
         activationActions + altTabActions + quickSwitchActions + focusedWindowMoveActions
     public static let sessionActions = allCases.filter { $0.shortcutScope == .session }
+
+    /// Only shown, and only bound, where Debut can add and remove desktops itself.
+    public static let desktopManagementActions: [KeyAction] = [.addDesktop, .removeDesktop]
+
+    /// Defaults added after people already had saved bindings. Each one steps aside when the
+    /// user has already given its key to another action, rather than silently taking it back.
+    static let laterSessionDefaults: [KeyAction] = overlaySelectionActions + desktopManagementActions
 
     public static func jumpAction(forSpaceIndex index: Int) -> KeyAction? {
         switch index {
@@ -489,6 +502,8 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             // the physical Cmd+Q and Cmd+W shortcuts the user already reaches for.
             .quitSelectedApp: KeyCombo(keyCode: kVK_ANSI_Q),
             .closeSelectedWindow: KeyCombo(keyCode: kVK_ANSI_W),
+            .addDesktop: KeyCombo(keyCode: kVK_ANSI_N),
+            .removeDesktop: KeyCombo(keyCode: kVK_Delete),
             .dismissOverlay: KeyCombo(keyCode: kVK_Escape),
         ]
     }
@@ -520,7 +535,7 @@ public struct KeyBindings: Codable, Sendable, Equatable {
             [String].self, forKey: .disabledActions
         )?.compactMap(KeyAction.init(rawValue:)) ?? [])
         var defaults = KeyCombo.defaults()
-        for action in KeyAction.overlaySelectionActions where saved[action] == nil {
+        for action in KeyAction.laterSessionDefaults where saved[action] == nil {
             if let combo = defaults[action], saved.contains(where: { $0.key != action && $0.value == combo }) {
                 defaults.removeValue(forKey: action)
             }

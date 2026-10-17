@@ -885,7 +885,10 @@ public struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            ForEach(KeyAction.sessionActions, id: \.self) { action in
+            ForEach(KeyAction.sessionActions.filter {
+                DesktopManagementCompatibility.isSupported
+                    || !KeyAction.desktopManagementActions.contains($0)
+            }, id: \.self) { action in
                 ShortcutRecorderRow(
                     action: action,
                     keyBindings: $viewModel.settings.keyBindings,

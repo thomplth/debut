@@ -515,26 +515,50 @@ struct StageMotionTests {
         ) == nil)
     }
 
-    @Test("Hover focus persists through a transit gap")
-    func hoverFocusPersistsThroughTransitGap() {
-        let layout = uniformStack(3, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
+    @Test("A plate is hovered a margin past its drawn edge, and no farther")
+    func plateHoverReachesPastItsEdge() {
+        let layout = uniformStack(2, focus: 0, height: 100, spacing: 60, inactiveScale: 0.8)
+        let widths: [CGFloat] = [300, 240]
+        let margin = StageInteraction.plateHitMargin
+        let hovered: (CGFloat, CGFloat) -> Int? = { x, y in
+            StageInteraction.hoveredSpaceIndex(
+                at: CGPoint(x: x, y: y), containerWidth: 500, currentStackOffset: 0,
+                stageWidths: widths, currentLayout: layout
+            )
+        }
+        let top = layout.centers[0] - layout.heights[0] / 2
+        let bottom = layout.centers[1] + layout.heights[1] / 2
+
+        #expect(hovered(250, top - margin + 1) == 0)
+        #expect(hovered(250, top - margin - 1) == nil)
+        #expect(hovered(250, bottom + margin - 1) == 1)
+        #expect(hovered(250, bottom + margin + 1) == nil)
+        #expect(hovered(100 - margin + 1, layout.centers[0]) == 0)
+        #expect(hovered(100 - margin - 1, layout.centers[0]) == nil)
+    }
+
+    @Test("Neighbouring plates split the room between them at its middle")
+    func neighbouringPlatesSplitTheirGap() {
+        let layout = uniformStack(2, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
+        let hovered: (CGFloat) -> Int? = { y in
+            StageInteraction.hoveredSpaceIndex(
+                at: CGPoint(x: 250, y: y), containerWidth: 500, currentStackOffset: 0,
+                stageWidths: [300, 240], currentLayout: layout
+            )
+        }
+
+        #expect(hovered(109) == 0)
+        #expect(hovered(111) == 1)
+    }
+
+    @Test("Plates farther apart than two margins leave the middle of their gap unhovered")
+    func distantPlatesLeaveTheirGapUnhovered() {
+        let layout = uniformStack(2, focus: 0, height: 100, spacing: 100, inactiveScale: 0.8)
 
         #expect(StageInteraction.hoveredSpaceIndex(
-            previous: 2,
-            at: CGPoint(x: 250, y: 110),
-            containerWidth: 500,
-            currentStackOffset: 0,
-            stageWidths: [300, 240, 180],
-            currentLayout: layout
-        ) == 2)
-        #expect(StageInteraction.hoveredSpaceIndex(
-            previous: 2,
-            at: CGPoint(x: 250, y: layout.centers[1]),
-            containerWidth: 500,
-            currentStackOffset: 0,
-            stageWidths: [300, 240, 180],
-            currentLayout: layout
-        ) == 1)
+            at: CGPoint(x: 250, y: 150), containerWidth: 500, currentStackOffset: 0,
+            stageWidths: [300, 240], currentLayout: layout
+        ) == nil)
     }
 
     @Test("Hover hit testing follows the magnified stage frame")
@@ -558,7 +582,6 @@ struct StageMotionTests {
             layout: baseline
         ) == nil)
         #expect(StageInteraction.hoveredSpaceIndex(
-            previous: 0,
             at: location,
             containerWidth: 600,
             currentStackOffset: magnifiedOffset,
@@ -567,81 +590,61 @@ struct StageMotionTests {
         ) == 0)
     }
 
-    @Test("Hover focus clears outside the horizontal transit corridor")
-    func hoverFocusClearsBesideTransitGap() {
-        let layout = uniformStack(2, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
+    @Test("Magnifying the hovered plate keeps it under the pointer anywhere along the stack")
+    func magnifyingTheHoveredPlateKeepsItHovered() {
+        let heights: [CGFloat] = [240, 180, 240, 200, 240]
+        let widths: [CGFloat] = [420, 360, 420, 380, 420]
+        let active = 2
+        let spacing: CGFloat = 14
+        let resolve: (Int?, CGFloat) -> Int? = { hovered, y in
+            let focus = hovered ?? active
+            let baseline = StageMotion.stackLayout(
+                stageHeights: heights, focusIndex: active, spacing: spacing, inactiveScale: 0.7
+            )
+            let layout = StageMotion.stackLayout(
+                stageHeights: heights, focusIndex: focus, spacing: spacing, inactiveScale: 0.7
+            )
+            let baselineOffset = 600 - baseline.centers[active]
+            let offset = StageMotion.anchoredOffset(
+                layout: layout, anchorIndex: focus,
+                anchorY: baselineOffset + baseline.centers[focus]
+            )
+            return StageInteraction.hoveredSpaceIndex(
+                at: CGPoint(x: 400, y: y), containerWidth: 800, currentStackOffset: offset,
+                stageWidths: widths, currentLayout: layout
+            )
+        }
 
-        #expect(StageInteraction.hoveredSpaceIndex(
-            previous: 0,
-            at: CGPoint(x: 420, y: 110),
-            containerWidth: 500,
-            currentStackOffset: 0,
-            stageWidths: [300, 240],
-            currentLayout: layout
-        ) == nil)
+        for sweep in [Array(stride(from: CGFloat(0), through: 1200, by: 1)),
+                      Array(stride(from: CGFloat(1200), through: 0, by: -1))] {
+            var hovered: Int?
+            for y in sweep {
+                hovered = resolve(hovered, y)
+                #expect(resolve(hovered, y) == hovered, "y \(y)")
+            }
+        }
     }
 
-    @Test("Hover focus clears beyond the vertical stack corridor")
-    func hoverFocusClearsAboveAndBelowStack() {
-        let layout = uniformStack(2, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
-        let widths: [CGFloat] = [300, 240]
+    @Test("A plate's pickup shape covers its hit frame in the plate's own unscaled coordinates")
+    func plateHitShapeIsInUnscaledPlateCoordinates() {
+        let drawn = CGRect(x: 100, y: 200, width: 280, height: 140)
+        let hit = drawn.insetBy(dx: -14, dy: -7)
 
-        let top = layout.centers[0] - layout.heights[0] / 2
-        let bottom = layout.centers[1] + layout.heights[1] / 2
-
-        #expect(StageInteraction.hoveredSpaceIndex(
-            previous: 0,
-            at: CGPoint(x: 250, y: top - 1),
-            containerWidth: 500,
-            currentStackOffset: 0,
-            stageWidths: widths,
-            currentLayout: layout
-        ) == nil)
-        #expect(StageInteraction.hoveredSpaceIndex(
-            previous: 1,
-            at: CGPoint(x: 250, y: bottom + 1),
-            containerWidth: 500,
-            currentStackOffset: 0,
-            stageWidths: widths,
-            currentLayout: layout
-        ) == nil)
+        #expect(StageInteraction.plateHitShape(hit: hit, drawn: drawn, scale: 0.7)
+            == CGRect(x: -20, y: -10, width: 440, height: 220))
     }
 
-    @Test("Entering a transit gap without prior focus stays unfocused")
-    func transitGapDoesNotCreateFocus() {
-        let layout = uniformStack(2, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
+    @Test("A tap just past a plate's edge belongs to the plate and keeps the overlay open")
+    func overlayTapNearPlateKeepsOverlay() {
+        let stageFrames = [0: CGRect(x: 100, y: 100, width: 300, height: 200)]
+        let hitFrames = [CGRect(x: 80, y: 80, width: 340, height: 240)]
 
-        #expect(StageInteraction.hoveredSpaceIndex(
-            previous: nil,
-            at: CGPoint(x: 250, y: 110),
-            containerWidth: 500,
-            currentStackOffset: 0,
-            stageWidths: [300, 240],
-            currentLayout: layout
-        ) == nil)
-    }
-
-    @Test("Transit corridor interpolates between unequal stage widths")
-    func unequalWidthTransitCorridor() {
-        let layout = uniformStack(2, focus: 0, height: 100, spacing: 20, inactiveScale: 0.8)
-        let widths: [CGFloat] = [400, 100]
-
-        #expect(StageInteraction.hoveredSpaceIndex(
-            previous: 0,
-            at: CGPoint(x: 390, y: 101),
-            containerWidth: 500,
-            currentStackOffset: 0,
-            stageWidths: widths,
-            currentLayout: layout
-        ) == 0)
-        #expect(StageInteraction.hoveredSpaceIndex(
-            previous: 0,
-            at: CGPoint(x: 390, y: 119),
-            containerWidth: 500,
-            currentStackOffset: 0,
-            stageWidths: widths,
-            currentLayout: layout
-        ) == nil)
+        #expect(StageInteraction.overlayTapTarget(
+            at: CGPoint(x: 90, y: 200), stageFrames: stageFrames, plateHitFrames: hitFrames
+        ) == .none)
+        #expect(StageInteraction.overlayTapTarget(
+            at: CGPoint(x: 70, y: 200), stageFrames: stageFrames, plateHitFrames: hitFrames
+        ) == .dismiss)
     }
 
     @Test("A pointer or drag target becomes the gradient focus")

@@ -37,6 +37,8 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case moveWindowRight        // Right Arrow — reorder within the space
     case quitSelectedApp        // Cmd+Q — quit the app owning the selected window
     case closeSelectedWindow    // Cmd+W — close the selected window
+    case addDesktop             // Cmd+N — stage a new desktop after the last one
+    case removeDesktop          // Cmd+Delete — stage removal of the selected desktop
 
     case escape
 }

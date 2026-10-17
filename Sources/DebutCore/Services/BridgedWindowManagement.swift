@@ -183,6 +183,36 @@ public enum BridgedWindowManagement {
         return true
     }
 
+    private static let moveSpaceOperationClass: AnyClass? =
+        NSClassFromString("SLSBridgedMoveManagedSpaceToDisplayIndexOperation")
+
+    /// Asks the window manager to move a desktop to `index` in its display's Space order.
+    ///
+    /// The unbridged `SLSMoveManagedSpaceToDisplayIndex` reorders behind the Dock's back: on
+    /// macOS 26 Control-Arrow kept the old order and a reboot reverted it. Through the bridge,
+    /// macOS 27's Dock writes the new order to `com.apple.spaces` at once (measured 56ms to
+    /// land on the server). `displayIdentifier` is the managed display's identifier, as
+    /// `CGSCopyManagedDisplaySpaces` reports it. Like a move, dispatching is not landing.
+    @discardableResult
+    public static func moveDesktop(_ space: CGSSpaceID, toDisplay displayIdentifier: String,
+                                   index: Int) -> Bool {
+        typealias MoveInit =
+            @convention(c) (AnyObject, Selector, CGSSpaceID, NSString, Int) -> Unmanaged<AnyObject>?
+        guard space != 0, index >= 0,
+              let operationClass = moveSpaceOperationClass,
+              let msgSend = objcMsgSend,
+              let perform = performOperation,
+              isBridgeDelegateLive(),
+              let allocated = allocate(operationClass),
+              let operation = unsafeBitCast(msgSend, to: MoveInit.self)(
+                  allocated, NSSelectorFromString("initWithSpaceID:displayIdentifier:index:"),
+                  space, displayIdentifier as NSString, index
+              )
+        else { return false }
+        perform(operation.takeRetainedValue())
+        return true
+    }
+
     /// Whether both desktop operations and their entry points resolve on this system.
     static var canManageDesktops: Bool {
         createSpaceOperationClass != nil && destroySpaceOperationClass != nil

@@ -128,6 +128,9 @@ public struct StageOverlayViewModel: Sendable {
     public var forceDisplayStackIndicator: Bool
     public var keyboardWindowMoveAnimation: KeyboardWindowMoveAnimation?
     public var overlayKeyboardInteractionSequence: Int
+    /// Whether the overlay offers to add and remove desktops. Off wherever macOS would not
+    /// adopt a desktop Debut created, so none of the controls are drawn there.
+    public var canManageDesktops = false
 
     public var displayStackName: String {
         spaceManager.selectedSpaceStack?.displayName ?? "Display"

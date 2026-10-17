@@ -338,6 +338,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var pendingExternalDesktopActivations: [String: PendingExternalDesktopActivation] = [:]
     private var desktopSwitchIndicatorTracker = DesktopSwitchIndicatorTracker()
     private var stageStackTransaction = StageStackTransaction()
+    /// The space each desktop staged in this session became, keyed by the id it was staged as.
+    private var committedDesktopIDs: [UUID: UUID] = [:]
+    /// Desktops a committed session removed while they were showing. Each goes once a desktop
+    /// change shows that the commit's switch has left it.
+    private var pendingShowingDesktopRemovals: Set<UUID> = []
     private var isStageStackCommitInFlight = false
     private var pendingOverlayActions: [pid_t: PendingOverlayAction] = [:]
 
@@ -752,14 +757,18 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// The model gains its space by reconciling, never directly, so a desktop macOS did not
     /// list is never a stage. Completes on the main queue with the new space's id, or nil.
     public func addDesktop(completion: (@Sendable (UUID?) -> Void)? = nil) {
-        guard let switcher = spaceSwitcher, switcher.canManageDesktops,
-              let stackID = spaceManager.selectedSpaceStack?.id
+        addDesktop(onStack: spaceManager.selectedSpaceStack?.id, placement: .end, completion: completion)
+    }
+
+    private func addDesktop(onStack stackID: String?, placement: DesktopPlacement,
+                            completion: (@Sendable (UUID?) -> Void)? = nil) {
+        guard let switcher = spaceSwitcher, switcher.canManageDesktops, let stackID
         else {
             diag.report("desktop_add_refused", details: ["reason": "unsupported"])
             completion?(nil)
             return
         }
-        switcher.createDesktop(onStack: stackID) { [weak self] location in
+        switcher.createDesktop(onStack: stackID, placement: placement) { [weak self] location in
             let controller = self
             let finish: @Sendable () -> Void = {
                 guard let controller, let location else {
@@ -950,6 +959,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         captureShowingDesktopsInBackground()
         applyPendingSpaceFocus()
         continueFollowingWindowMove()
+        removeDepartedShowingDesktops()
         return indicatorPresentations
     }
 
@@ -2214,7 +2224,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
         if isSpaceManagerVisible, activeTutorialScope != nil {
             switch event {
-            case .quitSelectedApp, .closeSelectedWindow, .nextDisplayStack,
+            case .quitSelectedApp, .closeSelectedWindow, .addDesktop, .removeDesktop,
+                 .nextDisplayStack,
                  .switchAdjacentSpace, .switchToSpace, .switchToSpaceKeepingCurrentApplication,
                  .moveFocusedWindowToAdjacentSpace,
                  .moveWindowLeft, .moveWindowRight, .jumpToSpace, .jumpToLastSpace:
@@ -2314,7 +2325,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         case .jumpToSpace(let index):
             jumpToSpace(index: index - 1)
         case .jumpToLastSpace:
-            jumpToSpace(index: spaceManager.spaces.count - 1)
+            jumpToSpace(index: overlaySpaceManager.spaces.count - 1)
         case .switchAdjacentSpace(let offset):
             guard abs(offset) == 1, let switcher = spaceSwitcher else { break }
             _ = switcher.switchToAdjacentSpace(
@@ -2339,6 +2350,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             quitSelectedApp()
         case .closeSelectedWindow:
             closeSelectedWindow()
+        case .addDesktop:
+            stageNewDesktop(at: .afterSelection)
+        case .removeDesktop:
+            stageDesktopRemoval(spaceIndex: selectedSpaceIndex)
         }
 
         // A command can legitimately stop at an edge without otherwise changing the model. The
@@ -2679,7 +2694,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         switch event {
         case .nextSpace, .previousSpace, .nextDisplayStack,
              .jumpToSpace, .jumpToLastSpace,
-             .moveWindowUp, .moveWindowDown, .moveWindowLeft, .moveWindowRight:
+             .moveWindowUp, .moveWindowDown, .moveWindowLeft, .moveWindowRight,
+             .addDesktop, .removeDesktop:
             true
         default:
             false
@@ -3375,16 +3391,37 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         guard isSpaceManagerVisible, !isStageStackCommitInFlight else { return }
         provisionalPointerTarget = nil
         isStageStackCommitInFlight = true
-        commitStageStackTransaction { [weak self] in
-            self?.finishSelectionCommit()
+        // Adding and removing desktops renumbers the stages, so the selection is carried across
+        // the commit by identity and found again afterwards.
+        let changesDesktops = stageStackTransaction.changesDesktops
+        let preview = overlaySpaceManager
+        let selectedSpaceID = preview.spaces[safe: selectedSpaceIndex]?.id
+        let selectedWindowID = preview.spaces[safe: selectedSpaceIndex]?
+            .windows[safe: selectedWindowIndex]?.windowID
+        commitStagedSession { [weak self] in
+            guard let self else { return }
+            if changesDesktops {
+                self.reselect(spaceID: selectedSpaceID, windowID: selectedWindowID)
+            }
+            self.finishSelectionCommit()
         }
+    }
+
+    private func reselect(spaceID: UUID?, windowID: CGWindowID?) {
+        let resolvedID = spaceID.map { committedDesktopIDs[$0] ?? $0 }
+        let spaces = spaceManager.spaces
+        selectedSpaceIndex = spaces.firstIndex { $0.id == resolvedID }
+            ?? spaces.firstIndex { $0.id == spaceManager.activeSpaceID } ?? 0
+        selectedWindowIndex = windowID.flatMap { windowID in
+            spaces[safe: selectedSpaceIndex]?.windows.firstIndex { $0.windowID == windowID }
+        } ?? 0
     }
 
     private func commitYieldedOverlaySession() {
         guard isOverlaySessionYielded, !isStageStackCommitInFlight else { return }
         provisionalPointerTarget = nil
         isStageStackCommitInFlight = true
-        commitStageStackTransaction { [weak self] in
+        commitStagedSession { [weak self] in
             guard let self else { return }
             self.isStageStackCommitInFlight = false
             self.isOverlaySessionYielded = false
@@ -3588,12 +3625,41 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// is still the one on screen. The drop names its gap by identity and is replayed that way,
     /// and it records an insertion only: it never promotes the window to the head of its stage.
     func moveWindowByPointerDrop(_ request: PointerWindowDropRequest) -> PointerWindowDropResult {
-        let preview = overlaySpaceManager
         guard isSpaceManagerVisible else { return .rejected("overlay hidden") }
         guard !isStageStackCommitInFlight else { return .rejected("commit in flight") }
-        guard StageStructureFingerprint(spaces: preview.spaces) == request.fingerprint else {
+        guard StageStructureFingerprint(spaces: overlaySpaceManager.spaces) == request.fingerprint
+        else {
             return .rejected("stage structure changed")
         }
+        guard request.createsDesktop else { return stagePointerDrop(request) }
+        // The new desktop is staged first so the move has somewhere to land, and taken back out
+        // if the move is refused: a drop that does nothing must not leave an empty desktop.
+        guard activeTutorialScope == nil, canManageDesktops,
+              let stackID = spaceManager.selectedSpaceStack?.id,
+              let position = request.newDesktopPosition,
+              !overlaySpaceManager.allSpaces.contains(where: { $0.id == request.toSpaceID })
+        else { return .rejected("desktop management unavailable") }
+        let selectedID = overlaySpaceManager.spaces[safe: selectedSpaceIndex]?.id
+        stageStackTransaction.addDesktop(
+            spaceID: request.toSpaceID,
+            onStack: stackID,
+            after: position == .top ? nil : overlaySpaceManager.spaces.last?.id
+        )
+        selectedSpaceIndex = overlaySpaceManager.spaces.firstIndex { $0.id == selectedID } ?? 0
+        let result = stagePointerDrop(request)
+        if result != .accepted {
+            stageStackTransaction.removeDesktop(
+                spaceID: request.toSpaceID,
+                into: spaceManager.activeSpaceID
+            )
+        } else {
+            diag.report("desktop_add_staged", details: ["source": "drop"])
+        }
+        return result
+    }
+
+    private func stagePointerDrop(_ request: PointerWindowDropRequest) -> PointerWindowDropResult {
+        let preview = overlaySpaceManager
         guard let fromSpaceIndex = preview.spaces.firstIndex(where: { $0.id == request.fromSpaceID }),
               let toSpaceIndex = preview.spaces.firstIndex(where: { $0.id == request.toSpaceID })
         else { return .rejected("space unavailable") }
@@ -3641,6 +3707,260 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         return .accepted
     }
 
+    // MARK: - Staged desktops
+
+    /// Whether the overlay may offer to add or remove desktops right now.
+    public var canStageDesktopChanges: Bool {
+        isSpaceManagerVisible && !isStageStackCommitInFlight && overlayMode == .stages
+            && activeTutorialScope == nil && canManageDesktops
+    }
+
+    /// Stages a desktop on the selected display: after the selected desktop, selecting it, or at
+    /// the top or bottom of the stack, leaving the selection where it was. Nothing reaches macOS
+    /// until the session commits, so Escape leaves no desktop behind.
+    @discardableResult
+    public func stageNewDesktop(at position: NewDesktopPosition = .afterSelection) -> UUID? {
+        let preview = overlaySpaceManager
+        guard canStageDesktopChanges, let stackID = spaceManager.selectedSpaceStack?.id else {
+            diag.report("desktop_add_refused", level: .transient, details: ["reason": "unavailable"])
+            return nil
+        }
+        let predecessorID: UUID? = switch position {
+        case .afterSelection: preview.spaces[safe: selectedSpaceIndex]?.id ?? preview.spaces.last?.id
+        case .top: nil
+        case .bottom: preview.spaces.last?.id
+        }
+        let spaceID = UUID()
+        let selectedID = position == .afterSelection ? spaceID : preview.spaces[safe: selectedSpaceIndex]?.id
+        stageStackTransaction.addDesktop(spaceID: spaceID, onStack: stackID, after: predecessorID)
+        selectedSpaceIndex = overlaySpaceManager.spaces.firstIndex { $0.id == selectedID } ?? 0
+        if position == .afterSelection { selectedWindowIndex = 0 }
+        diag.report("desktop_add_staged", details: [
+            "source": position == .afterSelection ? "command" : "button",
+            "position": "\(overlaySpaceManager.spaces.firstIndex { $0.id == spaceID } ?? -1)",
+        ])
+        notifyOverlayUpdated()
+        return spaceID
+    }
+
+    /// Stages the removal of a desktop, its windows joining `destinationIndex`. With none named
+    /// they join the desktop showing, which is where macOS itself would put them, or, when the
+    /// showing desktop is the one going, its neighbour above, else below. The commit switches
+    /// to the selection before a removed showing desktop is destroyed. A display's last
+    /// desktop is refused.
+    @discardableResult
+    public func stageDesktopRemoval(spaceIndex: Int, into destinationIndex: Int? = nil) -> Bool {
+        stageDesktopRemoval(spaceIndex: spaceIndex, into: destinationIndex, placement: nil)
+    }
+
+    private func stageDesktopRemoval(spaceIndex: Int, into destinationIndex: Int?,
+                                     placement: PointerPlacement?) -> Bool {
+        let preview = overlaySpaceManager
+        let showingID = preview.activeSpaceID
+        let neighbourID = preview.spaces[safe: spaceIndex - 1]?.id ?? preview.spaces[safe: spaceIndex + 1]?.id
+        guard canStageDesktopChanges,
+              preview.spaces.count > 1,
+              let space = preview.spaces[safe: spaceIndex],
+              let destinationID = destinationIndex.map({ preview.spaces[safe: $0]?.id })
+                ?? (space.id == showingID ? neighbourID : showingID),
+              destinationID != space.id,
+              preview.spaces.contains(where: { $0.id == destinationID })
+        else {
+            diag.report("desktop_remove_refused", level: .transient, details: [
+                "spaceIndex": "\(spaceIndex)",
+                "reason": "unavailable",
+            ])
+            return false
+        }
+        let selectedID = preview.spaces[safe: selectedSpaceIndex]?.id
+        stageStackTransaction.removeDesktop(spaceID: space.id, into: destinationID,
+                                            placement: placement)
+
+        let after = overlaySpaceManager.spaces
+        if selectedID == space.id {
+            selectedSpaceIndex = after.firstIndex { $0.id == destinationID } ?? 0
+            selectedWindowIndex = 0
+        } else if let selectedID, let index = after.firstIndex(where: { $0.id == selectedID }) {
+            selectedSpaceIndex = index
+        }
+        diag.report("desktop_remove_staged", details: [
+            "space": spaceLabel(forID: space.id),
+            "into": spaceLabel(forID: destinationID),
+            "source": destinationIndex == nil ? "command" : "merge",
+        ])
+        notifyOverlayUpdated()
+        return true
+    }
+
+    /// A held plate dropped into another plate's gap, or between plates. Validated against the
+    /// preview the overlay aimed at, like a window drop.
+    func stagePlateDrop(_ request: PlateDropRequest) -> PointerWindowDropResult {
+        let preview = overlaySpaceManager
+        guard canStageDesktopChanges else { return .rejected("desktop management unavailable") }
+        guard StageStructureFingerprint(spaces: preview.spaces) == request.fingerprint else {
+            return .rejected("stage structure changed")
+        }
+        guard let sourceIndex = preview.spaces.firstIndex(where: { $0.id == request.spaceID }) else {
+            return .rejected("space unavailable")
+        }
+        switch request.action {
+        case let .merge(destinationID, placement):
+            guard let destinationIndex = preview.spaces.firstIndex(where: { $0.id == destinationID })
+            else { return .rejected("space unavailable") }
+            return stageDesktopRemoval(spaceIndex: sourceIndex, into: destinationIndex,
+                                       placement: placement) ? .accepted : .rejected("merge refused")
+        case let .reorder(predecessorID):
+            return stageDesktopReorder(spaceIndex: sourceIndex, after: predecessorID)
+        }
+    }
+
+    /// Stages moving a desktop straight after another, or to the top. The selection follows
+    /// its desktop by identity.
+    private func stageDesktopReorder(spaceIndex: Int, after predecessorID: UUID?) -> PointerWindowDropResult {
+        let preview = overlaySpaceManager
+        guard let space = preview.spaces[safe: spaceIndex],
+              let stackID = spaceManager.selectedSpaceStack?.id
+        else { return .rejected("space unavailable") }
+        let currentPredecessor = preview.spaces[safe: spaceIndex - 1]?.id
+        guard predecessorID != currentPredecessor, predecessorID != space.id else { return .noChange }
+        let selectedID = preview.spaces[safe: selectedSpaceIndex]?.id
+        stageStackTransaction.reorderDesktop(spaceID: space.id, onStack: stackID, after: predecessorID)
+        if let selectedID,
+           let index = overlaySpaceManager.spaces.firstIndex(where: { $0.id == selectedID }) {
+            selectedSpaceIndex = index
+        }
+        diag.report("desktop_reorder_staged", details: [
+            "space": spaceLabel(forID: space.id),
+            "to": "\(overlaySpaceManager.spaces.firstIndex { $0.id == space.id } ?? -1)",
+        ])
+        notifyOverlayUpdated()
+        return .accepted
+    }
+
+    /// Carries out the desktops a session added and moved, one after another in the order they
+    /// were staged, each straight after the desktop it was staged after. A created desktop's
+    /// real space is swapped in for the id it was staged under; one macOS refuses is dropped
+    /// with the edits aimed at it, so its windows stay where they were.
+    private func applyStagedDesktopEdits(completion: @escaping @Sendable () -> Void) {
+        switch stageStackTransaction.nextDesktopEdit {
+        case nil:
+            completion()
+        case let .add(staged):
+            let placement = desktopPlacement(after: staged.predecessorID, onStack: staged.stackID)
+            addDesktop(onStack: staged.stackID, placement: placement) { [weak self] spaceID in
+                guard let self else { return }
+                self.stageStackTransaction.resolveDesktop(staged.spaceID, as: spaceID)
+                if let spaceID { self.committedDesktopIDs[staged.spaceID] = spaceID }
+                self.applyStagedDesktopEdits(completion: completion)
+            }
+        case let .reorder(reorder):
+            let placement = desktopPlacement(after: reorder.predecessorID, onStack: reorder.stackID)
+            reorderDesktop(spaceID: reorder.spaceID, placement: placement) { [weak self] in
+                guard let self else { return }
+                self.stageStackTransaction.finishReorder(reorder)
+                self.applyStagedDesktopEdits(completion: completion)
+            }
+        }
+    }
+
+    /// Moves the desktop behind a space and reconciles, so the model takes macOS's new order.
+    private func reorderDesktop(spaceID: UUID, placement: DesktopPlacement,
+                                completion: @escaping @Sendable () -> Void) {
+        guard let switcher = spaceSwitcher,
+              let stackID = spaceManager.spaceStackID(containingSpaceID: spaceID),
+              let index = spaceManager.spaceStacks.first(where: { $0.id == stackID })?
+                .spaces.firstIndex(where: { $0.id == spaceID }),
+              let location = switcher.spaceTopology().stack(id: stackID)?.location(at: index)
+        else {
+            diag.report("desktop_reorder_refused", details: ["space": spaceLabel(forID: spaceID)])
+            completion()
+            return
+        }
+        switcher.moveDesktop(location, placement: placement) { [weak self] moved in
+            let controller = self
+            let finish: @Sendable () -> Void = {
+                guard let controller else { return completion() }
+                controller.reconcileSpacesWithDesktops()
+                controller.diag.report("desktop_reordered", details: [
+                    "space": controller.spaceLabel(forID: spaceID),
+                    "from": "\(location.index)",
+                    "to": moved.map { "\($0.index)" } ?? "none",
+                ])
+                completion()
+            }
+            if Thread.isMainThread { finish() } else { DispatchQueue.main.async(execute: finish) }
+        }
+    }
+
+    /// The macOS placement for a desktop staged after `predecessorID`. A predecessor that is
+    /// not a desktop yet cannot be named to the window server, so the desktop goes last.
+    private func desktopPlacement(after predecessorID: UUID?, onStack stackID: String) -> DesktopPlacement {
+        guard let predecessorID else { return .start }
+        guard let stack = spaceManager.spaceStacks.first(where: { $0.id == stackID }),
+              let index = stack.spaces.firstIndex(where: { $0.id == predecessorID }),
+              let desktopID = spaceSwitcher?.spaceTopology().stack(id: stackID)?.desktopIDs[safe: index]
+        else { return .end }
+        return .after(desktopID)
+    }
+
+    /// Destroys the desktops a session removed. Their windows were already moved to their
+    /// destinations by the transaction commit, so each one goes empty. A desktop still showing
+    /// waits for the commit's switch to leave it: macOS would otherwise pick where to go.
+    private func removeStagedDesktops(_ removals: [StageStackTransaction.StagedRemoval],
+                                      completion: @escaping @Sendable () -> Void) {
+        guard let removal = removals.first else {
+            completion()
+            return
+        }
+        let remaining = Array(removals.dropFirst())
+        if spaceManager.spaceStacks.contains(where: { $0.activeSpaceID == removal.spaceID }) {
+            pendingShowingDesktopRemovals.insert(removal.spaceID)
+            diag.report("desktop_remove_deferred", details: [
+                "space": spaceLabel(forID: removal.spaceID), "reason": "showing",
+            ])
+            removeStagedDesktops(remaining, completion: completion)
+            return
+        }
+        removeDesktop(spaceID: removal.spaceID) { [weak self] _ in
+            self?.removeStagedDesktops(remaining, completion: completion)
+        }
+    }
+
+    /// Removes a desktop the session merged away while it was showing, once a switch has
+    /// left it. Runs on every desktop change; one the user never leaves waits for them to.
+    private func removeDepartedShowingDesktops() {
+        guard !pendingShowingDesktopRemovals.isEmpty else { return }
+        for spaceID in pendingShowingDesktopRemovals {
+            guard spaceManager.allSpaces.contains(where: { $0.id == spaceID }) else {
+                pendingShowingDesktopRemovals.remove(spaceID)
+                continue
+            }
+            guard !spaceManager.spaceStacks.contains(where: { $0.activeSpaceID == spaceID })
+            else { continue }
+            pendingShowingDesktopRemovals.remove(spaceID)
+            removeDesktop(spaceID: spaceID)
+        }
+    }
+
+    /// Commits the whole session in the order macOS can follow: create and reorder desktops,
+    /// move windows, then remove desktops. The caller switches afterwards, which is what lets a
+    /// removed showing desktop go.
+    private func commitStagedSession(completion: @escaping @Sendable () -> Void) {
+        guard stageStackTransaction.changesDesktops else {
+            commitStageStackTransaction(completion: completion)
+            return
+        }
+        committedDesktopIDs = [:]
+        applyStagedDesktopEdits { [weak self] in
+            guard let self else { return }
+            let removals = self.stageStackTransaction.stagedRemovals
+            self.commitStageStackTransaction { [weak self] in
+                guard let self else { return }
+                self.removeStagedDesktops(removals, completion: completion)
+            }
+        }
+    }
+
     /// Close the overlay but keep the Cmd session alive.
     /// Next Cmd+Tab or Cmd+Option+Tab reopens the overlay.
     private func discardOverlay() {
@@ -3682,10 +4002,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     }
 
     private func cycleSpace(forward: Bool) {
-        guard isSpaceManagerVisible, !spaceManager.spaces.isEmpty else { return }
+        let spaces = overlaySpaceManager.spaces
+        guard isSpaceManagerVisible, !spaces.isEmpty else { return }
 
-        let indices = (activeTutorialScope?.desktopIndices ?? Array(spaceManager.spaces.indices))
-            .filter { spaceManager.spaces.indices.contains($0) }
+        let indices = (activeTutorialScope?.desktopIndices ?? Array(spaces.indices))
+            .filter { spaces.indices.contains($0) }
         guard !indices.isEmpty else { return }
         let current = indices.firstIndex(of: selectedSpaceIndex) ?? 0
         selectedSpaceIndex = indices[(current + (forward ? 1 : indices.count - 1)) % indices.count]
@@ -3697,9 +4018,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// highlight a card, and keep the current card position when the destination has one.
     private func selectCardInAdjacentSpace(forward: Bool) {
         guard isSpaceManagerVisible else { return }
-        let indices = (activeTutorialScope?.desktopIndices ?? Array(spaceManager.spaces.indices))
-            .filter { spaceManager.spaces.indices.contains($0) }
-            .filter { !overlaySpaceManager.spaces[$0].windows.isEmpty }
+        let spaces = overlaySpaceManager.spaces
+        let indices = (activeTutorialScope?.desktopIndices ?? Array(spaces.indices))
+            .filter { spaces.indices.contains($0) }
+            .filter { !spaces[$0].windows.isEmpty }
         guard !indices.isEmpty else { return }
         let next = if forward {
             indices.first(where: { $0 > selectedSpaceIndex }) ?? indices[0]
@@ -3746,7 +4068,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public func jumpToSpace(index: Int) {
         guard activeTutorialScope?.desktopIndices.contains(index) ?? true else { return }
         guard isSpaceManagerVisible,
-              spaceManager.spaces.indices.contains(index) else { return }
+              overlaySpaceManager.spaces.indices.contains(index) else { return }
         selectedSpaceIndex = index
         selectedWindowIndex = 0
         notifyOverlayUpdated()

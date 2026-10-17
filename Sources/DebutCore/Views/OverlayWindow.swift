@@ -72,6 +72,9 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     public var onWindowSelected: ((Int, Int) -> Void)?
     public var onAltTabWindowSelected: ((Int) -> Void)?
     var onPointerWindowDrop: ((PointerWindowDropRequest) -> PointerWindowDropResult)?
+    public var onAddDesktop: ((NewDesktopPosition) -> Void)?
+    /// A held plate dropped into another plate's gap, or between plates.
+    var onPlateDrop: ((PlateDropRequest) -> PointerWindowDropResult)?
     public var onPointerSelectionChanged: ((Int?, Int?) -> Void)?
     public var onAltTabPointerSelectionChanged: ((Int?) -> Void)?
     public var onBackdropDismissed: (() -> Void)?
@@ -146,6 +149,8 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         view.scrollRelay = scrollRelay
         view.compactDragSession = compactDragSession
         view.onPointerWindowDrop = onPointerWindowDrop
+        view.onAddDesktop = onAddDesktop
+        view.onPlateDrop = onPlateDrop
         view.onSpaceScrollSelected = onSpaceScrollSelected
         view.onWindowScrollStepped = onWindowScrollStepped
         view.onSpaceScrollRouted = onSpaceScrollRouted

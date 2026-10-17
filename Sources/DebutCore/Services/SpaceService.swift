@@ -1335,14 +1335,18 @@ public protocol SpaceSwitching: AnyObject, Sendable {
     /// Whether this conformer can add and remove macOS desktops. False keeps the commands
     /// inert, exactly as `canMoveWindows` does for moves.
     var canManageDesktops: Bool { get }
-    /// Appends a desktop to the stack and reports where it landed once macOS lists it there,
-    /// or nil when it did not. Completion may run on any queue.
-    func createDesktop(onStack stackID: String,
+    /// Adds a desktop to the stack at `placement` and reports where it landed once macOS lists
+    /// it there, or nil when it did not. Completion may run on any queue.
+    func createDesktop(onStack stackID: String, placement: DesktopPlacement,
                        completion: @escaping @Sendable (DesktopLocation?) -> Void)
     /// Removes a desktop that is not showing; its windows land on the desktop that is.
     /// Reports true once macOS no longer lists it. Completion may run on any queue.
     func removeDesktop(_ location: DesktopLocation,
                        completion: @escaping @Sendable (Bool) -> Void)
+    /// Moves an existing desktop to `placement` and reports where it stands afterwards, which
+    /// is where it was when the move did not land. Completion may run on any queue.
+    func moveDesktop(_ location: DesktopLocation, placement: DesktopPlacement,
+                     completion: @escaping @Sendable (DesktopLocation?) -> Void)
 }
 
 public extension SpaceSwitching {
@@ -1363,13 +1367,21 @@ public extension SpaceSwitching {
     func cancelPendingSwitches() {}
     func setFrontProcess(pid: pid_t, onDesktop desktopID: CGSSpaceID) -> Bool { false }
     var canManageDesktops: Bool { false }
-    func createDesktop(onStack stackID: String,
+    func createDesktop(onStack stackID: String, placement: DesktopPlacement,
                        completion: @escaping @Sendable (DesktopLocation?) -> Void) {
         completion(nil)
+    }
+    func createDesktop(onStack stackID: String,
+                       completion: @escaping @Sendable (DesktopLocation?) -> Void) {
+        createDesktop(onStack: stackID, placement: .end, completion: completion)
     }
     func removeDesktop(_ location: DesktopLocation,
                        completion: @escaping @Sendable (Bool) -> Void) {
         completion(false)
+    }
+    func moveDesktop(_ location: DesktopLocation, placement: DesktopPlacement,
+                     completion: @escaping @Sendable (DesktopLocation?) -> Void) {
+        completion(nil)
     }
 
     func spaceTopology() -> SpaceTopology {
@@ -2207,7 +2219,11 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     /// The window server chooses the display, so a desktop that lands on another stack than
     /// the one asked for is removed again rather than reported: the caller asked for a stage
     /// beside the ones it is showing, not for one on a screen it is not looking at.
-    public func createDesktop(onStack stackID: String,
+    ///
+    /// macOS appends every new desktop, so any other placement is a reorder. On macOS 27 the
+    /// Dock adopts a bridged reorder as it adopts the desktop itself; a reorder that does not
+    /// land leaves the desktop where macOS put it, which is still a desktop the user asked for.
+    public func createDesktop(onStack stackID: String, placement: DesktopPlacement,
                               completion: @escaping @Sendable (DesktopLocation?) -> Void) {
         guard canManageDesktops, spaceTopology().stack(id: stackID) != nil else {
             completion(nil)
@@ -2221,20 +2237,69 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
                 completion(nil)
                 return
             }
-            let location = waitForTopology { topology in
+            let listed = waitForTopology { topology in
                 topology.location(ofSpace: desktopID) != nil
-            }.flatMap {
-                DesktopManagementPlan.createdLocation(of: desktopID, onStack: stackID, in: $0)
             }
-            if location == nil {
+            guard let listed,
+                  DesktopManagementPlan.createdLocation(of: desktopID, onStack: stackID, in: listed) != nil
+            else {
                 BridgedWindowManagement.destroyDesktop(desktopID)
                 DiagnosticReporter.shared.report("desktop_create_failed", details: [
                     "stackID": stackID, "desktopID": "\(desktopID)",
                     "reason": "notListedOnRequestedStack",
                 ])
+                completion(nil)
+                return
             }
-            completion(location)
+            completion(place(desktopID, onStack: stackID, at: placement, in: listed))
         }
+    }
+
+    /// Reorders a desktop with the same bridged move that places a new one.
+    public func moveDesktop(_ location: DesktopLocation, placement: DesktopPlacement,
+                            completion: @escaping @Sendable (DesktopLocation?) -> Void) {
+        guard canManageDesktops else {
+            completion(nil)
+            return
+        }
+        moveQueue.async { [self] in
+            completion(place(location.desktopID, onStack: location.stackID, at: placement,
+                             in: spaceTopology()))
+        }
+    }
+
+    /// Moves a desktop into place and reports where it ended up.
+    private func place(_ desktopID: CGSSpaceID, onStack stackID: String,
+                       at placement: DesktopPlacement, in topology: SpaceTopology) -> DesktopLocation? {
+        let located = { (topology: SpaceTopology) in
+            DesktopManagementPlan.createdLocation(of: desktopID, onStack: stackID, in: topology)
+        }
+        guard let stack = topology.stack(id: stackID),
+              let target = DesktopManagementPlan.orderedIndex(
+                  placing: desktopID, at: placement, in: stack
+              )
+        else { return located(topology) }
+        guard let display = managedDisplayIdentifier(forStack: stackID),
+              BridgedWindowManagement.moveDesktop(desktopID, toDisplay: display, index: target),
+              let moved = waitForTopology(until: {
+                  $0.stack(id: stackID)?.orderedSpaceIDs.firstIndex(of: desktopID) == target
+              })
+        else {
+            DiagnosticReporter.shared.report("desktop_place_failed", details: [
+                "stackID": stackID, "desktopID": "\(desktopID)", "index": "\(target)",
+            ])
+            return located(spaceTopology())
+        }
+        return located(moved)
+    }
+
+    /// The identifier the window server files a stack's Spaces under. A shared stack is the
+    /// display wall, which it files under the main display.
+    private func managedDisplayIdentifier(forStack stackID: String) -> String? {
+        guard stackID == SpaceTopology.sharedStackID else { return stackID }
+        let managed = managedDisplaySpaces()
+        let display = managed.first { ($0["Display Identifier"] as? String) == "Main" } ?? managed.first
+        return display?["Display Identifier"] as? String
     }
 
     public func removeDesktop(_ location: DesktopLocation,
