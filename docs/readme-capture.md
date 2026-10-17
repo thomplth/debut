@@ -17,6 +17,9 @@ than working around them per run.
   authoritative conversion filters.
 - `scripts/demo-capture-guest.sh`: guest-only installation, TCC grants, display and
   nine-window setup, and KeyCastr preferences.
+- `Sources/DebutDemo/CaptureSettings.swift`: the only settings a capture changes from
+  Debut's fresh defaults. Never hard-code appearance in a script or the driver; media
+  follows whatever the app ships.
 - `Sources/DebutDemo/ReadmeDemo.swift`: Weather, appearance, placement, keystrokes,
   and destination verification.
 - `Sources/DebutDemo/MediaCapture.swift` and `DemoMediaSupport.swift`:
@@ -30,7 +33,7 @@ than working around them per run.
 | Space 2 | Safari / Weekend Guide, Weather / Cupertino, Stocks |
 | Space 3 | Terminal / Project, TextEdit / Project notes, TextEdit / Reading list |
 | Display | 1440×900 logical pixels at 2× |
-| Debut | Clear glass, scale 1.4, inactive scale 0.7, corner radius 40; the script owns the exact settings |
+| Debut | Fresh `AppSettings()` defaults: previews use the preview appearance, the two no-preview onboarding stills the icon appearance. `Sources/DebutDemo/CaptureSettings.swift` adds only login launch off, no exclusions, and faster switching per clip |
 | GIF appearance | Light mode, with light rendered overlay plates |
 | Weather | Cupertino, California, search closed, no other saved locations visible |
 | KeyCastr | Pinned 0.11.1; 64 pt for individual demos, 128 pt before half-width comparison scaling |
@@ -102,7 +105,8 @@ first clip and the covers were fine, so reviewing only those missed it.
 
 For each interaction clip the driver restores the fixture, selects light appearance,
 and starts a fresh Debut process before starting KeyCastr and recording.
-`setDemoInstant(false)` currently restarts Debut while disabling faster switching.
+`setDemoInstant(false)` currently restarts Debut from the fresh capture settings with
+faster switching disabled; nothing set for an earlier clip carries over.
 Cover capture intentionally switches native appearance for each PNG and refreshes
 Debut's previews, then light mode is retained for the GIFs.
 

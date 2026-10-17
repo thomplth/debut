@@ -117,12 +117,8 @@ as_console killall NotificationCenter 2>/dev/null || true
 
 echo "Preparing the display before Debut starts..."
 as_console env HOME="$console_home" "$DEMO_SOURCE" --prepare-display --display "$DISPLAY_MODE"
-# Consistent capture settings, independent of the guest's previous session.
-as_console mkdir -p "$console_home/Library/Application Support/Debut"
-demo_stage_scale=1.4
-as_console tee "$console_home/Library/Application Support/Debut/settings.json" >/dev/null <<JSON
-{"launchAtLogin":false,"excludedBundleIDs":[],"glassStyle":"Clear","stageCornerRadius":40,"inactiveStageScale":0.7,"stageScale":$demo_stage_scale,"features":{"fasterDesktopSwitching":false}}
-JSON
+# Debut's fresh defaults plus only the fixture's deltas, encoded by the driver as AppSettings.
+as_console env HOME="$console_home" "$DEMO_SOURCE" --reset-settings
 
 echo "Provisioning three real desktops through Mission Control..."
 as_console env HOME="$console_home" "$PROVISION_SOURCE" reset-desktops

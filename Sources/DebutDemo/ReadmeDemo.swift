@@ -287,14 +287,13 @@ func releaseDemoModifier() {
     wait(1.1)
 }
 
-func setDemoInstant(_ enabled: Bool) {
+/// Restarts Debut from the fresh capture settings, so no earlier clip's choice carries over.
+func setDemoInstant(_ enabled: Bool, windowPreviews: Bool = true) {
     _ = run("/usr/bin/pkill", ["-x", "Debut"])
     wait(0.6)
-    let url = DebutCore.applicationSupportDirectory.appendingPathComponent("settings.json")
-    var settings = (try? JSONDecoder().decode(AppSettings.self, from: Data(contentsOf: url))) ?? AppSettings()
-    settings.features.fasterDesktopSwitching = enabled
-    settings.spaceSwitchDuration = 0
-    try! JSONEncoder().encode(settings).write(to: url, options: .atomic)
+    do {
+        try writeCaptureSettings(captureSettings(fasterDesktopSwitching: enabled, windowPreviews: windowPreviews))
+    } catch { log("FAILED: could not write the capture settings: \(error)"); exit(1) }
     _ = run("/usr/bin/open", ["/Applications/Debut.app"])
     wait(3)
 }
@@ -313,14 +312,9 @@ func recordReadme() {
     scene.focus(scene.groups[1][0])
     clearNotifications()
     if requestedClips.contains("onboarding") {
+        // Previews off is icon mode, drawn with its own fresh defaults.
         for previews in [true, false] {
-            _ = run("/usr/bin/pkill", ["-x", "Debut"])
-            wait(0.6)
-            let settingsURL = DebutCore.applicationSupportDirectory.appendingPathComponent("settings.json")
-            var settings = try! JSONDecoder().decode(AppSettings.self, from: Data(contentsOf: settingsURL))
-            settings.features.windowPreviews = previews
-            try! JSONEncoder().encode(settings).write(to: settingsURL, options: .atomic)
-            setDemoInstant(false)
+            setDemoInstant(false, windowPreviews: previews)
             scene.restore()
             scene.focus(scene.groups[1][0])
             for command in [true, false] {

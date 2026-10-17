@@ -247,6 +247,14 @@ func arrangeOnboardingWindows() {
 
 // MARK: - Main
 
+// The guest resets Debut before it first launches; this needs no capture permission.
+if arguments.contains("--reset-settings") {
+    do { try writeCaptureSettings(captureSettings()) }
+    catch { log("FAILED: could not write the capture settings: \(error)"); exit(1) }
+    log("wrote fresh capture settings")
+    exit(0)
+}
+
 try? FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
 guard CGPreflightScreenCaptureAccess() else {
