@@ -547,6 +547,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     /// How long a window must stop changing before its debounced background capture fires.
     public var backgroundPreviewSettleDelay: TimeInterval = PreviewCaptureDebouncer.defaultSettleDelay
+    /// A title change captures a window at most once in this long, counted from its last
+    /// capture for any reason (KHA-1111). Below the preview TTL, so the trailing change still
+    /// lands before age alone would ask for it.
+    public var titlePreviewCaptureInterval: TimeInterval = SpaceController.defaultTitlePreviewCaptureInterval
+    public static let defaultTitlePreviewCaptureInterval: TimeInterval = 30
     private lazy var previewDebouncer = PreviewCaptureDebouncer(
         delay: { [weak self] in self?.backgroundPreviewSettleDelay ?? PreviewCaptureDebouncer.defaultSettleDelay },
         fire: { [weak self] windowID, reason in
@@ -3248,7 +3253,12 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// evidence the change is over — focus leaving the window, a desktop switch that finished —
     /// and captures at once. Anything else waits until the window has been quiet for
     /// `backgroundPreviewSettleDelay`.
-    func capturePreviewInBackground(_ windowID: CGWindowID, reason: String, settled: Bool) {
+    func capturePreviewInBackground(
+        _ windowID: CGWindowID,
+        reason: String,
+        settled: Bool,
+        atLeast minimumDelay: TimeInterval = 0
+    ) {
         guard windowPreviewsEnabled, !previewCaptureSuspended,
               spaceOwningWindow(windowID: windowID) != nil
         else { return }
@@ -3256,7 +3266,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             previewDebouncer.cancel(windowID)
             captureWindowPreviews(windowIDs: [windowID], reason: reason, priority: .background)
         } else {
-            previewDebouncer.debounce(windowID, reason: reason)
+            previewDebouncer.debounce(windowID, reason: reason, atLeast: minimumDelay)
         }
     }
 
@@ -3276,8 +3286,21 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
     }
 
+    /// A window's title can change every few seconds — one measured p50 5s, p10 1.6s — so the
+    /// settle delay alone fired on nearly every change, and 94% of those captures were replaced
+    /// before any overlay showed them (KHA-1111). Each window gets at most one title-driven
+    /// capture per `titlePreviewCaptureInterval`, the trailing one, so its last state is still
+    /// captured. The focused window gets none: focus leaving it captures it, and an overlay
+    /// open captures the window in front.
     public func recordWindowTitleChange(windowID: CGWindowID) {
-        capturePreviewInBackground(windowID, reason: "title_changed", settled: false)
+        guard windowID != focusedWindowID else { return }
+        let sinceCapture = previewCacheEntries[windowID].map { clock().timeIntervalSince($0.capturedAt) }
+        capturePreviewInBackground(
+            windowID,
+            reason: "title_changed",
+            settled: false,
+            atLeast: sinceCapture.map { titlePreviewCaptureInterval - $0 } ?? 0
+        )
     }
 
     /// Windows discovery just found. Only one with no preview yet needs a first picture.

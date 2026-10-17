@@ -64,7 +64,9 @@ Between overlay opens, previews are kept current by window events. Focus leaving
 a desktop switch that has settled capture at once: each is evidence the change is over. Focus
 arriving, a resize, a title change and a new window restart a per-window timer, and the capture
 fires once the window has been quiet for a second, and only if it is on a showing desktop. There
-is no maximum wait. An overlay open takes over any capture still waiting. Background capture
+is no maximum wait. A title change captures a window at most once every 30 seconds from its last
+capture, taking the trailing change, and never captures the focused window, which focus leaving
+it captures instead. An overlay open takes over any capture still waiting. Background capture
 stops while the screen is locked, the displays sleep or another session is in front.
 
 At an overlay open, the window in use when the shortcut was pressed is captured straight away,

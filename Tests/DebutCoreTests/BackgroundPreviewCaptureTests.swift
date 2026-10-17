@@ -33,7 +33,8 @@ private func captured(_ service: MockWindowService) -> [CGWindowID] {
 @Suite("Background preview capture", .serialized)
 struct BackgroundPreviewCaptureTests {
     private func makeController(
-        settleDelay: TimeInterval = 0.15
+        settleDelay: TimeInterval = 0.15,
+        titleInterval: TimeInterval = 0
     ) -> (SpaceController, MockWindowService, MockKeyboardService, UUID, UUID) {
         let windowService = MockWindowService()
         let keyboardService = MockKeyboardService()
@@ -43,6 +44,7 @@ struct BackgroundPreviewCaptureTests {
             focusedWindowSnapshotProvider: { .unfocused }
         )
         controller.backgroundPreviewSettleDelay = settleDelay
+        controller.titlePreviewCaptureInterval = titleInterval
         let showing = controller.spaceManager.spaces[0].id
         controller.spaceManager.addFixtureDesktop()
         let hidden = controller.spaceManager.spaces[1].id
@@ -100,6 +102,40 @@ struct BackgroundPreviewCaptureTests {
         #expect(waitFor { captured(service).contains(101) })
         Thread.sleep(forTimeInterval: 0.2)
         #expect(!captured(service).contains(909))
+    }
+
+    @Test("Title changes capture a window at most once per interval, taking the last one")
+    func titleChangesRateLimited() {
+        // Long enough that a stalled runner reaching the middle check late is still inside it.
+        let (controller, service, _, _, _) = makeController(settleDelay: 0.05, titleInterval: 6)
+        DispatchQueue.main.sync { controller.recordWindowTitleChange(windowID: 101) }
+        #expect(waitFor { captured(service) == [101] }, "a first title change waits only to settle")
+        #expect(waitFor { controller.windowPreviews[101] != nil })
+
+        for _ in 0..<3 {
+            DispatchQueue.main.sync { controller.recordWindowTitleChange(windowID: 101) }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        // Past the scheduler's own one-second spacing, which would otherwise hide a capture.
+        Thread.sleep(forTimeInterval: 2)
+        #expect(captured(service) == [101], "captured moments ago: \(captured(service))")
+        #expect(waitFor(timeout: 20) { captured(service) == [101, 101] }, "the trailing change is still captured")
+        Thread.sleep(forTimeInterval: 0.5)
+        #expect(captured(service) == [101, 101], "one capture for the burst: \(captured(service))")
+    }
+
+    @Test("A title change on the focused window waits for focus to leave it")
+    func focusedTitleChangeSkipped() {
+        let (controller, service, _, _, _) = makeController(settleDelay: 0.05)
+        DispatchQueue.main.sync { controller.recordWindowActivation(windowID: 101) }
+        #expect(waitFor { captured(service) == [101] }, "focus arriving still settles into one capture")
+        for _ in 0..<3 {
+            DispatchQueue.main.sync { controller.recordWindowTitleChange(windowID: 101) }
+        }
+        Thread.sleep(forTimeInterval: 2)
+        #expect(captured(service) == [101], "retitles while in use: \(captured(service))")
+        DispatchQueue.main.sync { controller.recordWindowActivation(windowID: 102) }
+        #expect(waitFor { captured(service).filter { $0 == 101 }.count == 2 }, "focus_left captures it")
     }
 
     @Test("A settled desktop switch captures the windows now showing")

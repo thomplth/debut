@@ -24,11 +24,12 @@ final class PreviewCaptureDebouncer: @unchecked Sendable {
         self.fire = fire
     }
 
-    func debounce(_ windowID: CGWindowID, reason: String) {
+    /// `atLeast` holds the capture longer than the settle delay, for a caller rate-limiting it.
+    func debounce(_ windowID: CGWindowID, reason: String, atLeast minimumDelay: TimeInterval = 0) {
         tokens += 1
         let token = tokens
         pending[windowID] = (reason, token)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay()) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(delay(), minimumDelay)) { [weak self] in
             guard let self, let entry = self.pending[windowID], entry.token == token else { return }
             self.pending[windowID] = nil
             self.fire(windowID, entry.reason)
