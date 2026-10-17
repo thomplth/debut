@@ -41,7 +41,7 @@ grant() {
     csreq_hex="$(printf '%s' "$requirement" | csreq -r- -b /dev/stdout | xxd -p | tr -d '\n')"
     timestamp="$(date +%s)"
     for db in "$SYSTEM_TCC_DB" "$USER_TCC_DB"; do
-        sudo sqlite3 "$db" "INSERT OR REPLACE INTO access VALUES(\
+        sudo sqlite3 "$db" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 '$service','${client//\'/\'\'}',$client_type,2,4,1,X'$csreq_hex',NULL,0,'$indirect',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);" 2>/dev/null || true
     done
 }

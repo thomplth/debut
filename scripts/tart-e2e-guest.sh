@@ -133,7 +133,7 @@ grant_accessibility() {
     escaped_client="${client//\'/\'\'}"
     timestamp="$(date +%s)"
 
-    sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+    sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServiceAccessibility','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
@@ -148,9 +148,9 @@ grant_screen_capture() {
     escaped_client="${client//\'/\'\'}"
     timestamp="$(date +%s)"
 
-    sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+    sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServiceScreenCapture','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
-    sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+    sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServiceScreenCapture','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
@@ -220,9 +220,9 @@ grant_post_event() {
     escaped_client="${client//\'/\'\'}"
     timestamp="$(date +%s)"
 
-    sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+    sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServicePostEvent','$escaped_client',1,2,4,1,$csreq_sql,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
-    sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "INSERT OR REPLACE INTO access VALUES(\
+    sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServicePostEvent','$escaped_client',1,2,4,1,$csreq_sql,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 

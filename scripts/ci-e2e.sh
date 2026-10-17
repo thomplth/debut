@@ -58,17 +58,17 @@ echo "Granting Accessibility access inside the disposable runner..."
 requirement=$(codesign -d -r- "$app_path" 2>&1 | awk -F ' => ' '/designated/{print $2}')
 csreq_hex=$(printf '%s' "$requirement" | csreq -r- -b /dev/stdout | xxd -p | tr -d '\n')
 timestamp=$(date +%s)
-sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
+sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServiceAccessibility','$bundle_id',0,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 # The suite itself reads Mission Control's accessibility tree to provision desktops, which is a
 # separate client from the app bundle.
 e2e_requirement=$(codesign -d -r- "$e2e_path" 2>&1 | awk -F ' => ' '/designated/{print $2}')
 e2e_csreq_hex=$(printf '%s' "$e2e_requirement" | csreq -r- -b /dev/stdout | xxd -p | tr -d '\n')
-sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
+sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServiceAccessibility','$e2e_path',1,2,4,1,X'$e2e_csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 # The suite samples animation frames in-process rather than spawning `screencapture`, so it needs
 # the capture permission under its own identity rather than the shell's.
-sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access VALUES(\
+sudo sqlite3 "$system_tcc_db" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServiceScreenCapture','$e2e_path',1,2,4,1,X'$e2e_csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 sudo killall tccd 2>/dev/null || true
 

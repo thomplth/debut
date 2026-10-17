@@ -7,9 +7,12 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 source "$SCRIPT_DIR/tart-queue.sh"
 # shellcheck source=scripts/tart-run-report.sh
 source "$SCRIPT_DIR/tart-run-report.sh"
-VM_NAME="${DEBUT_TART_VM:-debut-e2e-tahoe}"
-VM_IMAGE="ghcr.io/cirruslabs/macos-tahoe-base:latest"
-SHARE_DIR="${DEBUT_TART_SHARE:-$HOME/Library/Caches/Debut/TartE2E}"
+# shellcheck source=scripts/tart-guest.sh
+source "$SCRIPT_DIR/tart-guest.sh"
+tart_guest_select || exit 2
+VM_NAME="${DEBUT_TART_VM:-$TART_GUEST_VM}"
+VM_IMAGE="$TART_GUEST_IMAGE"
+SHARE_DIR="${DEBUT_TART_SHARE:-$TART_GUEST_SHARE}"
 VM_LOG="$SHARE_DIR/tart-vm.log"
 SSH_KEY="$SHARE_DIR/id_ed25519"
 KNOWN_HOSTS="$SHARE_DIR/known_hosts"
@@ -45,7 +48,7 @@ Usage: scripts/tart-e2e.sh <prepare|run|stop|status>
        scripts/tart-e2e.sh run [--groups <group,...>] [--scenarios <id,...>]
                                [--duration-profile ordinary|full] [--no-gallery]
 
-  prepare  Clone and configure the free Tahoe VM (one-time, about 27 GB download),
+  prepare  Clone and configure the free macOS VM (one-time, about 34 GB download),
            then drop the downloaded image from the Tart cache
   run      Run every check in the headless guest
   stop     Stop the warm guest VM (refused while another task's run holds the queue;
@@ -79,8 +82,14 @@ Each run keeps its log, guest results and a report.json with phase timings, sour
 identity and check results in \$DEBUT_TART_SHARE/runs/<run-id>. The newest
 DEBUT_TART_KEEP_RUNS (default 5) runs and as many unsuccessful ones are kept.
 
-Overrides: DEBUT_TART_VM, DEBUT_TART_SHARE, DEBUT_E2E_DURATION_PROFILE,
-           DEBUT_TART_QUEUE_DIR, DEBUT_TART_KEEP_RUNS, DEBUT_TART_KEEP_WARM
+Guest release: DEBUT_TART_OS=26 (default) uses macOS 26 Tahoe, VM debut-e2e-tahoe and
+\$HOME/Library/Caches/Debut/TartE2E. DEBUT_TART_OS=27 uses macOS 27 Golden Gate, VM
+debut-e2e-27 and \$HOME/Library/Caches/Debut/TartE2E-27. Both share the one queue.
+This selection: $VM_NAME from $VM_IMAGE, share $SHARE_DIR.
+
+Overrides: DEBUT_TART_OS, DEBUT_TART_VM, DEBUT_TART_IMAGE, DEBUT_TART_SHARE,
+           DEBUT_E2E_DURATION_PROFILE, DEBUT_TART_QUEUE_DIR, DEBUT_TART_KEEP_RUNS,
+           DEBUT_TART_KEEP_WARM
 EOF
 }
 

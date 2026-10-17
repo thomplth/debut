@@ -10,8 +10,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=scripts/tart-queue.sh
 source "$SCRIPT_DIR/tart-queue.sh"
-VM_NAME="${DEBUT_TART_VM:-debut-e2e-tahoe}"
-SHARE_DIR="${DEBUT_TART_SHARE:-$HOME/Library/Caches/Debut/TartE2E}"
+# shellcheck source=scripts/tart-guest.sh
+source "$SCRIPT_DIR/tart-guest.sh"
+tart_guest_select || exit 2
+VM_NAME="${DEBUT_TART_VM:-$TART_GUEST_VM}"
+SHARE_DIR="${DEBUT_TART_SHARE:-$TART_GUEST_SHARE}"
 SSH_KEY="$SHARE_DIR/id_ed25519"
 KNOWN_HOSTS="$SHARE_DIR/known_hosts"
 MEDIA_DIR="$PROJECT_DIR/docs/media"
@@ -28,8 +31,11 @@ Records the README media in the Tart guest and converts it into docs/media.
 Requires the VM from scripts/tart-e2e.sh prepare, plus ffmpeg on the host.
 The default captures the cover and all four README demos.
 
-Overrides: DEBUT_TART_VM, DEBUT_TART_SHARE, DEBUT_DEMO_DISPLAY, DEBUT_DEMO_GIF_WIDTH,
-           DEBUT_DEMO_GIF_COLORS, DEBUT_DEMO_STILL_WIDTH
+DEBUT_TART_OS selects the guest release as for scripts/tart-e2e.sh: 26 (default, Tahoe)
+or 27 (Golden Gate, VM debut-e2e-27).
+
+Overrides: DEBUT_TART_OS, DEBUT_TART_VM, DEBUT_TART_SHARE, DEBUT_DEMO_DISPLAY,
+           DEBUT_DEMO_GIF_WIDTH, DEBUT_DEMO_GIF_COLORS, DEBUT_DEMO_STILL_WIDTH
 EOF
 }
 
@@ -48,7 +54,7 @@ for tool in tart ffmpeg; do
     command -v "$tool" >/dev/null 2>&1 || { echo "$tool is required." >&2; exit 1; }
 done
 tart list --source local --quiet | grep -Fqx "$VM_NAME" || {
-    echo "Tart VM $VM_NAME does not exist. Run scripts/tart-e2e.sh prepare first." >&2
+    echo "Tart VM $VM_NAME does not exist. Run DEBUT_TART_OS=$TART_GUEST_OS scripts/tart-e2e.sh prepare first." >&2
     exit 1
 }
 

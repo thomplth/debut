@@ -5,8 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=scripts/tart-queue.sh
 source "$SCRIPT_DIR/tart-queue.sh"
-VM_NAME="${DEBUT_TART_VM:-debut-e2e-tahoe}"
-SHARE_DIR="${DEBUT_TART_SHARE:-$HOME/Library/Caches/Debut/TartE2E}"
+# shellcheck source=scripts/tart-guest.sh
+source "$SCRIPT_DIR/tart-guest.sh"
+tart_guest_select || exit 2
+VM_NAME="${DEBUT_TART_VM:-$TART_GUEST_VM}"
+SHARE_DIR="${DEBUT_TART_SHARE:-$TART_GUEST_SHARE}"
 PROFILE="${2:-typical}"
 
 case "$PROFILE" in typical|busy|stress) ;; *) echo "Profile must be typical, busy, or stress" >&2; exit 2 ;; esac
@@ -16,7 +19,7 @@ case "${1:-}" in
 esac
 
 command -v tart >/dev/null || { echo "Tart is required" >&2; exit 1; }
-tart list --source local --quiet | grep -Fqx "$VM_NAME" || { echo "Prepare $VM_NAME with scripts/tart-e2e.sh prepare" >&2; exit 1; }
+tart list --source local --quiet | grep -Fqx "$VM_NAME" || { echo "Prepare $VM_NAME with DEBUT_TART_OS=$TART_GUEST_OS scripts/tart-e2e.sh prepare" >&2; exit 1; }
 
 "$PROJECT_DIR/scripts/build-app.sh"
 TOOLCHAINS=com.apple.dt.toolchain.XcodeDefault /usr/bin/swift build -c release --product DebutPerformanceFixture

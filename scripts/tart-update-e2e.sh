@@ -3,14 +3,17 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/tart-queue.sh
 source "$root/scripts/tart-queue.sh"
+# shellcheck source=scripts/tart-guest.sh
+source "$root/scripts/tart-guest.sh"
+tart_guest_select || exit 2
 baseline="${1:?usage: tart-update-e2e.sh <baseline.dmg> <candidate.dmg> <appcast.xml> <build-version>}"
 candidate="${2:?missing candidate}"
 appcast="${3:?missing appcast}"
 build="${4:?missing build}"
-vm="${DEBUT_UPDATE_VM:-debut-update-tahoe}"
+vm="${DEBUT_UPDATE_VM:-$TART_GUEST_UPDATE_VM}"
 share="${DEBUT_UPDATE_SHARE:-$HOME/Library/Caches/Debut/TartUpdate}"
 if ! tart list --source local --quiet | grep -Fxq "$vm"; then
-    echo "Prepare a separate update VM with: tart clone debut-e2e-tahoe $vm" >&2
+    echo "Prepare a separate update VM with: tart clone $TART_GUEST_VM $vm" >&2
     exit 1
 fi
 mkdir -p "$share"
