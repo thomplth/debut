@@ -101,7 +101,7 @@ public enum DockOverviewDetector {
         }
     }
 
-    static func isDisplaySized(_ window: [String: Any], displayBounds: [CGRect]) -> Bool {
+    public static func isDisplaySized(_ window: [String: Any], displayBounds: [CGRect]) -> Bool {
         guard let boundsDictionary = window[kCGWindowBounds as String] as? [String: Any],
               let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary)
         else { return false }
