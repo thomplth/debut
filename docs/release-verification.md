@@ -63,7 +63,8 @@ tart clone debut-e2e-tahoe debut-update-tahoe
 ```
 
 Use a separate VM; the wrapper stops only `debut-update-tahoe` (overridable with
-`DEBUT_UPDATE_VM`). Evidence is in `~/Library/Caches/Debut/TartUpdate/evidence`.
+`DEBUT_UPDATE_VM`). With `DEBUT_TART_OS=27` it uses `debut-update-27`, cloned from
+`debut-e2e-27`. Evidence is in `~/Library/Caches/Debut/TartUpdate/evidence`.
 The stable release gate requires a previous signed stable release and fails rather
 than silently skipping if none is available. The first isolated nightly has no
 compatible predecessor and explicitly bootstraps its feed; later nightly releases

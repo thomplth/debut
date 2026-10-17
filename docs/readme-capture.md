@@ -102,17 +102,21 @@ shows every key at 64 pt.
 ## Running a scoped capture
 
 Requires an Apple Silicon host with Xcode and command-line tools, `tart`,
-`ffmpeg`/`ffprobe`, and a prepared macOS 26 VM. `scripts/tart-e2e.sh prepare`
-documents initial provisioning.
+`ffmpeg`/`ffprobe`, and a prepared guest VM. Media is captured on the macOS 27
+guest, `debut-e2e-27`, so it shows the current system look and desktop management;
+`DEBUT_TART_OS=27 ./scripts/tart-e2e.sh prepare` provisions it (see
+[the macOS 27 guest](#the-macos-27-guest)). Capture only once the E2E suite passes
+on that guest. The macOS 26 guest, `debut-e2e-tahoe`, remains the E2E default.
 
 Clone the stopped prepared VM into a disposable capture VM with a dedicated shared
 cache, so older raw files cannot be converted by accident. Choose unused names when
 captures run concurrently.
 
 ```bash
-tart clone debut-e2e-tahoe debut-readme-capture
+tart clone debut-e2e-27 debut-readme-capture
 tart set debut-readme-capture --cpu 6 --memory 8192 --display 1440x900
 
+DEBUT_TART_OS=27 \
 DEBUT_TART_VM=debut-readme-capture \
 DEBUT_TART_SHARE="$HOME/Library/Caches/Debut/ReadmeCapture" \
 ./scripts/demo-capture.sh --clips organize-windows,option-tab --keep-raw
@@ -138,6 +142,22 @@ run the guest script on the host.
 An already-running VM keeps the share it was started with; changing the environment
 variable does not remount it. Stop and restart only the capture VM, with the correct
 `--dir`, if the mount needs to change.
+
+### The macOS 27 guest
+
+`debut-e2e-27` is a clone of `ghcr.io/cirruslabs/macos-golden-gate-base:latest`, the
+Cirrus Labs macOS 27 (Golden Gate) base image, prepared on 2026-10-17 from the
+image uploaded on 2026-10-03: macOS 27.0 (build 26A428). The image already has what
+the harness expects (user `admin` with passwordless `sudo`, automatic login, Remote
+Login, and `tart-guest-agent`), so prepare only clones it, sizes it like the Tahoe
+guest (6 CPUs, 8 GB, 1440×900) and drops the cached image.
+
+Its appearance stays at system defaults: Light, Multicolor accent, and System
+Settings → Appearance → Liquid Glass Tint Amount untouched. After prepare the guest's
+global and Universal Access domains hold no appearance, accent, icon-tint or glass
+key at all. Neither prepare, the host profile nor the capture scripts write the
+tint; do not change it for a capture. The host profile still pins Light appearance
+and turns Reduce Transparency, Increase Contrast and Reduce Motion off, as on 26.
 
 ### Appearance is a capture invariant
 

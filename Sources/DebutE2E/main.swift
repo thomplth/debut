@@ -1096,6 +1096,62 @@ func postMouseDrag(from start: CGPoint, through edge: CGPoint, to end: CGPoint) 
     up.post(tap: .cghidEventTap)
 }
 
+/// Holds the button through every point of `path`, which starts where the button goes down.
+func postMouseDrag(path: [CGPoint]) {
+    guard !skipsSyntheticDrags, let start = path.first, let end = path.last else { return }
+    guard let down = CGEvent(
+        mouseEventSource: nil,
+        mouseType: .leftMouseDown,
+        mouseCursorPosition: start,
+        mouseButton: .left
+    ) else { return }
+    down.post(tap: .cghidEventTap)
+    wait(0.25)
+    for point in path.dropFirst() {
+        guard let dragged = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .leftMouseDragged,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) else { continue }
+        dragged.post(tap: .cghidEventTap)
+        wait(0.06)
+    }
+    wait(0.15)
+    guard let up = CGEvent(
+        mouseEventSource: nil,
+        mouseType: .leftMouseUp,
+        mouseCursorPosition: end,
+        mouseButton: .left
+    ) else { return }
+    up.post(tap: .cghidEventTap)
+}
+
+/// The pointer path that merges the held plate `sourceSpaceIndex` into `destinationSpaceIndex`,
+/// from `pickup`, in screen coordinates and starting at `pickup`.
+func plateMergePath(
+    cardAspects: [[CGFloat?]],
+    pickup: CGPoint,
+    sourceSpaceIndex: Int,
+    destinationSpaceIndex: Int
+) -> [CGPoint]? {
+    let reservesIndicator = ProcessInfo.processInfo.environment["DEBUT_FORCE_DISPLAY_STACK_INDICATOR"] == "1"
+        || NSScreen.screens.count > 1
+    let origin = CGPoint(x: overlayBounds.minX, y: overlayBounds.minY)
+    return StageConstants.dragViewPlateMergePath(
+        contentAspects: cardAspects,
+        stageScale: CGFloat(interactionSettings.appearance(for: reportedCardStyle).stageScale),
+        cardSpacing: CGFloat(interactionSettings.previewCardSpacing),
+        containerSize: overlayBounds.size,
+        reservesDisplayIndicator: reservesIndicator,
+        from: CGPoint(x: pickup.x - origin.x, y: pickup.y - origin.y),
+        sourceSpaceIndex: sourceSpaceIndex,
+        destinationSpaceIndex: destinationSpaceIndex,
+        cardStyle: reportedCardStyle,
+        badgeGrowth: CGFloat(interactionSettings.badgeGrowth)
+    ).map { [pickup] + $0.map { CGPoint(x: origin.x + $0.x, y: origin.y + $0.y) } }
+}
+
 func spaceWindowCounts(in state: [String: String]) -> [Int] {
     (state["windowCountsBySpace"] ?? "")
         .split(separator: ",")
@@ -1181,7 +1237,7 @@ func stageCenter(
 func dragViewDropPoint(
     cardAspects: [[CGFloat?]],
     sourceSpaceIndex: Int,
-    sourceWindowIndex: Int,
+    sourceWindowIndex: Int?,
     destinationSpaceIndex: Int
 ) -> CGPoint? {
     let reservesIndicator = ProcessInfo.processInfo.environment["DEBUT_FORCE_DISPLAY_STACK_INDICATOR"] == "1"
@@ -1570,13 +1626,35 @@ func dismissSystemWindowOverview(
     return waitUntil { !isActive() }
 }
 
+/// Whether Mission Control, App Exposé or Show Desktop is visibly up, for deciding whether to
+/// dismiss one. On macOS 27 the Dock's layer-20 backdrop that Debut also counts can stay on
+/// screen after an ordinary desktop switch with no overview showing (KHA-1137); toggling then
+/// opened Mission Control instead of closing it. Only WindowManager's display-sized overlay is
+/// trusted here, read through Debut's own detector with the Dock marker left out.
 func systemWindowOverviewActive() -> Bool {
-    guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
-        as? [[String: Any]]
-    else { return false }
-    return windows.contains { window in
-        (window[kCGWindowLayer as String] as? NSNumber)?.int32Value == 18
-            && (window[kCGWindowOwnerName as String] as? String) == "Dock"
+    guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 else {
+        return DockOverviewDetector.isActive()
+    }
+    let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+    return DockOverviewDetector.isActive(
+        in: windows.filter { ($0[kCGWindowOwnerName as String] as? String) != "Dock" },
+        operatingSystemMajor: 27,
+        displayBounds: DockOverviewDetector.activeDisplayBounds()
+    )
+}
+
+/// The on-screen Dock and WindowManager windows the overview detector weighs, for a failure log.
+func systemOverviewMarkers() -> [String] {
+    let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+    return windows.compactMap { window in
+        guard let owner = window[kCGWindowOwnerName as String] as? String,
+              ["Dock", "WindowManager"].contains(owner),
+              let layer = (window[kCGWindowLayer as String] as? NSNumber)?.intValue, (18...20).contains(layer),
+              let bounds = window[kCGWindowBounds as String] as? [String: Any],
+              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+        else { return nil }
+        let alpha = (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? -1
+        return "\(owner) layer \(layer) \(Int(rect.width))×\(Int(rect.height)) at \(Int(rect.minX)),\(Int(rect.minY)) alpha \(alpha)"
     }
 }
 
@@ -5846,9 +5924,17 @@ func restoreFixtureWindows() -> Bool {
 /// state is each scenario's precondition.
 @MainActor
 func restoreBaseState() -> Bool {
+    if systemWindowOverviewActive() {
+        info("  Overview reported before any input: \(systemOverviewMarkers())")
+        _ = takeScreenshot("base_state_before_input")
+    }
     postKeyDown(keyCode: CGKeyCode(kVK_Escape))
     postKeyUp(keyCode: CGKeyCode(kVK_Escape))
     postFlagsChanged(flags: [])
+    // A pointer left at the top edge holds macOS 27's desktop bar, and Mission Control with it,
+    // open through every dismissal; an earlier pointer journey can leave it there.
+    let screen = CGDisplayBounds(CGMainDisplayID())
+    postMouseMove(to: CGPoint(x: screen.maxX - 4, y: screen.maxY - 4))
     let overviewClosed = dismissSystemWindowOverview()
     let fixturesRestored = restoreFixtureWindows()
     _ = SpaceService().switchToDesktop(index: 0)
@@ -5857,6 +5943,10 @@ func restoreBaseState() -> Bool {
     if !(overviewClosed && fixturesRestored && onFirstDesktop) {
         info("Base state: overviewClosed=\(overviewClosed) fixturesRestored=\(fixturesRestored) "
             + "firstDesktop=\(onFirstDesktop)")
+        if !overviewClosed {
+            info("  Overview markers: \(systemOverviewMarkers())")
+            _ = takeScreenshot("base_state_overview_open")
+        }
     }
     return overviewClosed && fixturesRestored && onFirstDesktop
 }
@@ -5941,6 +6031,7 @@ let scenarioBodies: [String: @MainActor () -> Void] = [
     "system-duration-transition": scenario_system_duration_transition,
     "prepared-arrival": scenario_prepared_arrival,
     "native-retarget": scenario_native_retarget,
+    "desktop-management": scenario_desktop_management,
     "onboarding-journey": scenario_onboarding_journey,
     "settings-chrome": scenario_settings_chrome,
     "selected-window-dismissal": scenario_selected_window_dismissal,

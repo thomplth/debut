@@ -1192,8 +1192,9 @@ public struct StageConstants {
     }
 
     /// A point on `destinationSpaceIndex`'s first row in the drag view that picking up the given
-    /// card would show, in overlay coordinates. E2E aims its drops here: it is the same snapshot
-    /// the overlay draws and hit-tests, so the two cannot drift apart.
+    /// card, or with no window index the whole plate, would show, in overlay coordinates. E2E
+    /// aims its drops here: it is the same snapshot the overlay draws and hit-tests, so the two
+    /// cannot drift apart.
     public static func dragViewDropPoint(
         contentAspects: [[CGFloat?]],
         stageScale: CGFloat,
@@ -1201,7 +1202,7 @@ public struct StageConstants {
         containerSize: CGSize,
         reservesDisplayIndicator: Bool,
         sourceSpaceIndex: Int,
-        sourceWindowIndex: Int,
+        sourceWindowIndex: Int?,
         destinationSpaceIndex: Int,
         cardStyle: OverlayCardStyle = .previews,
         badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
@@ -1246,21 +1247,20 @@ public struct StageConstants {
         )
     }
 
-    /// Where a window drag reaches the + at one end of the drag view, and the point inside the
-    /// plate that + opens into, in overlay coordinates. Capture drivers aim a held window here,
-    /// from the same variants the overlay draws and hit-tests.
-    public static func dragViewNewDesktopPoints(
+    /// The drag view's variants for a drag picked up from `sourceWindowIndex` (a whole plate when
+    /// nil), built as the overlay builds them, for the public aim helpers below.
+    private static func dragViewVariants(
         contentAspects: [[CGFloat?]],
         stageScale: CGFloat,
         cardSpacing: CGFloat,
         containerSize: CGSize,
         reservesDisplayIndicator: Bool,
         sourceSpaceIndex: Int,
-        sourceWindowIndex: Int,
-        position: NewDesktopPosition,
-        cardStyle: OverlayCardStyle = .previews,
-        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
-    ) -> (button: CGPoint, plate: CGPoint)? {
+        sourceWindowIndex: Int?,
+        cardStyle: OverlayCardStyle,
+        badgeGrowth: CGFloat,
+        newDesktopIDs: [NewDesktopPosition: UUID] = [:]
+    ) -> CompactDragVariants? {
         var nextWindowID: CGWindowID = 1
         let fingerprint = StageStructureFingerprint(stages: contentAspects.map { aspects in
             StageStructureFingerprint.Stage(spaceID: UUID(), windows: aspects.map { _ in
@@ -1276,7 +1276,7 @@ public struct StageConstants {
             cardStyle: cardStyle,
             badgeGrowth: badgeGrowth
         )
-        guard let variants = CompactDragSnapshot.makeVariants(
+        return CompactDragSnapshot.makeVariants(
             sessionID: UUID(),
             generation: 1,
             fingerprint: fingerprint,
@@ -1293,6 +1293,30 @@ public struct StageConstants {
                 containerSize: containerSize,
                 reservesDisplayIndicator: reservesDisplayIndicator
             ),
+            newDesktopIDs: newDesktopIDs
+        )
+    }
+
+    /// Where a window drag reaches the + at one end of the drag view, and the point inside the
+    /// plate that + opens into, in overlay coordinates. Capture drivers aim a held window here,
+    /// from the same variants the overlay draws and hit-tests.
+    public static func dragViewNewDesktopPoints(
+        contentAspects: [[CGFloat?]],
+        stageScale: CGFloat,
+        cardSpacing: CGFloat,
+        containerSize: CGSize,
+        reservesDisplayIndicator: Bool,
+        sourceSpaceIndex: Int,
+        sourceWindowIndex: Int,
+        position: NewDesktopPosition,
+        cardStyle: OverlayCardStyle = .previews,
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
+    ) -> (button: CGPoint, plate: CGPoint)? {
+        guard let variants = dragViewVariants(
+            contentAspects: contentAspects, stageScale: stageScale, cardSpacing: cardSpacing,
+            containerSize: containerSize, reservesDisplayIndicator: reservesDisplayIndicator,
+            sourceSpaceIndex: sourceSpaceIndex, sourceWindowIndex: sourceWindowIndex,
+            cardStyle: cardStyle, badgeGrowth: badgeGrowth,
             newDesktopIDs: [.top: UUID(), .bottom: UUID()]
         ), let button = variants.collapsed.newDesktopTargets.first(where: { $0.position == position }),
            let expanded = variants.expanded[position],
@@ -1300,6 +1324,67 @@ public struct StageConstants {
            let plate = expanded.stages[safe: plateIndex]
         else { return nil }
         return (button.center, CGPoint(x: expanded.centerX, y: plate.centerY))
+    }
+
+    /// A pointer path, in overlay coordinates, that carries a held plate from `start` onto
+    /// `destinationSpaceIndex` so that releasing at its last point merges the two desktops.
+    ///
+    /// One drop point is not enough: crossing the room between plates opens a slot, which moves
+    /// the drag view to its slotted scale and the destination with it. The path is walked through
+    /// the drag view's own retargeting, and re-aimed at the destination as drawn until the target
+    /// is a merge. Nil when no merge is reached.
+    public static func dragViewPlateMergePath(
+        contentAspects: [[CGFloat?]],
+        stageScale: CGFloat,
+        cardSpacing: CGFloat,
+        containerSize: CGSize,
+        reservesDisplayIndicator: Bool,
+        from start: CGPoint,
+        sourceSpaceIndex: Int,
+        destinationSpaceIndex: Int,
+        stepsPerLeg: Int = 16,
+        cardStyle: OverlayCardStyle = .previews,
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
+    ) -> [CGPoint]? {
+        guard destinationSpaceIndex != sourceSpaceIndex, stepsPerLeg > 0,
+              let variants = dragViewVariants(
+                  contentAspects: contentAspects, stageScale: stageScale, cardSpacing: cardSpacing,
+                  containerSize: containerSize, reservesDisplayIndicator: reservesDisplayIndicator,
+                  sourceSpaceIndex: sourceSpaceIndex, sourceWindowIndex: nil,
+                  cardStyle: cardStyle, badgeGrowth: badgeGrowth
+              )
+        else { return nil }
+
+        var snapshot = variants.collapsed
+        var intent: CompactDropIntent?
+        var path: [CGPoint] = []
+        var last = start
+        func merges() -> Bool { intent?.slot == nil && intent?.stageIndex == destinationSpaceIndex }
+        func destinationCenter() -> CGPoint? {
+            snapshot.plateFrame(stageIndex: destinationSpaceIndex,
+                                projection: snapshot.projection(for: intent))
+                .map { CGPoint(x: $0.midX, y: $0.midY) }
+        }
+        func walk(to target: CGPoint, steps: Int) {
+            for step in 1...steps {
+                let progress = CGFloat(step) / CGFloat(steps)
+                let point = CGPoint(x: last.x + (target.x - last.x) * progress,
+                                    y: last.y + (target.y - last.y) * progress)
+                (snapshot, intent) = variants.retarget(at: point, from: snapshot, intent: intent)
+                path.append(point)
+            }
+            last = target
+        }
+
+        guard let first = destinationCenter() else { return nil }
+        walk(to: first, steps: stepsPerLeg)
+        // Each correction aims at where the destination is drawn now; the stack only moves when
+        // the target changes, so this settles within a few legs or not at all.
+        for _ in 0..<4 where !merges() {
+            guard let center = destinationCenter() else { return nil }
+            walk(to: center, steps: max(1, stepsPerLeg / 2))
+        }
+        return merges() ? path : nil
     }
 
     /// Where a window card is drawn, for callers outside the view hierarchy. E2E clicks and drags

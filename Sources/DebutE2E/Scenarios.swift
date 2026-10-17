@@ -64,6 +64,8 @@ let e2eScenarioCatalog: [E2EScenarioDescriptor] = [
           summary: "A faster-off switch reveals the chosen window already on top"),
     .init(id: "native-retarget", group: .desktopNavigation, debut: .stopped,
           summary: "A switch requested during a faster-off transition still lands"),
+    .init(id: "desktop-management", group: .desktopNavigation, debut: .running,
+          summary: "Add, discard, merge and remove real desktops from the overlay (macOS 27)"),
     .init(id: "onboarding-journey", group: .onboarding, debut: .stopped,
           summary: "First-launch onboarding and its guided exercises"),
     .init(id: "settings-chrome", group: .rendering, debut: .stopped,

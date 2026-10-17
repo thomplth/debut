@@ -20,6 +20,25 @@ enum DesktopProvisioning {
     /// button's description, which is localized.
     private static let addButtonIdentifier = "mc.spaces.add"
 
+    /// The processes that draw Mission Control's spaces bar. macOS 26 draws it in the Dock;
+    /// macOS 27 moved it to WindowManager under the same identifiers, leaving the Dock an empty,
+    /// zero-sized `mc` group.
+    private static let missionControlHosts = ["com.apple.dock", "com.apple.WindowManager"]
+
+    private static func missionControlElements() -> [AXUIElement] {
+        missionControlHosts.compactMap { bundleID in
+            NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
+                .map { AXUIElementCreateApplication($0.processIdentifier) }
+        }
+    }
+
+    private static func element(in roots: [AXUIElement], identifier: String) -> AXUIElement? {
+        for root in roots {
+            if let found = element(in: root, identifier: identifier) { return found }
+        }
+        return nil
+    }
+
     static func ensureDesktops(_ target: Int) -> Bool {
         let service = SpaceService()
         var desktops = service.userDesktops()
@@ -29,20 +48,35 @@ enum DesktopProvisioning {
             print("Cannot provision desktops: this process is not trusted for Accessibility.")
             return false
         }
-        guard let dock = NSRunningApplication
-            .runningApplications(withBundleIdentifier: "com.apple.dock").first
+        guard NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first != nil
         else {
             print("Cannot provision desktops: the Dock is not running.")
             return false
         }
-        let dockElement = AXUIElementCreateApplication(dock.processIdentifier)
+
+        // Where Debut can manage desktops (macOS 27) the fixture uses the same bridged call, so
+        // setup never leaves Mission Control open for a later group to find.
+        print("Provisioning through \(service.canManageDesktops ? "the bridge" : "Mission Control")")
+        if service.canManageDesktops {
+            while desktops.count < target {
+                let before = desktops.count
+                guard let stack = service.spaceTopology().stacks.first(where: { !$0.desktopIDs.isEmpty }),
+                      bridged({ done in service.createDesktop(onStack: stack.id, placement: .end) { done($0 != nil) } }),
+                      service.userDesktops().count > before
+                else {
+                    print("Cannot provision desktops: the bridged add left \(service.userDesktops()).")
+                    return false
+                }
+                desktops = service.userDesktops()
+            }
+        }
 
         while desktops.count < target {
             let before = desktops.count
             toggleMissionControl()
             var addButton: AXUIElement?
             for _ in 0..<40 {
-                addButton = element(in: dockElement, identifier: addButtonIdentifier)
+                addButton = element(in: missionControlElements(), identifier: addButtonIdentifier)
                 if addButton != nil { break }
                 Thread.sleep(forTimeInterval: 0.05)
             }
@@ -74,14 +108,31 @@ enum DesktopProvisioning {
     static func resetToSingleDesktop() -> Bool {
         guard AXIsProcessTrusted() else { return false }
         let service = SpaceService()
+        if service.canManageDesktops {
+            while service.userDesktops().count > 1 {
+                let desktops = service.userDesktops()
+                // macOS refuses to remove the desktop showing, so keep the one showing.
+                let showing = service.currentDesktop()
+                guard let doomed = desktops.last(where: { $0 != showing }),
+                      let location = service.spaceTopology().location(ofSpace: doomed),
+                      bridged({ done in service.removeDesktop(location) { done($0) } }),
+                      service.userDesktops().count < desktops.count
+                else {
+                    print("Cannot reset desktops: the bridged removal left \(service.userDesktops()).")
+                    return false
+                }
+            }
+            print("Single-desktop fixture: \(service.userDesktops())")
+            return true
+        }
         while service.userDesktops().count > 1 {
             let before = service.userDesktops().count
-            guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return false }
-            let dockElement = AXUIElementCreateApplication(dock.processIdentifier)
+            let hosts = missionControlElements()
+            guard !hosts.isEmpty else { return false }
             // This is a presentation precondition, not a toggle: a warm guest may
             // already have Mission Control open when the fixture starts.
-            if element(in: dockElement, identifier: addButtonIdentifier) == nil { toggleMissionControl() }
-            guard element(in: dockElement, identifier: addButtonIdentifier) != nil else {
+            if element(in: hosts, identifier: addButtonIdentifier) == nil { toggleMissionControl() }
+            guard element(in: hosts, identifier: addButtonIdentifier) != nil else {
                 print("Cannot reset desktops: Mission Control did not expose its add button.")
                 return false
             }
@@ -101,7 +152,7 @@ enum DesktopProvisioning {
                 AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
                 for child in children as? [AXUIElement] ?? [] { visit(child, depth: depth + 1) }
             }
-            visit(dockElement)
+            hosts.forEach { visit($0) }
             guard let last = removable.last else {
                 print("The Dock exposes no remove-desktop action; cannot validate the one-desktop fixture.")
                 toggleMissionControl()
@@ -114,6 +165,27 @@ enum DesktopProvisioning {
         }
         print("Single-desktop fixture: \(service.userDesktops())")
         return true
+    }
+
+    /// Runs one bridged desktop edit to completion; false when it fails or never answers.
+    private static func bridged(_ operation: (@escaping @Sendable (Bool) -> Void) -> Void) -> Bool {
+        let finished = DispatchSemaphore(value: 0)
+        let succeeded = AtomicResult()
+        operation { result in
+            succeeded.set(result)
+            finished.signal()
+        }
+        guard finished.wait(timeout: .now() + 10) == .success else { return false }
+        // The topology the caller reads next trails the window server briefly.
+        Thread.sleep(forTimeInterval: 0.5)
+        return succeeded.value
+    }
+
+    private final class AtomicResult: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored = false
+        var value: Bool { lock.withLock { stored } }
+        func set(_ value: Bool) { lock.withLock { stored = value } }
     }
 
     private static func toggleMissionControl() {

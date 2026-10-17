@@ -160,6 +160,7 @@ only inspect an existing process are distinct from the global-input E2E harness.
 ## E2E verification cost
 
 Every local Tart run writes `report.json` under `~/Library/Caches/Debut/TartE2E/runs/<run-id>/`
+(`TartE2E-27` for the macOS 27 guest)
 with host phases (build, queue, stage, boot, provision, guest, collect), guest phases, check
 results, and CPU: `buildCpuSeconds` for the host build and `suiteVmCpuSeconds` for the
 Virtualization processes during the guest session. Compare runs by those fields rather than by

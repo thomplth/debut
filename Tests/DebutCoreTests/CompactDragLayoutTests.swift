@@ -170,6 +170,37 @@ struct CompactDragLayoutTests {
         #expect(intent.logicalIndex == 0)
     }
 
+    @Test("The E2E merge path for a held plate ends in a merge, however short the plates",
+          arguments: [[2, 0, 0, 0, 0], [2, 0, 0, 0, 0, 0], [2, 0, 0, 0, 0, 0, 0, 0, 0]])
+    func dragViewPlateMergePathEndsInAMerge(counts: [Int]) throws {
+        // The guest's drag of a new empty desktop's plate onto the first one (KHA-1118). A path
+        // aimed at one fixed point there reordered instead once a slot had opened on the way.
+        let size = CGSize(width: 1024, height: 768)
+        let path = try #require(StageConstants.dragViewPlateMergePath(
+            contentAspects: counts.map { Array(repeating: nil, count: $0) },
+            stageScale: CGFloat(AppSettings().previewAppearance.stageScale),
+            cardSpacing: CGFloat(AppSettings().previewCardSpacing),
+            containerSize: size,
+            reservesDisplayIndicator: false,
+            from: CGPoint(x: size.width / 2, y: size.height / 2),
+            sourceSpaceIndex: 1,
+            destinationSpaceIndex: 0
+        ))
+        // Replay it the way the overlay does, one pointer event at a time.
+        let variants = try #require(StageOverlayView.compactDragVariants(
+            viewModel: Self.viewModel(counts), spaceIndex: 1, windowIndex: nil, containerSize: size
+        ))
+        var snapshot = variants.collapsed
+        var intent: CompactDropIntent?
+        for point in path {
+            (snapshot, intent) = variants.retarget(at: point, from: snapshot, intent: intent)
+        }
+        let release = try #require(path.last)
+        let landed = try #require(snapshot.resolve(at: release, current: intent))
+        #expect(landed.slot == nil, "the release reordered: \(landed)")
+        #expect(landed.stageIndex == 0)
+    }
+
     @Test("No drag starts without a positive usable rectangle")
     func invalidBoundsStartNothing() {
         #expect(Self.snapshot([3, 2], size: CGSize(width: 100, height: 40)) == nil)

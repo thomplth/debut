@@ -276,7 +276,10 @@ provision_desktops() {
     local deadline=$((SECONDS + 30))
 
     while (( SECONDS < deadline )); do
-        if as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 4; then
+        # Exactly four: the guest persists between runs, and a desktop a failed run left behind
+        # would otherwise shrink every plate the next run aims at.
+        if as_console env HOME="$console_home" "$E2E_SOURCE" reset-desktops \
+            && as_console env HOME="$console_home" "$E2E_SOURCE" provision-desktops 4; then
             return 0
         fi
         # A freshly restarted tccd can briefly answer from its pre-grant cache even though the

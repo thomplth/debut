@@ -115,26 +115,17 @@ final class CompactDragSession {
     }
 
     private func target(at location: CGPoint, in snapshot: CompactDragSnapshot) -> CompactDropIntent? {
-        // A slot past either end opens outward, clear of every plate, but the slotted stack is
-        // drawn smaller than the one measured, so only the slot as drawn can be relied on.
-        if let intent, snapshot.isEndSlot(intent),
-           snapshot.openSlotFrame(for: intent)?.contains(location) == true {
-            return intent
-        }
-        let measured = snapshot.movesWholeStage ? variants?.collapsed ?? snapshot : snapshot
-        return measured.resolve(at: location, current: intent)
+        variants?.target(at: location, in: snapshot, intent: intent)
+            ?? snapshot.resolve(at: location, current: intent)
     }
 
     private func retarget(at location: CGPoint, from current: CompactDragSnapshot) {
-        var next = variants?.layout(at: location, from: current) ?? current
-        let resolved = target(at: location, in: next)
-        // A held plate asking for a slot moves the drag view to the scale that has room for one.
-        // The slot it asked for opens there: slots count the plates left, whatever the scale.
-        if let slotted = variants?.plateLayout(for: resolved, from: next) {
-            next = slotted
+        guard let variants else {
+            snapshot = current
+            intent = current.resolve(at: location, current: intent)
+            return
         }
-        snapshot = next
-        intent = resolved
+        (snapshot, intent) = variants.retarget(at: location, from: current, intent: intent)
     }
 
     /// Resolves the release once and hands a valid edit to `accept` exactly once, synchronously,

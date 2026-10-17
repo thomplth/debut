@@ -204,6 +204,34 @@ struct CompactDragVariants: Equatable, Sendable {
         return wanted == current ? nil : wanted
     }
 
+    /// Where one pointer event leaves a drag: the layout the pointer calls for, the target it
+    /// resolves to there, and, for a held plate asking for a slot, the scale that has room for
+    /// one. The slot it asked for opens there: slots count the plates left, whatever the scale.
+    func retarget(at location: CGPoint, from current: CompactDragSnapshot,
+                  intent: CompactDropIntent?) -> (CompactDragSnapshot, CompactDropIntent?) {
+        var next = layout(at: location, from: current) ?? current
+        let resolved = target(at: location, in: next, intent: intent)
+        if let slotted = plateLayout(for: resolved, from: next) {
+            next = slotted
+        }
+        return (next, resolved)
+    }
+
+    /// What the pointer at `location` aims at. A held plate is always measured against the held
+    /// layout, as drawn without a slot: the slotted one only rescales the stack around a slot
+    /// it already chose, and measuring against it would move the target with the pointer.
+    func target(at location: CGPoint, in snapshot: CompactDragSnapshot,
+                intent: CompactDropIntent?) -> CompactDropIntent? {
+        // A slot past either end opens outward, clear of every plate, but the slotted stack is
+        // drawn smaller than the one measured, so only the slot as drawn can be relied on.
+        if let intent, snapshot.isEndSlot(intent),
+           snapshot.openSlotFrame(for: intent)?.contains(location) == true {
+            return intent
+        }
+        let measured = snapshot.movesWholeStage ? collapsed : snapshot
+        return measured.resolve(at: location, current: intent)
+    }
+
     /// The layout the pointer calls for from `current`: a + it reaches opens, and an open plate
     /// it leaves closes. Nil keeps `current`.
     func layout(at location: CGPoint, from current: CompactDragSnapshot) -> CompactDragSnapshot? {

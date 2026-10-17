@@ -55,8 +55,8 @@ public extension Notification.Name {
 /// around every desktop switch inside Mission Control, and a refresh that lands in that gap
 /// read the overview as closed. The Dock's display-sized layer-20 backdrop stays up from
 /// open to close, so it is a marker too.
-enum DockOverviewDetector {
-    static func isActive() -> Bool {
+public enum DockOverviewDetector {
+    public static func isActive() -> Bool {
         guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
             as? [[String: Any]]
         else { return false }
@@ -67,7 +67,7 @@ enum DockOverviewDetector {
         )
     }
 
-    static func isActive(
+    public static func isActive(
         in windows: [[String: Any]],
         operatingSystemMajor: Int,
         displayBounds: [CGRect]
@@ -101,7 +101,7 @@ enum DockOverviewDetector {
         }
     }
 
-    static func activeDisplayBounds() -> [CGRect] {
+    public static func activeDisplayBounds() -> [CGRect] {
         var count: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
         var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
