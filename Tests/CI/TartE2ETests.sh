@@ -328,6 +328,15 @@ for script in scripts/tart-e2e-guest.sh scripts/demo-capture-guest.sh scripts/ta
         "$script must name the TCC access columns it writes; macOS 27's table has 19"
 done
 
+# macOS 27 keeps no per-user TCC database: the user tccd opens none and every grant lives in the
+# system one. The harness's user-database rows are belt-and-braces, so each write must tolerate
+# the database being absent rather than stop the guest before its first check.
+for script in scripts/tart-e2e-guest.sh scripts/tart-performance-guest.sh; do
+    if grep -E 'sqlite3 .*"\$USER_TCC_DB"' "$script" | grep -vqF '[[ ! -f "$USER_TCC_DB" ]] ||'; then
+        fail "$script writes the user TCC database without checking it exists; macOS 27 has none"
+    fi
+done
+
 # DEBUT_TART_OS picks the guest release. macOS 26 Tahoe stays the default; 27 Golden Gate gets
 # its own VM and share directory, so its SSH key, known hosts and run reports never mix with
 # Tahoe's. Explicit DEBUT_TART_VM, DEBUT_TART_SHARE and DEBUT_TART_IMAGE still win.

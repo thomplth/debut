@@ -13,6 +13,7 @@ case "$PROFILE" in typical) processes=4 ;; busy) processes=7 ;; stress) processe
 console_user="$(stat -f %Su /dev/console)"
 console_uid="$(id -u "$console_user")"
 console_home="$(dscl . -read "/Users/$console_user" NFSHomeDirectory | awk '{print $2}')"
+# macOS 27 keeps no per-user TCC database, so its rows are written only where one exists.
 USER_TCC_DB="$console_home/Library/Application Support/com.apple.TCC/TCC.db"
 as_console() { sudo launchctl asuser "$console_uid" sudo -u "$console_user" -- "$@"; }
 grant_post_event() {
@@ -23,7 +24,7 @@ grant_post_event() {
     timestamp="$(date +%s)"
     sudo sqlite3 "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServicePostEvent','$escaped_client',1,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
-    sqlite3 "$USER_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
+    [[ ! -f "$USER_TCC_DB" ]] || sqlite3 "$USER_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServicePostEvent','$escaped_client',1,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 # The E2E driver is granted Accessibility alongside PostEvent; match it so the two

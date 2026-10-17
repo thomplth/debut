@@ -77,6 +77,7 @@ if [[ -z "$console_user" || "$console_user" == "root" || "$console_user" == "log
 fi
 console_uid="$(id -u "$console_user")"
 console_home="$(dscl . -read "/Users/$console_user" NFSHomeDirectory | awk '{print $2}')"
+# macOS 27 keeps no per-user TCC database, so its rows are written only where one exists.
 USER_TCC_DB="$console_home/Library/Application Support/com.apple.TCC/TCC.db"
 
 as_console() {
@@ -150,7 +151,7 @@ grant_screen_capture() {
 
     sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServiceScreenCapture','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
-    sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
+    [[ ! -f "$USER_TCC_DB" ]] || sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServiceScreenCapture','$escaped_client',$client_type,2,4,1,X'$csreq_hex',NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
@@ -222,7 +223,7 @@ grant_post_event() {
 
     sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServicePostEvent','$escaped_client',1,2,4,1,$csreq_sql,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
-    sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
+    [[ ! -f "$USER_TCC_DB" ]] || sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified,pid,pid_version,boot_uuid,last_reminded) VALUES(\
 'kTCCServicePostEvent','$escaped_client',1,2,4,1,$csreq_sql,NULL,0,'UNUSED',NULL,0,$timestamp,NULL,NULL,'UNUSED',$timestamp);"
 }
 
@@ -415,7 +416,7 @@ for denied_permission in accessibility capture desktop stale; do
         sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceAccessibility';"
     elif [[ "$denied_permission" == capture ]]; then
         sudo sqlite3 -cmd '.timeout 10000' "$SYSTEM_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
-        sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
+        [[ ! -f "$USER_TCC_DB" ]] || sqlite3 -cmd '.timeout 10000' "$USER_TCC_DB" "UPDATE access SET auth_value=0 WHERE client='$bundle_id' AND service='kTCCServiceScreenCapture';"
     elif [[ "$denied_permission" == stale ]]; then
         plant_stale_grants "$bundle_id"
     fi
