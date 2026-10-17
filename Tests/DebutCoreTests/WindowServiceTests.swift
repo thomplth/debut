@@ -952,14 +952,16 @@ struct WindowServiceTests {
         let element = AXUIElementCreateSystemWide()
         service.windowElementResolver = { _ in element }
         let answered = OSAllocatedUnfairLock(initialState: false)
-
+        let callerReturned = DispatchSemaphore(value: 0)
         let finished = DispatchSemaphore(value: 0)
 
         service.raiseWindowDeferred(windowID: 42) { _ in
+            _ = callerReturned.wait(timeout: .now() + 5)
             answered.withLock { $0 = true }
             finished.signal()
         }
         let answeredBeforeReturning = answered.withLock { $0 }
+        callerReturned.signal()
 
         #expect(!answeredBeforeReturning)
         #expect(finished.wait(timeout: .now() + 5) == .success)
