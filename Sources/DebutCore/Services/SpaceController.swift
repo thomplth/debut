@@ -3313,13 +3313,22 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// The notification fires once the switch has settled, so the windows now showing are
     /// drawn and may have changed while they were away. A route still crossing intermediate
     /// desktops has not arrived anywhere yet.
+    ///
+    /// Only a window away longer than the preview TTL is captured. Switching back and forth
+    /// recaptured every window at each arrival, up to 72 between two reveals, though most had
+    /// been captured seconds before on the previous visit (KHA-1112). One whose title, shape or
+    /// appearance changed meanwhile is still recaptured at the next overlay open.
     private func captureShowingDesktopsInBackground() {
         guard !isSpaceManagerVisible,
               spaceSwitcher?.isSwitchInFlight(stackID: spaceManager.selectedSpaceStackID) != true
         else { return }
         previewFreshness.recordDesktopArrival()
+        let now = clock()
         let windowIDs = showingSpaceIDs.flatMap { spaceID in
             spaceManager.allSpaces.first { $0.id == spaceID }?.windows.map(\.windowID) ?? []
+        }.filter { windowID in
+            guard windowPreviews[windowID] != nil, let entry = previewCacheEntries[windowID] else { return true }
+            return now.timeIntervalSince(entry.capturedAt) >= previewCacheTTL
         }
         for windowID in windowIDs {
             capturePreviewInBackground(windowID, reason: "desktop_settled", settled: true)

@@ -61,7 +61,9 @@ only for a window that is missing; captures are sized from Debut's tracked windo
 because a held handle keeps the frame it was enumerated with.
 
 Between overlay opens, previews are kept current by window events. Focus leaving a window and
-a desktop switch that has settled capture at once: each is evidence the change is over. Focus
+a desktop switch that has settled capture at once: each is evidence the change is over. A
+settled switch captures only the arriving windows whose previews are older than the preview
+TTL, so switching back and forth does not recapture what the last visit just captured. Focus
 arriving, a resize, a title change and a new window restart a per-window timer, and the capture
 fires once the window has been quiet for a second, and only if it is on a showing desktop. There
 is no maximum wait. A title change captures a window at most once every 30 seconds from its last

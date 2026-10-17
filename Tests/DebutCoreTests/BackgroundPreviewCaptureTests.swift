@@ -149,6 +149,33 @@ struct BackgroundPreviewCaptureTests {
         #expect(!captured(service).contains(101), "the desktop left is not swept")
     }
 
+    @Test("A desktop arrival skips windows captured more recently than the preview TTL")
+    func desktopArrivalSkipsRecentCaptures() {
+        let (controller, service, _, showing, hidden) = makeController(settleDelay: 5)
+        // Long enough that a stalled runner cannot age the first captures past it mid-test.
+        DispatchQueue.main.sync { controller.previewCacheTTL = 4 }
+        func arrive(at spaceID: UUID) {
+            DispatchQueue.main.sync {
+                controller.spaceManager.activateSpace(id: spaceID)
+                controller.desktopDidChange()
+            }
+        }
+        arrive(at: hidden)
+        #expect(waitFor { controller.windowPreviews[909] != nil }, "a window with no preview is captured")
+        arrive(at: showing)
+        #expect(waitFor { controller.windowPreviews[101] != nil && controller.windowPreviews[102] != nil })
+        let afterFirstVisits = captured(service)
+
+        arrive(at: hidden)
+        arrive(at: showing)
+        Thread.sleep(forTimeInterval: 1.5)
+        #expect(captured(service) == afterFirstVisits, "captured moments ago: \(captured(service))")
+
+        Thread.sleep(forTimeInterval: 3)
+        arrive(at: hidden)
+        #expect(waitFor { captured(service).filter { $0 == 909 }.count == 2 }, "away past the TTL")
+    }
+
     @Test("Opening the overlay takes over a capture still waiting to settle")
     func overlayPromotesPending() {
         let (controller, service, keyboard, _, _) = makeController(settleDelay: 30)
