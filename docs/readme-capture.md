@@ -61,8 +61,8 @@ and that its sidebar has no extra cities.
 | `faster-space-switching` | Retired from the README. Matched Control-Right then Control-Left, space 2 → 3 → 2; macOS default left, Instant right |
 
 The README embeds only the covers and `overview.gif`; per-feature demos live on
-debutspace.com. The four retired clips stay in the driver and their GIFs stay in
-`docs/media` until the overview capture lands and removes them. The `onboarding` and
+debutspace.com. The four retired clips stay in the driver; their GIFs left
+`docs/media` when the overview landed. The `onboarding` and
 `onboarding-speed` clips are unaffected: the app bundles their assets.
 
 Cards in a space follow its MRU order, not the fixture order, so each switcher clip reads
