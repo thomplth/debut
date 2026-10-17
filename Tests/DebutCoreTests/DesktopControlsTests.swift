@@ -19,6 +19,37 @@ struct DesktopControlsTests {
         ), ids)
     }
 
+    @Test("The capture aim points are the drag view's own + and the plate it opens into",
+          arguments: [NewDesktopPosition.top, .bottom])
+    func newDesktopAimPointsMatchTheDragView(position: NewDesktopPosition) throws {
+        let size = CGSize(width: 1440, height: 875)
+        let aim = try #require(StageConstants.dragViewNewDesktopPoints(
+            contentAspects: [[nil, nil, nil]],
+            stageScale: CGFloat(AppSettings().previewAppearance.stageScale),
+            cardSpacing: CGFloat(AppSettings().previewCardSpacing),
+            containerSize: size,
+            reservesDisplayIndicator: false,
+            sourceSpaceIndex: 0,
+            sourceWindowIndex: 2,
+            position: position
+        ))
+        let ids: [NewDesktopPosition: UUID] = [.top: UUID(), .bottom: UUID()]
+        var viewModel = CompactDragLayoutTests.viewModel([3])
+        viewModel.canManageDesktops = true
+        let made = try #require(StageOverlayView.compactDragVariants(
+            viewModel: viewModel, spaceIndex: 0, windowIndex: 2,
+            containerSize: size, newDesktopIDs: ids
+        ))
+        // The pointer reaching the + is what opens it.
+        #expect(made.layout(at: aim.button, from: made.collapsed)?.expandedNewDesktop == position)
+        // The window then lands in the opened plate, which is a new stage after the real one.
+        let expanded = try #require(made.expanded[position])
+        let plateIndex = try #require(expanded.newDesktopStageIndex)
+        let plate = try #require(expanded.plateFrame(stageIndex: plateIndex,
+                                                    projection: expanded.projection(for: nil)))
+        #expect(plate.contains(aim.plate))
+    }
+
     @Test("A window drag reserves only a + at each end of the stack",
           arguments: [CGSize(width: 1024, height: 768), CGSize(width: 1280, height: 800)])
     func collapsedTargetsReserveOnlyTheButton(size: CGSize) throws {

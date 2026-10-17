@@ -1246,6 +1246,62 @@ public struct StageConstants {
         )
     }
 
+    /// Where a window drag reaches the + at one end of the drag view, and the point inside the
+    /// plate that + opens into, in overlay coordinates. Capture drivers aim a held window here,
+    /// from the same variants the overlay draws and hit-tests.
+    public static func dragViewNewDesktopPoints(
+        contentAspects: [[CGFloat?]],
+        stageScale: CGFloat,
+        cardSpacing: CGFloat,
+        containerSize: CGSize,
+        reservesDisplayIndicator: Bool,
+        sourceSpaceIndex: Int,
+        sourceWindowIndex: Int,
+        position: NewDesktopPosition,
+        cardStyle: OverlayCardStyle = .previews,
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
+    ) -> (button: CGPoint, plate: CGPoint)? {
+        var nextWindowID: CGWindowID = 1
+        let fingerprint = StageStructureFingerprint(stages: contentAspects.map { aspects in
+            StageStructureFingerprint.Stage(spaceID: UUID(), windows: aspects.map { _ in
+                defer { nextWindowID += 1 }
+                return .init(windowID: nextWindowID, modelID: UUID())
+            })
+        })
+        let metrics = drawnMetrics(
+            stageScale: stageScale,
+            contentAspects: contentAspects,
+            containerSize: containerSize,
+            cardSpacing: cardSpacing,
+            cardStyle: cardStyle,
+            badgeGrowth: badgeGrowth
+        )
+        guard let variants = CompactDragSnapshot.makeVariants(
+            sessionID: UUID(),
+            generation: 1,
+            fingerprint: fingerprint,
+            layouts: stageLayouts(
+                forContentAspects: contentAspects,
+                screenWidth: containerSize.width,
+                metrics: metrics
+            ),
+            contentAspects: contentAspects,
+            sourceStageIndex: sourceSpaceIndex,
+            sourceWindowIndex: sourceWindowIndex,
+            containerSize: containerSize,
+            usableBounds: CompactDragSnapshot.usableBounds(
+                containerSize: containerSize,
+                reservesDisplayIndicator: reservesDisplayIndicator
+            ),
+            newDesktopIDs: [.top: UUID(), .bottom: UUID()]
+        ), let button = variants.collapsed.newDesktopTargets.first(where: { $0.position == position }),
+           let expanded = variants.expanded[position],
+           let plateIndex = expanded.newDesktopStageIndex,
+           let plate = expanded.stages[safe: plateIndex]
+        else { return nil }
+        return (button.center, CGPoint(x: expanded.centerX, y: plate.centerY))
+    }
+
     /// Where a window card is drawn, for callers outside the view hierarchy. E2E clicks and drags
     /// real screen coordinates; a second copy of the grid math there drifts from what the overlay
     /// draws without either side failing.
