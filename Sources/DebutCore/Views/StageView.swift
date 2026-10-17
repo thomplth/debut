@@ -2391,16 +2391,23 @@ struct WindowPreviewView: View {
                                 GeometryReader { geometry in
                                     // This is the fitted image's box, before the card's frame.
                                     // Letterboxed previews must cast from their visible edges.
-                                    let scale = metrics.scaleFactor
+                                    // Keyed by the laid-out size, not the animating one: a drag
+                                    // view rescale otherwise blurred a new raster per card per
+                                    // frame, on the main thread.
+                                    let base = metrics.previewShadowSize(
+                                        forImageAspect: CGFloat(cgImage.width)
+                                            / CGFloat(max(1, cgImage.height))
+                                    )
                                     let shadow = PreviewShadowCache.shared.image(
-                                        for: CGSize(width: geometry.size.width / scale,
-                                                    height: geometry.size.height / scale),
-                                        cornerRadius: previewCorner / scale
+                                        for: base,
+                                        cornerRadius: previewCorner / metrics.scaleFactor
                                     )
                                     Image(nsImage: shadow)
                                         .resizable()
-                                        .frame(width: shadow.size.width * scale,
-                                               height: shadow.size.height * scale)
+                                        .frame(width: shadow.size.width * geometry.size.width
+                                                   / max(base.width, 1),
+                                               height: shadow.size.height * geometry.size.height
+                                                   / max(base.height, 1))
                                         .opacity(colorScheme == .dark ? 0.5 : 0.22)
                                         .position(x: geometry.size.width / 2,
                                                   y: geometry.size.height / 2)

@@ -6,27 +6,31 @@ import AppKit
 final class PreviewShadowCache {
     static let shared = PreviewShadowCache()
     static let padding: CGFloat = 72
+    /// Pixels per point. A 36-point blur has no detail a Retina raster would add, and at 2x a
+    /// full overlay's shadows outgrew the cache, which then blurred them again on every render.
+    static let rasterScale: CGFloat = 1
     private let images = NSCache<NSString, NSImage>()
 
     init() {
-        images.countLimit = 64
-        images.totalCostLimit = 16 * 1024 * 1024
+        images.countLimit = 256
+        images.totalCostLimit = 48 * 1024 * 1024
     }
 
     func image(for size: CGSize, cornerRadius: CGFloat) -> NSImage {
         // Snap to raster pixels so fractional layout noise does not churn the cache.
-        let width = max(1, Int((size.width * 2).rounded()))
-        let height = max(1, Int((size.height * 2).rounded()))
-        let radius = max(0, Int((cornerRadius * 2).rounded()))
+        let width = max(1, Int((size.width * Self.rasterScale).rounded()))
+        let height = max(1, Int((size.height * Self.rasterScale).rounded()))
+        let radius = max(0, Int((cornerRadius * Self.rasterScale).rounded()))
         let key = "\(width):\(height):\(radius)" as NSString
         if let image = images.object(forKey: key) { return image }
-        let inner = CGSize(width: CGFloat(width) / 2, height: CGFloat(height) / 2)
+        let inner = CGSize(width: CGFloat(width) / Self.rasterScale,
+                           height: CGFloat(height) / Self.rasterScale)
         let padded = CGSize(width: inner.width + Self.padding * 2,
                             height: inner.height + Self.padding * 2)
         let image = NSImage(size: padded)
         guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil, pixelsWide: Int(padded.width * 2),
-            pixelsHigh: Int(padded.height * 2), bitsPerSample: 8, samplesPerPixel: 4,
+            bitmapDataPlanes: nil, pixelsWide: Int(padded.width * Self.rasterScale),
+            pixelsHigh: Int(padded.height * Self.rasterScale), bitsPerSample: 8, samplesPerPixel: 4,
             hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
             bytesPerRow: 0, bitsPerPixel: 0
         ) else { return image }
@@ -37,7 +41,7 @@ final class PreviewShadowCache {
         let silhouette = NSBezierPath(
             roundedRect: CGRect(x: Self.padding, y: Self.padding,
                                 width: inner.width, height: inner.height),
-            xRadius: CGFloat(radius) / 2, yRadius: CGFloat(radius) / 2
+            xRadius: CGFloat(radius) / Self.rasterScale, yRadius: CGFloat(radius) / Self.rasterScale
         )
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow()

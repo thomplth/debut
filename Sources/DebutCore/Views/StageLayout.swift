@@ -317,6 +317,13 @@ public struct StageMetrics: Equatable, Sendable {
         )
     }
 
+    /// The fitted preview's size at scale 1: the same for every zoom of these metrics, so a
+    /// card whose drawn size animates keeps one shadow raster.
+    public func previewShadowSize(forImageAspect aspect: CGFloat?) -> CGSize {
+        let drawn = previewImageRect(forImageAspect: aspect).size
+        return CGSize(width: drawn.width / scale, height: drawn.height / scale)
+    }
+
     /// A failed capture shows the app's icon at the badge's size, with nothing around it.
     public var placeholderIconSize: CGFloat { drawnBadgeSize }
 
