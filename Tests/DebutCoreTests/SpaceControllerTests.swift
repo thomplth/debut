@@ -2468,7 +2468,7 @@ struct SpaceControllerTests {
 
         keyboardService.simulateEvent(.cmdTabTap)
         #expect(controller.verifyPendingFocusDelivery())
-        controller.recordWindowActivation(windowID: 303, evidence: .focusedWindowReported)
+        controller.recordWindowActivation(windowID: 303, evidence: .observed)
 
         #expect(activeWindowIDs(controller) == [303, 202, 101])
     }

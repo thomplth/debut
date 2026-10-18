@@ -231,7 +231,35 @@ struct WindowDiscoveryServiceTests {
         #expect(activated.map(\.1) == [.inferredFromWindowOrder])
     }
 
-    @Test("An activation whose AX answer names a live window reports that window as focused")
+    @Test("Without an AX answer, activation credits the app's window in front on screen over listing order")
+    func activationFallbackPrefersOnScreenFrontWindow() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 4_433, isHidden: false),
+        ]
+        windowService.windowList = [
+            liveWindow(76_509, ownerPID: 4_433),
+            liveWindow(59_667, ownerPID: 4_433),
+        ]
+        windowService.visibleFrontWindowID = 59_667
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.armingOverride = { _, _ in .armed }
+        var activated: [(CGWindowID, WindowActivationEvidence)] = []
+        service.onWindowActivated = { activated.append(($0, $1)) }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 4_433, isHidden: false)
+        )
+
+        #expect(activated.map(\.0) == [59_667])
+        #expect(activated.map(\.1) == [.observed])
+    }
+
+    @Test("An activation whose AX answer names a live window credits that window as observed")
     func activationWithAccessibilityAnswerIsReported() {
         let windowService = MockWindowService()
         windowService.apps = [
@@ -255,7 +283,7 @@ struct WindowDiscoveryServiceTests {
         )
 
         #expect(activated.map(\.0) == [119_139])
-        #expect(activated.map(\.1) == [.focusedWindowReported])
+        #expect(activated.map(\.1) == [.observed])
     }
 
     @Test("Debut in front at startup is seeded without probing itself")

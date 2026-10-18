@@ -211,7 +211,11 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     }
 
     public func frontmostWindowID(ownerPID: pid_t) -> CGWindowID? {
-        focusObservation(ownerPID: ownerPID).frontmostLayerZeroWindowID
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
+            as? [[CFString: Any]]
+        else { return nil }
+        return Self.frontmostLayerZeroWindowID(ownerPID: ownerPID, in: windows)
     }
 
     public func focusObservation(ownerPID: pid_t) -> WindowFocusObservation {

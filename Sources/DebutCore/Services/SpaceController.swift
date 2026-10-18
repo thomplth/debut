@@ -1854,7 +1854,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
 
     public func recordWindowActivation(
         windowID reportedWindowID: CGWindowID,
-        evidence: WindowActivationEvidence = .focusedWindowReported
+        evidence: WindowActivationEvidence = .observed
     ) {
         let windowID = creditedActivation(of: reportedWindowID)
         if evidence == .inferredFromWindowOrder,

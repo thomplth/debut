@@ -17,7 +17,7 @@ public enum FrontmostAppObservationSource: String, Sendable {
 }
 
 public enum WindowActivationEvidence: String, Sendable {
-    case focusedWindowReported = "focused_window_reported"
+    case observed
     case inferredFromWindowOrder = "inferred_from_window_order"
 }
 
@@ -61,6 +61,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let showingDesktopIDs: Set<CGSSpaceID>
         let allWindowIDs: Set<CGWindowID>?
         let skyLightWindowIDs: Set<CGWindowID>?
+        let activatedAppFrontWindowID: CGWindowID?
         let captureNanoseconds: UInt64
     }
 
@@ -1089,7 +1090,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                         windowID: focusedWindow.windowID,
                         pid: focusedWindow.ownerPID
                     )
-                    self.onWindowActivated?(focusedWindow.windowID, .focusedWindowReported)
+                    self.onWindowActivated?(focusedWindow.windowID, .observed)
                 }
             }
         }
@@ -1536,7 +1537,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                   self.frontmostPIDProvider() == metadata.ownerPID,
                   focusedWindowID == metadata.windowID
             else { return }
-            self.onWindowActivated?(metadata.windowID, .focusedWindowReported)
+            self.onWindowActivated?(metadata.windowID, .observed)
         }
     }
 
@@ -1779,7 +1780,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             self.heldActivationAnswer = nil
             self.focusChangeDeliveryCount += 1
             self.trackAndRegister(windowID: windowID, pid: pid)
-            self.onWindowActivated?(windowID, .focusedWindowReported)
+            self.onWindowActivated?(windowID, .observed)
         }
     }
 
@@ -1903,7 +1904,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             self.trackAndRegister(windowID: focusedWindowID, pid: pid)
             self.onWindowActivated?(
                 focusedWindowID,
-                reportedWindowID == nil ? .inferredFromWindowOrder : .focusedWindowReported
+                reportedWindowID == nil ? .inferredFromWindowOrder : .observed
             )
         }
     }
@@ -2070,6 +2071,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 ),
                 allWindowIDs: windowService.listAllWindowIDs(),
                 skyLightWindowIDs: spaceSwitcher.map { $0.placedWindowIDs() },
+                activatedAppFrontWindowID: windowService.frontmostWindowID(ownerPID: app.pid),
                 captureNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt
             )
         }) { [weak self] snapshot in
@@ -2118,8 +2120,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
         // AX focus can be nil while an app launches, or can briefly retain the ID of a
         // document window the app just replaced. Trust the early sample only when the
-        // activated process still enumerates that window. Otherwise CGWindowList's
-        // front-to-back order is only a guess, read before a raise in flight has landed.
+        // activated process still enumerates that window. Next is the app's window in front
+        // on screen. The full listing is not in screen order — Dia's windows came back in the
+        // same order whichever was on top — so its first window is only a last-resort guess.
         let activatedWindows = liveWindows.filter { $0.ownerPID == pid }
         let activatedWindowIDs = Set(activatedWindows.map(\.windowID))
         let liveIDs = Set(liveWindows.map(\.windowID))
@@ -2129,7 +2132,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         if let sampledFocusedWindowID,
            activatedWindowIDs.contains(sampledFocusedWindowID) {
             focusedWindowID = sampledFocusedWindowID
-            evidence = .focusedWindowReported
+            evidence = .observed
+        } else if shouldTrackActivation,
+                  let frontWindowID = snapshot.activatedAppFrontWindowID,
+                  activatedWindowIDs.contains(frontWindowID) {
+            focusedWindowID = frontWindowID
+            evidence = .observed
         } else if shouldTrackActivation {
             evidence = .inferredFromWindowOrder
             // CGWindowList orders every desktop's windows together, so the app's first window
