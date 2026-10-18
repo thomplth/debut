@@ -1815,6 +1815,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         spaceManager.spaceContainingWindow(windowID: windowID)
     }
 
+    private func ownerPID(ofWindow windowID: CGWindowID) -> pid_t? {
+        spaceManager.allSpaces.lazy.flatMap(\.windows)
+            .first(where: { $0.windowID == windowID })?.ownerPID
+    }
+
     /// Credits a focus report to the window Debut asked for, when that report is the answer to
     /// the request rather than a choice of the user's.
     ///
@@ -1847,8 +1852,23 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         return request.windowID
     }
 
-    public func recordWindowActivation(windowID reportedWindowID: CGWindowID) {
+    public func recordWindowActivation(
+        windowID reportedWindowID: CGWindowID,
+        evidence: WindowActivationEvidence = .focusedWindowReported
+    ) {
         let windowID = creditedActivation(of: reportedWindowID)
+        if evidence == .inferredFromWindowOrder,
+           let acceptedWindowID = focusedWindowID,
+           acceptedWindowID != windowID,
+           let inferredOwnerPID = ownerPID(ofWindow: windowID),
+           ownerPID(ofWindow: acceptedWindowID) == inferredOwnerPID {
+            diag.report("window_activation_inference_ignored", details: [
+                "acceptedWindowID": "\(acceptedWindowID)",
+                "inferredWindowID": "\(windowID)",
+                "ownerPID": "\(inferredOwnerPID)",
+            ])
+            return
+        }
         let ownerSpaceID = spaceOwningWindow(windowID: windowID)
         let desktopLocation = spaceSwitcher.flatMap { switcher in
             switcher.desktopLocation(forWindow: windowID)

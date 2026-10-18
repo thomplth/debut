@@ -196,7 +196,7 @@ struct WindowDiscoveryServiceTests {
         #expect(sources == [.startupSnapshot])
     }
 
-    @Test("Without an AX answer, activation credits the app's front window on the showing desktop")
+    @Test("Without an AX answer, activation infers the app's front window on the showing desktop")
     func activationFallbackSkipsWindowsOnHiddenDesktops() {
         // Dia often answers the focus probe with nothing. CGWindowList orders every desktop's
         // windows together, so its first window can sit on a desktop that is not showing; the
@@ -220,14 +220,42 @@ struct WindowDiscoveryServiceTests {
         )
         service.spaceSwitcher = spaces
         service.armingOverride = { _, _ in .armed }
-        var activated: [CGWindowID] = []
-        service.onWindowActivated = { activated.append($0) }
+        var activated: [(CGWindowID, WindowActivationEvidence)] = []
+        service.onWindowActivated = { activated.append(($0, $1)) }
 
         service.handleAppActivation(
             AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 27_155, isHidden: false)
         )
 
-        #expect(activated == [119_139])
+        #expect(activated.map(\.0) == [119_139])
+        #expect(activated.map(\.1) == [.inferredFromWindowOrder])
+    }
+
+    @Test("An activation whose AX answer names a live window reports that window as focused")
+    func activationWithAccessibilityAnswerIsReported() {
+        let windowService = MockWindowService()
+        windowService.apps = [
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 27_155, isHidden: false),
+        ]
+        windowService.windowList = [
+            liveWindow(119_138, ownerPID: 27_155),
+            liveWindow(119_139, ownerPID: 27_155),
+        ]
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in 119_139 },
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.armingOverride = { _, _ in .armed }
+        var activated: [(CGWindowID, WindowActivationEvidence)] = []
+        service.onWindowActivated = { activated.append(($0, $1)) }
+
+        service.handleAppActivation(
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 27_155, isHidden: false)
+        )
+
+        #expect(activated.map(\.0) == [119_139])
+        #expect(activated.map(\.1) == [.focusedWindowReported])
     }
 
     @Test("Debut in front at startup is seeded without probing itself")
@@ -267,7 +295,7 @@ struct WindowDiscoveryServiceTests {
         service.onFrontmostAppChanged = { bundleID, _ in
             callbackOrder.append("app:\(bundleID ?? "nil")")
         }
-        service.onWindowActivated = { _ in callbackOrder.append("focus") }
+        service.onWindowActivated = { _, _ in callbackOrder.append("focus") }
         service.onAppActivated = { snapshot in
             callbackOrder.append("snapshot")
             snapshotWindowIDs = Set(snapshot.liveWindows.map(\.windowID))
@@ -327,7 +355,7 @@ struct WindowDiscoveryServiceTests {
         var snapshots: [RuntimeWindowSnapshot] = []
         var activatedWindowIDs: [CGWindowID] = []
         service.onWindowCreated = { snapshots.append($0) }
-        service.onWindowActivated = { activatedWindowIDs.append($0) }
+        service.onWindowActivated = { windowID, _ in activatedWindowIDs.append(windowID) }
 
         service.handleWindowCreated(AXWindowCreationMetadata(
             windowID: 116_040,
@@ -1017,7 +1045,7 @@ struct WindowDiscoveryServiceTests {
         var callbackOrder: [String] = []
         service.onFrontmostAppChanged = { _, _ in callbackOrder.append("app") }
         service.onAppActivated = { _ in callbackOrder.append("snapshot") }
-        service.onWindowActivated = { _ in callbackOrder.append("focus") }
+        service.onWindowActivated = { _, _ in callbackOrder.append("focus") }
 
         service.handleAppActivation(
             AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)
@@ -1047,7 +1075,7 @@ struct WindowDiscoveryServiceTests {
         )
         var callbackOrder: [String] = []
         service.onAppActivated = { _ in callbackOrder.append("snapshot") }
-        service.onWindowActivated = { callbackOrder.append("focus \($0)") }
+        service.onWindowActivated = { windowID, _ in callbackOrder.append("focus \(windowID)") }
 
         service.handleAppActivation(
             AppInfo(bundleID: "notion.id", name: "Notion", pid: 10, isHidden: false)
@@ -1191,7 +1219,7 @@ struct WindowDiscoveryServiceTests {
         service.registerTracking(windowID: 7, pid: 10)
         service.registerTracking(windowID: 8, pid: 10)
         var activatedWindowIDs: [CGWindowID] = []
-        service.onWindowActivated = { activatedWindowIDs.append($0) }
+        service.onWindowActivated = { windowID, _ in activatedWindowIDs.append(windowID) }
 
         service.handleWindowDestroyed(element: destroyedElement)
 
@@ -1270,7 +1298,7 @@ struct WindowDiscoveryServiceTests {
                 activatedPIDs.append(window.ownerPID)
             }
         }
-        service.onWindowActivated = { focusedWindowIDs.append($0) }
+        service.onWindowActivated = { windowID, _ in focusedWindowIDs.append(windowID) }
 
         service.handleAppActivation(AppInfo(bundleID: "app.a", name: "A", pid: 10, isHidden: false))
         service.handleAppActivation(AppInfo(bundleID: "app.b", name: "B", pid: 20, isHidden: false))
@@ -1301,7 +1329,7 @@ struct WindowDiscoveryServiceTests {
             )
             service.focusObserverRegistrationOverride = { _ in .success }
             var focusedWindowIDs: [CGWindowID] = []
-            service.onWindowActivated = { focusedWindowIDs.append($0) }
+            service.onWindowActivated = { windowID, _ in focusedWindowIDs.append(windowID) }
 
             service.installFocusObserver(for: 10, bundleID: "company.thebrowser.dia")
             service.handleAppActivation(
@@ -1336,7 +1364,7 @@ struct WindowDiscoveryServiceTests {
         )
         service.focusObserverRegistrationOverride = { _ in .success }
         var focusedWindowIDs: [CGWindowID] = []
-        service.onWindowActivated = { focusedWindowIDs.append($0) }
+        service.onWindowActivated = { windowID, _ in focusedWindowIDs.append(windowID) }
 
         service.installFocusObserver(for: 10, bundleID: "company.thebrowser.dia")
         service.handleAppActivation(
@@ -1375,7 +1403,7 @@ struct WindowDiscoveryServiceTests {
         service.onFrontmostAppChanged = { bundleID, _ in
             callbackOrder.append("app:\(bundleID ?? "nil")")
         }
-        service.onWindowActivated = { _ in callbackOrder.append("focus") }
+        service.onWindowActivated = { _, _ in callbackOrder.append("focus") }
         service.onAppActivated = { _ in callbackOrder.append("snapshot") }
 
         service.handleAppActivation(
@@ -1605,9 +1633,9 @@ struct WindowDiscoveryServiceTests {
             callbackOrder.append("windows")
             availableWindowIDs = $0.map(\.windowID)
         }
-        service.onWindowActivated = {
+        service.onWindowActivated = { windowID, _ in
             callbackOrder.append("focus")
-            activatedWindowIDs.append($0)
+            activatedWindowIDs.append(windowID)
         }
 
         service.handleAppLaunch(
@@ -1636,7 +1664,7 @@ struct WindowDiscoveryServiceTests {
         )
         var activatedWindowIDs: [CGWindowID] = []
         var snapshotFocusedWindowID: CGWindowID?
-        service.onWindowActivated = { activatedWindowIDs.append($0) }
+        service.onWindowActivated = { windowID, _ in activatedWindowIDs.append(windowID) }
         service.onAppActivated = { snapshotFocusedWindowID = $0.focusedWindowID }
 
         service.handleAppActivation(
@@ -1664,7 +1692,7 @@ struct WindowDiscoveryServiceTests {
         )
         var activatedWindowIDs: [CGWindowID] = []
         var snapshotFocusedWindowID: CGWindowID?
-        service.onWindowActivated = { activatedWindowIDs.append($0) }
+        service.onWindowActivated = { windowID, _ in activatedWindowIDs.append(windowID) }
         service.onAppActivated = { snapshotFocusedWindowID = $0.focusedWindowID }
 
         service.handleAppActivation(
@@ -2854,7 +2882,7 @@ struct WindowDiscoveryServiceTests {
         service.registerTracking(windowID: 7, pid: 10)
         service.registerTracking(windowID: 8, pid: 10)
         var activatedWindowIDs: [CGWindowID] = []
-        service.onWindowActivated = { activatedWindowIDs.append($0) }
+        service.onWindowActivated = { windowID, _ in activatedWindowIDs.append(windowID) }
 
         service.handleWindowDestroyed(element: destroyedElement)
 
@@ -2882,7 +2910,7 @@ struct WindowDiscoveryServiceTests {
         service.armingOverride = { _, _ in .armed }
         service.registerTracking(windowID: 7, pid: 10)
         var activatedWindowIDs: [CGWindowID] = []
-        service.onWindowActivated = { activatedWindowIDs.append($0) }
+        service.onWindowActivated = { windowID, _ in activatedWindowIDs.append(windowID) }
 
         service.handleWindowDestroyed(element: destroyedElement)
         frontmostPID.write(20)
@@ -2910,7 +2938,7 @@ struct WindowDiscoveryServiceTests {
             service.armingOverride = { _, _ in .armed }
             service.registerTracking(windowID: 7, pid: 10)
             var activatedWindowIDs: [CGWindowID] = []
-            service.onWindowActivated = { activatedWindowIDs.append($0) }
+            service.onWindowActivated = { windowID, _ in activatedWindowIDs.append(windowID) }
 
             service.handleWindowDestroyed(element: destroyedElement)
 

@@ -2413,6 +2413,83 @@ struct SpaceControllerTests {
         #expect(windowService.frontedWindows.map(\.windowID) == [202])
     }
 
+    private func makeSafariAndTwoDiaWindowsController(
+        windowService: MockWindowService,
+        keyboardService: MockKeyboardService
+    ) -> SpaceController {
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryProbe: { _, completion in completion(22_502, 202) },
+            focusDeliveryVerificationDelay: 60
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        for (windowID, bundleID, ownerPID) in [
+            (101, "com.apple.Safari", 4_217),
+            (202, "company.thebrowser.dia", 22_502),
+            (303, "company.thebrowser.dia", 22_502),
+        ] as [(CGWindowID, String, pid_t)] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: bundleID, ownerName: bundleID,
+                            windowTitle: "Window \(windowID)", ownerPID: ownerPID),
+                toSpaceID: spaceID
+            )
+        }
+        return controller
+    }
+
+    @Test("A window-order guess at the app's focus does not displace the window Command-Tab confirmed")
+    func inferredSameAppActivationKeepsConfirmedDelivery() {
+        let windowService = MockWindowService()
+        windowService.visibleFrontWindowID = 202
+        let keyboardService = MockKeyboardService()
+        let controller = makeSafariAndTwoDiaWindowsController(
+            windowService: windowService,
+            keyboardService: keyboardService
+        )
+
+        keyboardService.simulateEvent(.cmdTabTap)
+        #expect(controller.verifyPendingFocusDelivery())
+        controller.recordWindowActivation(windowID: 303, evidence: .inferredFromWindowOrder)
+
+        #expect(activeWindowIDs(controller) == [202, 101, 303])
+    }
+
+    @Test("A reported focus on another window of the app still takes the MRU head after Command-Tab")
+    func reportedSameAppActivationAfterConfirmedDeliveryIsRecorded() {
+        let windowService = MockWindowService()
+        windowService.visibleFrontWindowID = 202
+        let keyboardService = MockKeyboardService()
+        let controller = makeSafariAndTwoDiaWindowsController(
+            windowService: windowService,
+            keyboardService: keyboardService
+        )
+
+        keyboardService.simulateEvent(.cmdTabTap)
+        #expect(controller.verifyPendingFocusDelivery())
+        controller.recordWindowActivation(windowID: 303, evidence: .focusedWindowReported)
+
+        #expect(activeWindowIDs(controller) == [303, 202, 101])
+    }
+
+    @Test("A window-order guess still credits an app Debut has no accepted focus in")
+    func inferredActivationOfAnotherAppIsRecorded() {
+        let windowService = MockWindowService()
+        windowService.visibleFrontWindowID = 202
+        let keyboardService = MockKeyboardService()
+        let controller = makeSafariAndTwoDiaWindowsController(
+            windowService: windowService,
+            keyboardService: keyboardService
+        )
+
+        keyboardService.simulateEvent(.cmdTabTap)
+        #expect(controller.verifyPendingFocusDelivery())
+        controller.recordWindowActivation(windowID: 101, evidence: .inferredFromWindowOrder)
+
+        #expect(activeWindowIDs(controller) == [101, 202, 303])
+    }
+
     @Test("Production focus verification works without an injected test probe")
     func productionFocusVerificationUsesWindowService() {
         let windowService = MockWindowService()

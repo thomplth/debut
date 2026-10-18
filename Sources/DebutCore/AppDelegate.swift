@@ -478,10 +478,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 self?.spaceController?.recordWindowSize(windowID: windowID, size: size)
             }
         }
-        discovery.onWindowActivated = { [weak self] windowID in
+        discovery.onWindowActivated = { [weak self] windowID, evidence in
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.spaceController?.recordWindowActivation(windowID: windowID)
+                self.spaceController?.recordWindowActivation(windowID: windowID, evidence: evidence)
             }
         }
         discovery.onSystemAttentionRequested = { [weak self] windowID, ownerPID in

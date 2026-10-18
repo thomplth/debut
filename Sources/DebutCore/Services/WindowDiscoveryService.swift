@@ -16,6 +16,11 @@ public enum FrontmostAppObservationSource: String, Sendable {
     case workspaceActivation = "workspace_activation"
 }
 
+public enum WindowActivationEvidence: String, Sendable {
+    case focusedWindowReported = "focused_window_reported"
+    case inferredFromWindowOrder = "inferred_from_window_order"
+}
+
 struct AXWindowCreationMetadata: Equatable, Sendable {
     let windowID: CGWindowID
     let ownerPID: pid_t
@@ -94,7 +99,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private let windowService: any WindowService
     public var onWindowsDiscovered: (([WindowInfo]) -> Void)?
     public var onWindowClosed: ((CGWindowID) -> Void)?
-    public var onWindowActivated: ((CGWindowID) -> Void)?
+    public var onWindowActivated: ((CGWindowID, WindowActivationEvidence) -> Void)?
     /// Publishes one standard window found from its creation event. This is separate from the
     /// app-launch batch because a creation event is a targeted update, not a complete app list.
     public var onWindowCreated: ((RuntimeWindowSnapshot) -> Void)?
@@ -249,6 +254,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         generation: Int,
         pid: pid_t,
         windowID: CGWindowID,
+        evidence: WindowActivationEvidence,
         focusDeliveries: Int
     )?
     private var launchProbeGeneration = 0
@@ -1083,7 +1089,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                         windowID: focusedWindow.windowID,
                         pid: focusedWindow.ownerPID
                     )
-                    self.onWindowActivated?(focusedWindow.windowID)
+                    self.onWindowActivated?(focusedWindow.windowID, .focusedWindowReported)
                 }
             }
         }
@@ -1530,7 +1536,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                   self.frontmostPIDProvider() == metadata.ownerPID,
                   focusedWindowID == metadata.windowID
             else { return }
-            self.onWindowActivated?(metadata.windowID)
+            self.onWindowActivated?(metadata.windowID, .focusedWindowReported)
         }
     }
 
@@ -1773,7 +1779,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             self.heldActivationAnswer = nil
             self.focusChangeDeliveryCount += 1
             self.trackAndRegister(windowID: windowID, pid: pid)
-            self.onWindowActivated?(windowID)
+            self.onWindowActivated?(windowID, .focusedWindowReported)
         }
     }
 
@@ -1784,7 +1790,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
               activatedPID == held.pid,
               focusChangeDeliveryCount == held.focusDeliveries
         else { return }
-        onWindowActivated?(held.windowID)
+        onWindowActivated?(held.windowID, held.evidence)
     }
 
     // MARK: - NSWorkspace notifications
@@ -1890,12 +1896,15 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                   self.launchProbeGeneration == generation,
                   self.frontmostPIDProvider() == pid
             else { return }
-            let focusedWindowID = probedWindowID.flatMap { candidate in
+            let reportedWindowID = probedWindowID.flatMap { candidate in
                 windows.contains(where: { $0.windowID == candidate }) ? candidate : nil
-            } ?? windows.first?.windowID
-            guard let focusedWindowID else { return }
+            }
+            guard let focusedWindowID = reportedWindowID ?? windows.first?.windowID else { return }
             self.trackAndRegister(windowID: focusedWindowID, pid: pid)
-            self.onWindowActivated?(focusedWindowID)
+            self.onWindowActivated?(
+                focusedWindowID,
+                reportedWindowID == nil ? .inferredFromWindowOrder : .focusedWindowReported
+            )
         }
     }
 
@@ -2109,17 +2118,20 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
         // AX focus can be nil while an app launches, or can briefly retain the ID of a
         // document window the app just replaced. Trust the early sample only when the
-        // activated process still enumerates that window. Re-read once after enumeration
-        // before falling back to CGWindowList's front-to-back order.
+        // activated process still enumerates that window. Otherwise CGWindowList's
+        // front-to-back order is only a guess, read before a raise in flight has landed.
         let activatedWindows = liveWindows.filter { $0.ownerPID == pid }
         let activatedWindowIDs = Set(activatedWindows.map(\.windowID))
         let liveIDs = Set(liveWindows.map(\.windowID))
         let liveDesktopLocations = snapshot.windowLocations.filter { liveIDs.contains($0.key) }
         let focusedWindowID: CGWindowID?
+        let evidence: WindowActivationEvidence
         if let sampledFocusedWindowID,
            activatedWindowIDs.contains(sampledFocusedWindowID) {
             focusedWindowID = sampledFocusedWindowID
+            evidence = .focusedWindowReported
         } else if shouldTrackActivation {
+            evidence = .inferredFromWindowOrder
             // CGWindowList orders every desktop's windows together, so the app's first window
             // can sit on a desktop that is not showing. Activation cannot have focused it there,
             // and the controller defers such a report for a desktop change that never comes,
@@ -2131,11 +2143,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             })?.windowID ?? activatedWindows.first?.windowID
         } else {
             focusedWindowID = nil
+            evidence = .inferredFromWindowOrder
         }
         let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - probeStartedAt
         diag.report("app_activation_focus_probed", details: [
             "bundleID": app.bundleID,
             "elapsedMilliseconds": String(format: "%.3f", Double(elapsedNanoseconds) / 1_000_000),
+            "evidence": evidence.rawValue,
             "ownerPID": "\(pid)",
             "snapshotMilliseconds": String(
                 format: "%.3f",
@@ -2163,11 +2177,11 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             // window; until its probe answers, this answer waits rather than being dropped.
             guard focusChangeDeliveryCount == focusDeliveries else { return }
             if focusChangeProbePending {
-                heldActivationAnswer = (generation, pid, focusedWindowID, focusDeliveries)
+                heldActivationAnswer = (generation, pid, focusedWindowID, evidence, focusDeliveries)
                 return
             }
         }
-        onWindowActivated?(focusedWindowID)
+        onWindowActivated?(focusedWindowID, evidence)
     }
 
     @objc private func appDidTerminate(_ notification: Notification) {
