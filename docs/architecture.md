@@ -124,8 +124,14 @@ on commit; it does not drag the real window or drive the user's cursor.
 
 ## Events, capture, and persistence
 
-Window state is driven by workspace notifications, AX lifecycle/focus events,
-process-exit sources, and desktop reconfiguration. Bounded retries handle AX
+Window state is driven by workspace notifications, AX lifecycle events,
+WindowServer focus and order events, process-exit sources, and desktop
+reconfiguration. Window focus comes from SkyLight's per-window focus event (808)
+for every tracked window, because an AX focus read asks the app, and a busy app
+answers too late. The first 808 of an activation names its window and the raises
+that follow it are ignored ([WindowServerFocusRules](../Sources/DebutCore/Services/WindowServerFocusRules.swift)).
+The activation probe and the AX focus observer remain fallbacks for when no 808
+arrives. Bounded retries handle AX
 servers and newly created windows that are not ready yet. Animation schedules,
 presentation delays, focus verification, debounced saves, and indicator dismissal
 are event-triggered work, not a background discovery poll. Hidden overlays detach

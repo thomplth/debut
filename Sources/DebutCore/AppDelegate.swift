@@ -478,6 +478,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 self?.spaceController?.recordWindowSize(windowID: windowID, size: size)
             }
         }
+        controller.onFocusRequested = { [weak discovery] windowID, ownerPID in
+            discovery?.noteFocusRequested(windowID: windowID, ownerPID: ownerPID)
+        }
         discovery.onWindowActivated = { [weak self] windowID, evidence in
             DispatchQueue.main.async {
                 guard let self else { return }

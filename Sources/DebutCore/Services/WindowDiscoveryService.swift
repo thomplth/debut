@@ -62,6 +62,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let allWindowIDs: Set<CGWindowID>?
         let skyLightWindowIDs: Set<CGWindowID>?
         let activatedAppFrontWindowID: CGWindowID?
+        let captureStartedAt: UInt64
         let captureNanoseconds: UInt64
     }
 
@@ -134,7 +135,14 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// so this never reaches state.json.
     public private(set) var armedWindowIDs: Set<CGWindowID> = []
     public private(set) var unarmedWindowIDs: Set<CGWindowID> = []
-    private var windowOwnerPIDs: [CGWindowID: pid_t] = [:]
+    private var windowOwnerPIDs: [CGWindowID: pid_t] = [:] {
+        didSet {
+            guard windowOwnerPIDs.count != oldValue.count
+                || !windowOwnerPIDs.keys.allSatisfy({ oldValue[$0] != nil })
+            else { return }
+            windowServerWatchListChanged(from: Set(oldValue.keys))
+        }
+    }
 
     /// Windows a destroy notification confirmed are gone, and the process that owned them.
     ///
@@ -235,6 +243,29 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Replaces the bounded creation-readiness delay in tests. Production leaves this nil.
     var windowCreationRetryScheduler: ((TimeInterval, @escaping () -> Void) -> Void)?
 
+    private let windowServerEvents: (any WindowServerWindowEventSource)?
+    private let uptime: @Sendable () -> TimeInterval
+    private var focusRules = WindowServerFocusRules()
+    /// The WindowServer accepted the focus event, so it names focus and the AX focus observer
+    /// stays off: AX reads that app's answer, and Dia missed its 50ms read for one of its
+    /// windows 126 times in 147 (KHA-1166).
+    private(set) var isWindowServerFocusActive = false
+    private var hasSeenWindowServerFocus = false
+    /// Activations of apps with tracked windows since the focus tap started, while it has never
+    /// spoken. Registration can succeed on a connection that is never sent anything, and then
+    /// the AX observer comes back until the first focus event arrives.
+    private var activationsWithoutWindowServerFocus = 0
+    private var isWindowServerFocusSilent = false
+    static let silentWindowServerFocusActivationLimit = 5
+    private var isAXFocusObserverEnabled: Bool {
+        !isWindowServerFocusActive || isWindowServerFocusSilent
+    }
+    /// Whether the current activation has named a window yet, through any evidence.
+    private var activationAnswered = true
+    private var activationFocusAnswer: CGWindowID?
+    private var activationStartedAt: UInt64 = 0
+    private var activatedBundleID: String?
+
     // AXObserver for tracking focused window changes within the frontmost app
     private var focusObserver: AXObserver?
     private var observedPID: pid_t?
@@ -320,7 +351,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             discoveryReadScheduler: { read in Self.scheduleDiscoveryReadOffMain(read) },
             frontmostPIDProvider: frontmostPIDProvider,
             launchDiscoveryDelay: launchDiscoveryDelay,
-            processExitMonitor: ProcessExitMonitor()
+            processExitMonitor: ProcessExitMonitor(),
+            windowServerEvents: SkyLightWindowEvents()
         )
     }
 
@@ -333,10 +365,14 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         frontmostPIDProvider: (@Sendable () -> pid_t?)? = nil,
         launchDiscoveryDelay: TimeInterval = 0.5,
         processExitMonitor: any ProcessExitMonitoring,
+        windowServerEvents: (any WindowServerWindowEventSource)? = nil,
+        uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         diagnosticReporter: DiagnosticReporter = .shared
     ) {
         self.diag = diagnosticReporter
         self.windowService = windowService
+        self.windowServerEvents = windowServerEvents
+        self.uptime = uptime
         self.discoveryReadScheduler = discoveryReadScheduler ?? { read in read()() }
         if let activationSnapshotScheduler {
             self.activationSnapshotScheduler = activationSnapshotScheduler
@@ -681,6 +717,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                        name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         nc.addObserver(self, selector: #selector(appDidActivate(_:)),
                        name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        startWindowServerFocus()
 
         // Seed frontmost-app state outside the keyboard event-tap callback.
         let front = NSWorkspace.shared.frontmostApplication
@@ -1676,6 +1713,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // the whole session, and every focus change inside that app reached the activation path.
         // Leave an observer already installed elsewhere alone — the user has not left that app.
         guard bundleID != "com.thomplth.Debut", !excludedBundleIDs.contains(bundleID) else { return }
+        guard isAXFocusObserverEnabled else { return }
 
         // Skip if already observing this app, or already retrying for it — the launch pass
         // asks again 0.5s after the activation did, and a second chain would only reset the
@@ -1758,22 +1796,29 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         pendingFocusObserverPID = nil
     }
 
-    func handleFocusChanged() {
+    /// The notification names the window that took focus. Re-reading the app's focused window
+    /// instead asks the app again, and Dia missed that 50ms read for one of its windows 126
+    /// times in 147, which dropped every switch to it (KHA-1166).
+    func handleFocusChanged(notifiedWindow: AXUIElement? = nil) {
         guard let pid = observedPID else { return }
         focusChangeProbeGeneration += 1
         focusChangeProbePending = true
         let generation = focusChangeProbeGeneration
         let activationGeneration = activationProbeGeneration
-        focusProbeScheduler(pid) { [weak self] windowID in
+        let deliver: @Sendable (CGWindowID?) -> Void = { [weak self] windowID in
             guard let self, self.focusChangeProbeGeneration == generation else { return }
             self.focusChangeProbePending = false
             // A fullscreen Space animating in answers the focused-window read with nothing, and
             // it is exactly then that the app's focus notification races its own activation.
             // No answer is no evidence, so the activation's answer stands.
             guard self.observedPID == pid,
-                  self.activationProbeGeneration == activationGeneration,
-                  let windowID
+                  self.activationProbeGeneration == activationGeneration
             else {
+                self.releaseHeldActivationAnswer()
+                return
+            }
+            guard let windowID else {
+                self.diag.report("focus_change_unresolved", details: ["ownerPID": "\(pid)"])
                 self.releaseHeldActivationAnswer()
                 return
             }
@@ -1782,6 +1827,32 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             self.trackAndRegister(windowID: windowID, pid: pid)
             self.onWindowActivated?(windowID, .observed)
         }
+        guard let notifiedWindow else {
+            focusProbeScheduler(pid, deliver)
+            return
+        }
+        let element = UncheckedSendable(notifiedWindow)
+        let readWindowID = notifiedWindowIDReader
+        scheduleDiscoveryRead {
+            let windowID = readWindowID(element.value)
+            return { [weak self] in
+                guard let self, self.focusChangeProbeGeneration == generation else { return }
+                if let windowID {
+                    deliver(windowID)
+                } else {
+                    self.focusProbeScheduler(pid, deliver)
+                }
+            }
+        }
+    }
+
+    /// Replaces the notified window's ID read in tests. Production reads it with the probe's
+    /// timeout, off the main queue.
+    var notifiedWindowIDReader: @Sendable (AXUIElement) -> CGWindowID? = { element in
+        AXUIElementSetMessagingTimeout(element, Float(WindowDiscoveryService.focusProbeTimeout))
+        var windowID: CGWindowID = 0
+        guard _AXUIElementGetWindow(element, &windowID) == .success, windowID != 0 else { return nil }
+        return windowID
     }
 
     private func releaseHeldActivationAnswer() {
@@ -1792,6 +1863,177 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
               focusChangeDeliveryCount == held.focusDeliveries
         else { return }
         onWindowActivated?(held.windowID, held.evidence)
+    }
+
+    // MARK: - WindowServer focus
+
+    func startWindowServerFocus() {
+        guard let windowServerEvents, !isWindowServerFocusActive else { return }
+        let accepted = windowServerEvents.start { [weak self] event, windowID, arrivedAt in
+            self?.handleWindowServerEvent(event, windowID: windowID, at: arrivedAt)
+        }
+        isWindowServerFocusActive = accepted.contains(.windowFocused)
+        diag.report("window_server_focus_started", details: [
+            "events": accepted.map { "\($0.rawValue)" }.joined(separator: ","),
+            "active": "\(isWindowServerFocusActive)",
+        ])
+        guard isWindowServerFocusActive else { return }
+        removeFocusObserver()
+        windowServerWatchListChanged(from: [])
+    }
+
+    /// Debut is about to front `windowID`, so the activation that follows has a known answer.
+    public func noteFocusRequested(windowID: CGWindowID, ownerPID: pid_t) {
+        guard isWindowServerFocusActive else { return }
+        focusRules.focusRequested(
+            windowID: windowID,
+            pid: ownerPID,
+            frontmostPID: frontmostPIDProvider(),
+            now: uptime()
+        )
+    }
+
+    func handleWindowServerEvent(
+        _ event: WindowServerWindowEvent,
+        windowID: CGWindowID,
+        at arrivedAt: TimeInterval
+    ) {
+        switch event {
+        case .currentSpaceChanged, .activeSpaceChanged:
+            focusRules.spaceTransitionBegan(now: arrivedAt)
+            traceWindowServerEvent(event, windowID: nil)
+        case .windowOrderedOut:
+            focusRules.windowOrderedOut(windowID: windowID)
+            traceWindowServerEvent(event, windowID: windowID)
+        case .windowFocused, .windowOrderedIn:
+            guard let pid = windowOwnerPIDs[windowID] else {
+                traceWindowServerEvent(event, windowID: windowID)
+                return
+            }
+            if event == .windowFocused { noteWindowServerFocusHeard() }
+            let frontmostPID = frontmostPIDProvider()
+            let verdict = event == .windowFocused
+                ? focusRules.windowFocused(
+                    windowID: windowID, pid: pid, frontmostPID: frontmostPID, now: arrivedAt
+                )
+                : focusRules.windowOrderedIn(
+                    windowID: windowID, pid: pid, frontmostPID: frontmostPID, now: arrivedAt
+                )
+            reportWindowServerFocus(
+                event,
+                windowID: windowID,
+                ownerPID: pid,
+                frontmostPID: frontmostPID,
+                verdict: verdict,
+                at: arrivedAt
+            )
+            switch verdict {
+            case .credited: creditWindowServerFocus(windowID: windowID, pid: pid, publishes: true)
+            case .alreadyCredited: creditWindowServerFocus(windowID: windowID, pid: pid, publishes: false)
+            default: break
+            }
+        }
+    }
+
+    /// Counts as the freshest focus answer, so an activation probe still out yields to it.
+    private func creditWindowServerFocus(windowID: CGWindowID, pid: pid_t, publishes: Bool) {
+        focusChangeDeliveryCount += 1
+        heldActivationAnswer = nil
+        if pid == activatedPID {
+            activationAnswered = true
+            activationFocusAnswer = windowID
+        }
+        if publishes { onWindowActivated?(windowID, .observed) }
+    }
+
+    private func noteWindowServerFocusHeard() {
+        activationsWithoutWindowServerFocus = 0
+        guard !hasSeenWindowServerFocus else { return }
+        hasSeenWindowServerFocus = true
+        if isWindowServerFocusSilent {
+            isWindowServerFocusSilent = false
+            removeFocusObserver()
+            diag.report("window_server_focus_resumed")
+        }
+    }
+
+    private func countActivationWithoutWindowServerFocus() {
+        guard !hasSeenWindowServerFocus, !isWindowServerFocusSilent else { return }
+        activationsWithoutWindowServerFocus += 1
+        guard activationsWithoutWindowServerFocus >= Self.silentWindowServerFocusActivationLimit
+        else { return }
+        isWindowServerFocusSilent = true
+        diag.report("window_server_focus_silent", details: [
+            "activations": "\(activationsWithoutWindowServerFocus)",
+        ])
+    }
+
+    private func windowServerWatchListChanged(from previous: Set<CGWindowID>) {
+        guard isWindowServerFocusActive, let windowServerEvents else { return }
+        let current = Set(windowOwnerPIDs.keys)
+        windowServerEvents.watch(current)
+        let removed = previous.subtracting(current)
+        if !removed.isEmpty { focusRules.forget(windowIDs: removed) }
+        let added = current.subtracting(previous)
+        guard !added.isEmpty else { return }
+        let source = UncheckedSendable(windowServerEvents)
+        scheduleDiscoveryRead {
+            let onScreen = source.value.onScreenWindowIDs().intersection(added)
+            return { [weak self] in
+                guard let self else { return }
+                let stillTracked = onScreen.filter { self.windowOwnerPIDs[$0] != nil }
+                self.focusRules.windowsSeenOnScreen(stillTracked)
+                if DevelopmentMeasurements.isEnabled {
+                    self.diag.report("window_server_focus_watch", details: [
+                        "watched": "\(self.windowOwnerPIDs.count)",
+                        "added": "\(added.count)",
+                        "addedOnScreen": "\(stillTracked.count)",
+                    ])
+                }
+            }
+        }
+    }
+
+    /// Every 808 decision is kept: a wrong MRU head is only explainable from the focus event that
+    /// put it there. Order-ins that change nothing, order-outs and Space events are development
+    /// tracing, since a desktop change orders in every window it shows.
+    private func reportWindowServerFocus(
+        _ event: WindowServerWindowEvent,
+        windowID: CGWindowID,
+        ownerPID: pid_t,
+        frontmostPID: pid_t?,
+        verdict: WindowServerFocusVerdict,
+        at arrivedAt: TimeInterval
+    ) {
+        let isDecision = event == .windowFocused || verdict == .credited
+        guard isDecision || DevelopmentMeasurements.isEnabled else { return }
+        var details = [
+            "event": event.diagnosticName,
+            "windowID": "\(windowID)",
+            "ownerPID": "\(ownerPID)",
+            "frontmostPID": frontmostPID.map(String.init) ?? "none",
+            "verdict": verdict.rawValue,
+        ]
+        if DevelopmentMeasurements.isEnabled {
+            details["activatedPID"] = activatedPID.map(String.init) ?? "none"
+            details["activationAgeMilliseconds"] = activationStartedAt == 0 ? "none" : String(
+                format: "%.1f",
+                Double(DispatchTime.now().uptimeNanoseconds &- activationStartedAt) / 1_000_000
+            )
+            details["deliveryLagMilliseconds"] = String(format: "%.1f", (uptime() - arrivedAt) * 1000)
+            details["knownOnScreen"] = "\(focusRules.isOnScreen(windowID))"
+        }
+        diag.report("window_server_focus", details: details)
+    }
+
+    private func traceWindowServerEvent(_ event: WindowServerWindowEvent, windowID: CGWindowID?) {
+        guard DevelopmentMeasurements.isEnabled else { return }
+        var details = ["event": event.diagnosticName]
+        if let windowID {
+            details["windowID"] = "\(windowID)"
+            details["ownerPID"] = windowOwnerPIDs[windowID].map(String.init) ?? "untracked"
+        }
+        diag.report("window_server_event", details: details)
     }
 
     // MARK: - NSWorkspace notifications
@@ -1997,6 +2239,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         _ app: AppInfo,
         source: FrontmostAppObservationSource = .workspaceActivation
     ) {
+        reportUnansweredActivation(supersededBy: app)
         activationProbeGeneration += 1
         activatedPID = app.pid
         let generation = activationProbeGeneration
@@ -2007,17 +2250,47 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         // answering would name Debut the frontmost app every time its own window took focus.
         guard app.bundleID != "com.thomplth.Debut" else {
             activatedPID = nil
+            activationAnswered = true
             return
         }
-        diag.report("app_activation_observed", details: [
+        let pid = app.pid
+        let shouldTrackActivation = !excludedBundleIDs.contains(app.bundleID)
+        activationAnswered = !shouldTrackActivation
+        activationFocusAnswer = nil
+        activationStartedAt = probeStartedAt
+        activatedBundleID = app.bundleID
+        var observedDetails = [
             "bundleID": app.bundleID,
             "ownerPID": "\(app.pid)",
             "source": source.rawValue,
-        ])
+        ]
+        if DevelopmentMeasurements.isEnabled {
+            observedDetails["trackedWindowIDs"] = windowOwnerPIDs.filter { $0.value == pid }
+                .keys.sorted().map(String.init).joined(separator: ",")
+            observedDetails["windowServerFocus"] = isWindowServerFocusActive
+                ? (isWindowServerFocusSilent ? "silent" : "active") : "off"
+        }
+        diag.report("app_activation_observed", details: observedDetails)
         onFrontmostAppChanged?(app.bundleID, source)
 
-        let pid = app.pid
-        let shouldTrackActivation = !excludedBundleIDs.contains(app.bundleID)
+        let focusDeliveries = focusChangeDeliveryCount
+        if isWindowServerFocusActive {
+            let windowIDs = Set(windowOwnerPIDs.filter { $0.value == pid }.keys)
+            if !windowIDs.isEmpty { countActivationWithoutWindowServerFocus() }
+            if let held = focusRules.activationBegan(pid: pid, windowIDs: windowIDs, now: uptime()),
+               shouldTrackActivation {
+                diag.report("window_server_focus", details: [
+                    "event": WindowServerWindowEvent.windowFocused.diagnosticName,
+                    "windowID": "\(held)",
+                    "ownerPID": "\(pid)",
+                    "frontmostPID": "\(pid)",
+                    "verdict": WindowServerFocusVerdict.credited.rawValue,
+                    "reason": "arrived_before_activation",
+                ])
+                creditWindowServerFocus(windowID: held, pid: pid, publishes: true)
+            }
+        }
+
         guard shouldTrackActivation else {
             finishAppActivation(
                 app,
@@ -2029,7 +2302,6 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             return
         }
         installWindowCreationObserver(for: app.pid, bundleID: app.bundleID)
-        let focusDeliveries = focusChangeDeliveryCount
         focusProbeScheduler(pid) { [weak self] sampledFocusedWindowID in
             self?.finishAppActivation(
                 app,
@@ -2054,6 +2326,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let windowService = windowService
         let spaceSwitcher = spaceSwitcher
         let excludedBundleIDs = excludedBundleIDs
+        let snapshotScheduledAt = DispatchTime.now().uptimeNanoseconds
         activationSnapshotScheduler({
             let startedAt = DispatchTime.now().uptimeNanoseconds
             let listedWindows = windowService.listWindows().filter {
@@ -2072,6 +2345,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 allWindowIDs: windowService.listAllWindowIDs(),
                 skyLightWindowIDs: spaceSwitcher.map { $0.placedWindowIDs() },
                 activatedAppFrontWindowID: windowService.frontmostWindowID(ownerPID: app.pid),
+                captureStartedAt: startedAt,
                 captureNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt
             )
         }) { [weak self] snapshot in
@@ -2082,6 +2356,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 generation: generation,
                 focusDeliveries: focusDeliveries,
                 probeStartedAt: probeStartedAt,
+                snapshotScheduledAt: snapshotScheduledAt,
                 source: source
             )
         }
@@ -2094,10 +2369,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         generation: Int,
         focusDeliveries: Int?,
         probeStartedAt: UInt64,
+        snapshotScheduledAt: UInt64,
         source: FrontmostAppObservationSource
     ) {
         // A newer activation may have started while this snapshot was being captured.
         guard activationProbeGeneration == generation, activatedPID == app.pid else { return }
+        activationAnswered = true
         let pid = app.pid
         let shouldTrackActivation = !excludedBundleIDs.contains(app.bundleID)
         var runningPIDs = snapshot.runningPIDs
@@ -2165,6 +2442,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             ),
             "resolvedWindowID": focusedWindowID.map(String.init) ?? "none",
             "sampledWindowID": sampledFocusedWindowID.map(String.init) ?? "none",
+            "windowServerWindowID": activationFocusAnswer.map(String.init) ?? "none",
+            "focusProbeMilliseconds": Self.milliseconds(from: probeStartedAt, to: snapshotScheduledAt),
+            "snapshotQueueMilliseconds": Self.milliseconds(
+                from: snapshotScheduledAt,
+                to: snapshot.captureStartedAt
+            ),
             "source": source.rawValue,
         ])
         if let focusedWindowID {
@@ -2173,7 +2456,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         onAppActivated?(RuntimeWindowSnapshot(
             liveWindows: liveWindows,
             allWindowIDs: snapshot.allWindowIDs,
-            focusedWindowID: focusedWindowID,
+            focusedWindowID: activationFocusAnswer ?? focusedWindowID,
             unarmedWindowIDs: unarmedWindowIDs,
             desktopIndexes: liveDesktopLocations.mapValues(\.index),
             desktopLocations: liveDesktopLocations,
@@ -2183,13 +2466,39 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         if let focusDeliveries {
             // A focus change reported since this probe started is fresher only once it names a
             // window; until its probe answers, this answer waits rather than being dropped.
-            guard focusChangeDeliveryCount == focusDeliveries else { return }
+            guard focusChangeDeliveryCount == focusDeliveries else {
+                diag.report("app_activation_probe_yielded", details: [
+                    "ownerPID": "\(pid)",
+                    "probedWindowID": "\(focusedWindowID)",
+                    "focusWindowID": activationFocusAnswer.map(String.init) ?? "other_app",
+                ])
+                return
+            }
             if focusChangeProbePending {
                 heldActivationAnswer = (generation, pid, focusedWindowID, evidence, focusDeliveries)
                 return
             }
         }
         onWindowActivated?(focusedWindowID, evidence)
+    }
+
+    private static func milliseconds(from start: UInt64, to end: UInt64) -> String {
+        String(format: "%.1f", Double(end &- start) / 1_000_000)
+    }
+
+    /// An activation superseded before any evidence named its window left the MRU head on the
+    /// app before it, so the next Command-Tab from it went one app too far (KHA-1166).
+    private func reportUnansweredActivation(supersededBy app: AppInfo) {
+        guard !activationAnswered, let pid = activatedPID else { return }
+        diag.report("app_activation_unanswered", details: [
+            "ownerPID": "\(pid)",
+            "bundleID": activatedBundleID ?? "",
+            "elapsedMilliseconds": Self.milliseconds(
+                from: activationStartedAt,
+                to: DispatchTime.now().uptimeNanoseconds
+            ),
+            "supersededBy": app.bundleID,
+        ])
     }
 
     @objc private func appDidTerminate(_ notification: Notification) {
@@ -2306,5 +2615,5 @@ private func focusChangedCallback(
 ) {
     guard let refcon else { return }
     let service = Unmanaged<WindowDiscoveryService>.fromOpaque(refcon).takeUnretainedValue()
-    service.handleFocusChanged()
+    service.handleFocusChanged(notifiedWindow: element)
 }

@@ -579,7 +579,14 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var frontmostAppIsExcluded = false
     private var frontmostAppBundleID: String?
     /// The window Debut last asked the window server to front, pending the focus report it causes.
-    private var focusRequest: (windowID: CGWindowID, ownerPID: pid_t, at: Date)?
+    private var focusRequest: (windowID: CGWindowID, ownerPID: pid_t, at: Date)? {
+        didSet {
+            guard let focusRequest else { return }
+            onFocusRequested?(focusRequest.windowID, focusRequest.ownerPID)
+        }
+    }
+    /// Tells window-server focus tracking which window an activation Debut causes will name.
+    public var onFocusRequested: ((CGWindowID, pid_t) -> Void)?
     private var pendingFront: (windowID: CGWindowID, ownerPID: pid_t)?
     private struct FollowingWindowMove {
         let id = UUID()
@@ -1964,6 +1971,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             diag.report("window_activation_recorded", details: [
                 "windowID": "\(windowID)",
                 "reported": "\(reportedWindowID)",
+                "evidence": evidence.rawValue,
                 "space": spaceLabel(forID: targetSpaceID),
                 "order": windowOrderDescription(spaceID: targetSpaceID),
             ])
@@ -3487,17 +3495,22 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 crossesDesktop: !showing.contains(targetSpace.id)
             )
         }
+        let orderBeforeCommit = DevelopmentMeasurements.isEnabled
+            ? windowOrderDescription(spaceID: targetSpace.id) : nil
         performSpaceSwitch(
             id: targetSpace.id,
             raiseWindowID: raiseWindowID,
             command: focusCommand
         )
 
-        diag.report("overlay_committed", details: [
+        var committedDetails = [
             "spaceIndex": "\(selectedSpaceIndex)",
             "windowIndex": "\(selectedWindowIndex)",
             "targetSpace": spaceLabel(forID: targetSpace.id),
-        ])
+            "windowID": raiseWindowID.map(String.init) ?? "none",
+        ]
+        if let orderBeforeCommit { committedDetails["orderBeforeCommit"] = orderBeforeCommit }
+        diag.report("overlay_committed", details: committedDetails)
     }
 
     /// Keep the pointer's highlight apart from the keyboard cursor until a command consumes it.
