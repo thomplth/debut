@@ -78,6 +78,8 @@ let e2eScenarioCatalog: [E2EScenarioDescriptor] = [
           summary: "Startup discovers windows on every desktop"),
     .init(id: "launch-focus-and-resize", group: .windowLifecycle, debut: .running,
           summary: "Focus inside a just-launched app, and a resized window reshaping its card"),
+    .init(id: "slow-focus-app", group: .windowLifecycle, debut: .running,
+          summary: "Focus inside, and into, an app too slow to answer Accessibility"),
     .init(id: "move-duration-sweep", group: .windowMoves, debut: .running,
           summary: "Command-Option arrows chain across desktops at every switch duration"),
 ]

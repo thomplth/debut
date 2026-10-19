@@ -42,6 +42,10 @@ var onboardingApplication: NSRunningApplication?
 // have to exist before Debut launches and builds its space list. It is never implied: the suite
 // also runs against the developer's own session, where silently adding desktops would be a
 // change to the user's machine rather than to a fixture.
+if CommandLine.arguments.contains(StalledFocusFixture.subcommand) {
+    StalledFocusFixture.run()
+}
+
 if CommandLine.arguments.dropFirst().first == "provision-desktops" {
     let target = Int(CommandLine.arguments.dropFirst(2).first ?? "") ?? 3
     exit(DesktopProvisioning.ensureDesktops(target) ? 0 : 1)
@@ -6067,6 +6071,7 @@ let scenarioBodies: [String: @MainActor () -> Void] = [
     "recycled-window-id": scenario_recycled_window_id,
     "startup-discovery": scenario_startup_discovery,
     "launch-focus-and-resize": scenario_launch_focus_and_resize,
+    "slow-focus-app": scenario_slow_focus_app,
     "held-key-across-overlay": scenario_held_key_across_overlay,
     "move-duration-sweep": scenario_move_duration_sweep,
 ]
