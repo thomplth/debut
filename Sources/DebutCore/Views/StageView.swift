@@ -58,6 +58,29 @@ struct StageExtent: Equatable {
     let height: CGFloat
 }
 
+private struct PlateStack {
+    let stages: [StageData]
+    let compact: CompactDragSnapshot?
+    let compactProjection: CompactProjection?
+    let heldPlateID: UUID?
+    let containerSize: CGSize
+    let metrics: StageMetrics
+    let displayedLayouts: [StageWindowLayout]
+    let stageWidths: [CGFloat]
+    let stageHeights: [CGFloat]
+    let visualLayout: StageStackLayout
+    let focusedSpaceIndex: Int
+    let spacing: CGFloat
+    let yOffset: CGFloat
+    let plateHitFrames: [CGRect]
+    let addButtonPlates: [NewDesktopPosition: Int]
+    let settlingWindowIDs: Set<CGWindowID>
+    let guidedKeyboardWindowID: CGWindowID?
+    let guidedKeyboardDeparture: KeyboardWindowDeparture?
+    let hasGuidedKeyboardMove: Bool
+    let fingerprint: StageStructureFingerprint
+}
+
 private struct StageLaidOutStack: Equatable {
     let ids: [UUID]
     /// Empty while a compact drag owns the geometry.
@@ -1637,375 +1660,47 @@ public struct StageOverlayView: View {
                 ? [.top: 0, .bottom: stages.count - 1].filter { $0.value == hoveredSpaceIndex }
                 : [:]
 
-            ZStack(alignment: .topLeading) {
-                ZStack(alignment: .top) {
-                    ForEach(Array(stages.enumerated()), id: \.element.id) { index, stage in
-                        // Compact stages are found by identity: the model can already hold the
-                        // accepted drop while the snapshot it was aimed at is still drawn.
-                        let compactIndex = compact?.stages.firstIndex { $0.spaceID == stage.id }
-                        let compactStage = compactIndex.flatMap { compact?.stages[$0] }
-                        // A held plate is drawn by its proxy; the plate itself waits, hidden, under
-                        // it, so whichever one is shown, the other is in the same place.
-                        let isHeld = compact != nil && heldPlateID == stage.id
-                        // The drag view's scale goes into the metrics rather than a render
-                        // transform, so a stage magnified past its resting size stays sharp.
-                        let dragScale = compact?.scale ?? 1
-                        let stageWidth = compactIndex.flatMap {
-                            compactProjection?.plateWidths[safe: $0].map { $0 * dragScale }
-                        } ?? stageWidths[index]
-                        let stageHeight = compactStage.map { $0.baseHeight * dragScale }
-                            ?? stageHeights[index]
-                        let isActive = index == viewModel.activeSpaceIndex
-                        let isInteractionTarget = compact == nil && index == focusedSpaceIndex
-                        let scale = compact == nil ? visualLayout.scales[index] : 1
-                        let slotOffset = compactStage.map {
-                            $0.centerY + (compactIndex.flatMap {
-                                compactProjection?.stageShifts[safe: $0]
-                            } ?? 0) - stageHeight / 2
-                        }
-                            ?? StageMotion.stageSlotOffset(layout: visualLayout, index: index)
-                        let stageOpacity = compact == nil
-                            ? StageMotion.stageOpacity(scale: scale)
-                            : 1
-                        let lift = StageMotion.lift(isActive: isInteractionTarget)
-                        let visualScale = metrics.scaleFactor * dragScale
-                        let contentScale = compactIndex.flatMap {
-                            compactProjection?.contentScales[safe: $0]
-                        } ?? 1
-                        let stageLayout = compact.map {
-                            StageWindowLayout(
-                                contentAspects: stage.windows.map(\.contentAspect),
-                                availableWidth: .greatestFiniteMagnitude,
-                                metrics: $0.metrics.scaled(by: dragScale * contentScale)
-                            )
-                        } ?? displayedLayouts[index]
-                        let selectedWindowIndex = compact != nil ? nil : StageMotion.selectedWindowIndex(
-                            windows: stage.windows,
-                            spaceIndex: index,
-                            activeSpaceIndex: viewModel.activeSpaceIndex,
-                            keyboardSelectedWindowIndex: viewModel.selectedWindowIndex,
-                            pointerSelection: pointerSelection,
-                            guidedKeyboardWindowID: guidedKeyboardWindowID
-                        )
+            let laidOutStack = StageLaidOutStack(
+                ids: stages.map(\.id),
+                extents: compact != nil ? [:] : Self.laidOutExtents(
+                    stages: stages, layout: visualLayout, stackOffset: yOffset
+                )
+            )
+            let stack = PlateStack(
+                stages: stages,
+                compact: compact,
+                compactProjection: compactProjection,
+                heldPlateID: heldPlateID,
+                containerSize: geo.size,
+                metrics: metrics,
+                displayedLayouts: displayedLayouts,
+                stageWidths: stageWidths,
+                stageHeights: stageHeights,
+                visualLayout: visualLayout,
+                focusedSpaceIndex: focusedSpaceIndex,
+                spacing: spacing,
+                yOffset: yOffset,
+                plateHitFrames: plateHitFrames,
+                addButtonPlates: addButtonPlates,
+                settlingWindowIDs: settlingWindowIDs,
+                guidedKeyboardWindowID: guidedKeyboardWindowID,
+                guidedKeyboardDeparture: guidedKeyboardDeparture,
+                hasGuidedKeyboardMove: hasGuidedKeyboardMove,
+                fingerprint: fingerprint
+            )
 
-                        StageSwiftUIView(
-                            stage: stage,
-                            selectedWindowIndex: selectedWindowIndex,
-                            layout: stageLayout,
-                            appearance: viewModel.appearance,
-                            draggingWindowID: dragSession.phase == .dragging
-                                ? compact?.sourceWindowID : nil,
-                            compactOffsets: compactIndex.flatMap {
-                                compactProjection?.cardOffsets[safe: $0]?.mapValues {
-                                    CGPoint(x: $0.x * dragScale, y: $0.y * dragScale)
-                                }
-                            },
-                            isDropTarget: compactIndex != nil
-                                && compactProjection?.placeholder?.stageIndex == compactIndex
-                                || compactIndex != nil && heldPlateID != nil
-                                    && dragSession.intent?.stageIndex == compactIndex,
-                            settlingWindowIDs: settlingWindowIDs,
-                            guidedKeyboardWindowID: guidedKeyboardWindowID,
-                            guidedKeyboardDeparture: guidedKeyboardDeparture,
-                            usesGuidedKeyboardMoveMotion: hasGuidedKeyboardMove,
-                            stageFrames: $stageFrames,
-                            windowFrames: $windowFrames,
-                            spaceIndex: index,
-                            onPointerSelectionChanged: { selection, isHovering, location in
-                                guard !dragSession.suppressesNavigation else { return }
-                                if isHovering && !pointerMovementGate.observe(at: location) {
-                                    return
-                                }
-                                let nextSelection = StageInteraction.pointerSelection(
-                                    current: pointerSelection,
-                                    target: selection,
-                                    isHovering: isHovering
-                                )
-                                guard nextSelection != pointerSelection else { return }
-                                pointerSelection = nextSelection
-                                onPointerSelectionChanged?(
-                                    nextSelection?.spaceIndex,
-                                    nextSelection?.windowIndex
-                                )
-                            },
-                            onWindowSelected: onWindowSelected,
-                            onWindowDragChanged: { window, windowIndex, value in
-                                windowDragChanged(
-                                    window: window,
-                                    spaceIndex: index,
-                                    windowIndex: windowIndex,
-                                    value: value,
-                                    layouts: displayedLayouts,
-                                    fingerprint: fingerprint,
-                                    containerSize: geo.size
-                                )
-                            },
-                            onWindowDragEnded: { window, windowIndex, value in
-                                windowDragEnded(
-                                    window: window,
-                                    spaceIndex: index,
-                                    windowIndex: windowIndex,
-                                    value: value
-                                )
-                            }
-                        )
-                        .frame(width: stageWidth, height: stageHeight)
-                        .background {
-                            StageSurfaceView(
-                                spaceIndex: index,
-                                size: CGSize(width: stageWidth, height: stageHeight),
-                                cornerRadius: CGFloat(viewModel.switcherAppearance.stageCornerRadius)
-                                    * visualScale,
-                                appearance: viewModel.switcherAppearance,
-                                shadow: StageSurfaceShadow.forStage(
-                                    lift: lift,
-                                    visualScale: visualScale,
-                                    stageScale: scale
-                                )
-                            )
-                        }
-                        .background(
-                            GeometryReader { stageGeo in
-                                Color.clear.preference(
-                                    key: StageFramePreferenceKey.self,
-                                    value: [index: stageGeo.frame(in: .named("overlay"))]
-                                )
-                            }
-                        )
-                        .contentShape(plateHitFrames[safe: index].map {
-                            Path(StageInteraction.plateHitShape(
-                                hit: $0,
-                                drawn: StageMotion.stageFrame(
-                                    at: index, containerWidth: geo.size.width, stackOffset: yOffset,
-                                    stageWidths: stageWidths, layout: visualLayout
-                                ),
-                                scale: scale
-                            ))
-                        } ?? Path(CGRect(x: 0, y: 0, width: stageWidth, height: stageHeight)))
-                        .gesture(
-                            plateDragGesture(index: index, stage: stage, containerSize: geo.size),
-                            // A held plate's own gesture must outlive the drag view it opens.
-                            including: viewModel.canManageDesktops
-                                && (compact == nil || heldPlateID == stage.id) ? .all : .subviews
-                        )
-                        // Attached outside the plate's content shape, which would otherwise
-                        // clip hit testing to the plate and swallow the click, and outside the
-                        // plate drag, so pressing a + never lifts the plate.
-                        .overlay(alignment: .bottom) {
-                            addDesktopButton(.bottom, isShown: addButtonPlates[.bottom] == index,
-                                             visualScale: visualScale)
-                        }
-                        .overlay(alignment: .top) {
-                            addDesktopButton(.top, isShown: addButtonPlates[.top] == index,
-                                             visualScale: visualScale)
-                        }
-                        .scaleEffect(scale)
-                        .opacity(stageOpacity)
-                        .animation(nil) {
-                            $0.opacity(isHeld || returningPlateID == stage.id ? 0 : 1)
-                        }
-                        .offset(
-                            x: isHeld ? dragSession.proxyLocation.x - geo.size.width / 2 : 0,
-                            y: isHeld ? dragSession.proxyLocation.y - stageHeight / 2 : slotOffset
-                        )
-                        .zIndex(isHeld ? 10
-                            : compact == nil && (isActive || isInteractionTarget) ? 2 : 0)
-                        // A desktop made by a drop takes over the drop target's geometry, so
-                        // it swaps in rather than fading in over the target fading out. A held
-                        // plate merged away hands over to its landing cards the same way.
-                        .transition(isHeld || compactStage != nil && !laidOutStageIDs.contains(stage.id)
-                            ? .identity : .asymmetric(
-                            insertion: .scale(scale: StageMotion.insertionScale(
-                                    index: index, stageIDs: stages.map(\.id), laidOut: laidOutExtents
-                                )).combined(with: .opacity)
-                                .combined(with: .offset(y: compact != nil
-                                    || laidOutStageIDs.contains(stage.id) ? 0
-                                    : StageMotion.insertionShift(
-                                        index: index,
-                                        stageIDs: stages.map(\.id),
-                                        laidOut: laidOutExtents,
-                                        spacing: spacing,
-                                        finalLayout: visualLayout,
-                                        finalStackOffset: yOffset
-                                    ))),
-                            // A removed plate keeps its last place while the stack around it
-                            // moves, so it leaves quickly rather than being scrolled through.
-                            removal: .scale(scale: 0.92).combined(with: .opacity)
-                                .animation(StageMotion.plateRemovalAnimation(
-                                    reduceMotion: reduceMotion
-                                ))
-                        ))
-                    }
-
-                    if let compact {
-                        // One view per end, so a + opening into a plate is the same view
-                        // growing rather than one shape fading over another.
-                        ForEach([NewDesktopPosition.top, .bottom], id: \.self) { position in
-                            if let shape = NewDesktopDropTarget.Shape(
-                                position: position, compact: compact, projection: compactProjection,
-                                excluding: Set(stages.map(\.id))
-                            ) {
-                                NewDesktopDropTarget(
-                                    shape: shape,
-                                    cornerRadius: CGFloat(viewModel.switcherAppearance.stageCornerRadius)
-                                        * metrics.scaleFactor * compact.scale,
-                                    appearance: viewModel.switcherAppearance
-                                )
-                                .offset(y: shape.centerY - shape.size.height / 2)
-                                .allowsHitTesting(false)
-                                // A desktop made by a drop takes over the open plate's geometry,
-                                // so the plate hands over to it rather than fading out.
-                                .transition(shape.isTargeted
-                                    ? .identity : .opacity)
-                            }
-                        }
-                    }
-                }
-                .background {
-                    if let compact {
-                        // Published from layout, so a release can only accept a compact
-                        // generation that has actually been laid out.
-                        Color.clear.preference(
-                            key: CompactDragGenerationPreferenceKey.self,
-                            value: compact.generation
-                        )
-                    }
-                }
-                .frame(width: geo.size.width, height: tallestStageHeight, alignment: .top)
-                .offset(y: yOffset)
-
-                if viewModel.shouldShowDisplayStackIndicator {
-                    HStack(spacing: 8) {
-                        HStack(spacing: 8) {
-                            Text(viewModel.displayStackName)
-                                .fontWeight(.semibold)
-                            Text("\(viewModel.displayStackPosition) of \(viewModel.displayStackCount)")
-                                .foregroundStyle(.secondary)
-                        }
-                        // The shortcut keeps its own darkened capsule, so only the text is haloed.
-                        .titleHalo(
-                            strength: viewModel.switcherAppearance.effectiveTitleHaloStrength,
-                            size: CGFloat(viewModel.switcherAppearance.titleHaloSize)
-                        )
-                        if !viewModel.displayStackShortcut.isEmpty {
-                            HStack(spacing: viewModel.displayStackShortcutSpacing) {
-                                Text("⌘")
-                                Text(viewModel.displayStackShortcut)
-                            }
-                            .font(.system(.caption, design: .monospaced, weight: .semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(.black.opacity(0.18), in: Capsule())
-                        }
-                    }
-                    .font(.callout)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .modifier(OverlayGlassCapsuleModifier(
-                        glassStyle: viewModel.switcherAppearance.glassStyle,
-                        dockGlassStyle: viewModel.switcherAppearance.dockGlassStyle
-                    ))
-                    .frame(width: geo.size.width)
-                    .padding(.top, 18)
-                    .allowsHitTesting(false)
-                    .accessibilityLabel(
-                        "\(viewModel.displayStackName), display stack "
-                            + "\(viewModel.displayStackPosition) of \(viewModel.displayStackCount)"
-                    )
-                    .zIndex(4)
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-            // The frame above only grows the layout bounds; hit testing still follows the drawn
-            // stages. Everything the space buttons need lives in the space it adds — the insert
-            // band beyond the stack, the outer half of the corner delete button, the desktop
-            // fall-through — so without a content shape none of it can be hovered or clicked.
-            .contentShape(Rectangle())
-            .overlay(alignment: .topLeading) {
-                if let compact, let plate = dragSession.plate {
-                    let layoutScale = dragSession.heldPlateScale ?? compact.scale
-                    HeldPlateView(
-                        plate: plate,
-                        compact: compact,
-                        projection: compactProjection,
-                        layoutScale: layoutScale,
-                        settlesIntoGap: plateSettlesIntoGap,
-                        appearance: viewModel.appearance,
-                        switcherAppearance: viewModel.switcherAppearance
-                    )
-                    .position(dragSession.proxyLocation)
-                    .allowsHitTesting(false)
-                    // It grows out of the plate's resting frame on pickup. Landed, it hands
-                    // over to the plate or the cards with a swap; dropped on nothing, it flies
-                    // back into that frame as the stack around it returns.
-                    .transition(PlatePickupEffect.transition(
-                        from: platePickupFrame, size: HeldPlateView.size(
-                            compact: compact, projection: compactProjection, scale: layoutScale
-                        ),
-                        returns: false,
-                        pointer: dragSession.proxyLocation, in: geo.size
-                    ))
-                } else if let compact, let window = dragSession.window {
-                    WindowPreviewView(
-                        window: window,
-                        isWindowSelected: true,
-                        isDragging: true,
-                        metrics: compact.metrics
-                            .adapted(toContentAspect: window.contentAspect)
-                            .scaled(by: compact.scale),
-                        appearance: viewModel.appearance
-                    )
-                    .opacity(StageMotion.cursorPreviewOpacity)
-                    .position(dragSession.proxyLocation)
-                    .allowsHitTesting(false)
-                    // The proxy hands to or from the real card at the same point, so it must
-                    // not fade in or out over a card that is animating away from it.
-                    .transition(.identity)
-                } else if let flight = keyboardWindowFlight {
-                    WindowPreviewView(
-                        window: flight.window,
-                        isWindowSelected: true,
-                        isDragging: false,
-                        metrics: flight.metrics.adapted(
-                            toContentAspect: flight.window.contentAspect
-                        ),
-                        appearance: viewModel.appearance
-                    )
-                    .position(flight.position)
-                    .allowsHitTesting(false)
-                }
-            }
-            .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeSpaceIndex)
-            .transition(focusTransition.usesSpatialMotion ? .identity : .opacity)
-            .animation(focusTransition.animation, value: layoutAnimationKey)
-            .animation(focusTransition.animation, value: focusedSpaceIndex)
-            .animation(focusTransition.animation, value: pointerSelection)
-            .animation(keyboardLayoutTransition?.animation, value: windowLayoutKey)
+            stackScene(
+                stack,
+                tallestStageHeight: tallestStageHeight,
+                focusTransition: focusTransition,
+                layoutAnimationKey: layoutAnimationKey,
+                keyboardLayoutTransition: keyboardLayoutTransition,
+                windowLayoutKey: windowLayoutKey
+            )
             .coordinateSpace(name: "overlay")
             .simultaneousGesture(
                 SpatialTapGesture(coordinateSpace: .named("overlay"))
-                    .onEnded { event in
-                        if addButtonPlates.keys.contains(where: {
-                            addButtonFrames[$0]?.contains(event.location) == true
-                        }) {
-                            return
-                        }
-                        let target = StageInteraction.overlayTapTarget(
-                            at: event.location,
-                            stageFrames: stageFrames,
-                            plateHitFrames: plateHitFrames
-                        )
-                        onOverlayTapRouted?(OverlayTapDiagnostic(
-                            location: event.location,
-                            target: target
-                        ))
-                        switch target {
-                        case .dismiss:
-                            onBackdropDismissed?()
-                        case .none:
-                            break
-                        }
-                    }
+                    .onEnded { event in stackTapped(at: event.location, in: stack) }
             )
             .onChange(of: scrollRelay?.latest) { _, event in
                 if let event { handleSpaceScroll(event, containerSize: geo.size) }
@@ -2025,61 +1720,12 @@ public struct StageOverlayView: View {
                 }
             }
             .onContinuousHover(coordinateSpace: .local) { phase in
-                switch phase {
-                case let .active(location):
-                    guard !dragSession.suppressesNavigation else { return }
-                    let region = StageInteraction.pointerRegion(
-                        at: location,
-                        stageFrames: stageFrames
-                    )
-                    if region != reportedPointerRegion {
-                        reportedPointerRegion = region
-                        onOverlayPointerRegionChanged?(OverlayPointerRegionDiagnostic(
-                            region: region,
-                            location: location,
-                            topBoundary: StageMotion.stackBoundary(
-                                edge: .top, stackOffset: yOffset, layout: visualLayout
-                            ),
-                            bottomBoundary: StageMotion.stackBoundary(
-                                edge: .bottom, stackOffset: yOffset, layout: visualLayout
-                            )
-                        ))
-                    }
-                    guard pointerMovementGate.observe(at: NSEvent.mouseLocation) else {
-                        return
-                    }
-                    clearParkedKeyboardWindowFlight()
-                    retainedWindowDragFocusSpaceIndex = nil
-                    if let plate = addButtonPlates.first(where: { position, plate in
-                        DesktopControlGeometry.addZone(
-                            plate: stageFrames[plate], button: addButtonFrames[position]
-                        )?.contains(location) == true
-                    })?.value {
-                        hoveredSpaceIndex = plate
-                        return
-                    }
-                    hoveredSpaceIndex = plateHitFrames.firstIndex { $0.contains(location) }
-                case .ended:
-                    hoveredSpaceIndex = nil
-                    if reportedPointerRegion != "ended" {
-                        reportedPointerRegion = "ended"
-                        onOverlayPointerRegionChanged?(OverlayPointerRegionDiagnostic(
-                            region: "ended", location: .zero,
-                            topBoundary: nil, bottomBoundary: nil
-                        ))
-                    }
-                }
+                stackHoverChanged(phase, in: stack)
             }
             .onChange(of: viewModel.activeSpaceIndex) { _, _ in
                 hoveredSpaceIndex = nil
             }
-            .onChange(of: StageLaidOutStack(
-                ids: stages.map(\.id),
-                extents: compact != nil ? [:] : Dictionary(uniqueKeysWithValues: stages.indices
-                    .filter { visualLayout.centers.indices.contains($0) }
-                    .map { (stages[$0].id, StageExtent(center: yOffset + visualLayout.centers[$0],
-                                                       height: visualLayout.heights[$0])) })
-            ), initial: true) { _, stack in
+            .onChange(of: laidOutStack, initial: true) { _, stack in
                 laidOutStageIDs = Set(stack.ids)
                 laidOutExtents = stack.extents
             }
@@ -2094,34 +1740,7 @@ public struct StageOverlayView: View {
                 pointerMovementGate.reset(at: NSEvent.mouseLocation)
             }
             .onChange(of: viewModel.keyboardWindowMoveAnimation?.sequence) { _, _ in
-                guard let move = viewModel.keyboardWindowMoveAnimation,
-                      move.sequence > lastHandledKeyboardMoveSequence
-                else { return }
-                if pointerSelection != nil {
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        pointerSelection = nil
-                    }
-                    onPointerSelectionChanged?(nil, nil)
-                }
-                pointerMovementGate.reset(at: NSEvent.mouseLocation)
-                guard let destination = StageMotion.renderedWindowCenter(
-                    spaceIndex: move.toSpaceIndex,
-                    windowIndex: move.toWindowIndex,
-                    containerWidth: geo.size.width,
-                    stackOffset: yOffset,
-                    layouts: displayedLayouts,
-                    stackLayout: visualLayout
-                ) else { return }
-                beginKeyboardWindowFlight(
-                    move,
-                    stages: stages,
-                    afterAspects: restingAspects,
-                    containerSize: geo.size,
-                    destinationMetrics: metrics,
-                    destination: destination
-                )
+                keyboardWindowMoveChanged(in: stack, restingAspects: restingAspects)
             }
             .onChange(of: viewModel.selectedWindow?.windowID) { _, selectedWindowID in
                 guard let flight = keyboardWindowFlight,
@@ -2147,6 +1766,127 @@ public struct StageOverlayView: View {
                 dragSession.cancel(reason: "overlay disappeared")
             }
         }
+    }
+
+    private func stackHoverChanged(_ phase: HoverPhase, in stack: PlateStack) {
+        let yOffset = stack.yOffset
+        let visualLayout = stack.visualLayout
+        let addButtonPlates = stack.addButtonPlates
+        let plateHitFrames = stack.plateHitFrames
+        switch phase {
+        case let .active(location):
+            guard !dragSession.suppressesNavigation else { return }
+            let region = StageInteraction.pointerRegion(
+                at: location,
+                stageFrames: stageFrames
+            )
+            if region != reportedPointerRegion {
+                reportedPointerRegion = region
+                onOverlayPointerRegionChanged?(OverlayPointerRegionDiagnostic(
+                    region: region,
+                    location: location,
+                    topBoundary: StageMotion.stackBoundary(
+                        edge: .top, stackOffset: yOffset, layout: visualLayout
+                    ),
+                    bottomBoundary: StageMotion.stackBoundary(
+                        edge: .bottom, stackOffset: yOffset, layout: visualLayout
+                    )
+                ))
+            }
+            guard pointerMovementGate.observe(at: NSEvent.mouseLocation) else {
+                return
+            }
+            clearParkedKeyboardWindowFlight()
+            retainedWindowDragFocusSpaceIndex = nil
+            if let plate = addButtonPlates.first(where: { position, plate in
+                DesktopControlGeometry.addZone(
+                    plate: stageFrames[plate], button: addButtonFrames[position]
+                )?.contains(location) == true
+            })?.value {
+                hoveredSpaceIndex = plate
+                return
+            }
+            hoveredSpaceIndex = plateHitFrames.firstIndex { $0.contains(location) }
+        case .ended:
+            hoveredSpaceIndex = nil
+            if reportedPointerRegion != "ended" {
+                reportedPointerRegion = "ended"
+                onOverlayPointerRegionChanged?(OverlayPointerRegionDiagnostic(
+                    region: "ended", location: .zero,
+                    topBoundary: nil, bottomBoundary: nil
+                ))
+            }
+        }
+    }
+
+    static func laidOutExtents(
+        stages: [StageData], layout: StageStackLayout, stackOffset: CGFloat
+    ) -> [UUID: StageExtent] {
+        Dictionary(uniqueKeysWithValues: stages.indices
+            .filter { layout.centers.indices.contains($0) }
+            .map { (stages[$0].id, StageExtent(center: stackOffset + layout.centers[$0],
+                                               height: layout.heights[$0])) })
+    }
+
+    private func stackTapped(at location: CGPoint, in stack: PlateStack) {
+        let addButtonPlates = stack.addButtonPlates
+        let plateHitFrames = stack.plateHitFrames
+        if addButtonPlates.keys.contains(where: {
+            addButtonFrames[$0]?.contains(location) == true
+        }) {
+            return
+        }
+        let target = StageInteraction.overlayTapTarget(
+            at: location,
+            stageFrames: stageFrames,
+            plateHitFrames: plateHitFrames
+        )
+        onOverlayTapRouted?(OverlayTapDiagnostic(
+            location: location,
+            target: target
+        ))
+        switch target {
+        case .dismiss:
+            onBackdropDismissed?()
+        case .none:
+            break
+        }
+    }
+
+    private func keyboardWindowMoveChanged(in stack: PlateStack, restingAspects: [[CGFloat?]]) {
+        let yOffset = stack.yOffset
+        let visualLayout = stack.visualLayout
+        let displayedLayouts = stack.displayedLayouts
+        let stages = stack.stages
+        let metrics = stack.metrics
+        guard let move = viewModel.keyboardWindowMoveAnimation,
+              move.sequence > lastHandledKeyboardMoveSequence
+        else { return }
+        if pointerSelection != nil {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                pointerSelection = nil
+            }
+            onPointerSelectionChanged?(nil, nil)
+        }
+        pointerMovementGate.reset(at: NSEvent.mouseLocation)
+        guard let destination = StageMotion.renderedWindowCenter(
+            spaceIndex: move.toSpaceIndex,
+            windowIndex: move.toWindowIndex,
+            containerWidth: stack.containerSize.width,
+            stackOffset: yOffset,
+            layouts: displayedLayouts,
+            stackLayout: visualLayout
+        ) else { return }
+        beginKeyboardWindowFlight(
+            move,
+            stages: stages,
+            afterAspects: restingAspects,
+            containerSize: stack.containerSize,
+            destinationMetrics: metrics,
+            destination: destination
+        )
     }
 
     private func beginKeyboardWindowFlight(
@@ -2333,6 +2073,416 @@ public struct StageOverlayView: View {
     static func offersNewDesktop(for window: StageWindowData,
                                  viewModel: StageOverlayViewModel) -> Bool {
         viewModel.canManageDesktops && !TransientWindowIdentity.isTransient(window.ownerBundleID)
+    }
+
+    private func stackScene(
+        _ stack: PlateStack,
+        tallestStageHeight: CGFloat,
+        focusTransition: StageFocusTransition,
+        layoutAnimationKey: StageLayoutAnimationKey,
+        keyboardLayoutTransition: StageFocusTransition?,
+        windowLayoutKey: WindowLayoutKey
+    ) -> some View {
+        let dragSession = self.dragSession
+        let stages = stack.stages
+        let compact = stack.compact
+        let compactProjection = stack.compactProjection
+        let metrics = stack.metrics
+        let focusedSpaceIndex = stack.focusedSpaceIndex
+        let yOffset = stack.yOffset
+        return ZStack(alignment: .topLeading) {
+            ZStack(alignment: .top) {
+                ForEach(Array(stages.enumerated()), id: \.element.id) { index, stage in
+                    stagePlate(stage, at: index, in: stack)
+                }
+
+                if let compact {
+                    // One view per end, so a + opening into a plate is the same view
+                    // growing rather than one shape fading over another.
+                    ForEach([NewDesktopPosition.top, .bottom], id: \.self) { position in
+                        if let shape = NewDesktopDropTarget.Shape(
+                            position: position, compact: compact, projection: compactProjection,
+                            excluding: Set(stages.map(\.id))
+                        ) {
+                            NewDesktopDropTarget(
+                                shape: shape,
+                                cornerRadius: CGFloat(viewModel.switcherAppearance.stageCornerRadius)
+                                    * metrics.scaleFactor * compact.scale,
+                                appearance: viewModel.switcherAppearance
+                            )
+                            .offset(y: shape.centerY - shape.size.height / 2)
+                            .allowsHitTesting(false)
+                            // A desktop made by a drop takes over the open plate's geometry,
+                            // so the plate hands over to it rather than fading out.
+                            .transition(shape.isTargeted
+                                ? .identity : .opacity)
+                        }
+                    }
+                }
+            }
+            .background {
+                if let compact {
+                    // Published from layout, so a release can only accept a compact
+                    // generation that has actually been laid out.
+                    Color.clear.preference(
+                        key: CompactDragGenerationPreferenceKey.self,
+                        value: compact.generation
+                    )
+                }
+            }
+            .frame(width: stack.containerSize.width, height: tallestStageHeight, alignment: .top)
+            .offset(y: yOffset)
+
+            if viewModel.shouldShowDisplayStackIndicator {
+                HStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(viewModel.displayStackName)
+                            .fontWeight(.semibold)
+                        Text("\(viewModel.displayStackPosition) of \(viewModel.displayStackCount)")
+                            .foregroundStyle(.secondary)
+                    }
+                    // The shortcut keeps its own darkened capsule, so only the text is haloed.
+                    .titleHalo(
+                        strength: viewModel.switcherAppearance.effectiveTitleHaloStrength,
+                        size: CGFloat(viewModel.switcherAppearance.titleHaloSize)
+                    )
+                    if !viewModel.displayStackShortcut.isEmpty {
+                        HStack(spacing: viewModel.displayStackShortcutSpacing) {
+                            Text("⌘")
+                            Text(viewModel.displayStackShortcut)
+                        }
+                        .font(.system(.caption, design: .monospaced, weight: .semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.black.opacity(0.18), in: Capsule())
+                    }
+                }
+                .font(.callout)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .modifier(OverlayGlassCapsuleModifier(
+                    glassStyle: viewModel.switcherAppearance.glassStyle,
+                    dockGlassStyle: viewModel.switcherAppearance.dockGlassStyle
+                ))
+                .frame(width: stack.containerSize.width)
+                .padding(.top, 18)
+                .allowsHitTesting(false)
+                .accessibilityLabel(
+                    "\(viewModel.displayStackName), display stack "
+                        + "\(viewModel.displayStackPosition) of \(viewModel.displayStackCount)"
+                )
+                .zIndex(4)
+            }
+        }
+        .frame(width: stack.containerSize.width, height: stack.containerSize.height, alignment: .topLeading)
+        // The frame above only grows the layout bounds; hit testing still follows the drawn
+        // stages. Everything the space buttons need lives in the space it adds — the insert
+        // band beyond the stack, the outer half of the corner delete button, the desktop
+        // fall-through — so without a content shape none of it can be hovered or clicked.
+        .contentShape(Rectangle())
+        .overlay(alignment: .topLeading) {
+            if let compact, let plate = dragSession.plate {
+                let layoutScale = dragSession.heldPlateScale ?? compact.scale
+                HeldPlateView(
+                    plate: plate,
+                    compact: compact,
+                    projection: compactProjection,
+                    layoutScale: layoutScale,
+                    settlesIntoGap: plateSettlesIntoGap,
+                    appearance: viewModel.appearance,
+                    switcherAppearance: viewModel.switcherAppearance
+                )
+                .position(dragSession.proxyLocation)
+                .allowsHitTesting(false)
+                // It grows out of the plate's resting frame on pickup. Landed, it hands
+                // over to the plate or the cards with a swap; dropped on nothing, it flies
+                // back into that frame as the stack around it returns.
+                .transition(PlatePickupEffect.transition(
+                    from: platePickupFrame, size: HeldPlateView.size(
+                        compact: compact, projection: compactProjection, scale: layoutScale
+                    ),
+                    returns: false,
+                    pointer: dragSession.proxyLocation, in: stack.containerSize
+                ))
+            } else if let compact, let window = dragSession.window {
+                WindowPreviewView(
+                    window: window,
+                    isWindowSelected: true,
+                    isDragging: true,
+                    metrics: compact.metrics
+                        .adapted(toContentAspect: window.contentAspect)
+                        .scaled(by: compact.scale),
+                    appearance: viewModel.appearance
+                )
+                .opacity(StageMotion.cursorPreviewOpacity)
+                .position(dragSession.proxyLocation)
+                .allowsHitTesting(false)
+                // The proxy hands to or from the real card at the same point, so it must
+                // not fade in or out over a card that is animating away from it.
+                .transition(.identity)
+            } else if let flight = keyboardWindowFlight {
+                WindowPreviewView(
+                    window: flight.window,
+                    isWindowSelected: true,
+                    isDragging: false,
+                    metrics: flight.metrics.adapted(
+                        toContentAspect: flight.window.contentAspect
+                    ),
+                    appearance: viewModel.appearance
+                )
+                .position(flight.position)
+                .allowsHitTesting(false)
+            }
+        }
+        .id(focusTransition.usesSpatialMotion ? -1 : viewModel.activeSpaceIndex)
+        .transition(focusTransition.usesSpatialMotion ? .identity : .opacity)
+        .animation(focusTransition.animation, value: layoutAnimationKey)
+        .animation(focusTransition.animation, value: focusedSpaceIndex)
+        .animation(focusTransition.animation, value: pointerSelection)
+        .animation(keyboardLayoutTransition?.animation, value: windowLayoutKey)
+    }
+
+    @ViewBuilder private func stagePlate(_ stage: StageData, at index: Int, in stack: PlateStack) -> some View {
+        let dragSession = self.dragSession
+        let stages = stack.stages
+        let compact = stack.compact
+        let compactProjection = stack.compactProjection
+        let heldPlateID = stack.heldPlateID
+        let metrics = stack.metrics
+        let displayedLayouts = stack.displayedLayouts
+        let stageWidths = stack.stageWidths
+        let stageHeights = stack.stageHeights
+        let visualLayout = stack.visualLayout
+        let focusedSpaceIndex = stack.focusedSpaceIndex
+        let yOffset = stack.yOffset
+        let spacing = stack.spacing
+        let plateHitFrames = stack.plateHitFrames
+        let addButtonPlates = stack.addButtonPlates
+        let settlingWindowIDs = stack.settlingWindowIDs
+        let guidedKeyboardWindowID = stack.guidedKeyboardWindowID
+        let guidedKeyboardDeparture = stack.guidedKeyboardDeparture
+        let hasGuidedKeyboardMove = stack.hasGuidedKeyboardMove
+        let fingerprint = stack.fingerprint
+        // Compact stages are found by identity: the model can already hold the
+        // accepted drop while the snapshot it was aimed at is still drawn.
+        let compactIndex = compact?.stages.firstIndex { $0.spaceID == stage.id }
+        let compactStage = compactIndex.flatMap { compact?.stages[$0] }
+        // A held plate is drawn by its proxy; the plate itself waits, hidden, under
+        // it, so whichever one is shown, the other is in the same place.
+        let isHeld = compact != nil && heldPlateID == stage.id
+        // The drag view's scale goes into the metrics rather than a render
+        // transform, so a stage magnified past its resting size stays sharp.
+        let dragScale = compact?.scale ?? 1
+        let stageWidth = compactIndex.flatMap {
+            compactProjection?.plateWidths[safe: $0].map { $0 * dragScale }
+        } ?? stageWidths[index]
+        let stageHeight = compactStage.map { $0.baseHeight * dragScale }
+            ?? stageHeights[index]
+        let isActive = index == viewModel.activeSpaceIndex
+        let isInteractionTarget = compact == nil && index == focusedSpaceIndex
+        let scale = compact == nil ? visualLayout.scales[index] : 1
+        let slotOffset = compactStage.map {
+            $0.centerY + (compactIndex.flatMap {
+                compactProjection?.stageShifts[safe: $0]
+            } ?? 0) - stageHeight / 2
+        }
+            ?? StageMotion.stageSlotOffset(layout: visualLayout, index: index)
+        let stageOpacity = compact == nil
+            ? StageMotion.stageOpacity(scale: scale)
+            : 1
+        let lift = StageMotion.lift(isActive: isInteractionTarget)
+        let visualScale = metrics.scaleFactor * dragScale
+        let contentScale = compactIndex.flatMap {
+            compactProjection?.contentScales[safe: $0]
+        } ?? 1
+        let stageLayout = compact.map {
+            StageWindowLayout(
+                contentAspects: stage.windows.map(\.contentAspect),
+                availableWidth: .greatestFiniteMagnitude,
+                metrics: $0.metrics.scaled(by: dragScale * contentScale)
+            )
+        } ?? displayedLayouts[index]
+        let selectedWindowIndex = compact != nil ? nil : StageMotion.selectedWindowIndex(
+            windows: stage.windows,
+            spaceIndex: index,
+            activeSpaceIndex: viewModel.activeSpaceIndex,
+            keyboardSelectedWindowIndex: viewModel.selectedWindowIndex,
+            pointerSelection: pointerSelection,
+            guidedKeyboardWindowID: guidedKeyboardWindowID
+        )
+        let compactOffsets: [CGWindowID: CGPoint]? = compactIndex.flatMap {
+            compactProjection?.cardOffsets[safe: $0]?.mapValues {
+                CGPoint(x: $0.x * dragScale, y: $0.y * dragScale)
+            }
+        }
+        let isDropTarget: Bool = compactIndex.map { compactIndex in
+            compactProjection?.placeholder?.stageIndex == compactIndex
+                || heldPlateID != nil && dragSession.intent?.stageIndex == compactIndex
+        } ?? false
+        let hitShape: Path = plateHitFrames[safe: index].map {
+            Path(StageInteraction.plateHitShape(
+                hit: $0,
+                drawn: StageMotion.stageFrame(
+                    at: index, containerWidth: stack.containerSize.width, stackOffset: yOffset,
+                    stageWidths: stageWidths, layout: visualLayout
+                ),
+                scale: scale
+            ))
+        } ?? Path(CGRect(x: 0, y: 0, width: stageWidth, height: stageHeight))
+        let plateZIndex: Double = isHeld ? 10
+            : compact == nil && (isActive || isInteractionTarget) ? 2 : 0
+        let plateTransition: AnyTransition = plateTransition(
+            stage: stage,
+            index: index,
+            swapsIn: isHeld || compactStage != nil && !laidOutStageIDs.contains(stage.id),
+            isCompact: compact != nil,
+            stageIDs: stages.map(\.id),
+            spacing: spacing,
+            finalLayout: visualLayout,
+            finalStackOffset: yOffset
+        )
+
+        StageSwiftUIView(
+            stage: stage,
+            selectedWindowIndex: selectedWindowIndex,
+            layout: stageLayout,
+            appearance: viewModel.appearance,
+            draggingWindowID: dragSession.phase == .dragging
+                ? compact?.sourceWindowID : nil,
+            compactOffsets: compactOffsets,
+            isDropTarget: isDropTarget,
+            settlingWindowIDs: settlingWindowIDs,
+            guidedKeyboardWindowID: guidedKeyboardWindowID,
+            guidedKeyboardDeparture: guidedKeyboardDeparture,
+            usesGuidedKeyboardMoveMotion: hasGuidedKeyboardMove,
+            stageFrames: $stageFrames,
+            windowFrames: $windowFrames,
+            spaceIndex: index,
+            onPointerSelectionChanged: { selection, isHovering, location in
+                guard !dragSession.suppressesNavigation else { return }
+                if isHovering && !pointerMovementGate.observe(at: location) {
+                    return
+                }
+                let nextSelection = StageInteraction.pointerSelection(
+                    current: pointerSelection,
+                    target: selection,
+                    isHovering: isHovering
+                )
+                guard nextSelection != pointerSelection else { return }
+                pointerSelection = nextSelection
+                onPointerSelectionChanged?(
+                    nextSelection?.spaceIndex,
+                    nextSelection?.windowIndex
+                )
+            },
+            onWindowSelected: onWindowSelected,
+            onWindowDragChanged: { window, windowIndex, value in
+                windowDragChanged(
+                    window: window,
+                    spaceIndex: index,
+                    windowIndex: windowIndex,
+                    value: value,
+                    layouts: displayedLayouts,
+                    fingerprint: fingerprint,
+                    containerSize: stack.containerSize
+                )
+            },
+            onWindowDragEnded: { window, windowIndex, value in
+                windowDragEnded(
+                    window: window,
+                    spaceIndex: index,
+                    windowIndex: windowIndex,
+                    value: value
+                )
+            }
+        )
+        .frame(width: stageWidth, height: stageHeight)
+        .background {
+            StageSurfaceView(
+                spaceIndex: index,
+                size: CGSize(width: stageWidth, height: stageHeight),
+                cornerRadius: CGFloat(viewModel.switcherAppearance.stageCornerRadius)
+                    * visualScale,
+                appearance: viewModel.switcherAppearance,
+                shadow: StageSurfaceShadow.forStage(
+                    lift: lift,
+                    visualScale: visualScale,
+                    stageScale: scale
+                )
+            )
+        }
+        .background(
+            GeometryReader { stageGeo in
+                Color.clear.preference(
+                    key: StageFramePreferenceKey.self,
+                    value: [index: stageGeo.frame(in: .named("overlay"))]
+                )
+            }
+        )
+        .contentShape(hitShape)
+        .gesture(
+            plateDragGesture(index: index, stage: stage, containerSize: stack.containerSize),
+            // A held plate's own gesture must outlive the drag view it opens.
+            including: viewModel.canManageDesktops
+                && (compact == nil || heldPlateID == stage.id) ? .all : .subviews
+        )
+        // Attached outside the plate's content shape, which would otherwise
+        // clip hit testing to the plate and swallow the click, and outside the
+        // plate drag, so pressing a + never lifts the plate.
+        .overlay(alignment: .bottom) {
+            addDesktopButton(.bottom, isShown: addButtonPlates[.bottom] == index,
+                             visualScale: visualScale)
+        }
+        .overlay(alignment: .top) {
+            addDesktopButton(.top, isShown: addButtonPlates[.top] == index,
+                             visualScale: visualScale)
+        }
+        .scaleEffect(scale)
+        .opacity(stageOpacity)
+        .animation(nil) {
+            $0.opacity(isHeld || returningPlateID == stage.id ? 0 : 1)
+        }
+        .offset(
+            x: isHeld ? dragSession.proxyLocation.x - stack.containerSize.width / 2 : 0,
+            y: isHeld ? dragSession.proxyLocation.y - stageHeight / 2 : slotOffset
+        )
+        .zIndex(plateZIndex)
+        .transition(plateTransition)
+    }
+
+    /// A desktop made by a drop takes over the drop target's geometry, so it swaps in rather
+    /// than fading in over the target fading out. A held plate merged away hands over to its
+    /// landing cards the same way.
+    private func plateTransition(
+        stage: StageData,
+        index: Int,
+        swapsIn: Bool,
+        isCompact: Bool,
+        stageIDs: [UUID],
+        spacing: CGFloat,
+        finalLayout: StageStackLayout,
+        finalStackOffset: CGFloat
+    ) -> AnyTransition {
+        guard !swapsIn else { return .identity }
+        let insertionShift: CGFloat = isCompact || laidOutStageIDs.contains(stage.id) ? 0
+            : StageMotion.insertionShift(
+                index: index,
+                stageIDs: stageIDs,
+                laidOut: laidOutExtents,
+                spacing: spacing,
+                finalLayout: finalLayout,
+                finalStackOffset: finalStackOffset
+            )
+        let insertion: AnyTransition = .scale(scale: StageMotion.insertionScale(
+            index: index, stageIDs: stageIDs, laidOut: laidOutExtents
+        ))
+        .combined(with: .opacity)
+        .combined(with: .offset(y: insertionShift))
+        // A removed plate keeps its last place while the stack around it moves, so it leaves
+        // quickly rather than being scrolled through.
+        let removal: AnyTransition = .scale(scale: 0.92).combined(with: .opacity)
+            .animation(StageMotion.plateRemovalAnimation(reduceMotion: reduceMotion))
+        return .asymmetric(insertion: insertion, removal: removal)
     }
 
     /// The + hung from a plate's edge. Hover changes no animated value of its own, so the
