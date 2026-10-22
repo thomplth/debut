@@ -113,6 +113,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     public var onFrontmostAppChanged: ((String?, FrontmostAppObservationSource) -> Void)?
     public var onAppActivated: ((RuntimeWindowSnapshot) -> Void)?
     public var onDesktopsChanged: ((RuntimeWindowSnapshot) -> Void)?
+    /// Publishes a window the window server ordered out without minimizing or hiding it, and its
+    /// return when it is ordered back in. Each tab of a native tab group is its own window, and
+    /// only the selected one stays ordered in.
+    public var onWindowOrderChanged: ((RuntimeWindowSnapshot, WindowServerWindowEvent) -> Void)?
     public var onAppTerminated: ((pid_t) -> Void)?
     public var excludedBundleIDs: Set<String> = []
     /// Spaces are desktops, so every snapshot carries the desktop macOS reports for each
@@ -127,6 +131,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     private let processExitMonitor: any ProcessExitMonitoring
 
     private var knownWindowIDs: Set<CGWindowID> = []
+    /// Windows parked because the window server ordered them out, and their owners. Only these
+    /// are worth a listing when ordered in: a desktop change orders in every window it shows.
+    private var orderedOutWindowOwners: [CGWindowID: pid_t] = [:]
+    private var pendingOrderOutWindowIDs: Set<CGWindowID> = []
+    /// The order-outs the read now out will judge. Nil while no read is out.
+    private var orderOutWindowIDsBeingRead: Set<CGWindowID>?
     private var monitoredProcessIDs: Set<pid_t> = []
     private var handledExitedProcessIDs: Set<pid_t> = []
 
@@ -140,6 +150,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             guard windowOwnerPIDs.count != oldValue.count
                 || !windowOwnerPIDs.keys.allSatisfy({ oldValue[$0] != nil })
             else { return }
+            orderedOutWindowOwners = orderedOutWindowOwners.filter {
+                windowOwnerPIDs[$0.key] == $0.value
+            }
             windowServerWatchListChanged(from: Set(oldValue.keys))
         }
     }
@@ -631,6 +644,9 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     continue
                 }
                 guard let assignment = spaceManager.makeWindowDormant(windowID: windowID) else { continue }
+                if reason == "ordered_out", let ownerPID = assignment.window.ownerPID {
+                    orderedOutWindowOwners[windowID] = ownerPID
+                }
                 parkedDormantCount += 1
                 diag.report("window_made_dormant", details: [
                     "windowID": "\(windowID)",
@@ -1905,11 +1921,13 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         case .windowOrderedOut:
             focusRules.windowOrderedOut(windowID: windowID)
             traceWindowServerEvent(event, windowID: windowID)
+            parkIfOrderedOutGhost(windowID: windowID)
         case .windowFocused, .windowOrderedIn:
             guard let pid = windowOwnerPIDs[windowID] else {
                 traceWindowServerEvent(event, windowID: windowID)
                 return
             }
+            if event == .windowOrderedIn { restoreIfParkedOrderedOut(windowID: windowID, pid: pid) }
             if event == .windowFocused { noteWindowServerFocusHeard() }
             let frontmostPID = frontmostPIDProvider()
             let verdict = event == .windowFocused
@@ -1931,6 +1949,74 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             case .credited: creditWindowServerFocus(windowID: windowID, pid: pid, publishes: true)
             case .alreadyCredited: creditWindowServerFocus(windowID: windowID, pid: pid, publishes: false)
             default: break
+            }
+        }
+    }
+
+    /// Selecting another tab, or opening one, orders the previous tab out and does nothing else
+    /// to it, so the order-out is the only moment its assignment can be parked while Debut runs.
+    /// Order-outs arriving while a read is out share the next one.
+    private func parkIfOrderedOutGhost(windowID: CGWindowID) {
+        guard windowOwnerPIDs[windowID] != nil else { return }
+        pendingOrderOutWindowIDs.insert(windowID)
+        guard orderOutWindowIDsBeingRead == nil else { return }
+        readOrderedOutGhosts()
+    }
+
+    private func readOrderedOutGhosts() {
+        orderOutWindowIDsBeingRead = pendingOrderOutWindowIDs
+        pendingOrderOutWindowIDs = []
+        let windowService = windowService
+        scheduleDiscoveryRead {
+            let ghostWindowIDs = windowService.listWindowServerVerdicts().orderedOut
+            return { [weak self] in
+                guard let self else { return }
+                let candidates = self.orderOutWindowIDsBeingRead ?? []
+                self.orderOutWindowIDsBeingRead = nil
+                defer { if !self.pendingOrderOutWindowIDs.isEmpty { self.readOrderedOutGhosts() } }
+                var parked = Set<CGWindowID>()
+                for windowID in candidates.intersection(ghostWindowIDs) {
+                    guard let pid = self.windowOwnerPIDs[windowID] else { continue }
+                    self.orderedOutWindowOwners[windowID] = pid
+                    parked.insert(windowID)
+                }
+                guard !parked.isEmpty else { return }
+                self.onWindowOrderChanged?(RuntimeWindowSnapshot(
+                    liveWindows: [],
+                    allWindowIDs: nil,
+                    orderedOutWindowIDs: parked
+                ), .windowOrderedOut)
+            }
+        }
+    }
+
+    /// A read already out may have seen the window before this order-in, so its verdict no
+    /// longer stands.
+    private func restoreIfParkedOrderedOut(windowID: CGWindowID, pid: pid_t) {
+        pendingOrderOutWindowIDs.remove(windowID)
+        orderOutWindowIDsBeingRead?.remove(windowID)
+        guard orderedOutWindowOwners[windowID] == pid else { return }
+        let windowService = windowService
+        let spaceSwitcher = spaceSwitcher
+        scheduleDiscoveryRead {
+            let info = windowService.listWindows(ownerPIDs: [pid]).first { $0.windowID == windowID }
+            let locations = info == nil ? [:] :
+                spaceSwitcher?.desktopLocations(forWindows: [windowID]) ?? [:]
+            return { [weak self] in
+                guard let self, let info, self.orderedOutWindowOwners[windowID] == pid else { return }
+                let liveWindows = self.excludingRetired([info]).filter {
+                    !self.excludedBundleIDs.contains($0.ownerBundleID)
+                }
+                guard !liveWindows.isEmpty else { return }
+                self.orderedOutWindowOwners.removeValue(forKey: windowID)
+                self.onWindowOrderChanged?(RuntimeWindowSnapshot(
+                    liveWindows: liveWindows,
+                    allWindowIDs: nil,
+                    unarmedWindowIDs: self.unarmedWindowIDs,
+                    desktopIndexes: locations.mapValues(\.index),
+                    desktopLocations: locations,
+                    skyLightWindowIDs: spaceSwitcher == nil ? nil : Set(locations.keys)
+                ), .windowOrderedIn)
             }
         }
     }

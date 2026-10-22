@@ -542,6 +542,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 self.debouncedSaver?.scheduleSave(controller.spaceManager)
             }
         }
+        discovery.onWindowOrderChanged = { [weak self] snapshot, event in
+            DispatchQueue.main.async {
+                guard let self, let controller = self.spaceController else { return }
+                controller.recordWindowSizes(snapshot.liveWindows)
+                let result = self.runtimeWindowReconciler.reconcile(
+                    snapshot,
+                    spaceManager: &controller.spaceManager,
+                    allowDormantBundleFallback: false,
+                    controllerOwnedMoveWindowIDs: controller.controllerOwnedMoveWindowIDs
+                )
+                guard result.didMutate || result.refusedCount > 0 else { return }
+                let trigger = "window_\(event.diagnosticName)"
+                self.diag.report("runtime_windows_reconciled", details: [
+                    "added": "\(result.addedCount)",
+                    "reassigned": "\(result.reassignedCount)",
+                    "refused": "\(result.refusedCount)",
+                    "dormant": "\(result.dormantCount)",
+                    "trigger": trigger,
+                ])
+                self.reportAssignmentEvents(result.events, trigger: trigger)
+                if result.dormantCount > 0 { controller.handleLiveWindowsRemoved() }
+                controller.recordWindowsAppeared(snapshot.liveWindows.map(\.windowID))
+                self.debouncedSaver?.scheduleSave(controller.spaceManager)
+            }
+        }
         discovery.onAppTerminated = { [weak self] ownerPID in
             DispatchQueue.main.async {
                 guard let self, let controller = self.spaceController else { return }

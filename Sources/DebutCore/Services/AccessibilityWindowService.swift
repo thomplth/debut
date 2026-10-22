@@ -545,6 +545,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     ///
     /// A window whose owner is unresolved abstains rather than being refused. Its app's hidden
     /// state cannot be checked, and this predicate carries an eviction verdict.
+    ///
+    /// The hide tag is consulted before AppKit's hidden state. The window server sets it as it
+    /// orders the window out, while AppKit's answer updates only as Debut's main run loop turns,
+    /// so an order-out read in between would otherwise refuse every window of an app being hidden.
     static func orderedOutGhostWindowIDs(
         orderedOutWindowIDs: Set<CGWindowID>,
         ownerPIDs: [CGWindowID: pid_t],
@@ -554,12 +558,11 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         windowDesktops: [CGWindowID: Int] = [:]
     ) -> Set<CGWindowID> {
         orderedOutWindowIDs.filter { windowID in
-            guard let ownerPID = ownerPIDs[windowID] else { return false }
+            guard let ownerPID = ownerPIDs[windowID],
+                  !hiddenTaggedWindowIDs.contains(windowID)
+            else { return false }
             guard hiddenPIDs.contains(ownerPID) else { return true }
-            if hiddenTaggedWindowIDs.contains(windowID) ||
-                axWindowIDsByPID[ownerPID]?.contains(windowID) == true {
-                return false
-            }
+            if axWindowIDsByPID[ownerPID]?.contains(windowID) == true { return false }
             guard let desktop = windowDesktops[windowID] else { return false }
             return axWindowIDsByPID[ownerPID]?.contains {
                 windowDesktops[$0] == desktop

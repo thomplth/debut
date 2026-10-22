@@ -17,6 +17,10 @@ public struct RuntimeWindowSnapshot: Sendable {
     /// Windows Accessibility positively declined to name while their own desktop was the
     /// showing one. Unlike absence from a list this is a statement, so it may evict.
     public let axContradictedWindowIDs: Set<CGWindowID>
+    /// Windows the window server ordered out for no reason the user would recognise, such as a
+    /// tab left behind its tab group's selected tab. Readable from any desktop, and reversed by
+    /// the order-in that lists the window again.
+    public let orderedOutWindowIDs: Set<CGWindowID>
     /// Every window SkyLight places on a desktop, not just the assigned ones. Nil when the
     /// enumeration gave no answer, which must never be read as an empty screen.
     public let skyLightWindowIDs: Set<CGWindowID>?
@@ -29,6 +33,7 @@ public struct RuntimeWindowSnapshot: Sendable {
         desktopIndexes: [CGWindowID: Int] = [:],
         desktopLocations: [CGWindowID: DesktopLocation] = [:],
         axContradictedWindowIDs: Set<CGWindowID> = [],
+        orderedOutWindowIDs: Set<CGWindowID> = [],
         skyLightWindowIDs: Set<CGWindowID>? = nil
     ) {
         self.liveWindows = liveWindows
@@ -38,6 +43,7 @@ public struct RuntimeWindowSnapshot: Sendable {
         self.desktopIndexes = desktopIndexes
         self.desktopLocations = desktopLocations
         self.axContradictedWindowIDs = axContradictedWindowIDs
+        self.orderedOutWindowIDs = orderedOutWindowIDs
         self.skyLightWindowIDs = skyLightWindowIDs
     }
 }
@@ -66,6 +72,9 @@ public struct WindowAssignmentEvent: Equatable, Sendable {
         /// showing and did not name it. Only ever available for the showing desktop, so this
         /// is the one moment such a window can be judged.
         case axContradicted = "ax_contradicted"
+        /// The window server stopped drawing it without minimizing it or hiding its app,
+        /// such as a background tab of a native tab group, which is one window to the user.
+        case orderedOut = "ordered_out"
         /// No window source can find it any more — not Core Graphics, not SkyLight. Either
         /// alone proves nothing, so only their agreement retires an assignment this way.
         case vanished
@@ -447,23 +456,29 @@ public struct RuntimeWindowReconciler: Sendable {
 
         // Runs after every recovery pass so a window parked here cannot be reclaimed by the
         // same reconcile that just judged it.
-        for assignment in assignments(in: spaceManager)
-        where snapshot.axContradictedWindowIDs.contains(assignment.window.windowID)
-            || vanishedWindowIDs.contains(assignment.window.windowID) {
+        for assignment in assignments(in: spaceManager) {
+            let windowID = assignment.window.windowID
+            let reason: WindowAssignmentEvent.Reason
+            if vanishedWindowIDs.contains(windowID) {
+                reason = .vanished
+            } else if snapshot.axContradictedWindowIDs.contains(windowID) {
+                reason = .axContradicted
+            } else if snapshot.orderedOutWindowIDs.contains(windowID) {
+                reason = .orderedOut
+            } else {
+                continue
+            }
             let fromSpace = spaceManager.spaceIndex(id: assignment.spaceID)
-            guard spaceManager.makeWindowDormant(windowID: assignment.window.windowID) != nil
-            else { continue }
+            guard spaceManager.makeWindowDormant(windowID: windowID) != nil else { continue }
             dormantCount += 1
             events.append(WindowAssignmentEvent(
                 kind: .madeDormant,
-                windowID: assignment.window.windowID,
+                windowID: windowID,
                 bundleID: assignment.window.ownerBundleID,
                 windowTitle: assignment.window.windowTitle,
                 fromSpace: fromSpace,
                 toSpace: nil,
-                reason: vanishedWindowIDs.contains(assignment.window.windowID)
-                    ? .vanished
-                    : .axContradicted
+                reason: reason
             ))
         }
 

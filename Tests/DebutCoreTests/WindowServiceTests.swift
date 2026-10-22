@@ -336,6 +336,17 @@ struct WindowServiceTests {
         #expect(ghosts == [12791])
     }
 
+    @Test("A window tagged as hidden by its app is not a ghost before AppKit reports the app hidden")
+    func hideTaggedWindowSurvivesBeforeAppKitReportsTheHide() {
+        let ghosts = AccessibilityWindowService.orderedOutGhostWindowIDs(
+            orderedOutWindowIDs: [12791, 17973],
+            ownerPIDs: [12791: 90962, 17973: 48584],
+            hiddenPIDs: [],
+            hiddenTaggedWindowIDs: [17973]
+        )
+        #expect(ghosts == [12791])
+    }
+
     @Test("A hidden Chrome window and its orphan popup have different window identities")
     func hiddenChromePopupIsNotAWindow() {
         let ghosts = AccessibilityWindowService.orderedOutGhostWindowIDs(
