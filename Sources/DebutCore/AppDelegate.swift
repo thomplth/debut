@@ -1541,7 +1541,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func refreshTutorialEnvironment() {
-        refreshOnboardingEnvironment()
         guard let tutorialViewModel else { return }
         spaceController?.reconcileSpacesWithDesktops()
         tutorialViewModel.updateEnvironment(
@@ -1747,7 +1746,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         if let onboardingWindow {
             onboardingWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
-            refreshOnboardingEnvironment()
             return
         }
         // Separate setup storage intentionally ignores the old exercise-based checkpoint.
@@ -1815,7 +1813,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 }
             },
             onMenuBarCoachmark: { [weak self] in self?.showMenuBarCoachmark() })
-        model.onEnvironmentRefresh = { [weak self] in self?.refreshOnboardingEnvironment() }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 650),
             styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         if let screen = NSScreen.main {
@@ -1841,7 +1838,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             UserDefaults.standard.set(checkpoint, forKey: "setupCheckpoint")
             _ = UserDefaults.standard.synchronize()
         }
-        refreshOnboardingEnvironment()
         diag.report("onboarding_shown", details: ["forced": "\(ProcessInfo.processInfo.arguments.contains("--show-onboarding"))"])
     }
 
@@ -1861,14 +1857,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 self?.onboardingViewModel?.cancelPermissionHandoff(permission)
             }
         )
-    }
-
-    private func refreshOnboardingEnvironment() {
-        guard onboardingViewModel != nil else { return }
-        // Count every connected stack; do not mistake one desktop on the focused display
-        // for a device with only one desktop. Exclude disconnected recovery stacks.
-        let count = spaceService?.spaceTopology().stacks.reduce(0) { $0 + $1.desktopIDs.count }
-        if let count { onboardingViewModel?.updateEnvironment(desktopCount: count) }
     }
 
     private func completeOnboarding() {

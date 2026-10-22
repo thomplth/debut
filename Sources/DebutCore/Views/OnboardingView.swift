@@ -44,7 +44,6 @@ public struct OnboardingView: View {
         .background(canvas)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             viewModel.refreshPermissions()
-            viewModel.onEnvironmentRefresh()
         }
         .accessibilityElement(children: .contain).accessibilityIdentifier("onboarding-root")
     }
@@ -176,24 +175,9 @@ public struct OnboardingView: View {
             heading("Command-Tab", "Organize your windows by desktop")
             preview(viewModel.showsWindowPreviews ? "onboarding-workspace" : "onboarding-workspace-no-previews",
                 label: "Command-Tab groups windows by desktop", keys: [OnboardingKeyboard.leftCommand, OnboardingKeyboard.tab],
-                height: compact ? 246 : 310, showsDesktopGuidance: viewModel.showsDesktopGuidance)
+                height: compact ? 246 : 310)
             featureToggle("Enable Debut Command-Tab", key: \.workspaceIsolation, id: "command-tab")
         }
-    }
-
-    private var desktopGuidance: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: "rectangle.3.group").font(.system(size: 22)).foregroundStyle(Color.accentColor)
-                .accessibilityHidden(true)
-            Text("Unlock more with multiple desktops").font(.system(size: 15, weight: .semibold))
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Open Mission Control, move your pointer to the top, then click + to add a desktop.")
-                .font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Give your windows room to spread out.")
-                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(width: 240, alignment: .leading)
-        .accessibilityIdentifier("onboarding-desktop-guidance")
     }
 
     private func optionTab(compact: Bool) -> some View {
@@ -294,15 +278,14 @@ public struct OnboardingView: View {
             startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
-    @ViewBuilder private func preview(_ name: String, label: String, keys: Set<CGKeyCode>, height: CGFloat,
-                                      showsDesktopGuidance: Bool = false) -> some View {
+    @ViewBuilder private func preview(_ name: String, label: String, keys: Set<CGKeyCode>, height: CGFloat) -> some View {
         if let directory = previewDirectory, let image = NSImage(contentsOf: directory.appendingPathComponent("\(name).png")) {
             let plateBounds = OnboardingDemoPlate.bounds(of: image, named: name)
             HStack(spacing: 0) {
                 GeometryReader { geometry in
                     // One margin before the keyboard, between its dissolved edge and the
                     // demo's plate, and after the plate; the plate's shadow spills past it.
-                    let unit = min(showsDesktopGuidance ? 31 : 40, (geometry.size.height - 2 * OnboardingDemoLayout.margin) / 5.2)
+                    let unit = min(40, (geometry.size.height - 2 * OnboardingDemoLayout.margin) / 5.2)
                     let layout = OnboardingDemoLayout(width: geometry.size.width, height: geometry.size.height,
                         plateAspect: plateBounds.width * image.size.width / max(1, plateBounds.height * image.size.height),
                         unit: unit, highlighted: keys)
@@ -320,7 +303,6 @@ public struct OnboardingView: View {
                                     y: layout.plate.minY - plateBounds.minY * imageHeight)
                     }
                 }
-                if showsDesktopGuidance { desktopGuidance.padding(.trailing, 24) }
             }
             .frame(height: height).frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 20))

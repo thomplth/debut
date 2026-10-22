@@ -1214,7 +1214,7 @@ struct ScreenshotTests {
         try saveImage(image, name: "settings_faster_desktop_transitions_disabled")
     }
 
-    @Test("Minimal onboarding pages fit the window", arguments: ["welcome", "permission", "one-desktop", "workspace", "workspace-no-previews", "previews", "previews-disabled", "speed", "ready", "small-welcome", "small-permission", "small-one-desktop", "small-previews", "small-speed", "small-ready", "dark-welcome", "dark-permission", "dark-workspace", "dark-one-desktop", "dark-previews", "dark-speed", "dark-ready"])
+    @Test("Minimal onboarding pages fit the window", arguments: ["welcome", "permission", "workspace", "workspace-no-previews", "previews", "previews-disabled", "speed", "ready", "small-welcome", "small-permission", "small-previews", "small-speed", "small-ready", "dark-welcome", "dark-permission", "dark-workspace", "dark-previews", "dark-speed", "dark-ready"])
     func onboardingPages(_ state: String) throws {
         let outputName = state
         let smallScreen = state.hasPrefix("small-")
@@ -1230,7 +1230,6 @@ struct ScreenshotTests {
         let vm = OnboardingViewModel(permissionClient: PreviewOnboardingPermissionClient(
             accessibilityGranted: state != "permission", screenRecordingGranted: !["permission", "workspace-no-previews", "previews-disabled"].contains(state)),
             checkpoint: .init(page: page))
-        vm.updateEnvironment(desktopCount: state == "one-desktop" ? 1 : 3)
         let image = try #require(renderSwiftUI(
             OnboardingView(viewModel: vm, previewDirectory: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs/media"),
                 iconURL: Self.outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Resources/AppIcon.icns"))

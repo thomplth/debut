@@ -1777,7 +1777,7 @@ if CommandLine.arguments.dropFirst().first == "onboarding-permission-check" {
         passed = passed && onboardingPress("Get started") && onboardingContinueEnabled()
         if oneDesktop {
             passed = passed && SpaceService().userDesktops().count == 1
-                && onboardingContains("Unlock more with multiple desktops")
+                && !onboardingContains("Unlock more with multiple desktops")
             _ = takeScreenshot("onboarding_one_desktop")
         }
         passed = passed && currentOnboardingTarget() == nil

@@ -55,23 +55,6 @@ struct SetupFlowTests {
         model.back()
         #expect(!model.features.workspaceIsolation)
     }
-    @Test("The single desktop callout follows topology and appears only on Command-Tab")
-    func guidance() {
-        let permissions = Permissions()
-        permissions.state = .init(accessibilityGranted: true, screenRecordingGranted: false)
-        let model = OnboardingViewModel(permissionClient: permissions)
-        #expect(!model.showsDesktopGuidance)
-        model.advance()
-        #expect(!model.showsDesktopGuidance)
-        model.updateEnvironment(desktopCount: 1)
-        #expect(model.showsDesktopGuidance)
-        model.updateEnvironment(desktopCount: 2)
-        #expect(!model.showsDesktopGuidance)
-        model.updateEnvironment(desktopCount: 1)
-        model.advance()
-        #expect(!model.showsDesktopGuidance)
-    }
-
     @Test("Every final action completes setup before opening the destination", arguments: [OnboardingDestination.useDebut, .tutorial, .settings])
     func completionBeforeDestination(_ destination: OnboardingDestination) {
         let permissions = Permissions()

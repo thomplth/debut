@@ -117,9 +117,7 @@ public final class OnboardingViewModel {
     public var features: FeatureSettings
     public var spaceSwitchDuration: TimeInterval
     public private(set) var permissions: OnboardingPermissionState
-    public private(set) var desktopCount: Int?
     public private(set) var screenRecordingRequiresRelaunch = false
-    public var onEnvironmentRefresh: @MainActor () -> Void = {}
     private var didComplete = false
     private let permissionClient: any OnboardingPermissionClient
     private let onSpaceSwitchDurationChanged: @MainActor (TimeInterval) -> Void
@@ -171,12 +169,10 @@ public final class OnboardingViewModel {
     }
 
     public var canAdvance: Bool { permissions.accessibilityGranted }
-    public var showsDesktopGuidance: Bool { page == .workspace && desktopCount == 1 }
     public var showsWindowPreviews: Bool {
         features.windowPreviews && permissions.screenRecordingGranted && !screenRecordingRequiresRelaunch
     }
 
-    public func updateEnvironment(desktopCount: Int) { self.desktopCount = desktopCount }
 
     public func advance() {
         refreshPermissions()
@@ -185,7 +181,6 @@ public final class OnboardingViewModel {
         else if let next = OnboardingPage(rawValue: page.rawValue + 1) {
             page = next
             onProgressChanged(.init(page: page))
-            onEnvironmentRefresh()
         }
     }
 
@@ -193,7 +188,6 @@ public final class OnboardingViewModel {
         guard !didComplete, let previous = OnboardingPage(rawValue: page.rawValue - 1) else { return }
         page = previous
         onProgressChanged(.init(page: page))
-        onEnvironmentRefresh()
     }
 
     public func finish(_ destination: OnboardingDestination) {
