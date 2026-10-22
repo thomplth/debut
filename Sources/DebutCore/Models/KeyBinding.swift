@@ -46,6 +46,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
     case addDesktop
     case removeDesktop
     case dismissOverlay
+    case lockOverlay
 
     public var displayName: String {
         switch self {
@@ -98,6 +99,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .addDesktop: "Add desktop"
         case .removeDesktop: "Remove selected desktop"
         case .dismissOverlay: "Close overlay"
+        case .lockOverlay: "Lock overlay open"
         }
     }
 
@@ -153,6 +155,7 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
         case .addDesktop: .addDesktop
         case .removeDesktop: .removeDesktop
         case .dismissOverlay: .escape
+        case .lockOverlay: .lockOverlay
         }
     }
 
@@ -289,7 +292,8 @@ public enum KeyAction: String, Codable, Sendable, CaseIterable {
 
     /// Defaults added after people already had saved bindings. Each one steps aside when the
     /// user has already given its key to another action, rather than silently taking it back.
-    static let laterSessionDefaults: [KeyAction] = overlaySelectionActions + desktopManagementActions
+    static let laterSessionDefaults: [KeyAction] =
+        overlaySelectionActions + desktopManagementActions + [.lockOverlay]
 
     public static func jumpAction(forSpaceIndex index: Int) -> KeyAction? {
         switch index {
@@ -505,6 +509,7 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
             .addDesktop: KeyCombo(keyCode: kVK_ANSI_N),
             .removeDesktop: KeyCombo(keyCode: kVK_Delete),
             .dismissOverlay: KeyCombo(keyCode: kVK_Escape),
+            .lockOverlay: KeyCombo(keyCode: kVK_Space),
         ]
     }
 }

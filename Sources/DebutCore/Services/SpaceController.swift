@@ -2322,6 +2322,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             commitSelection()
         case .escape:
             discardOverlay()
+        case .lockOverlay:
+            diag.report("overlay_locked")
         case .nextWindow:
             stepWindow(forward: true)
         case .nextWindowRepeat:

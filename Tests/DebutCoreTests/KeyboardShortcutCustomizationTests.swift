@@ -99,6 +99,32 @@ struct KeyboardShortcutCustomizationTests {
                 == .moveWindowLeft)
     }
 
+    @Test("Space locks the overlay by default, including for older saved bindings")
+    func lockOverlayDefault() throws {
+        var saved = KeyBindings()
+        #expect(saved.combo(for: .lockOverlay) == KeyCombo(keyCode: kVK_Space))
+        #expect(KeyAction.lockOverlay.shortcutScope == .session)
+        #expect(KeyAction.lockOverlay.toKeyEvent() == .lockOverlay)
+        saved.bindings.removeValue(forKey: .lockOverlay)
+
+        let restored = try JSONDecoder().decode(KeyBindings.self, from: JSONEncoder().encode(saved))
+
+        #expect(restored.combo(for: .lockOverlay) == KeyCombo(keyCode: kVK_Space))
+    }
+
+    @Test("The lock default leaves Space with an action the user already gave it")
+    func lockOverlayDefaultPreservesExistingBinding() throws {
+        var saved = KeyBindings()
+        saved.bindings.removeValue(forKey: .lockOverlay)
+        saved.bindings[.nextDisplayStack] = KeyCombo(keyCode: kVK_Space)
+
+        let restored = try JSONDecoder().decode(KeyBindings.self, from: JSONEncoder().encode(saved))
+
+        #expect(restored.combo(for: .lockOverlay) == nil)
+        #expect(restored.action(for: KeyCombo(keyCode: kVK_Space), scope: .session)
+                == .nextDisplayStack)
+    }
+
     @Test("Configured Vim selection shortcuts dispatch only while an overlay is visible")
     func customVimSelectionShortcut() {
         let service = EventTapKeyboardService()
@@ -198,7 +224,8 @@ struct KeyboardShortcutCustomizationTests {
         )
 
         #expect(decoded.combo(for: .moveWindowLeft) == KeyCombo(keyCode: kVK_ANSI_B))
-        #expect(!decoded.bindings.values.contains(KeyCombo(keyCode: kVK_Space)))
+        #expect(decoded.bindings.filter { $0.value == KeyCombo(keyCode: kVK_Space) }.keys
+                .elementsEqual([.lockOverlay]))
     }
 
     /// macOS's Command-backtick already stays on the current Space, which is a stage (KHA-864).

@@ -18,6 +18,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private var eventTapRunLoop: CFRunLoop?
     private var eventTapThread: Thread?
     private var spaceManagerActive: Bool = false
+    private var sessionLocked: Bool = false
     private var sessionPrimaryModifier: CGEventFlags?
     private var sessionTriggerKeyCode: Int64?
     private var quickSwitchKeysDown: Set<Int64> = []
@@ -292,6 +293,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         let recordingKeys = configurationLock.withLock { shortcutRecordingKeysDown }
         let claims = KeyboardTapClaims(
             sessionActive: spaceManagerActive,
+            sessionLocked: sessionLocked,
             sessionModifier: sessionPrimaryModifier?.rawValue,
             recordingKeys: recordingKeys,
             quickSwitchKeys: quickSwitchKeysDown,
@@ -321,6 +323,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         func codes(_ keys: Set<Int64>) -> String { keys.sorted().map(String.init).joined(separator: ",") }
         return [
             "sessionActive": "\(claims.sessionActive)",
+            "sessionLocked": "\(claims.sessionLocked)",
             "sessionModifier": claims.sessionModifier.map { String($0, radix: 16) } ?? "none",
             "overlayVisible": "\(overlayVisible)",
             "recordingKeys": codes(claims.recordingKeys),
@@ -343,6 +346,13 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         deliverAsynchronously: Bool
     ) -> CGEvent? {
         let flags = event.flags
+
+        // A locked session outlives its modifier, so it ends with its overlay instead. A click,
+        // a quick switch, or a dialog the overlay yielded to can close it without a key here.
+        if sessionLocked, !overlayVisible {
+            endSession()
+            deliver(.cmdRelease, asynchronously: deliverAsynchronously)
+        }
 
         // macOS drops events while it has the tap disabled, so a claimed press can lose its
         // release. A held key only ever repeats; a non-repeat key-down is a new physical press,
@@ -389,10 +399,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         }
         if type == .keyUp,
            spaceManagerActive,
+           !sessionLocked,
            sessionPrimaryModifier == nil,
            sessionTriggerKeyCode == keyCode {
-            spaceManagerActive = false
-            sessionTriggerKeyCode = nil
+            endSession()
             deliver(.cmdRelease, asynchronously: deliverAsynchronously)
             return nil
         }
@@ -400,11 +410,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         // A Space Manager session commits when its activation modifier is released.
         if type == .flagsChanged {
             if spaceManagerActive,
+               !sessionLocked,
                let primaryModifier = sessionPrimaryModifier,
                !flags.contains(primaryModifier) {
-                spaceManagerActive = false
-                sessionPrimaryModifier = nil
-                sessionTriggerKeyCode = nil
+                endSession()
                 deliver(.cmdRelease, asynchronously: deliverAsynchronously)
                 return nil
             }
@@ -540,14 +549,20 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         // The same applies to the session's modifier: a keystroke without it means it was
         // released unseen, and an overlay left to own the keyboard would swallow typing.
         if spaceManagerActive,
+           !sessionLocked,
            let primaryModifier = sessionPrimaryModifier,
            !flags.contains(primaryModifier) {
-            spaceManagerActive = false
-            sessionPrimaryModifier = nil
-            sessionTriggerKeyCode = nil
+            endSession()
             DiagnosticReporter.shared.report("keyboard_session_release_recovered")
             deliver(.cmdRelease, asynchronously: deliverAsynchronously)
         }
+    }
+
+    private func endSession() {
+        spaceManagerActive = false
+        sessionLocked = false
+        sessionPrimaryModifier = nil
+        sessionTriggerKeyCode = nil
     }
 
     private func beginSession(using action: KeyAction) {
@@ -599,15 +614,24 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         }
 
         // Consume both halves; dispatch only the configured key-down command.
-        guard type == .keyDown else { return nil }
-        if let sessionAction {
-            let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-            if shouldPaceHeldCycle(sessionAction, isAutoRepeat: isAutoRepeat) { return nil }
+        guard type == .keyDown, let sessionAction else { return nil }
+        let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        if sessionAction == .lockOverlay, isAutoRepeat { return nil }
+        if sessionLocked, sessionAction == .lockOverlay || sessionAction == .dismissOverlay {
+            endSession()
+            quickSwitchKeysDown.insert(keyCode)
             deliver(
-                sessionAction.toKeyEvent(autoRepeat: isAutoRepeat),
+                sessionAction == .lockOverlay ? .cmdRelease : .escape,
                 asynchronously: deliverAsynchronously
             )
+            return nil
         }
+        if sessionAction == .lockOverlay { sessionLocked = true }
+        if shouldPaceHeldCycle(sessionAction, isAutoRepeat: isAutoRepeat) { return nil }
+        deliver(
+            sessionAction.toKeyEvent(autoRepeat: isAutoRepeat),
+            asynchronously: deliverAsynchronously
+        )
         return nil
     }
 
@@ -722,6 +746,7 @@ private struct LastKeyDecisions: CustomStringConvertible {
 
 private struct KeyboardTapClaims {
     var sessionActive = false
+    var sessionLocked = false
     var sessionModifier: UInt64?
     var recordingKeys: Set<Int64> = []
     var quickSwitchKeys: Set<Int64> = []

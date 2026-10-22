@@ -1073,6 +1073,106 @@ struct KeyboardServiceTests {
         ) != nil)
     }
 
+    private static func lockedOverlaySession(
+        _ service: EventTapKeyboardService
+    ) -> TestKeyboardDelegate {
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: key(kVK_Tab, down: true, flags: .maskCommand)
+        ) == nil)
+        service.overlayVisible = true
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: key(kVK_Space, down: true, flags: .maskCommand)
+        ) == nil)
+        #expect(service.handleCGEvent(
+            type: .keyUp,
+            event: key(kVK_Space, down: false, flags: .maskCommand)
+        ) == nil)
+        #expect(service.handleCGEvent(
+            type: .flagsChanged,
+            event: key(kVK_Command, down: false)
+        ) != nil)
+        return delegate
+    }
+
+    @Test("A locked overlay keeps owning the keyboard after Command is released")
+    func lockedOverlaySurvivesModifierRelease() {
+        let service = EventTapKeyboardService()
+        let delegate = Self.lockedOverlaySession(service)
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_Tab, down: true)) == nil)
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .lockOverlay, .nextWindow])
+        #expect(service.diagnosticDetails()["sessionLocked"] == "true")
+    }
+
+    @Test("Holding the lock key locks the overlay once rather than committing it")
+    func heldLockKeyDoesNotCommit() {
+        let service = EventTapKeyboardService()
+        let delegate = TestKeyboardDelegate()
+        #expect(service.start(delegate: delegate))
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_Tab, down: true, flags: .maskCommand)
+        ) == nil)
+        service.overlayVisible = true
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_Space, down: true, flags: .maskCommand)
+        ) == nil)
+        #expect(service.handleCGEvent(
+            type: .keyDown,
+            event: Self.key(kVK_Space, down: true, flags: .maskCommand, autoRepeat: true)
+        ) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .lockOverlay])
+    }
+
+    @Test("Pressing the lock key again commits a locked overlay and returns the keyboard")
+    func lockKeyCommitsLockedOverlay() {
+        let service = EventTapKeyboardService()
+        let delegate = Self.lockedOverlaySession(service)
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_Space, down: true)) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: Self.key(kVK_Space, down: false)) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .lockOverlay, .cmdRelease])
+
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) != nil)
+        #expect(service.diagnosticDetails()["sessionActive"] == "false")
+    }
+
+    @Test("Escape discards a locked overlay and returns the keyboard")
+    func escapeDiscardsLockedOverlay() {
+        let service = EventTapKeyboardService()
+        let delegate = Self.lockedOverlaySession(service)
+        defer { service.stop() }
+
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_Escape, down: true)) == nil)
+        #expect(service.handleCGEvent(type: .keyUp, event: Self.key(kVK_Escape, down: false)) == nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .lockOverlay, .escape])
+
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) != nil)
+    }
+
+    @Test("A locked session ends with its overlay when a click closes it")
+    func lockedSessionEndsWithItsOverlay() {
+        let service = EventTapKeyboardService()
+        let delegate = Self.lockedOverlaySession(service)
+        defer { service.stop() }
+
+        service.overlayVisible = false
+
+        #expect(service.handleCGEvent(type: .keyDown, event: Self.key(kVK_ANSI_D, down: true)) != nil)
+        #expect(delegate.receivedEvents == [.cmdTabHold, .lockOverlay, .cmdRelease])
+        #expect(service.diagnosticDetails()["sessionActive"] == "false")
+    }
+
     @Test("A missed modifier release cannot leave the overlay owning the keyboard")
     func sessionEndsWhenModifierReleaseWasMissed() {
         let service = EventTapKeyboardService()

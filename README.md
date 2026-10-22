@@ -56,10 +56,11 @@ Keep the activation modifier held (Command for Command-Tab) and press:
 | **Delete** | Remove the selected desktop; its windows join the desktop showing, or a neighbour if it is the one showing (macOS 27) |
 | Drag a space, **+** | Reorder desktops, drop one onto another to merge them, or add one at the top or bottom (macOS 27) |
 | **Esc** | Close the switcher and discard staged changes |
+| **Space** | Lock the switcher open, so releasing the modifier no longer closes it; afterwards **Space** or a click applies, **Esc** discards |
 | Release the modifier | Focus the selection and apply staged moves and desktop changes |
 
-Option-Tab supports Tab, ⇧ Tab, \`, H J K L, W, Q and Esc. Space, move and desktop
-keys are Command-Tab only.
+Option-Tab supports Tab, ⇧ Tab, \`, H J K L, W, Q, Esc and the Space lock. Space
+navigation, move and desktop keys are Command-Tab only.
 
 ## Settings
 

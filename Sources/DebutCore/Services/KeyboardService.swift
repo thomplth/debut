@@ -41,6 +41,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case removeDesktop          // Cmd+Delete — stage removal of the selected desktop
 
     case escape
+    case lockOverlay            // Space — keep the overlay open after the modifier lifts
 }
 
 public protocol KeyboardEventDelegate: AnyObject, Sendable {
