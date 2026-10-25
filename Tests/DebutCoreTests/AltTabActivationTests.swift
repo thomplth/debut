@@ -48,7 +48,7 @@ struct AltTabActivationTests {
 
     @Test("Option+backtick passes through when no switcher is open")
     func backtickPassesThroughWithoutSession() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -61,7 +61,7 @@ struct AltTabActivationTests {
 
     @Test("Option+Tab opens the alt-tab switcher and is consumed")
     func opensSwitcher() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -73,7 +73,7 @@ struct AltTabActivationTests {
 
     @Test("Option+Shift+Tab opens the switcher travelling backward")
     func opensBackward() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -88,7 +88,7 @@ struct AltTabActivationTests {
     /// physical Option+backtick resolves through the same bare-backtick binding Cmd+Tab uses.
     @Test("Option+backtick steps backward while the switcher is open")
     func alternateCyclesBackward() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -109,7 +109,7 @@ struct AltTabActivationTests {
     /// same path Cmd+Tab uses.
     @Test("Releasing Option commits the alt-tab session")
     func releaseCommits() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -126,7 +126,7 @@ struct AltTabActivationTests {
     /// burst of repeats cannot yank the selection to the beginning mid-cycle.
     @Test("A held Option+Tab repeat clamps instead of wrapping")
     func heldRepeatClamps() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         service.heldCycleMinimumInterval = 0
         #expect(service.start(delegate: delegate))
@@ -144,7 +144,7 @@ struct AltTabActivationTests {
     /// Cmd+Option+Tab is the stage switcher's space-cycling chord. Option+Tab must not shadow it.
     @Test("Cmd+Option+Tab still opens the stage switcher in space mode")
     func doesNotShadowStageSpaceCycling() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }

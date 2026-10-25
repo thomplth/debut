@@ -9,7 +9,7 @@ struct MoveFocusedWindowTests {
     @Test("Command-Option arrows move globally, drain releases and accept consecutive presses",
           arguments: [(kVK_LeftArrow, -1), (kVK_UpArrow, -1), (kVK_RightArrow, 1), (kVK_DownArrow, 1)])
     func arrowChord(_ input: (Int, Int)) {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -29,7 +29,7 @@ struct MoveFocusedWindowTests {
     @Test("Window-moving chord yields when isolation is disabled or overview visible")
     func chordYields() {
         for mode in 0..<3 {
-            let service = EventTapKeyboardService(desktopNavigationBlocked: { mode == 1 })
+            let service = EventTapKeyboardService(listensToSession: false, desktopNavigationBlocked: { mode == 1 })
             if mode == 0 { service.features.workspaceIsolation = false }
             if mode == 2 { service.desktopNavigationAvailable = false }
             let delegate = TestKeyboardDelegate()

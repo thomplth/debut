@@ -82,7 +82,7 @@ struct LaunchFeatureTests {
 
     @Test("Disabled shortcuts pass through; Control arrows consume their matching key up")
     func keyboardChoices() throws {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         _ = service.start(delegate: delegate) // Direct dispatch below does not require a live event tap.
         defer { service.stop() }
@@ -114,7 +114,7 @@ struct LaunchFeatureTests {
 
     @Test("The faster-desktop master gates preserved keyboard overrides", arguments: [true, false])
     func fasterDesktopMasterGatesKeyboardOverrides(masterEnabled: Bool) {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         _ = service.start(delegate: delegate)
         defer { service.stop() }
@@ -170,7 +170,7 @@ struct LaunchFeatureTests {
     @Test("Control-arrow remains native throughout an overview and resumes on the next press")
     func controlArrowOverviewPassthrough() {
         let overview = OverviewState()
-        let service = EventTapKeyboardService(desktopNavigationBlocked: { overview.active })
+        let service = EventTapKeyboardService(listensToSession: false, desktopNavigationBlocked: { overview.active })
         let delegate = TestKeyboardDelegate()
         _ = service.start(delegate: delegate)
         defer { service.stop() }

@@ -68,6 +68,7 @@ struct KeyboardServiceTests {
         let performance = PerformanceRecorder(resourceReader: UnavailableProcessResourceReader())
         let overlay = OverlayPresentationRecorder(performanceRecorder: performance)
         let service = EventTapKeyboardService(
+            listensToSession: false,
             overlayPresentationRecorder: overlay,
             performanceRecorder: performance
         )
@@ -97,7 +98,7 @@ struct KeyboardServiceTests {
 
     @Test("Shortcut recording captures Ctrl-Tab before normal dispatch")
     func recordingCapturesControlTab() async throws {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         let recorded = RecordedComboBox()
         #expect(service.start(delegate: delegate))
@@ -121,7 +122,7 @@ struct KeyboardServiceTests {
 
     @Test("Shortcut recording captures Cmd-Tab instead of opening Debut")
     func recordingCapturesCommandTab() async throws {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         let recorded = RecordedComboBox()
         #expect(service.start(delegate: delegate))
@@ -185,7 +186,7 @@ struct KeyboardServiceTests {
 
     @Test("Return cycles display stacks while the Command session is active")
     func returnCyclesDisplayStacks() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -221,7 +222,7 @@ struct KeyboardServiceTests {
 
     @Test("Visible overlay dispatches Command-9 and ignores Command-0")
     func visibleOverlayDigitDispatch() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -310,7 +311,7 @@ struct KeyboardServiceTests {
 
     @Test("Quick switch digit keys use the configured modifier chord")
     func quickSwitchUsesConfiguredModifiers() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         _ = service.start(delegate: delegate)
         defer { service.stop() }
@@ -344,7 +345,7 @@ struct KeyboardServiceTests {
 
     @Test("Same-app quick switch uses its own configured modifier chord")
     func sameAppQuickSwitchUsesConfiguredModifiers() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         _ = service.start(delegate: delegate)
         defer { service.stop() }
@@ -367,7 +368,7 @@ struct KeyboardServiceTests {
 
     @Test("Digit zero is not captured by either quick-switch shortcut")
     func quickSwitchIgnoresZero() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         _ = service.start(delegate: delegate)
         defer { service.stop() }
@@ -392,7 +393,7 @@ struct KeyboardServiceTests {
 
     @Test("Quick switch consumes key-up even when Ctrl was released first")
     func quickSwitchConsumesKeyUpAfterControlRelease() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let keyDown = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_ANSI_1),
@@ -412,7 +413,7 @@ struct KeyboardServiceTests {
 
     @Test("Unconfigured app Ctrl digit shortcuts do not take priority over quick switch")
     func unconfiguredAppShortcutDoesNotTakePriority() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let keyDown = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_ANSI_1),
@@ -432,7 +433,7 @@ struct KeyboardServiceTests {
 
     @Test("A Debut-captured quick switch remains captured during key repeat")
     func capturedQuickSwitchRepeatStaysCaptured() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let initialKeyDown = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_ANSI_1),
@@ -447,7 +448,7 @@ struct KeyboardServiceTests {
 
     @Test("Event-tap callback returns before delegate work completes")
     func eventTapDoesNotBlockOnDelegate() async throws {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = SlowKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         #expect(service.eventTapRunsOnDedicatedThread)
@@ -477,7 +478,7 @@ struct KeyboardServiceTests {
 
     @Test("Quick-switch inputs are independent of the frontmost app")
     func quickSwitchInputsIgnoreFrontmostApp() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         _ = service.start(delegate: delegate)
         defer { service.stop() }
@@ -553,7 +554,7 @@ struct KeyboardServiceTests {
 
     @Test("Cmd+Tab auto-repeat is distinguished from a fresh press")
     func cmdTabAutoRepeat() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -572,7 +573,7 @@ struct KeyboardServiceTests {
 
     @Test("Cmd+Shift+Tab auto-repeat is distinguished from a fresh press")
     func cmdShiftTabAutoRepeat() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -591,7 +592,7 @@ struct KeyboardServiceTests {
 
     @Test("Held backtick inside the overlay auto-repeats as a backward window step")
     func sessionBacktickAutoRepeat() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         service.heldCycleMinimumInterval = 0 // pacing is covered separately
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
@@ -623,7 +624,7 @@ struct KeyboardServiceTests {
         clock: TestMonotonicClock,
         interval: TimeInterval
     ) -> EventTapKeyboardService {
-        let service = EventTapKeyboardService(monotonicNanoseconds: { clock.read() })
+        let service = EventTapKeyboardService(listensToSession: false, monotonicNanoseconds: { clock.read() })
         service.heldCycleMinimumInterval = interval
         return service
     }
@@ -747,7 +748,7 @@ struct KeyboardServiceTests {
 
     @Test("Cmd+Option+backtick opens the previous-space direction")
     func cmdOptionBacktick() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -765,7 +766,7 @@ struct KeyboardServiceTests {
 
     @Test("Cmd+Q quits the overlay's selected app instead of the frontmost one")
     func commandQQuitsSelectedAppVisibleOverlay() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -799,7 +800,7 @@ struct KeyboardServiceTests {
 
     @Test("Cmd+Q reaches the frontmost app when the quit command is unbound")
     func commandQPassesThroughWhenUnbound() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         var bindings = KeyBindings()
         bindings.bindings.removeValue(forKey: .quitSelectedApp)
         service.keyBindings = bindings
@@ -825,7 +826,7 @@ struct KeyboardServiceTests {
 
     @Test("Cmd+W closes the overlay's selected window")
     func commandWClosesSelectedWindowVisibleOverlay() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -859,7 +860,7 @@ struct KeyboardServiceTests {
 
     @Test("Cmd+W reaches the frontmost app when the close command is unbound")
     func commandWPassesThroughWhenUnbound() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         var bindings = KeyBindings()
         bindings.bindings.removeValue(forKey: .closeSelectedWindow)
         service.keyBindings = bindings
@@ -887,7 +888,7 @@ struct KeyboardServiceTests {
     /// windows on the current Space, so Debut leaves the shortcut to macOS (KHA-864).
     @Test("Cmd-backtick passes through to macOS", arguments: [false, true], [false, true])
     func commandBacktickPassesThrough(shift: Bool, autoRepeat: Bool) {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -906,7 +907,7 @@ struct KeyboardServiceTests {
 
     @Test("Cmd-backtick still steps backward inside the overlay")
     func commandBacktickControlsOverlay() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -942,7 +943,7 @@ struct KeyboardServiceTests {
     // the chord is not the native quit shortcut.
     @Test("Q other than Command-Q remains consumed while the overlay is visible")
     func plainQRemainsConsumedVisibleOverlay() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let tabDown = CGEvent(
             keyboardEventSource: nil,
             virtualKey: CGKeyCode(kVK_Tab),
@@ -1003,7 +1004,7 @@ struct KeyboardServiceTests {
 
     @Test("A recorded key whose release was missed is not suppressed forever")
     func recordedKeyRecoversAfterMissedKeyUp() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -1029,7 +1030,7 @@ struct KeyboardServiceTests {
 
     @Test("An uninterrupted recorded press still consumes both halves")
     func recordedKeyConsumesBothHalves() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -1046,7 +1047,7 @@ struct KeyboardServiceTests {
 
     @Test("A quick-switch press whose release was missed dispatches again on the next press")
     func quickSwitchKeyRecoversAfterMissedKeyUp() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -1100,7 +1101,7 @@ struct KeyboardServiceTests {
 
     @Test("A locked overlay keeps owning the keyboard after Command is released")
     func lockedOverlaySurvivesModifierRelease() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = Self.lockedOverlaySession(service)
         defer { service.stop() }
 
@@ -1112,7 +1113,7 @@ struct KeyboardServiceTests {
 
     @Test("Holding the lock key locks the overlay once rather than committing it")
     func heldLockKeyDoesNotCommit() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -1135,7 +1136,7 @@ struct KeyboardServiceTests {
 
     @Test("Pressing the lock key again commits a locked overlay and returns the keyboard")
     func lockKeyCommitsLockedOverlay() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = Self.lockedOverlaySession(service)
         defer { service.stop() }
 
@@ -1149,7 +1150,7 @@ struct KeyboardServiceTests {
 
     @Test("Escape discards a locked overlay and returns the keyboard")
     func escapeDiscardsLockedOverlay() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = Self.lockedOverlaySession(service)
         defer { service.stop() }
 
@@ -1162,7 +1163,7 @@ struct KeyboardServiceTests {
 
     @Test("A locked session ends with its overlay when a click closes it")
     func lockedSessionEndsWithItsOverlay() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = Self.lockedOverlaySession(service)
         defer { service.stop() }
 
@@ -1175,7 +1176,7 @@ struct KeyboardServiceTests {
 
     @Test("A missed modifier release cannot leave the overlay owning the keyboard")
     func sessionEndsWhenModifierReleaseWasMissed() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -1206,7 +1207,7 @@ struct KeyboardServiceTests {
 
     @Test("A key held as the overlay opens still reaches the app when released")
     func releaseOfKeyPressedBeforeOverlayPasses() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -1246,7 +1247,7 @@ struct KeyboardServiceTests {
 
     @Test("A key pressed again inside the overlay belongs to the overlay")
     func keyRepressedInsideOverlayIsConsumed() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -1271,7 +1272,7 @@ struct KeyboardServiceTests {
 
     @Test("The tap reports the keys it holds and the presses it consumed")
     func diagnosticsNameHeldAndConsumedKeys() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -1293,7 +1294,7 @@ struct KeyboardServiceTests {
 
     @Test("Each key's last press and release record whether the app received them")
     func diagnosticsRecordLastDecisionPerKey() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }

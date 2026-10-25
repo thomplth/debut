@@ -168,7 +168,7 @@ struct NativeDesktopShortcutTests {
 
     @Test("Debut's own shortcut keystroke passes through its keyboard tap untouched")
     func syntheticKeystrokePassesThrough() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         _ = service.start(delegate: delegate)
         defer { service.stop() }

@@ -78,6 +78,22 @@ if grep -q 'Tools/space-probe' Sources/DebutCore/Services/SpaceService.swift; th
     fail "SpaceService points readers to probes that were removed from the repository"
 fi
 
+python3 - <<'CHECK' || fail "a unit test constructs a keyboard service that taps the live session"
+import re
+from pathlib import Path
+offenders = []
+for path in Path('Tests').rglob('*.swift'):
+    text = path.read_text()
+    for match in re.finditer(r'EventTapKeyboardService\(', text):
+        depth, end = 1, match.end()
+        while depth:
+            depth += {'(': 1, ')': -1}.get(text[end], 0)
+            end += 1
+        if 'listensToSession: false' not in text[match.end():end]:
+            offenders.append(f"{path}:{text.count(chr(10), 0, match.start()) + 1}")
+assert not offenders, "\n".join(offenders)
+CHECK
+
 if (( failures > 0 )); then
     exit 1
 fi

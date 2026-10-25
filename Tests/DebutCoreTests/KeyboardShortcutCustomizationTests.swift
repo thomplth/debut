@@ -8,7 +8,7 @@ import Testing
 struct KeyboardShortcutCustomizationTests {
     @Test("Disabling Option-Tab passes both directions through without disabling Command-Tab")
     func disabledOptionTab() throws {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         service.features = try JSONDecoder().decode(FeatureSettings.self, from: Data(#"{"optionTab":false}"#.utf8))
         #expect(service.start(delegate: delegate))
@@ -127,7 +127,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("Configured Vim selection shortcuts dispatch only while an overlay is visible")
     func customVimSelectionShortcut() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
         bindings.bindings[.selectLeft] = KeyCombo(keyCode: kVK_ANSI_B)
@@ -264,7 +264,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("A custom global shortcut replaces Command-Tab activation")
     func customActivation() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
         bindings.bindings[.activateNextWindow] = KeyCombo(
@@ -289,7 +289,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("Custom focused-window move shortcuts replace the arrow defaults")
     func customFocusedWindowMove() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
         bindings.bindings[.moveFocusedWindowToPreviousSpace] = KeyCombo(
@@ -320,7 +320,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("Session shortcuts are relative to the configured activation modifier")
     func customSessionShortcut() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
         bindings.bindings[.activateNextWindow] = KeyCombo(
@@ -343,7 +343,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("Legacy per-number bindings cannot move quick switch away from digit keys")
     func quickSwitchDigitsStayFixed() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
         bindings.bindings[.quickSwitchSpace1] = KeyCombo(
@@ -367,7 +367,7 @@ struct KeyboardShortcutCustomizationTests {
         #expect(EventTapKeyboardService.quickSwitchSpacePosition(
             keyCode: Int64(kVK_ANSI_1), flags: [], modifiers: .disabled
         ) == nil)
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         service.quickSwitchModifiers = .disabled
         service.quickSwitchSameApplicationModifiers = .disabled
@@ -444,7 +444,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("Clearing every Space Manager session key prevents its command while the overlay is open")
     func clearedSessionKeysDoNotDispatch() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
         let defaultCombos = Dictionary(uniqueKeysWithValues: KeyAction.sessionActions.compactMap {
@@ -478,7 +478,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("An open session owns a cleared jump key even when quick switch uses Command")
     func clearedSessionJumpOutranksQuickSwitch() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
         bindings.clear(.jumpToSpace1)
@@ -498,7 +498,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("An open Control session owns a cleared arrow before desktop navigation")
     func clearedSessionArrowOutranksDesktopNavigation() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
         bindings.set(KeyCombo(keyCode: kVK_Space, control: true), for: .activateNextWindow)
@@ -517,7 +517,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("Activation chords use session bindings while open and reopen a closed overlay")
     func activationChordContext() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         #expect(service.start(delegate: delegate))
         defer { service.stop() }
@@ -558,7 +558,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("A modifier-free activation session commits when its trigger is released")
     func modifierFreeActivation() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
         bindings.bindings[.activateNextWindow] = KeyCombo(keyCode: kVK_ANSI_B)
@@ -575,7 +575,7 @@ struct KeyboardShortcutCustomizationTests {
 
     @Test("Overlay dismissal uses its configured binding")
     func configuredDismissBinding() {
-        let service = EventTapKeyboardService()
+        let service = EventTapKeyboardService(listensToSession: false)
         let delegate = TestKeyboardDelegate()
         var bindings = KeyBindings()
         bindings.bindings[.dismissOverlay] = KeyCombo(keyCode: kVK_ANSI_D)

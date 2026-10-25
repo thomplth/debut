@@ -59,6 +59,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     private let monotonicNanoseconds: @Sendable () -> UInt64
     private let overlayPresentationRecorder: OverlayPresentationRecorder
     private let performanceRecorder: PerformanceRecorder
+    private let listensToSession: Bool
     private let desktopNavigationBlocked: @Sendable () -> Bool
 
     public var overlayVisible: Bool {
@@ -84,6 +85,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     }
 
     public init(
+        listensToSession: Bool = true,
         desktopNavigationBlocked: @escaping @Sendable () -> Bool = { false },
         overlayPresentationRecorder: OverlayPresentationRecorder = .shared,
         performanceRecorder: PerformanceRecorder = .shared,
@@ -91,6 +93,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
             DispatchTime.now().uptimeNanoseconds
         }
     ) {
+        self.listensToSession = listensToSession
         self.desktopNavigationBlocked = desktopNavigationBlocked
         self.overlayPresentationRecorder = overlayPresentationRecorder
         self.performanceRecorder = performanceRecorder
@@ -167,14 +170,17 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
 
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: eventMask,
-            callback: eventTapCallback,
-            userInfo: selfPtr
-        ) else {
+        let port = listensToSession
+            ? CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: eventMask,
+                callback: eventTapCallback,
+                userInfo: selfPtr
+            )
+            : CFMachPortCreate(kCFAllocatorDefault, { _, _, _, _ in }, nil, nil)
+        guard let tap = port else {
             startupSignal.signal()
             return
         }
