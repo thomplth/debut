@@ -215,7 +215,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
             as? [[CFString: Any]]
         else { return nil }
-        return Self.frontmostLayerZeroWindowID(ownerPID: ownerPID, in: windows)
+        return Self.frontmostManageableWindowID(ownerPID: ownerPID, in: windows)
     }
 
     public func focusObservation(ownerPID: pid_t) -> WindowFocusObservation {
@@ -237,14 +237,18 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     }
 
     /// Core Graphics returns this array front-to-back. Restricting the answer to visible,
-    /// layer-zero windows makes it a statement about the app window the user actually sees,
-    /// rather than an AX focus flag that may move without the z-order following it.
-    static func frontmostLayerZeroWindowID(
+    /// manageable windows makes it a statement about the app window the user actually sees,
+    /// rather than an AX focus flag that may move without the z-order following it, or a
+    /// toolbar strip the app floats above its document window.
+    static func frontmostManageableWindowID(
         ownerPID: pid_t,
         in windows: [[CFString: Any]]
     ) -> CGWindowID? {
-        visibleWindowZOrder(ownerPID: ownerPID, in: windows)
-            .first(where: { $0.layer == 0 })?.windowID
+        WindowFocusObservation(
+            frontmostApplicationPID: nil,
+            axFocusedWindowID: nil,
+            visibleWindows: visibleWindowZOrder(ownerPID: ownerPID, in: windows)
+        ).frontmostManageableWindowID
     }
 
     static func visibleWindowZOrder(

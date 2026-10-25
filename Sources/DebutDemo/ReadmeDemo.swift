@@ -244,14 +244,14 @@ struct ReadmeScene {
             if service.currentDesktopIndex() == space,
                service.desktopIndex(forWindow: window.windowID) == space,
                observed.frontmostApplicationPID == window.ownerPID,
-               observed.frontmostLayerZeroWindowID == window.windowID { break }
+               observed.frontmostManageableWindowID == window.windowID { break }
             wait(0.05)
         }
         let observation = accessibility.focusObservation(ownerPID: window.ownerPID)
         guard service.currentDesktopIndex() == space,
               service.desktopIndex(forWindow: window.windowID) == space,
               observation.frontmostApplicationPID == window.ownerPID,
-              observation.frontmostLayerZeroWindowID == window.windowID else {
+              observation.frontmostManageableWindowID == window.windowID else {
             log("FAILED focus: \(window.title), space \(space + 1), observation \(observation)")
             exit(1)
         }

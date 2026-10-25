@@ -90,8 +90,10 @@ public struct WindowFocusObservation: Sendable, Equatable {
         self.visibleWindows = visibleWindows
     }
 
-    public var frontmostLayerZeroWindowID: CGWindowID? {
-        visibleWindows.first(where: { $0.layer == 0 })?.windowID
+    public var frontmostManageableWindowID: CGWindowID? {
+        visibleWindows.first(where: {
+            !AccessibilityWindowService.isDisqualifiedWindow(layer: $0.layer, bounds: $0.bounds)
+        })?.windowID
     }
 }
 

@@ -843,27 +843,31 @@ struct WindowServiceTests {
         #expect(svc.listWindows().count == 2)
     }
 
-    @Test("Visible app window follows Core Graphics front-to-back order")
+    @Test("Visible app window follows Core Graphics front-to-back order past strips too thin to manage")
     func visibleFrontWindowOrder() {
+        let document: [String: CGFloat] = ["X": 0, "Y": 0, "Width": 800, "Height": 600]
         let windows: [[CFString: Any]] = [
             [kCGWindowNumber: CGWindowID(999), kCGWindowOwnerPID: pid_t(22),
-             kCGWindowLayer: 25],
+             kCGWindowLayer: 25, kCGWindowBounds: document],
             [kCGWindowNumber: CGWindowID(101), kCGWindowOwnerPID: pid_t(11),
-             kCGWindowLayer: 0],
+             kCGWindowLayer: 0, kCGWindowBounds: document],
+            [kCGWindowNumber: CGWindowID(150), kCGWindowOwnerPID: pid_t(22),
+             kCGWindowLayer: 0,
+             kCGWindowBounds: ["X": 0, "Y": 0, "Width": 2_560, "Height": 32] as [String: CGFloat]],
             [kCGWindowNumber: CGWindowID(202), kCGWindowOwnerPID: pid_t(22),
-             kCGWindowLayer: 0],
+             kCGWindowLayer: 0, kCGWindowBounds: document],
             [kCGWindowNumber: CGWindowID(303), kCGWindowOwnerPID: pid_t(22),
-             kCGWindowLayer: 0],
+             kCGWindowLayer: 0, kCGWindowBounds: document],
         ]
 
-        #expect(AccessibilityWindowService.frontmostLayerZeroWindowID(
+        #expect(AccessibilityWindowService.frontmostManageableWindowID(
             ownerPID: 22,
             in: windows
         ) == 202)
         let trace = AccessibilityWindowService.visibleWindowZOrder(ownerPID: 22, in: windows)
-        #expect(trace.map(\.windowID) == [999, 202, 303])
-        #expect(trace.map(\.orderIndex) == [0, 2, 3])
-        #expect(trace.map(\.layer) == [25, 0, 0])
+        #expect(trace.map(\.windowID) == [999, 150, 202, 303])
+        #expect(trace.map(\.orderIndex) == [0, 2, 3, 4])
+        #expect(trace.map(\.layer) == [25, 0, 0, 0])
     }
 
     @Test("Raise window")

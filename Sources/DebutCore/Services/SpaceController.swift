@@ -1265,7 +1265,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let visibleZOrder = observation.visibleWindows
             .map { "\($0.windowID)@\($0.layer)" }
             .joined(separator: ",")
-        let windowServerFrontWindowID = observation.frontmostLayerZeroWindowID
+        let windowServerFrontWindowID = observation.frontmostManageableWindowID
             .map(String.init) ?? "none"
         let windowServerTopSurfaceID = observation.visibleWindows.first
             .map { String($0.windowID) } ?? "none"
@@ -1390,7 +1390,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             attempt: request.attempt
         )
         let processArrived = frontmostPID == request.ownerPID
-        let visibleFrontWindowID = observation.frontmostLayerZeroWindowID
+        let visibleFrontWindowID = observation.frontmostManageableWindowID
         let visibleWindowArrived = visibleFrontWindowID == request.windowID
         if processArrived, !request.requiresVisibleWindow || visibleWindowArrived {
             pendingFocusDelivery = nil

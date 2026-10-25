@@ -199,7 +199,7 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
     }
 
     public func frontmostWindowID(ownerPID: pid_t) -> CGWindowID? {
-        focusObservation?.frontmostLayerZeroWindowID ?? visibleFrontWindowID
+        focusObservation?.frontmostManageableWindowID ?? visibleFrontWindowID
     }
 
     public func focusObservation(ownerPID: pid_t) -> WindowFocusObservation {
@@ -213,7 +213,7 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
                     windowID: $0,
                     layer: 0,
                     alpha: 1,
-                    bounds: .zero,
+                    bounds: CGRect(x: 0, y: 0, width: 800, height: 600),
                     title: ""
                 )]
             } ?? []

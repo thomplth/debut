@@ -2413,6 +2413,45 @@ struct SpaceControllerTests {
         #expect(windowService.frontedWindows.map(\.windowID) == [202])
     }
 
+    @Test("A thin untitled strip of the same app above the focused window still confirms the switch")
+    func thinSameAppStripAboveFocusedWindowConfirms() {
+        let windowService = MockWindowService()
+        windowService.focusObservation = WindowFocusObservation(
+            frontmostApplicationPID: 22_502,
+            axFocusedWindowID: 202,
+            visibleWindows: [
+                WindowZOrderEntry(orderIndex: 0, windowID: 119_680, layer: 0, alpha: 1,
+                                  bounds: CGRect(x: 1_925, y: 0, width: 2_560, height: 32),
+                                  title: ""),
+                WindowZOrderEntry(orderIndex: 8, windowID: 202, layer: 0, alpha: 1,
+                                  bounds: CGRect(x: 1_925, y: 32, width: 1_280, height: 900),
+                                  title: "Dia 202"),
+            ]
+        )
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            focusDeliveryProbe: { _, completion in completion(22_502, 202) },
+            focusDeliveryVerificationDelay: 60
+        )
+        let spaceID = controller.spaceManager.activeSpaceID
+        for windowID in [CGWindowID(101), 202] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "company.thebrowser.dia",
+                            ownerName: "Dia", windowTitle: "Dia \(windowID)", ownerPID: 22_502),
+                toSpaceID: spaceID
+            )
+        }
+
+        keyboardService.simulateEvent(.cmdTabTap)
+        #expect(controller.verifyPendingFocusDelivery())
+
+        #expect(!controller.verifyPendingFocusDelivery())
+        #expect(windowService.frontedWindows.map(\.windowID) == [202])
+    }
+
     private func makeSafariAndTwoDiaWindowsController(
         windowService: MockWindowService,
         keyboardService: MockKeyboardService
