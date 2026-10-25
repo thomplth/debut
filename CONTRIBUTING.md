@@ -28,11 +28,11 @@ it; run it only when you want to replace your installed copy.
 The global-input E2E harness runs in a disposable headless Tart VM with
 `./scripts/tart-e2e.sh run`. Do not run it against an active desktop session; the
 suite refuses to start unless its caller sets `DEBUT_E2E_DISPOSABLE_SESSION=1`,
-which only the Tart guest and hosted runners do. The guest runs macOS 26 Tahoe
-(`debut-e2e-tahoe`) by default; set `DEBUT_TART_OS=27` on any Tart script to use the
-macOS 27 guest (`debut-e2e-27`, prepared once with
-`DEBUT_TART_OS=27 ./scripts/tart-e2e.sh prepare`), which is the only release where
-Debut adds and removes desktops. Each release keeps its own VM and share directory
+which only the Tart guest and hosted runners do. The guest runs macOS 27 Golden Gate
+(`debut-e2e-27`, prepared once with `./scripts/tart-e2e.sh prepare`) by default, the only
+release where Debut adds and removes desktops. Hosted runners cover macOS 26, so a local
+Tahoe guest is optional; set `DEBUT_TART_OS=26` on any Tart script to prepare or use
+`debut-e2e-tahoe`. Each release keeps its own VM and share directory
 (`~/Library/Caches/Debut/TartE2E` and `TartE2E-27`), and both wait in the one queue.
 
 The suite is split into groups that each own their setup and can run alone or in

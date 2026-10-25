@@ -108,9 +108,9 @@ shows every key at 64 pt.
 Requires an Apple Silicon host with Xcode and command-line tools, `tart`,
 `ffmpeg`/`ffprobe`, and a prepared guest VM. Media is captured on the macOS 27
 guest, `debut-e2e-27`, so it shows the current system look and desktop management;
-`DEBUT_TART_OS=27 ./scripts/tart-e2e.sh prepare` provisions it (see
+`./scripts/tart-e2e.sh prepare` provisions it (see
 [the macOS 27 guest](#the-macos-27-guest)). Capture only once the E2E suite passes
-on that guest. The macOS 26 guest, `debut-e2e-tahoe`, remains the E2E default.
+on that guest.
 
 Clone the stopped prepared VM into a disposable capture VM with a dedicated shared
 cache, so older raw files cannot be converted by accident. Choose unused names when

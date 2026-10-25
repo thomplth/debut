@@ -58,13 +58,13 @@ always uses Tart, never the foreground developer session or a hosted fallback.
 Run a local rehearsal with existing signed artifacts:
 
 ```bash
-tart clone debut-e2e-tahoe debut-update-tahoe
+tart clone debut-e2e-27 debut-update-27
 ./scripts/tart-update-e2e.sh baseline.dmg candidate.dmg appcast.xml 10000
 ```
 
-Use a separate VM; the wrapper stops only `debut-update-tahoe` (overridable with
-`DEBUT_UPDATE_VM`). With `DEBUT_TART_OS=27` it uses `debut-update-27`, cloned from
-`debut-e2e-27`. Evidence is in `~/Library/Caches/Debut/TartUpdate/evidence`.
+Use a separate VM; the wrapper stops only `debut-update-27` (overridable with
+`DEBUT_UPDATE_VM`). With `DEBUT_TART_OS=26` it uses `debut-update-tahoe`, cloned from
+`debut-e2e-tahoe`. Evidence is in `~/Library/Caches/Debut/TartUpdate/evidence`.
 The stable release gate requires a previous signed stable release and fails rather
 than silently skipping if none is available. The first isolated nightly has no
 compatible predecessor and explicitly bootstraps its feed; later nightly releases

@@ -337,9 +337,9 @@ for script in scripts/tart-e2e-guest.sh scripts/tart-performance-guest.sh; do
     fi
 done
 
-# DEBUT_TART_OS picks the guest release. macOS 26 Tahoe stays the default; 27 Golden Gate gets
+# DEBUT_TART_OS picks the guest release. macOS 27 Golden Gate is the default; 26 Tahoe keeps
 # its own VM and share directory, so its SSH key, known hosts and run reports never mix with
-# Tahoe's. Explicit DEBUT_TART_VM, DEBUT_TART_SHARE and DEBUT_TART_IMAGE still win.
+# Golden Gate's. Explicit DEBUT_TART_VM, DEBUT_TART_SHARE and DEBUT_TART_IMAGE still win.
 guest_selection_lib="scripts/tart-guest.sh"
 [[ -f "$guest_selection_lib" ]] || fail "missing $guest_selection_lib"
 selection_for() {
@@ -357,7 +357,7 @@ expect_selection() {
     actual="$(selection_for "$@")" || { fail "selection for '$*' failed: $actual"; return; }
     [[ "$actual" == "$expected" ]] || fail "selection for '$*' was '$actual', expected '$expected'"
 }
-expect_selection "debut-e2e-tahoe|ghcr.io/cirruslabs/macos-tahoe-base:latest|$HOME/Library/Caches/Debut/TartE2E"
+expect_selection "debut-e2e-27|ghcr.io/cirruslabs/macos-golden-gate-base:latest|$HOME/Library/Caches/Debut/TartE2E-27"
 expect_selection "debut-e2e-tahoe|ghcr.io/cirruslabs/macos-tahoe-base:latest|$HOME/Library/Caches/Debut/TartE2E" \
     DEBUT_TART_OS=26
 expect_selection "debut-e2e-27|ghcr.io/cirruslabs/macos-golden-gate-base:latest|$HOME/Library/Caches/Debut/TartE2E-27" \
@@ -365,7 +365,7 @@ expect_selection "debut-e2e-27|ghcr.io/cirruslabs/macos-golden-gate-base:latest|
 expect_selection "custom-vm|example/image:tag|/tmp/custom-share" \
     DEBUT_TART_OS=27 DEBUT_TART_VM=custom-vm DEBUT_TART_IMAGE=example/image:tag DEBUT_TART_SHARE=/tmp/custom-share
 
-# An unknown release must be refused before any script reaches tart, not quietly read as Tahoe.
+# An unknown release must be refused before any script reaches tart, not quietly read as the default.
 unknown_scratch="$(mktemp -d)"
 mkdir -p "$unknown_scratch/bin"
 printf '#!/bin/bash\necho "$*" >> "%s/calls"\nexit 0\n' "$unknown_scratch" > "$unknown_scratch/bin/tart"
@@ -413,7 +413,7 @@ for existing in no yes; do
     rm -f "$prepare_scratch/log" "$prepare_scratch/vm"
     [[ "$existing" == yes ]] && touch "$prepare_scratch/vm"
     if PATH="$prepare_scratch/bin:$PATH" TART_FAKE_LOG="$prepare_scratch/log" TART_FAKE_DIR="$prepare_scratch" \
-        DEBUT_TART_SHARE="$prepare_scratch/share" "$host_runner" prepare >/dev/null 2>&1; then
+        DEBUT_TART_OS=26 DEBUT_TART_SHARE="$prepare_scratch/share" "$host_runner" prepare >/dev/null 2>&1; then
         grep -qx 'delete ghcr.io/cirruslabs/macos-tahoe-base:latest' "$prepare_scratch/log" \
             && grep -qx 'delete ghcr.io/cirruslabs/macos-tahoe-base@sha256:1b09' "$prepare_scratch/log" \
             || fail "prepare (existing VM: $existing) must drop the cached Tahoe base image"
@@ -423,7 +423,7 @@ for existing in no yes; do
         fail "prepare (existing VM: $existing) failed against a fake tart"
     fi
 done
-# The macOS 27 prepare clones the Golden Gate base as its own VM and drops only that image.
+# The default macOS 27 prepare clones the Golden Gate base as its own VM and drops only that image.
 rm -f "$prepare_scratch/log" "$prepare_scratch/vm"
 cat > "$prepare_scratch/bin/tart" <<'FAKE'
 #!/bin/bash
@@ -437,18 +437,18 @@ esac
 exit 0
 FAKE
 if PATH="$prepare_scratch/bin:$PATH" TART_FAKE_LOG="$prepare_scratch/log" TART_FAKE_DIR="$prepare_scratch" \
-    DEBUT_TART_OS=27 DEBUT_TART_SHARE="$prepare_scratch/share" "$host_runner" prepare >/dev/null 2>&1; then
+    DEBUT_TART_SHARE="$prepare_scratch/share" "$host_runner" prepare >/dev/null 2>&1; then
     grep -qx 'clone ghcr.io/cirruslabs/macos-golden-gate-base:latest debut-e2e-27' "$prepare_scratch/log" \
-        || fail "DEBUT_TART_OS=27 prepare must clone the Golden Gate base image as debut-e2e-27"
+        || fail "default prepare must clone the Golden Gate base image as debut-e2e-27"
     grep -qx 'set debut-e2e-27 --cpu 6 --memory 8192 --display 1440x900' "$prepare_scratch/log" \
-        || fail "DEBUT_TART_OS=27 prepare must size debut-e2e-27 like the Tahoe guest"
+        || fail "default prepare must size debut-e2e-27 like the Tahoe guest"
     grep -qx 'delete ghcr.io/cirruslabs/macos-golden-gate-base:latest' "$prepare_scratch/log" \
         && grep -qx 'delete ghcr.io/cirruslabs/macos-golden-gate-base@sha256:27aa' "$prepare_scratch/log" \
-        || fail "DEBUT_TART_OS=27 prepare must drop the cached Golden Gate base image"
+        || fail "default prepare must drop the cached Golden Gate base image"
     expect_not_contains "$prepare_scratch/log" 'tahoe' \
-        "DEBUT_TART_OS=27 prepare must not touch the Tahoe image or VM"
+        "default prepare must not touch the Tahoe image or VM"
 else
-    fail "DEBUT_TART_OS=27 prepare failed against a fake tart"
+    fail "default prepare failed against a fake tart"
 fi
 rm -rf "$prepare_scratch"
 

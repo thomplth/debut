@@ -31,8 +31,8 @@ Records the README media in the Tart guest and converts it into docs/media.
 Requires the VM from scripts/tart-e2e.sh prepare, plus ffmpeg on the host.
 The default captures the cover and all four README demos.
 
-DEBUT_TART_OS selects the guest release as for scripts/tart-e2e.sh: 26 (default, Tahoe)
-or 27 (Golden Gate, VM debut-e2e-27).
+DEBUT_TART_OS selects the guest release as for scripts/tart-e2e.sh: 27 (default, Golden Gate)
+or 26 (Tahoe).
 
 Overrides: DEBUT_TART_OS, DEBUT_TART_VM, DEBUT_TART_SHARE, DEBUT_DEMO_DISPLAY,
            DEBUT_DEMO_GIF_WIDTH, DEBUT_DEMO_GIF_COLORS, DEBUT_DEMO_STILL_WIDTH

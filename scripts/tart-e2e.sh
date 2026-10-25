@@ -82,9 +82,9 @@ Each run keeps its log, guest results and a report.json with phase timings, sour
 identity and check results in \$DEBUT_TART_SHARE/runs/<run-id>. The newest
 DEBUT_TART_KEEP_RUNS (default 5) runs and as many unsuccessful ones are kept.
 
-Guest release: DEBUT_TART_OS=26 (default) uses macOS 26 Tahoe, VM debut-e2e-tahoe and
-\$HOME/Library/Caches/Debut/TartE2E. DEBUT_TART_OS=27 uses macOS 27 Golden Gate, VM
-debut-e2e-27 and \$HOME/Library/Caches/Debut/TartE2E-27. Both share the one queue.
+Guest release: DEBUT_TART_OS=27 (default) uses macOS 27 Golden Gate, VM debut-e2e-27 and
+\$HOME/Library/Caches/Debut/TartE2E-27. DEBUT_TART_OS=26 uses macOS 26 Tahoe, VM
+debut-e2e-tahoe and \$HOME/Library/Caches/Debut/TartE2E. Both share the one queue.
 This selection: $VM_NAME from $VM_IMAGE, share $SHARE_DIR.
 
 Overrides: DEBUT_TART_OS, DEBUT_TART_VM, DEBUT_TART_IMAGE, DEBUT_TART_SHARE,

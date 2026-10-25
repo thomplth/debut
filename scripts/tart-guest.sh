@@ -3,8 +3,8 @@
 #
 # Sourced by every script that boots a Debut VM. DEBUT_TART_OS selects the release:
 #
-#   26 (default)  macOS 26 Tahoe        VM debut-e2e-tahoe  share ~/Library/Caches/Debut/TartE2E
-#   27            macOS 27 Golden Gate  VM debut-e2e-27     share ~/Library/Caches/Debut/TartE2E-27
+#   26            macOS 26 Tahoe        VM debut-e2e-tahoe  share ~/Library/Caches/Debut/TartE2E
+#   27 (default)  macOS 27 Golden Gate  VM debut-e2e-27     share ~/Library/Caches/Debut/TartE2E-27
 #
 # Each release keeps its own VM and share directory, so its SSH key, known hosts and run reports
 # never mix with another's. Both still wait in the one Tart queue: a second VM competes for the
@@ -13,7 +13,7 @@
 # Sets TART_GUEST_OS, TART_GUEST_IMAGE, TART_GUEST_VM, TART_GUEST_SHARE and TART_GUEST_UPDATE_VM.
 # An unknown release returns 2 before the caller can reach tart.
 tart_guest_select() {
-    TART_GUEST_OS="${DEBUT_TART_OS:-26}"
+    TART_GUEST_OS="${DEBUT_TART_OS:-27}"
     case "$TART_GUEST_OS" in
         26)
             TART_GUEST_IMAGE="ghcr.io/cirruslabs/macos-tahoe-base:latest"
@@ -28,7 +28,7 @@ tart_guest_select() {
             TART_GUEST_UPDATE_VM="debut-update-27"
             ;;
         *)
-            echo "Unknown DEBUT_TART_OS '$TART_GUEST_OS'. Known releases: 26 (Tahoe, default), 27 (Golden Gate)." >&2
+            echo "Unknown DEBUT_TART_OS '$TART_GUEST_OS'. Known releases: 26 (Tahoe), 27 (Golden Gate, default)." >&2
             return 2
             ;;
     esac
