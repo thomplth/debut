@@ -159,6 +159,14 @@ struct WindowDiscoveryServiceTests {
         }
     }
 
+    private func recentDiagnosticEvents(in directory: URL) -> [[String: String]] {
+        let url = directory.appendingPathComponent("diagnostic.json")
+        guard let data = try? Data(contentsOf: url),
+              let snapshot = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [] }
+        return snapshot["events"] as? [[String: String]] ?? []
+    }
+
     private func liveWindow(_ windowID: CGWindowID, ownerPID: pid_t = 10) -> WindowInfo {
         WindowInfo(
             windowID: windowID,
@@ -441,7 +449,7 @@ struct WindowDiscoveryServiceTests {
 
         #expect(snapshots.count == 1)
         #expect(retry.delays == [WindowDiscoveryService.windowCreationRetryDelays[0]])
-        let attempts = durableDiagnosticEvents(in: directory).filter {
+        let attempts = recentDiagnosticEvents(in: directory).filter {
             $0["event"] == "window_creation_detection_attempted"
         }
         #expect(attempts.map { $0["result"] } == ["window_not_listed", "detected"])
@@ -557,7 +565,7 @@ struct WindowDiscoveryServiceTests {
 
         #expect(snapshots.isEmpty)
         #expect(service.diagnosticTrackingSnapshot.knownWindowIDs.isEmpty)
-        let attempts = durableDiagnosticEvents(in: directory).filter {
+        let attempts = recentDiagnosticEvents(in: directory).filter {
             $0["event"] == "window_creation_detection_attempted"
         }
         #expect(attempts.map { $0["result"] } == Array(
@@ -569,7 +577,7 @@ struct WindowDiscoveryServiceTests {
     // KHA-789: the creation probe held a transient Dia surface back, but a desktop-change scan
     // running during the probe admitted the same window to Desktop 1 regardless. It could be
     // focused for 19 s before it vanished and left a dormant assignment behind.
-    private func pendingDiaFixture() -> (
+    private func pendingDiaFixture(diagnosticReporter: DiagnosticReporter = .shared) -> (
         WindowDiscoveryService, MockWindowService, DeferredWindowCreationRetryScheduler
     ) {
         let retry = DeferredWindowCreationRetryScheduler()
@@ -594,7 +602,8 @@ struct WindowDiscoveryServiceTests {
         let service = WindowDiscoveryService(
             windowService: windowService,
             focusedWindowProvider: { _ in nil },
-            processExitMonitor: MockProcessExitMonitor()
+            processExitMonitor: MockProcessExitMonitor(),
+            diagnosticReporter: diagnosticReporter
         )
         service.spaceSwitcher = spaces
         service.windowCreationRetryScheduler = retry.schedule
@@ -660,7 +669,7 @@ struct WindowDiscoveryServiceTests {
             }
         )
 
-        #expect(WindowDiscoveryService.windowCreationMetadata(for: created, reader: reader) == nil)
+        #expect(WindowDiscoveryService.windowCreationMetadata(for: created, reader: reader) == .unanswered)
         let bound = AccessibilityWindowService.sweepReadTimeout
         #expect(timeouts.map(\.0) == [91_001, 91_002])
         #expect(timeouts.allSatisfy { $0.1 == bound })
@@ -684,7 +693,25 @@ struct WindowDiscoveryServiceTests {
         #expect(WindowDiscoveryService.windowCreationMetadata(
             for: AXUIElementCreateApplication(91_001),
             reader: reader
-        ) == nil)
+        ) == .unanswered)
+        #expect(reads == [kAXRoleAttribute])
+    }
+
+    @Test("A destroyed creation element reads as destroyed and is asked nothing else")
+    func creationMetadataReportsDestroyedElement() {
+        var reads: [String] = []
+        let reader = WindowDiscoveryService.AXCreationReader(
+            setTimeout: { _, _ in },
+            copy: { _, attribute in
+                reads.append(attribute)
+                return (.invalidUIElement, nil)
+            }
+        )
+
+        #expect(WindowDiscoveryService.windowCreationMetadata(
+            for: AXUIElementCreateApplication(91_001),
+            reader: reader
+        ) == .destroyed)
         #expect(reads == [kAXRoleAttribute])
     }
 
@@ -715,6 +742,74 @@ struct WindowDiscoveryServiceTests {
             isModal: false
         ))
         #expect(!service.isAdmissionRefused(windowID: 82_256, ownerPID: 69_928))
+    }
+
+    @Test("An AX-unknown creation whose element is destroyed is refused without further reads")
+    func destroyedUnknownCreationSettlesAtOnce() {
+        let (service, _, retry) = pendingDiaFixture()
+        var reads = 0
+        service.handleWindowCreated(resolvingRead: {
+            reads += 1
+            return reads == 1 ? .resolved(Self.unknownDiaSurface) : .destroyed
+        })
+        retry.runAll()
+
+        #expect(reads == 2)
+        #expect(retry.delays == [WindowDiscoveryService.windowCreationRetryDelays[0]])
+        #expect(service.isAdmissionRefused(windowID: 82_256, ownerPID: 69_928))
+    }
+
+    @Test("A creation already destroyed at the first read is settled without retries")
+    func creationDestroyedAtFirstReadIsNotRetried() {
+        let (service, _, retry) = pendingDiaFixture()
+        var reads = 0
+        service.handleWindowCreated(resolvingRead: {
+            reads += 1
+            return .destroyed
+        })
+        retry.runAll()
+
+        #expect(reads == 1)
+        #expect(retry.delays.isEmpty)
+    }
+
+    @Test("A creation read the app leaves unanswered is still retried")
+    func unansweredCreationReadIsRetried() {
+        let (service, _, retry) = pendingDiaFixture()
+        var reads = 0
+        service.handleWindowCreated(resolvingRead: {
+            reads += 1
+            return .unanswered
+        })
+        retry.runAll()
+
+        #expect(reads == WindowDiscoveryService.windowCreationRetryDelays.count + 1)
+    }
+
+    @Test("Creation attempts that lead to a retry stay out of the durable log, outcomes do not")
+    func retriedCreationAttemptsAreNotDurable() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reporter = DiagnosticReporter(directory: directory)
+        let (service, _, retry) = pendingDiaFixture(diagnosticReporter: reporter)
+        var reads = 0
+        service.handleWindowCreated(resolvingRead: {
+            reads += 1
+            return reads == 1 ? .resolved(Self.unknownDiaSurface) : .destroyed
+        })
+        retry.runAll()
+        reporter.flush()
+
+        let durable = durableDiagnosticEvents(in: directory).map { $0["event"] ?? "" }
+        #expect(!durable.contains("window_creation_detection_attempted"))
+        let failure = durableDiagnosticEvents(in: directory).first {
+            $0["event"] == "window_creation_detection_failed"
+        }
+        #expect(failure?["reason"] == "ax_element_destroyed")
+        #expect(failure?["attempts"] == "2")
+        #expect(durable.contains("window_creation_refused"))
+        let recent = recentDiagnosticEvents(in: directory).map { $0["event"] ?? "" }
+        #expect(recent.filter { $0 == "window_creation_detection_attempted" }.count == 2)
     }
 
     // Phoenix Slides' borderless viewer is a real window that stays AXUnknown for life. Its AX
@@ -814,7 +909,7 @@ struct WindowDiscoveryServiceTests {
         reporter.flush()
 
         #expect(snapshots.count == 1)
-        let attempts = durableDiagnosticEvents(in: directory).filter {
+        let attempts = recentDiagnosticEvents(in: directory).filter {
             $0["event"] == "window_creation_detection_attempted"
         }
         #expect(attempts.map { $0["result"] } == ["desktop_unresolved", "detected"])

@@ -29,6 +29,12 @@ struct AXWindowCreationMetadata: Equatable, Sendable {
     let isModal: Bool
 }
 
+enum AXWindowCreationRead: Equatable, Sendable {
+    case resolved(AXWindowCreationMetadata)
+    case destroyed
+    case unanswered
+}
+
 /// One window a destroy notification proved gone, named together with the process that owned
 /// it. The bundle ID is only there to survive being written to disk: on reload it is what
 /// distinguishes the original owner from whatever process inherited its PID.
@@ -312,7 +318,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     }
 
     private struct PendingWindowCreation {
-        let resolveMetadata: () -> AXWindowCreationMetadata?
+        let resolveMetadata: () -> AXWindowCreationRead
         let startedAt: UInt64
         var identity: WindowOwnerIdentity?
         var systemAttentionRequested: Bool
@@ -1183,12 +1189,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     static func windowCreationMetadata(
         for element: AXUIElement,
         reader: AXCreationReader = .live
-    ) -> AXWindowCreationMetadata? {
-        var timedOut = false
+    ) -> AXWindowCreationRead {
+        var failure: AXWindowCreationRead?
         func read(_ attribute: String, of element: AXUIElement) -> CFTypeRef? {
-            guard !timedOut else { return nil }
+            guard failure == nil else { return nil }
             let (result, value) = reader.copy(element, attribute)
-            if result == .cannotComplete { timedOut = true }
+            switch result {
+            case .cannotComplete: failure = .unanswered
+            case .invalidUIElement: failure = .destroyed
+            default: break
+            }
             return result == .success ? value : nil
         }
 
@@ -1198,10 +1208,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
            role == kAXWindowRole as String || role == kAXSheetRole as String {
             candidate = element
         } else {
-            guard !timedOut,
+            guard failure == nil,
                   let focused = read(kAXFocusedWindowAttribute, of: element),
                   CFGetTypeID(focused) == AXUIElementGetTypeID()
-            else { return nil }
+            else { return failure ?? .unanswered }
             candidate = unsafeDowncast(focused, to: AXUIElement.self)
             reader.setTimeout(candidate, AccessibilityWindowService.sweepReadTimeout)
         }
@@ -1214,16 +1224,16 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
               _AXUIElementGetWindow(candidate, &windowID) == .success,
               ownerPID > 0,
               windowID > 0
-        else { return nil }
+        else { return failure ?? .unanswered }
         let isModal = read(kAXModalAttribute, of: candidate) as? Bool ?? false
-        guard !timedOut else { return nil }
-        return AXWindowCreationMetadata(
+        if let failure { return failure }
+        return .resolved(AXWindowCreationMetadata(
             windowID: windowID,
             ownerPID: ownerPID,
             role: role,
             subrole: subrole,
             isModal: isModal
-        )
+        ))
     }
 
     static func isPotentialStandardAXWindow(
@@ -1262,8 +1272,12 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
 
     /// Test entry point for an AX element whose answers change between probe attempts.
     func handleWindowCreated(resolvingMetadata: @escaping () -> AXWindowCreationMetadata?) {
+        handleWindowCreated(resolvingRead: { resolvingMetadata().map { .resolved($0) } ?? .unanswered })
+    }
+
+    func handleWindowCreated(resolvingRead: @escaping () -> AXWindowCreationRead) {
         beginWindowCreationProbe(
-            resolveMetadata: resolvingMetadata,
+            resolveMetadata: resolvingRead,
             fixedMetadata: nil,
             notification: kAXWindowCreatedNotification
         )
@@ -1272,14 +1286,14 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
     /// Test entry point for the part after AX has supplied the new window identity.
     func handleWindowCreated(_ metadata: AXWindowCreationMetadata) {
         beginWindowCreationProbe(
-            resolveMetadata: { metadata },
+            resolveMetadata: { .resolved(metadata) },
             fixedMetadata: metadata,
             notification: kAXWindowCreatedNotification
         )
     }
 
     private func beginWindowCreationProbe(
-        resolveMetadata: @escaping () -> AXWindowCreationMetadata?,
+        resolveMetadata: @escaping () -> AXWindowCreationRead,
         fixedMetadata: AXWindowCreationMetadata?,
         notification: String,
         readsOnMain: Bool = false
@@ -1319,27 +1333,37 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         guard let pending = pendingWindowCreations[probeID] else { return }
         let resolveMetadata = UncheckedSendable(pending.resolveMetadata)
         scheduleDiscoveryRead(onMain: pending.readsOnMain) {
-            let metadata = resolveMetadata.value()
+            let read = resolveMetadata.value()
             return { [weak self] in
-                self?.applyWindowCreationMetadata(metadata, probeID: probeID, attempt: attempt)
+                self?.applyWindowCreationRead(read, probeID: probeID, attempt: attempt)
             }
         }
     }
 
-    private func applyWindowCreationMetadata(
-        _ resolvedMetadata: AXWindowCreationMetadata?,
+    private func applyWindowCreationRead(
+        _ read: AXWindowCreationRead,
         probeID: UUID,
         attempt: Int
     ) {
         // The process may have exited, or another probe settled this one, during the read.
         guard var pending = pendingWindowCreations[probeID] else { return }
-        guard let metadata = resolvedMetadata else {
-            retryWindowCreationDetection(
-                probeID: probeID,
-                attempt: attempt,
-                reason: "ax_identity_unresolved",
-                metadata: nil
-            )
+        guard case let .resolved(metadata) = read else {
+            if read == .destroyed {
+                reportUnidentifiedAttempt(probeID: probeID, attempt: attempt, reason: "ax_element_destroyed")
+                failWindowCreationDetection(
+                    probeID: probeID,
+                    attempt: attempt,
+                    reason: "ax_element_destroyed",
+                    metadata: nil
+                )
+            } else {
+                retryWindowCreationDetection(
+                    probeID: probeID,
+                    attempt: attempt,
+                    reason: "ax_identity_unresolved",
+                    metadata: nil
+                )
+            }
             return
         }
 
@@ -1607,40 +1631,20 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 probeID: probeID,
                 attempt: attempt,
                 result: reason,
-                extra: extra
+                extra: extra,
+                level: .transient
             )
         } else {
-            diag.report("window_creation_detection_attempted", details: [
-                "attempt": "\(attempt)",
-                "probeID": probeID.uuidString,
-                "result": reason,
-                "windowID": "unresolved",
-            ])
+            reportUnidentifiedAttempt(probeID: probeID, attempt: attempt, reason: reason)
         }
 
         guard attempt <= Self.windowCreationRetryDelays.count else {
-            if let pending = pendingWindowCreations[probeID], let identity = pending.identity {
-                creationDetectionFailures[identity] = (reason, attempt)
-                // AXUnknown and then no element at all: the object died in AX. A persistent
-                // AXUnknown window keeps resolving and is left to the scans' own evidence.
-                if pending.awaitingClassification, metadata == nil {
-                    refusedCreations.insert(identity)
-                    diag.report("window_creation_refused", details: [
-                        "ownerPID": "\(identity.ownerPID)",
-                        "probeID": probeID.uuidString,
-                        "reason": "ax_unknown_then_unresolved",
-                        "windowID": "\(identity.windowID)",
-                    ])
-                }
-            }
-            diag.report("window_creation_detection_failed", details: [
-                "attempts": "\(attempt)",
-                "ownerPID": metadata.map { "\($0.ownerPID)" } ?? "unresolved",
-                "probeID": probeID.uuidString,
-                "reason": reason,
-                "windowID": metadata.map { "\($0.windowID)" } ?? "unresolved",
-            ])
-            pendingWindowCreations.removeValue(forKey: probeID)
+            failWindowCreationDetection(
+                probeID: probeID,
+                attempt: attempt,
+                reason: reason,
+                metadata: metadata
+            )
             return
         }
 
@@ -1655,12 +1659,52 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         }
     }
 
+    private func reportUnidentifiedAttempt(probeID: UUID, attempt: Int, reason: String) {
+        diag.report("window_creation_detection_attempted", level: .transient, details: [
+            "attempt": "\(attempt)",
+            "probeID": probeID.uuidString,
+            "result": reason,
+            "windowID": "unresolved",
+        ])
+    }
+
+    private func failWindowCreationDetection(
+        probeID: UUID,
+        attempt: Int,
+        reason: String,
+        metadata: AXWindowCreationMetadata?
+    ) {
+        if let pending = pendingWindowCreations[probeID], let identity = pending.identity {
+            creationDetectionFailures[identity] = (reason, attempt)
+            // AXUnknown and then no element at all: the object died in AX. A persistent
+            // AXUnknown window keeps resolving and is left to the scans' own evidence.
+            if pending.awaitingClassification, metadata == nil {
+                refusedCreations.insert(identity)
+                diag.report("window_creation_refused", details: [
+                    "ownerPID": "\(identity.ownerPID)",
+                    "probeID": probeID.uuidString,
+                    "reason": "ax_unknown_then_unresolved",
+                    "windowID": "\(identity.windowID)",
+                ])
+            }
+        }
+        diag.report("window_creation_detection_failed", details: [
+            "attempts": "\(attempt)",
+            "ownerPID": metadata.map { "\($0.ownerPID)" } ?? "unresolved",
+            "probeID": probeID.uuidString,
+            "reason": reason,
+            "windowID": metadata.map { "\($0.windowID)" } ?? "unresolved",
+        ])
+        pendingWindowCreations.removeValue(forKey: probeID)
+    }
+
     private func reportWindowCreationAttempt(
         metadata: AXWindowCreationMetadata,
         probeID: UUID,
         attempt: Int,
         result: String,
-        extra: [String: String] = [:]
+        extra: [String: String] = [:],
+        level: DiagnosticLevel = .lifecycle
     ) {
         var details: [String: String] = [
             "attempt": "\(attempt)",
@@ -1673,7 +1717,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             "windowID": "\(metadata.windowID)",
         ]
         details.merge(extra) { _, new in new }
-        diag.report("window_creation_detection_attempted", details: details)
+        diag.report("window_creation_detection_attempted", level: level, details: details)
     }
 
     private func trackedWindowID(for element: AXUIElement) -> CGWindowID? {
