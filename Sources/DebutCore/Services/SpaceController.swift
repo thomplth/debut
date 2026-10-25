@@ -2919,14 +2919,18 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let generation = overlayPresentationGeneration
 
         let delay = max(0, overlayPresentationDelay)
+        let releasesAtSchedule = keyboardService.releasesDelivered
         if let presentation = activeOverlayPresentation {
             overlayPresentationRecorder.mark(.presentationScheduled, for: presentation)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            // After a main-queue stall this deadline can run ahead of a release the tap already
+            // queued, and revealing then flashes the overlay for a tap.
             guard let self,
                   self.overlayPresentationGeneration == generation,
                   self.isSpaceManagerVisible,
-                  !self.isOverlayPresented
+                  !self.isOverlayPresented,
+                  self.keyboardService.releasesDelivered == releasesAtSchedule
             else { return }
 
             self.isOverlayPresented = true

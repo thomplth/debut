@@ -41,6 +41,10 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         set { configurationLock.withLock { storedFeatures = newValue } }
     }
     private var storedOverlayVisible: Bool = false
+    private var storedReleasesDelivered: UInt64 = 0
+    public var releasesDelivered: UInt64 {
+        configurationLock.withLock { storedReleasesDelivered }
+    }
     private var storedKeyBindings: KeyBindings = KeyBindings()
     private var storedQuickSwitchModifiers: ShortcutModifiers = .control
     private var storedQuickSwitchSameApplicationModifiers = ShortcutModifiers(
@@ -658,6 +662,9 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         asynchronously: Bool,
         overlayPresentation: OverlayPresentationContext? = nil
     ) {
+        if event == .cmdRelease {
+            configurationLock.withLock { storedReleasesDelivered &+= 1 }
+        }
         let deliveryID = performanceRecorder.begin(
             .mainQueueDelivery,
             traceID: overlayPresentation?.traceID,

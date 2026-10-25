@@ -970,6 +970,26 @@ struct SpaceControllerTests {
         ))
     }
 
+    @Test("A release the tap saw before the hold delay ran keeps the overlay hidden")
+    func releaseSeenBeforeStalledRevealKeepsOverlayHidden() {
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: MockWindowService(),
+            keyboardService: keyboardService,
+            overlayPresentationDelay: 0.05,
+            focusedWindowSnapshotProvider: { .unfocused }
+        )
+        let delegate = PreviewRefreshDelegate()
+        controller.delegate = delegate
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        keyboardService.simulateReleaseQueuedBehindStall()
+
+        #expect(delegate.overlayOpened.wait(timeout: .now() + 0.3) == .timedOut)
+        keyboardService.simulateEvent(.cmdRelease)
+        #expect(!controller.isSpaceManagerVisible)
+    }
+
     @Test("Configured overlay presentation delay controls the hold threshold")
     func configuredOverlayPresentationDelay() {
         let windowService = MockWindowService()

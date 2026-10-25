@@ -65,6 +65,8 @@ public protocol KeyboardService: Sendable {
     func start(delegate: KeyboardEventDelegate) -> Bool
     func stop()
     var isRunning: Bool { get }
+    /// Counts session releases as the tap sees them, ahead of their delivery to the main queue.
+    var releasesDelivered: UInt64 { get }
 }
 
 public protocol ShortcutRecordingService: AnyObject, Sendable {
