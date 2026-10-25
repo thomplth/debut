@@ -10,3 +10,4 @@ DerivedData/
 .linear
 *.xcodeproj
 Package.resolved
+*.orig
