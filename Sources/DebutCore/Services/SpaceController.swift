@@ -571,6 +571,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var previewCacheEntries: [CGWindowID: PreviewCacheEntry] = [:]
     private var pendingPreviewCaptureIDs: [CGWindowID] = []
     private let clock: @Sendable () -> Date
+    private let pointerButtonIsHeld: @Sendable () -> Bool
     let previewFreshness: PreviewFreshnessRecorder
 
     /// Activation carries a bare window ID, so the controller has to answer the exclusion
@@ -646,6 +647,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         previewRefreshPolicy: PreviewRefreshPolicy = .lastActiveOnly,
         previewCacheTTL: TimeInterval = AppSettings.defaultPreviewCacheTTL,
         clock: @escaping @Sendable () -> Date = Date.init,
+        pointerButtonIsHeld: @escaping @Sendable () -> Bool = { false },
         diagnosticReporter: DiagnosticReporter = .shared,
         previewFreshness: PreviewFreshnessRecorder? = nil
     ) {
@@ -664,6 +666,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         self.previewRefreshPolicy = previewRefreshPolicy
         self.previewCacheTTL = previewCacheTTL
         self.clock = clock
+        self.pointerButtonIsHeld = pointerButtonIsHeld
         self.diag = diagnosticReporter
         self.previewFreshness = previewFreshness ?? PreviewFreshnessRecorder(
             report: { [diagnosticReporter] event, level, details in
@@ -1662,8 +1665,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         id targetID: UUID,
         raiseWindowID: CGWindowID? = nil,
         focusesWindow: Bool = true,
-        command: FocusCommand
+        command: FocusCommand,
+        usesSystemSwitch: Bool = false
     ) {
+        let swipes = fasterDesktopSwitchingEnabled && !usesSystemSwitch
         let targetSpace = spaceManager.allSpaces.first(where: { $0.id == targetID })
         let workload = PerformanceWorkload(
             spaces: spaceManager.spaces.count,
@@ -1685,7 +1690,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             let toLabel = spaceLabel(forID: targetID)
 
             self.previousSpaceID = previousID
-            if fasterDesktopSwitchingEnabled {
+            if swipes {
                 spaceManager.activateSpace(id: targetID)
             }
 
@@ -1709,7 +1714,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                     prepareHiddenDesktop(forWindow: focusWindowID, inSpaceID: targetID,
                                          desktopID: location.desktopID, switcher: switcher)
                 }
-                if fasterDesktopSwitchingEnabled {
+                if swipes {
                     desktopIsSettling = switcher.switchToDesktop(location)
                 } else {
                     desktopIsSettling = switcher.switchToDesktopWithSystemAnimation(location)
@@ -2649,9 +2654,16 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             dismissOverlayPresentation()
         }
 
-        // Keeping the current application is the whole point of that chord, so it still focuses.
-        switchToSpace(id: targetSpace.id, raiseWindowID: matchingWindowID,
-                      focusesWindow: keepingCurrentApplication)
+        // The Dock drops a forged swipe while a window is held by its title bar, but answers its
+        // own Switch to Desktop N and carries the window along. Any held button takes that route:
+        // a press held still on a title bar looks like any other press from outside the app, and
+        // apps drag windows by regions Accessibility does not report. Keeping the current
+        // application is otherwise the whole point of that chord, so it still focuses, except
+        // during a hold, where focusing another window would pull the drag apart.
+        let windowIsHeld = pointerButtonIsHeld()
+        performSpaceSwitch(id: targetSpace.id, raiseWindowID: matchingWindowID,
+                           focusesWindow: keepingCurrentApplication && !windowIsHeld,
+                           command: .general, usesSystemSwitch: windowIsHeld)
         selectedSpaceIndex = index
         selectedWindowIndex = 0
     }

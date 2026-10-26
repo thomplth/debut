@@ -82,6 +82,8 @@ let e2eScenarioCatalog: [E2EScenarioDescriptor] = [
           summary: "Focus inside, and into, an app too slow to answer Accessibility"),
     .init(id: "move-duration-sweep", group: .windowMoves, debut: .running,
           summary: "Command-Option arrows chain across desktops at every switch duration"),
+    .init(id: "held-window-quick-switch", group: .windowMoves, debut: .running,
+          summary: "A window held by its title bar follows a Control-number switch"),
 ]
 
 enum E2EInvocation: Equatable, Sendable {

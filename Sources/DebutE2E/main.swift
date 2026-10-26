@@ -6087,6 +6087,7 @@ let scenarioBodies: [String: @MainActor () -> Void] = [
     "slow-focus-app": scenario_slow_focus_app,
     "held-key-across-overlay": scenario_held_key_across_overlay,
     "move-duration-sweep": scenario_move_duration_sweep,
+    "held-window-quick-switch": scenario_held_window_quick_switch,
 ]
 
 runSelectedScenarios(bodies: scenarioBodies)

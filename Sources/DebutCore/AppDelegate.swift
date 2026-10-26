@@ -325,7 +325,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             spaceManager: spaceManager,
             overlayPresentationDelay: currentSettings.overlayPresentationDelay,
             previewRefreshPolicy: currentSettings.previewRefreshPolicy,
-            previewCacheTTL: currentSettings.previewCacheTTL
+            previewCacheTTL: currentSettings.previewCacheTTL,
+            pointerButtonIsHeld: { CGEventSource.buttonState(.combinedSessionState, button: .left) }
         )
         controller.delegate = self
         // Publishes the restored owners at once, so their icons warm before discovery finishes.

@@ -1673,6 +1673,70 @@ struct SpaceControllerSpaceTests {
         #expect(windowService.activatedBundleID == nil)
     }
 
+    private func makeHeldPointerController(
+        spaces: MockSpaceSwitcher,
+        pointerButtonIsHeld: Bool
+    ) -> (SpaceController, MockWindowService, MockKeyboardService) {
+        let windowService = MockWindowService()
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            pointerButtonIsHeld: { pointerButtonIsHeld }
+        )
+        controller.spaceSwitcher = spaces
+        controller.spaceManager.addFixtureDesktop()
+        controller.spaceManager.activateSpace(id: controller.spaceManager.spaces[0].id)
+        return (controller, windowService, keyboardService)
+    }
+
+    @Test("Quick switch with the pointer button held asks for the system switch that carries a held window")
+    func quickSwitchWhileButtonHeldUsesSystemSwitch() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.switchChangesDesktop = false
+        let (controller, _, keyboardService) = makeHeldPointerController(
+            spaces: spaces, pointerButtonIsHeld: true)
+        let spaceA = controller.spaceManager.spaces[0].id
+
+        keyboardService.simulateEvent(.switchToSpace(2))
+
+        #expect(spaces.operations == [.switchToDesktopWithSystemAnimation(1)])
+        #expect(controller.spaceManager.activeSpaceID == spaceA)
+    }
+
+    @Test("Quick switch keeping the application focuses nothing while the pointer button is held")
+    func sameApplicationQuickSwitchWhileButtonHeldFocusesNothing() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, windowService, keyboardService) = makeHeldPointerController(
+            spaces: spaces, pointerButtonIsHeld: true)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 11, ownerBundleID: "com.a", ownerName: "A", windowTitle: "WA"),
+            toSpaceID: controller.spaceManager.spaces[0].id)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 22, ownerBundleID: "com.a", ownerName: "A", windowTitle: "WB"),
+            toSpaceID: controller.spaceManager.spaces[1].id)
+
+        keyboardService.simulateEvent(.switchToSpaceKeepingCurrentApplication(2))
+        controller.desktopDidChange()
+
+        #expect(spaces.operations == [.switchToDesktopWithSystemAnimation(1)])
+        #expect(windowService.raisedWindowIDs.isEmpty)
+        #expect(windowService.activatedBundleID == nil)
+    }
+
+    @Test("Quick switch with the pointer button up keeps the faster switch")
+    func quickSwitchWithButtonUpSwipes() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _, keyboardService) = makeHeldPointerController(
+            spaces: spaces, pointerButtonIsHeld: false)
+
+        keyboardService.simulateEvent(.switchToSpace(2))
+
+        #expect(spaces.operations == [.switchToDesktop(1)])
+        #expect(controller.spaceManager.activeSpaceID == controller.spaceManager.spaces[1].id)
+    }
+
     @Test("Adjacent input reaches the native-order switcher at a desktop model edge")
     func adjacentInputUsesNativeSpaceOrderAtModelEdge() {
         let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
