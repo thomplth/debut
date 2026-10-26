@@ -2242,13 +2242,15 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let windowService = windowService
         scheduleDiscoveryRead {
             let listedWindows = windowService.listWindows(ownerPIDs: [pid])
+            let frontWindowID = windowService.frontmostWindowID(ownerPID: pid)
             return { [weak self] in
-                self?.applyLaunchedWindows(listedWindows, pid: pid)
+                self?.applyLaunchedWindows(listedWindows, frontWindowID: frontWindowID, pid: pid)
             }
         }
     }
 
-    private func applyLaunchedWindows(_ listedWindows: [WindowInfo], pid: pid_t) {
+    private func applyLaunchedWindows(_ listedWindows: [WindowInfo], frontWindowID: CGWindowID?,
+                                      pid: pid_t) {
         // Retirement is read at publication, not capture (KHA-789).
         let windows = excludingRetired(listedWindows)
         // Matching by window ID alone would trust stale bookkeeping from a process whose
@@ -2269,7 +2271,10 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                   self.launchProbeGeneration == generation,
                   self.frontmostPIDProvider() == pid
             else { return }
-            let reportedWindowID = probedWindowID.flatMap { candidate in
+            // A launching app keys each window as it opens, before Debut tracks it, so the focus
+            // events naming them are dropped. Without an AX answer the window in front on screen
+            // is the next best evidence; the listing is not in screen order.
+            let reportedWindowID = (probedWindowID ?? frontWindowID).flatMap { candidate in
                 windows.contains(where: { $0.windowID == candidate }) ? candidate : nil
             }
             guard let focusedWindowID = reportedWindowID ?? windows.first?.windowID else { return }

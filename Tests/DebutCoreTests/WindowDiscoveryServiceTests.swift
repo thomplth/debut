@@ -1318,6 +1318,30 @@ struct WindowDiscoveryServiceTests {
         #expect(discovered == [3])
     }
 
+    @Test("Without an AX answer, a launched app's window in front on screen is credited over listing order")
+    func launchFallbackPrefersOnScreenFrontWindow() {
+        let windowService = MockWindowService()
+        windowService.windowList = [liveWindow(3, ownerPID: 30), liveWindow(4, ownerPID: 30)]
+        windowService.visibleFrontWindowID = 4
+        let service = WindowDiscoveryService(
+            windowService: windowService,
+            focusedWindowProvider: { _ in nil },
+            frontmostPIDProvider: { 30 },
+            launchDiscoveryDelay: 0,
+            processExitMonitor: MockProcessExitMonitor()
+        )
+        service.armingOverride = { _, _ in .armed }
+        var activated: [(CGWindowID, WindowActivationEvidence)] = []
+        service.onWindowActivated = { activated.append(($0, $1)) }
+
+        service.handleAppLaunch(
+            AppInfo(bundleID: "com.thomplth.debut.e2e.stalled-focus", name: "Stalled", pid: 30, isHidden: false)
+        )
+
+        #expect(activated.map(\.0) == [4])
+        #expect(activated.map(\.1) == [.observed])
+    }
+
     @Test("Destroy focus recovery reads the window list only off the calling turn")
     func destroyFocusRecoveryReadsOffTheCallingTurn() {
         let windowService = MockWindowService()
