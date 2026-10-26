@@ -118,6 +118,19 @@ struct NativeDesktopShortcutTests {
         #expect(hotKeys.calls == [.post(20)])
     }
 
+    @Test("A one-step move maps to macOS's own Move left or right a space")
+    func adjacentShortcut() {
+        let hotKeys = FakeHotKeys()
+        hotKeys.bindings[79] = SymbolicHotKeyBinding(keyCode: 123, flags: .maskControl, isEnabled: true)
+        hotKeys.bindings[81] = SymbolicHotKeyBinding(keyCode: 124, flags: .maskControl, isEnabled: false)
+        let shortcut = makeSwitch(hotKeys)
+        #expect(shortcut.resolveAdjacent(offset: -1)?.hotKeyID == 79)
+        #expect(shortcut.resolveAdjacent(offset: 1)?.hotKeyID == 81)
+        #expect(shortcut.resolveAdjacent(offset: 1)?.temporarilyEnabled == true)
+        #expect(shortcut.resolveAdjacent(offset: 2) == nil)
+        #expect(hotKeys.calls.isEmpty)
+    }
+
     @Test("A disabled shortcut is enabled only around Debut's keystroke")
     func disabledShortcut() {
         let hotKeys = FakeHotKeys()

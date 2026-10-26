@@ -1309,6 +1309,9 @@ public protocol SpaceSwitching: AnyObject, Sendable {
     @discardableResult func switchToDesktop(_ location: DesktopLocation) -> Bool
     /// Switches one position in Mission Control order, including fullscreen and tiled Spaces.
     @discardableResult func switchToAdjacentSpace(offset: Int, stackID: String) -> Bool
+    /// Switches one position through macOS's own Move left or right a space, on the display
+    /// under the pointer, which carries a window held by its title bar along.
+    @discardableResult func switchToAdjacentSpaceWithSystemShortcut(offset: Int, stackID: String) -> Bool
     /// Switches through Dock at macOS's standard slide duration, ignoring Debut's configured
     /// acceleration. This is used for Debut-owned selections while the speed feature is off;
     /// physical system shortcuts remain completely unhandled by Debut.
@@ -1440,6 +1443,11 @@ public extension SpaceSwitching {
     @discardableResult
     func switchToDesktopWithSystemAnimation(_ location: DesktopLocation) -> Bool {
         switchToDesktop(location)
+    }
+
+    @discardableResult
+    func switchToAdjacentSpaceWithSystemShortcut(offset: Int, stackID: String) -> Bool {
+        switchToAdjacentSpace(offset: offset, stackID: stackID)
     }
 
     @discardableResult
@@ -1962,6 +1970,24 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             )
         }
         return handleSwitchRequest(request, in: topology)
+    }
+
+    /// An adjacent move has no endpoint to retarget, so unlike Switch to Desktop N it is posted
+    /// as one keystroke with no route to track. A shortcut that is unbound or cannot be posted
+    /// falls back to the swipe.
+    @discardableResult
+    public func switchToAdjacentSpaceWithSystemShortcut(offset: Int, stackID: String) -> Bool {
+        guard canSwitchSpaces,
+              !isSwitchInFlight(stackID: stackID),
+              let resolved = nativeDesktopShortcut.resolveAdjacent(offset: offset),
+              nativeDesktopShortcut.post(resolved)
+        else { return switchToAdjacentSpace(offset: offset, stackID: stackID) }
+        DiagnosticReporter.shared.report("adjacent_space_native_shortcut_posted", details: [
+            "offset": "\(offset)",
+            "hotKeyID": "\(resolved.hotKeyID)",
+            "temporarilyEnabled": "\(resolved.temporarilyEnabled)",
+        ])
+        return true
     }
 
     private func requestSwitch(

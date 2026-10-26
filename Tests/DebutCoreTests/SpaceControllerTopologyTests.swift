@@ -8,6 +8,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     var current: Int
     private(set) var switchRequests: [Int] = []
     private(set) var adjacentSwitchRequests: [(offset: Int, stackID: String)] = []
+    private(set) var systemAdjacentSwitchRequests: [(offset: Int, stackID: String)] = []
     private(set) var moveRequests: [(windowID: CGWindowID, desktop: Int)] = []
     var windowDesktops: [CGWindowID: Int] = [:]
     /// Windows SkyLight places on every desktop, so they have no single desktop answer.
@@ -135,6 +136,11 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
 
     func switchToAdjacentSpace(offset: Int, stackID: String) -> Bool {
         adjacentSwitchRequests.append((offset, stackID))
+        return true
+    }
+
+    func switchToAdjacentSpaceWithSystemShortcut(offset: Int, stackID: String) -> Bool {
+        systemAdjacentSwitchRequests.append((offset, stackID))
         return true
     }
 
@@ -1735,6 +1741,30 @@ struct SpaceControllerSpaceTests {
 
         #expect(spaces.operations == [.switchToDesktop(1)])
         #expect(controller.spaceManager.activeSpaceID == controller.spaceManager.spaces[1].id)
+    }
+
+    @Test("Control-arrow with the pointer button held asks for macOS's own move a space")
+    func adjacentInputWhileButtonHeldUsesSystemShortcut() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _, keyboardService) = makeHeldPointerController(
+            spaces: spaces, pointerButtonIsHeld: true)
+
+        withExtendedLifetime(controller) { keyboardService.simulateEvent(.switchAdjacentSpace(1)) }
+
+        #expect(spaces.systemAdjacentSwitchRequests.map(\.offset) == [1])
+        #expect(spaces.adjacentSwitchRequests.isEmpty)
+    }
+
+    @Test("Control-arrow with the pointer button up keeps the faster switch")
+    func adjacentInputWithButtonUpSwipes() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        let (controller, _, keyboardService) = makeHeldPointerController(
+            spaces: spaces, pointerButtonIsHeld: false)
+
+        withExtendedLifetime(controller) { keyboardService.simulateEvent(.switchAdjacentSpace(-1)) }
+
+        #expect(spaces.adjacentSwitchRequests.map(\.offset) == [-1])
+        #expect(spaces.systemAdjacentSwitchRequests.isEmpty)
     }
 
     @Test("Adjacent input reaches the native-order switcher at a desktop model edge")

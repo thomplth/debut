@@ -29,6 +29,9 @@ enum NativeDesktopShortcut {
     /// "Switch to Desktop 1". Desktops 1 through 16 follow consecutively.
     static let firstHotKeyID: Int32 = 118
     static let numberedDesktopCount = 16
+    /// "Move left a space" and "Move right a space", which Control-arrow triggers.
+    static let previousSpaceHotKeyID: Int32 = 79
+    static let nextSpaceHotKeyID: Int32 = 81
     /// The key code a symbolic hotkey reports when nothing is bound to it.
     static let unboundKeyCode: CGKeyCode = 0xFFFF
 
@@ -142,6 +145,16 @@ struct NativeDesktopShortcutSwitch {
     func resolve(_ location: DesktopLocation, in topology: SpaceTopology) -> Resolved? {
         guard let id = NativeDesktopShortcut.hotKeyID(for: location, in: topology),
               let delivery = NativeDesktopShortcut.delivery(for: hotKeys.binding(forHotKey: id))
+        else { return nil }
+        return Resolved(hotKeyID: id, delivery: delivery)
+    }
+
+    /// The Move left or right a space shortcut for a one-step `offset`. Posts nothing.
+    func resolveAdjacent(offset: Int) -> Resolved? {
+        guard abs(offset) == 1 else { return nil }
+        let id = offset < 0
+            ? NativeDesktopShortcut.previousSpaceHotKeyID : NativeDesktopShortcut.nextSpaceHotKeyID
+        guard let delivery = NativeDesktopShortcut.delivery(for: hotKeys.binding(forHotKey: id))
         else { return nil }
         return Resolved(hotKeyID: id, delivery: delivery)
     }

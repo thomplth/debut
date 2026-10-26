@@ -2365,10 +2365,19 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             jumpToSpace(index: overlaySpaceManager.spaces.count - 1)
         case .switchAdjacentSpace(let offset):
             guard abs(offset) == 1, let switcher = spaceSwitcher else { break }
-            _ = switcher.switchToAdjacentSpace(
-                offset: offset,
-                stackID: spaceManager.selectedSpaceStackID
-            )
+            // See `quickSwitchToSpace`: a forged swipe leaves a held window behind, macOS's own
+            // shortcut carries it.
+            if pointerButtonIsHeld() {
+                _ = switcher.switchToAdjacentSpaceWithSystemShortcut(
+                    offset: offset,
+                    stackID: spaceManager.selectedSpaceStackID
+                )
+            } else {
+                _ = switcher.switchToAdjacentSpace(
+                    offset: offset,
+                    stackID: spaceManager.selectedSpaceStackID
+                )
+            }
         case .moveFocusedWindowToAdjacentSpace(let offset):
             moveFocusedWindowToAdjacentSpace(offset: offset)
         case .switchToSpace(let position):
