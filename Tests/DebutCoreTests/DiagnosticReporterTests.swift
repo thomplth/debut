@@ -87,12 +87,12 @@ struct DiagnosticReporterTests {
         #expect(durableLines(in: dir).contains { $0["event"] == "health_rollup" && $0["kind"] == "active" })
     }
 
-    @Test("Bursty events coalesce full snapshot rewrites")
-    func burstyEventsCoalesceSnapshotWrites() throws {
+    @Test("Events within one coalescing window share one full snapshot rewrite")
+    func eventsWithinOneCoalescingWindowShareOneSnapshotWrite() throws {
         let dir = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        let reporter = DiagnosticReporter(directory: dir)
+        let reporter = DiagnosticReporter(directory: dir, snapshotCoalescingMilliseconds: 60_000)
         for index in 0..<200 {
             reporter.report("key_event", level: .transient, details: ["index": "\(index)"])
         }
