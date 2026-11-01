@@ -49,20 +49,20 @@ private let slsCopyWindowsWithOptionsAndTags: (@convention(c) (
 // host; an ordinary window names nothing. Reached through the iterator rather than a per-window
 // property call so the whole list costs one query.
 private let slsWindowQueryWindows: (@convention(c)
-    (CGSConnectionID, CFArray, Int32) -> UnsafeMutableRawPointer?)? =
+    (CGSConnectionID, CFArray, Int32) -> Unmanaged<CFTypeRef>?)? =
     skyLightSymbol("SLSWindowQueryWindows")
 private let slsWindowQueryResultCopyWindows: (@convention(c)
-    (UnsafeMutableRawPointer) -> UnsafeMutableRawPointer?)? =
+    (CFTypeRef) -> Unmanaged<CFTypeRef>?)? =
     skyLightSymbol("SLSWindowQueryResultCopyWindows")
-private let slsWindowIteratorAdvance: (@convention(c) (UnsafeMutableRawPointer) -> Bool)? =
+private let slsWindowIteratorAdvance: (@convention(c) (CFTypeRef) -> Bool)? =
     skyLightSymbol("SLSWindowIteratorAdvance")
-private let slsWindowIteratorGetWindowID: (@convention(c) (UnsafeMutableRawPointer) -> CGWindowID)? =
+private let slsWindowIteratorGetWindowID: (@convention(c) (CFTypeRef) -> CGWindowID)? =
     skyLightSymbol("SLSWindowIteratorGetWindowID")
-private let slsWindowIteratorGetParentID: (@convention(c) (UnsafeMutableRawPointer) -> CGWindowID)? =
+private let slsWindowIteratorGetParentID: (@convention(c) (CFTypeRef) -> CGWindowID)? =
     skyLightSymbol("SLSWindowIteratorGetParentID")
-private let slsWindowIteratorGetAttributes: (@convention(c) (UnsafeMutableRawPointer) -> UInt64)? =
+private let slsWindowIteratorGetAttributes: (@convention(c) (CFTypeRef) -> UInt64)? =
     skyLightSymbol("SLSWindowIteratorGetAttributes")
-private let slsWindowIteratorGetTags: (@convention(c) (UnsafeMutableRawPointer) -> UInt64)? =
+private let slsWindowIteratorGetTags: (@convention(c) (CFTypeRef) -> UInt64)? =
     skyLightSymbol("SLSWindowIteratorGetTags")
 
 /// Set while the window server is willing to draw the surface. Clearing it is how minimizing,
@@ -1821,8 +1821,9 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         else { return WindowServerVerdicts() }
 
         let identifiers = candidates.map { NSNumber(value: $0) } as CFArray
-        guard let query = slsWindowQueryWindows(connection, identifiers, Int32(candidates.count)),
-              let iterator = slsWindowQueryResultCopyWindows(query)
+        guard let query = slsWindowQueryWindows(connection, identifiers, Int32(candidates.count))?
+                .takeRetainedValue(),
+              let iterator = slsWindowQueryResultCopyWindows(query)?.takeRetainedValue()
         else { return WindowServerVerdicts() }
 
         var verdicts = WindowServerVerdicts()

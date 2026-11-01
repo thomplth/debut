@@ -914,4 +914,34 @@ struct SpaceServiceWindowEnumerationTests {
         #expect(service.windowLocations()[windowID] == nil)
         #expect(service.placedWindowIDs().contains(windowID))
     }
+
+    @Test("Repeated window-server verdict queries retain no window-server memory")
+    @MainActor func verdictQueriesRetainNoWindowServerMemory() {
+        let service = SpaceService()
+        let windows = (0..<128).map { _ in
+            let window = OffDesktopWindow()
+            window.isReleasedWhenClosed = false
+            window.orderFront(nil)
+            return window
+        }
+        defer { windows.forEach { $0.close() } }
+        let candidates = windows.map { CGWindowID($0.windowNumber) }
+
+        _ = service.windowServerVerdicts(among: candidates)
+        let bytesBefore = mallocBytesInUse()
+        let queries = 200
+        for _ in 0..<queries {
+            _ = service.windowServerVerdicts(among: candidates)
+        }
+        let bytesAfter = mallocBytesInUse()
+
+        #expect(bytesAfter - bytesBefore < queries * 1_024,
+                "malloc bytes in use went from \(bytesBefore) to \(bytesAfter) over \(queries) queries")
+    }
+}
+
+private func mallocBytesInUse() -> Int {
+    var statistics = malloc_statistics_t()
+    malloc_zone_statistics(nil, &statistics)
+    return statistics.size_in_use
 }
