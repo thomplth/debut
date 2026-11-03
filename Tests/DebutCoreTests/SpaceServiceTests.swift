@@ -102,27 +102,13 @@ struct SpaceSwitchCoordinatorTests {
         )
     }
 
-    @Test("A far target starts exactly one adjacent hop")
-    func farTargetStartsOneHop() {
+    @Test("A far target posts every adjacent hop as one route")
+    func farTargetPostsEveryHop() {
         var coordinator = SpaceSwitchCoordinator()
 
         let request = coordinator.request(to: location(3), in: topology(current: 0))
 
-        #expect(request == .post([hop(from: 0, to: 1)]))
-        #expect(request.hops.first?.instantVelocity == 400)
-        #expect(coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
-    }
-
-    @Test("An instant far target posts every adjacent hop as one batch")
-    func instantFarTargetStartsEveryHop() {
-        var coordinator = SpaceSwitchCoordinator()
-
-        let request = coordinator.request(
-            to: location(3),
-            in: topology(current: 0),
-            scheduling: .batchedInstant
-        )
-
+        #expect(request.hops.allSatisfy { $0.instantVelocity == 400 })
         #expect(request == .post([
             hop(from: 0, to: 1),
             hop(from: 1, to: 2),
@@ -152,19 +138,17 @@ struct SpaceSwitchCoordinatorTests {
         #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
     }
 
-    @Test("A batched route accepts intermediate confirmations and retargets from its endpoint")
+    @Test("A route accepts intermediate confirmations and retargets from its endpoint")
     func batchedRouteRetargetsAfterEndpoint() {
         var coordinator = SpaceSwitchCoordinator()
         _ = coordinator.request(
             to: location(3),
-            in: topology(current: 0),
-            scheduling: .batchedInstant
+            in: topology(current: 0)
         )
 
         let retarget = coordinator.request(
             to: location(1),
-            in: topology(current: 0),
-            scheduling: .batchedInstant
+            in: topology(current: 0)
         )
 
         #expect(retarget == .coalesced)
@@ -184,39 +168,30 @@ struct SpaceSwitchCoordinatorTests {
     func systemAnimationIsRetainedAcrossHops() throws {
         var coordinator = SpaceSwitchCoordinator()
 
-        let first = try #require(coordinator.request(
+        let hops = coordinator.request(
             to: location(3),
             in: topology(current: 0),
             animation: .system
-        ).hops.first)
-        let second = try #require(coordinator.desktopDidChange(
-            to: topology(current: 1)
-        ).first)
-        let third = try #require(coordinator.desktopDidChange(
-            to: topology(current: 2)
-        ).first)
+        ).hops
 
-        #expect(first.animation == .system)
-        #expect(second.animation == .system)
-        #expect(third.animation == .system)
+        #expect(hops.count == 3)
+        #expect(hops.allSatisfy { $0.animation == .system })
     }
 
-    @Test("A request back to the showing desktop is retained while a hop is in flight")
-    func reversesAfterConfirmingInFlightHop() {
+    @Test("A request back to the showing desktop returns once the posted route lands")
+    func reversesAfterConfirmingInFlightRoute() {
         var coordinator = SpaceSwitchCoordinator()
         _ = coordinator.request(to: location(2), in: topology(current: 0))
 
         let reversal = coordinator.request(to: location(0), in: topology(current: 0))
 
         #expect(reversal == .coalesced)
-        #expect(coordinator.desktopDidChange(to: topology(current: 1)) == [
-            SpaceSwitchHop(
-                stackID: SpaceTopology.sharedStackID,
-                fromSpaceID: 11,
-                toSpaceID: 10,
-                direction: .left
-            ),
+        #expect(coordinator.desktopDidChange(to: topology(current: 1)).isEmpty)
+        #expect(coordinator.desktopDidChange(to: topology(current: 2)) == [
+            hop(from: 2, to: 1),
+            hop(from: 1, to: 0),
         ])
+        #expect(coordinator.desktopDidChange(to: topology(current: 1)).isEmpty)
         #expect(coordinator.desktopDidChange(to: topology(current: 0)).isEmpty)
         #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
     }
@@ -224,9 +199,9 @@ struct SpaceSwitchCoordinatorTests {
     @Test("An unexpected landing stops instead of posting from an uncertain state")
     func unexpectedLandingStops() {
         var coordinator = SpaceSwitchCoordinator()
-        _ = coordinator.request(to: location(3), in: topology(current: 0))
+        _ = coordinator.request(to: location(2), in: topology(current: 0))
 
-        let next = coordinator.desktopDidChange(to: topology(current: 2))
+        let next = coordinator.desktopDidChange(to: topology(current: 3))
 
         #expect(next.isEmpty)
         #expect(!coordinator.isInFlight(stackID: SpaceTopology.sharedStackID))
@@ -250,8 +225,7 @@ struct SpaceSwitchCoordinatorTests {
         var coordinator = SpaceSwitchCoordinator()
         let request = coordinator.request(
             to: location(2),
-            in: topology(current: 0),
-            scheduling: .batchedInstant
+            in: topology(current: 0)
         )
         let hops = try #require(request.hops.isEmpty ? nil : request.hops)
 
@@ -337,8 +311,7 @@ struct SpaceSwitchCoordinatorTests {
                 desktopID: 12,
                 index: 1
             ),
-            in: initialTopology,
-            scheduling: .batchedInstant
+            in: initialTopology
         )
 
         #expect(request == .post([
@@ -371,8 +344,7 @@ struct SpaceSwitchCoordinatorTests {
             offset: leftOffset,
             stackID: SpaceTopology.sharedStackID,
             in: initialTopology,
-            animation: .configured,
-            scheduling: .confirmedAdjacent
+            animation: .configured
         )
         #expect(left == .post([
             SpaceSwitchHop(
@@ -389,8 +361,7 @@ struct SpaceSwitchCoordinatorTests {
             offset: rightOffset,
             stackID: SpaceTopology.sharedStackID,
             in: initialTopology,
-            animation: .configured,
-            scheduling: .confirmedAdjacent
+            animation: .configured
         )
         #expect(right == .post([
             SpaceSwitchHop(
@@ -415,8 +386,7 @@ struct SpaceSwitchCoordinatorTests {
                 desktopIDs: [10, 12],
                 orderedSpaceIDs: orderedSpaceIDs
             ),
-            animation: .configured,
-            scheduling: .confirmedAdjacent
+            animation: .configured
         )
         #expect(first == .post([
             SpaceSwitchHop(
@@ -436,8 +406,7 @@ struct SpaceSwitchCoordinatorTests {
                 desktopIDs: [10, 12],
                 orderedSpaceIDs: orderedSpaceIDs
             ),
-            animation: .configured,
-            scheduling: .confirmedAdjacent
+            animation: .configured
         )
         #expect(last == .post([
             SpaceSwitchHop(
@@ -462,15 +431,13 @@ struct SpaceSwitchCoordinatorTests {
             offset: 1,
             stackID: SpaceTopology.sharedStackID,
             in: initialTopology,
-            animation: .configured,
-            scheduling: .confirmedAdjacent
+            animation: .configured
         ).hops.map(\.toSpaceID) == [11])
         #expect(coordinator.requestAdjacent(
             offset: 1,
             stackID: SpaceTopology.sharedStackID,
             in: initialTopology,
-            animation: .configured,
-            scheduling: .confirmedAdjacent
+            animation: .configured
         ) == .coalesced)
         #expect(coordinator.desktopDidChange(to: topology(
             currentSpaceID: 11,
@@ -502,22 +469,6 @@ struct ManagedSpaceParsingTests {
 
 @Suite("SpaceService switch speed")
 struct SpaceServiceSpeedTests {
-
-    @Test("Only a configured zero-duration route batches its hops")
-    func schedulingFollowsResolvedDuration() {
-        #expect(
-            SpaceSwitchAnimation.configured.scheduling(configuredDuration: 0)
-                == .batchedInstant
-        )
-        #expect(
-            SpaceSwitchAnimation.configured.scheduling(configuredDuration: 0.01)
-                == .confirmedAdjacent
-        )
-        #expect(
-            SpaceSwitchAnimation.system.scheduling(configuredDuration: 0)
-                == .confirmedAdjacent
-        )
-    }
 
     @Test("System animation ignores the configured faster-switch duration")
     func systemAnimationIgnoresConfiguredDuration() {
@@ -575,26 +526,41 @@ struct DockSwipeAnimationTests {
         #expect(abs(last.delay - 0.12) < 1e-9)
     }
 
-    // Progress is what the Dock draws, and it saturates at one desktop per gesture — the
-    // instant path asks for 2 and still lands exactly one hop. So the final sample has to
-    // reach 1 exactly: short of it, the release settles back where the slide started.
-    @Test("Progress rises from above zero to exactly one desktop")
-    func progressSpansOneDesktop() throws {
-        let samples = DockSwipeAnimation.samples(duration: 0.12)
+    @Test("Progress rises from above zero to the whole distance")
+    func progressSpansTheDistance() throws {
+        let samples = DockSwipeAnimation.samples(duration: 0.12, distance: 3)
         let first = try #require(samples.first)
         let last = try #require(samples.last)
         #expect(first.progress > 0)
-        #expect(abs(last.progress - 1) < 1e-9)
-        #expect(zip(samples, samples.dropFirst()).allSatisfy { $0.progress < $1.progress })
+        #expect(abs(last.progress - 3) < 1e-9)
         #expect(zip(samples, samples.dropFirst()).allSatisfy { $0.delay < $1.delay })
     }
 
-    @Test("Sample count follows the duration at the sample rate")
+    @Test("Progress advances by the same amount every frame")
+    func progressHasConstantSpeed() {
+        let samples = DockSwipeAnimation.samples(duration: 0.2, distance: 2)
+        let steps = zip([DockSwipeSample(delay: 0, progress: 0)] + samples, samples)
+            .map { $1.progress - $0.progress }
+        #expect(steps.allSatisfy { abs($0 - steps[0]) < 1e-9 })
+    }
+
+    @Test("A far route takes the same time as an adjacent one")
+    func farRouteKeepsTheDuration() {
+        let near = DockSwipeAnimation.samples(duration: 0.15, distance: 1)
+        let far = DockSwipeAnimation.samples(duration: 0.15, distance: 4)
+        #expect(near.map(\.delay) == far.map(\.delay))
+    }
+
+    @Test("Sample count follows the duration at the display's refresh rate")
     func sampleCountFollowsDuration() {
-        let short = DockSwipeAnimation.samples(duration: 0.1)
-        let long = DockSwipeAnimation.samples(duration: 0.2)
-        #expect(long.count == short.count * 2)
-        #expect(short.count == Int((0.1 * DockSwipeAnimation.sampleRate).rounded()))
+        #expect(DockSwipeAnimation.samples(duration: 0.1, sampleRate: 120).count == 12)
+        #expect(DockSwipeAnimation.samples(duration: 0.1, sampleRate: 60).count == 6)
+        #expect(DockSwipeAnimation.samples(duration: 0.2, sampleRate: 120).count == 24)
+    }
+
+    @Test("An unknown display samples at the fallback rate")
+    func unknownDisplayUsesFallbackRate() {
+        #expect(DockSwipeAnimation.sampleRate(of: nil) == DockSwipeAnimation.fallbackSampleRate)
     }
 
     // A duration far below one frame still has to produce a usable gesture rather than a
@@ -602,6 +568,68 @@ struct DockSwipeAnimationTests {
     @Test("A duration shorter than one sample still sends two samples")
     func veryShortDurationStillAnimates() {
         #expect(DockSwipeAnimation.samples(duration: 0.001).count == 2)
+    }
+
+    @Test("One desktop of progress stops just short of the Dock's strip-relative desktop")
+    func progressPerDesktopFollowsSpaceCount() {
+        #expect(abs(DockSwipeAnimation.progressPerDesktop(spaceCount: 2) - 1.98) < 1e-9)
+        #expect(abs(DockSwipeAnimation.progressPerDesktop(spaceCount: 3) - 1.485) < 1e-9)
+        #expect(abs(DockSwipeAnimation.progressPerDesktop(spaceCount: 5) - 1.2375) < 1e-9)
+    }
+}
+
+@Suite("DockSwipeRoute")
+struct DockSwipeRouteTests {
+    private func sample(_ progress: Double) -> DockSwipeSample {
+        DockSwipeSample(delay: progress, progress: progress)
+    }
+
+    @Test("An adjacent route begins once, drags, and ends on the boundary")
+    func adjacentRouteIsOneGesture() {
+        let frames = DockSwipeRoute.strokes(for: [sample(0.5), sample(1)])
+        #expect(frames == [
+            [DockSwipeStroke(phase: .began, progress: 0),
+             DockSwipeStroke(phase: .changed, progress: 0.5)],
+            [DockSwipeStroke(phase: .changed, progress: 1),
+             DockSwipeStroke(phase: .ended, progress: 1)],
+        ])
+    }
+
+    @Test("Crossing a desktop boundary ends one gesture and begins the next in the same frame")
+    func boundaryHandsOverWithinOneFrame() {
+        let frames = DockSwipeRoute.strokes(for: [sample(0.75), sample(1.5), sample(2)])
+        #expect(frames == [
+            [DockSwipeStroke(phase: .began, progress: 0),
+             DockSwipeStroke(phase: .changed, progress: 0.75)],
+            [DockSwipeStroke(phase: .changed, progress: 1),
+             DockSwipeStroke(phase: .ended, progress: 1),
+             DockSwipeStroke(phase: .began, progress: 0),
+             DockSwipeStroke(phase: .changed, progress: 0.5)],
+            [DockSwipeStroke(phase: .changed, progress: 1),
+             DockSwipeStroke(phase: .ended, progress: 1)],
+        ])
+    }
+
+    @Test("A frame that lands exactly on a boundary opens the next gesture on the following frame")
+    func exactBoundaryDefersTheNextGesture() {
+        let frames = DockSwipeRoute.strokes(for: [sample(1), sample(2)])
+        #expect(frames == [
+            [DockSwipeStroke(phase: .began, progress: 0),
+             DockSwipeStroke(phase: .changed, progress: 1),
+             DockSwipeStroke(phase: .ended, progress: 1)],
+            [DockSwipeStroke(phase: .began, progress: 0),
+             DockSwipeStroke(phase: .changed, progress: 1),
+             DockSwipeStroke(phase: .ended, progress: 1)],
+        ])
+    }
+
+    @Test("Every gesture a route opens is ended")
+    func everyGestureEnds() {
+        let samples = DockSwipeAnimation.samples(duration: 0.3, distance: 3)
+        let phases = DockSwipeRoute.strokes(for: samples).flatMap { $0.map(\.phase) }
+        #expect(phases.filter { $0 == .began }.count == 3)
+        #expect(phases.filter { $0 == .ended }.count == 3)
+        #expect(phases.last == .ended)
     }
 }
 

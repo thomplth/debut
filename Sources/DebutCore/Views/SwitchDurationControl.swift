@@ -15,7 +15,7 @@ struct SwitchDurationControl: View {
                    in: AppSettings.minimumSpaceSwitchDuration...AppSettings.maximumSpaceSwitchDuration, step: 0.01)
                 .accessibilityLabel("Desktop transition duration").accessibilityIdentifier("space-switch-duration")
             if showsCaption {
-                Text("Duration per desktop. Instant removes the transition.")
+                Text("Every switch takes this long, however far. Instant removes the transition.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

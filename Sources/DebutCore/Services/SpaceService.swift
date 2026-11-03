@@ -257,6 +257,9 @@ private let kWindowEnumerationOptions: UInt32 = 0x7
 //     setting can be a duration rather than an opaque speed.
 //   - iss — https://github.com/joshuarli/iss
 //     The reverse-engineered macOS 27 IOHID payload format and serialized field-4205 framing.
+//   - FasterSwiper — https://github.com/mgbowen/FasterSwiper
+//     The strip-relative progress scale, and chaining a multi-desktop slide by ending each
+//     gesture on its boundary and beginning the next one at once.
 let kCGSEventTypeField = CGEventField(rawValue: 55)!
 let kCGEventGestureHIDType = CGEventField(rawValue: 110)!
 let kCGEventGestureSwipeMask = CGEventField(rawValue: 115)!
@@ -416,7 +419,7 @@ struct SpaceSwitchPlan: Equatable {
 extension SpaceSwitchDirection: Equatable {}
 
 /// One adjacent, fully addressable Space transition. A far target remains a sequence of
-/// adjacent transitions even when Instant mode posts the whole sequence as one batch.
+/// adjacent transitions even though the whole sequence is posted as one route.
 enum SpaceSwitchAnimation: Equatable {
     case configured
     case system
@@ -432,17 +435,6 @@ enum SpaceSwitchAnimation: Equatable {
         case .system: Self.systemDuration
         }
     }
-
-    func scheduling(configuredDuration: TimeInterval) -> SpaceSwitchScheduling {
-        duration(configuredDuration: configuredDuration) == 0
-            ? .batchedInstant
-            : .confirmedAdjacent
-    }
-}
-
-enum SpaceSwitchScheduling: Equatable {
-    case confirmedAdjacent
-    case batchedInstant
 }
 
 struct SpaceSwitchHop: Equatable {
@@ -505,8 +497,8 @@ private struct SpaceNavigationTarget: Equatable {
 ///
 /// WindowServer's current Space is the only completion signal. Rapid requests replace
 /// `desiredTarget`; they never append another route before the posted endpoint is confirmed.
-/// Animated routes post and confirm one adjacent hop at a time. Instant routes post all of
-/// their adjacent hops together, then treat intermediate notifications as acknowledgements.
+/// A route posts all of its adjacent hops together, so a far jump slides for the same time as a
+/// near one, then treats intermediate notifications as acknowledgements.
 struct SpaceSwitchCoordinator {
     private struct PendingSwitch {
         var generation: UInt64
@@ -514,7 +506,6 @@ struct SpaceSwitchCoordinator {
         var originSpaceID: CGSSpaceID
         var expectedSpaceIDs: [CGSSpaceID]
         var animation: SpaceSwitchAnimation
-        var scheduling: SpaceSwitchScheduling
     }
 
     private var pendingByStackID: [String: PendingSwitch] = [:]
@@ -527,8 +518,7 @@ struct SpaceSwitchCoordinator {
     mutating func request(
         to target: DesktopLocation,
         in topology: SpaceTopology,
-        animation: SpaceSwitchAnimation = .configured,
-        scheduling: SpaceSwitchScheduling = .confirmedAdjacent
+        animation: SpaceSwitchAnimation = .configured
     ) -> SpaceSwitchRequestResult {
         guard let stack = topology.stack(id: target.stackID),
               stack.desktopIDs.indices.contains(target.index),
@@ -542,8 +532,7 @@ struct SpaceSwitchCoordinator {
                 index: navigationIndex
             ),
             in: topology,
-            animation: animation,
-            scheduling: scheduling
+            animation: animation
         )
     }
 
@@ -554,8 +543,7 @@ struct SpaceSwitchCoordinator {
         offset: Int,
         stackID: String,
         in topology: SpaceTopology,
-        animation: SpaceSwitchAnimation = .configured,
-        scheduling: SpaceSwitchScheduling = .confirmedAdjacent
+        animation: SpaceSwitchAnimation = .configured
     ) -> SpaceSwitchRequestResult {
         guard let target = Self.adjacentTarget(
             offset: offset,
@@ -567,8 +555,7 @@ struct SpaceSwitchCoordinator {
         return requestNavigation(
             to: target,
             in: topology,
-            animation: animation,
-            scheduling: scheduling
+            animation: animation
         )
     }
 
@@ -594,8 +581,7 @@ struct SpaceSwitchCoordinator {
     private mutating func requestNavigation(
         to target: SpaceNavigationTarget,
         in topology: SpaceTopology,
-        animation: SpaceSwitchAnimation,
-        scheduling: SpaceSwitchScheduling
+        animation: SpaceSwitchAnimation
     ) -> SpaceSwitchRequestResult {
         guard let stack = topology.stack(id: target.stackID),
               stack.orderedSpaceIDs.indices.contains(target.index),
@@ -607,7 +593,6 @@ struct SpaceSwitchCoordinator {
         if var pending = pendingByStackID[target.stackID] {
             pending.desiredTarget = target
             pending.animation = animation
-            pending.scheduling = scheduling
             pendingByStackID[target.stackID] = pending
             return .coalesced
         }
@@ -617,15 +602,13 @@ struct SpaceSwitchCoordinator {
             from: currentIndex,
             toward: target,
             in: stack,
-            animation: animation,
-            scheduling: scheduling
+            animation: animation
         )
         guard !hops.isEmpty else { return .declined }
         pendingByStackID[target.stackID] = makePendingSwitch(
             desiredTarget: target,
             hops: hops,
-            animation: animation,
-            scheduling: scheduling
+            animation: animation
         )
         return .post(hops)
     }
@@ -659,7 +642,7 @@ struct SpaceSwitchCoordinator {
                 continue
             }
 
-            // Every gesture in an Instant route has already been posted. Intermediate
+            // Every gesture in a route has already been posted. Intermediate
             // notifications acknowledge the route but must neither finish it nor post again.
             guard currentSpaceID == expectedSpaceID else { continue }
 
@@ -672,8 +655,7 @@ struct SpaceSwitchCoordinator {
                 from: currentIndex,
                 toward: pending.desiredTarget,
                 in: stack,
-                animation: pending.animation,
-                scheduling: pending.scheduling
+                animation: pending.animation
             )
             guard !hops.isEmpty else {
                 pendingByStackID.removeValue(forKey: stackID)
@@ -682,8 +664,7 @@ struct SpaceSwitchCoordinator {
             pendingByStackID[stackID] = makePendingSwitch(
                 desiredTarget: pending.desiredTarget,
                 hops: hops,
-                animation: pending.animation,
-                scheduling: pending.scheduling
+                animation: pending.animation
             )
             nextHops.append(contentsOf: hops)
         }
@@ -738,8 +719,7 @@ struct SpaceSwitchCoordinator {
             from: currentIndex,
             toward: pending.desiredTarget,
             in: stack,
-            animation: pending.animation,
-            scheduling: pending.scheduling
+            animation: pending.animation
         )
         guard !hops.isEmpty else {
             pendingByStackID.removeValue(forKey: ticket.stackID)
@@ -748,8 +728,7 @@ struct SpaceSwitchCoordinator {
         pendingByStackID[ticket.stackID] = makePendingSwitch(
             desiredTarget: pending.desiredTarget,
             hops: hops,
-            animation: pending.animation,
-            scheduling: pending.scheduling
+            animation: pending.animation
         )
         return .post(hops)
     }
@@ -780,8 +759,7 @@ struct SpaceSwitchCoordinator {
     private mutating func makePendingSwitch(
         desiredTarget: SpaceNavigationTarget,
         hops: [SpaceSwitchHop],
-        animation: SpaceSwitchAnimation,
-        scheduling: SpaceSwitchScheduling
+        animation: SpaceSwitchAnimation
     ) -> PendingSwitch {
         nextGeneration &+= 1
         if nextGeneration == 0 { nextGeneration = 1 }
@@ -790,8 +768,7 @@ struct SpaceSwitchCoordinator {
             desiredTarget: desiredTarget,
             originSpaceID: hops[0].fromSpaceID,
             expectedSpaceIDs: hops.map(\.toSpaceID),
-            animation: animation,
-            scheduling: scheduling
+            animation: animation
         )
     }
 
@@ -799,8 +776,7 @@ struct SpaceSwitchCoordinator {
         from currentIndex: Int,
         toward target: SpaceNavigationTarget,
         in stack: SpaceStackDescriptor,
-        animation: SpaceSwitchAnimation,
-        scheduling: SpaceSwitchScheduling
+        animation: SpaceSwitchAnimation
     ) -> [SpaceSwitchHop] {
         guard let plan = SpaceSwitchPlan(
             from: currentIndex,
@@ -808,8 +784,7 @@ struct SpaceSwitchCoordinator {
             spaceCount: stack.orderedSpaceIDs.count
         ) else { return [] }
         let delta = plan.direction == .right ? 1 : -1
-        let count = scheduling == .batchedInstant ? plan.steps : 1
-        return (0..<count).compactMap { offset in
+        return (0..<plan.steps).compactMap { offset in
             let fromIndex = currentIndex + offset * delta
             let toIndex = fromIndex + delta
             guard stack.orderedSpaceIDs.indices.contains(fromIndex),
@@ -842,9 +817,10 @@ enum DockSwipePhase: Equatable {
     }
 }
 
-/// One frame of a driven swipe: how far into the gesture it is, and how far the desktop has
-/// travelled by then. Distances are unsigned; the direction is applied when the event is built.
-struct DockSwipeSample {
+/// One frame of a driven route: how far into the route it is, and how many desktops the
+/// slide has covered by then. Distances are unsigned; the direction is applied when the event
+/// is built.
+struct DockSwipeSample: Equatable {
     let delay: TimeInterval
     let progress: Double
 }
@@ -857,21 +833,77 @@ struct DockSwipeSample {
 /// opaque speed scalar that looked identical at every value.
 enum DockSwipeAnimation {
 
-    /// One sample per display frame. Finer sampling only posts events the Dock coalesces.
-    static let sampleRate: Double = 120
+    static let fallbackSampleRate: Double = 120
 
-    /// Samples for a single desktop of travel, easing out so the slide settles rather than
-    /// stopping dead. Empty for a non-positive duration, which is the instant path.
+    /// Samples covering `distance` desktops in `duration` at one constant speed, one per display
+    /// frame. Empty for a non-positive duration, which is the instant path.
     static func samples(duration: TimeInterval,
-                        sampleRate: Double = sampleRate) -> [DockSwipeSample] {
-        guard duration > 0, sampleRate > 0 else { return [] }
+                        distance: Int = 1,
+                        sampleRate: Double = fallbackSampleRate) -> [DockSwipeSample] {
+        guard duration > 0, distance > 0, sampleRate > 0 else { return [] }
 
         // Two samples minimum: one point is a flick, not a drag.
         let count = max(2, Int((duration * sampleRate).rounded()))
         return (1...count).map { step in
             let fraction = Double(step) / Double(count)
             return DockSwipeSample(delay: duration * fraction,
-                                   progress: 1 - pow(1 - fraction, 3))
+                                   progress: Double(distance) * fraction)
+        }
+    }
+
+    // The Dock measures swipe progress against its whole strip of Spaces, not the screen, so
+    // reaching 1 with three Spaces moves the desktop only two thirds of the way and the
+    // release snaps the rest. Stopping just short of the full desktop is deliberate: a gesture
+    // released exactly on it slides identically but commits one to two seconds late on
+    // macOS 27, and every focus decision waits for that commit.
+    static func progressPerDesktop(spaceCount: Int) -> Double {
+        guard spaceCount > 1 else { return 1 }
+        return Double(spaceCount) / Double(spaceCount - 1) * 0.99
+    }
+
+    static func sampleRate(of displayID: CGDirectDisplayID?) -> Double {
+        guard let displayID,
+              let refreshRate = CGDisplayCopyDisplayMode(displayID)?.refreshRate,
+              refreshRate > 0
+        else { return fallbackSampleRate }
+        return refreshRate
+    }
+}
+
+/// One phase of a driven route as posted: which phase, and the progress within the current
+/// adjacent gesture.
+struct DockSwipeStroke: Equatable {
+    let phase: DockSwipePhase
+    let progress: Double
+}
+
+/// Splits a multi-desktop route into adjacent gestures, closing each exactly on its desktop
+/// boundary and opening the next one in the same frame so the slide never pauses between them.
+enum DockSwipeRoute {
+    static func strokes(for samples: [DockSwipeSample]) -> [[DockSwipeStroke]] {
+        let tolerance = 1e-9
+        var completedSegments = 0
+        var segmentOpen = false
+        return samples.map { sample in
+            var frame: [DockSwipeStroke] = []
+            while true {
+                if !segmentOpen {
+                    frame.append(DockSwipeStroke(phase: .began, progress: 0))
+                    segmentOpen = true
+                }
+                let withinSegment = sample.progress - Double(completedSegments)
+                guard withinSegment >= 1 - tolerance else {
+                    if withinSegment > tolerance {
+                        frame.append(DockSwipeStroke(phase: .changed, progress: withinSegment))
+                    }
+                    return frame
+                }
+                frame.append(DockSwipeStroke(phase: .changed, progress: 1))
+                frame.append(DockSwipeStroke(phase: .ended, progress: 1))
+                completedSegments += 1
+                segmentOpen = false
+                guard sample.progress - Double(completedSegments) > tolerance else { return frame }
+            }
         }
     }
 }
@@ -1183,53 +1215,53 @@ enum DockSwipeEvent {
         return true
     }
 
-    /// Posts one hop as a gesture whose progress Debut drives across `samples`, so the slide
-    /// takes as long as the samples say rather than as long as the Dock feels like.
+    /// Posts a route whose progress Debut drives across `samples`, so the slide takes as long
+    /// as the samples say rather than as long as the Dock feels like. Each desktop is its own
+    /// gesture, closed on its boundary and followed in the same frame by the next.
     ///
-    /// Blocks for the length of the animation, so it belongs off the main thread. `isCancelled`
-    /// is consulted between samples; a cancelled slide still Ends, because abandoning an open
-    /// gesture leaves the Dock rubber-banding on its own.
+    /// Blocks for the length of the animation, so it belongs off the main thread. Events are
+    /// built as they are posted because each carries its posting time. A gesture that cannot
+    /// be continued is still Ended without velocity, because an open gesture leaves the Dock
+    /// rubber-banding.
     @discardableResult
-    static func postDrivenSwitch(direction: SpaceSwitchDirection,
-                                 samples: [DockSwipeSample],
-                                 location: CGPoint? = nil,
-                                 mode: DockSwipePostingMode = .legacy,
-                                 isCancelled: () -> Bool = { false }) -> Bool {
+    static func postDrivenRoute(direction: SpaceSwitchDirection,
+                                samples: [DockSwipeSample],
+                                location: CGPoint? = nil,
+                                mode: DockSwipePostingMode = .legacy,
+                                progressPerDesktop: Double = 1) -> Bool {
         let releaseVelocity = mode == .legacy
             ? kAnimatedReleaseVelocity : kAugmentedInstantSwitchVelocity
-        guard let began = makeForPosting(
-            phase: .began, direction: direction, velocity: 0, progress: 1,
+        guard let abandonment = makeForPosting(
+            phase: .ended, direction: direction, velocity: 0, progress: 0,
             location: location, mode: mode
-        ), let beganEnvelope = makeEnvelope(location: location),
-              let ended = makeForPosting(
-                phase: .ended, direction: direction, velocity: releaseVelocity, progress: 1,
-                location: location, mode: mode
-              ),
-              let endedEnvelope = makeEnvelope(location: location)
+        ), let abandonmentEnvelope = makeEnvelope(location: location)
         else { return false }
 
         let start = DispatchTime.now()
-        began.post(tap: .cgSessionEventTap)
-        beganEnvelope.post(tap: .cgSessionEventTap)
-
-        for sample in samples.dropLast() {
-            guard !isCancelled() else { break }
+        var gestureOpen = false
+        for (sample, frame) in zip(samples, DockSwipeRoute.strokes(for: samples)) {
             wait(untilElapsed: sample.delay, since: start)
-            guard let changed = makeForPosting(
-                    phase: .changed, direction: direction, velocity: 0,
-                    progress: sample.progress, location: location, mode: mode
-                  ),
-                  let envelope = makeEnvelope(location: location)
-            else { continue }
-            changed.post(tap: .cgSessionEventTap)
-            envelope.post(tap: .cgSessionEventTap)
+            for stroke in frame {
+                guard let control = makeForPosting(
+                    phase: stroke.phase,
+                    direction: direction,
+                    velocity: stroke.phase == .ended ? releaseVelocity : 0,
+                    progress: stroke.progress * progressPerDesktop,
+                    location: location,
+                    mode: mode
+                ), let envelope = makeEnvelope(location: location)
+                else {
+                    if gestureOpen {
+                        abandonment.post(tap: .cgSessionEventTap)
+                        abandonmentEnvelope.post(tap: .cgSessionEventTap)
+                    }
+                    return false
+                }
+                control.post(tap: .cgSessionEventTap)
+                envelope.post(tap: .cgSessionEventTap)
+                gestureOpen = stroke.phase != .ended
+            }
         }
-
-        if !isCancelled(), let last = samples.last {
-            wait(untilElapsed: last.delay, since: start)
-        }
-        ended.post(tap: .cgSessionEventTap)
-        endedEnvelope.post(tap: .cgSessionEventTap)
         return true
     }
 
@@ -1959,15 +1991,11 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     public func switchToAdjacentSpace(offset: Int, stackID: String) -> Bool {
         guard canSwitchSpaces, abs(offset) == 1 else { return false }
         let topology = spaceTopology()
-        let scheduling = SpaceSwitchAnimation.configured.scheduling(
-            configuredDuration: switchDuration
-        )
         let request = switchCoordinatorLock.withLock {
             switchCoordinator.requestAdjacent(
                 offset: offset,
                 stackID: stackID,
-                in: topology,
-                scheduling: scheduling
+                in: topology
             )
         }
         return handleSwitchRequest(request, in: topology)
@@ -1997,13 +2025,11 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
     ) -> Bool {
         guard canSwitchSpaces else { return false }
         let topology = spaceTopology()
-        let scheduling = animation.scheduling(configuredDuration: switchDuration)
         let request = switchCoordinatorLock.withLock {
             switchCoordinator.request(
                 to: location,
                 in: topology,
-                animation: animation,
-                scheduling: scheduling
+                animation: animation
             )
         }
 
@@ -2117,9 +2143,9 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         onSwitchRecovery?()
     }
 
-    /// Posts one confirmed animated hop or a complete Instant route. The coordinator never
-    /// starts a second route while this one is unconfirmed, so batching the hops that belong to
-    /// one requested endpoint does not restore the overlapping-request overshoot this replaced.
+    /// Posts a complete route, timed or Instant. The coordinator never starts a second route
+    /// while this one is unconfirmed, so posting every hop that belongs to one requested
+    /// endpoint does not restore the overlapping-request overshoot this replaced.
     private func post(
         _ hops: [SpaceSwitchHop],
         in topology: SpaceTopology,
@@ -2148,7 +2174,11 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
         }
 
         let duration = first.animation.duration(configuredDuration: switchDuration)
-        let samples = DockSwipeAnimation.samples(duration: duration)
+        let samples = DockSwipeAnimation.samples(
+            duration: duration,
+            distance: hops.count,
+            sampleRate: DockSwipeAnimation.sampleRate(of: stack.displayID)
+        )
         guard !samples.isEmpty else {
             return DockSwipeEvent.postSwitches(
                 directions: hops.map(\.direction),
@@ -2158,13 +2188,16 @@ public final class SpaceService: SpaceSwitching, @unchecked Sendable {
             )
         }
 
-        guard hops.count == 1 else { return false }
+        guard hops.allSatisfy({ $0.direction == first.direction }) else { return false }
         switchQueue.async { [self] in
-            let posted = DockSwipeEvent.postDrivenSwitch(
+            let posted = DockSwipeEvent.postDrivenRoute(
                 direction: first.direction,
                 samples: samples,
                 location: eventLocation,
-                mode: postingMode
+                mode: postingMode,
+                progressPerDesktop: DockSwipeAnimation.progressPerDesktop(
+                    spaceCount: stack.orderedSpaceIDs.count
+                )
             )
             if !posted {
                 let cleared = switchCoordinatorLock.withLock {

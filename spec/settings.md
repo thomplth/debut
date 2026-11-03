@@ -22,7 +22,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Numbered desktop shortcuts | On |
 | Faster Control-arrow switching | On |
 | Faster trackpad desktop swipe | On |
-| Desktop switch duration | Instant (0 ms); configurable through 400 ms per desktop crossed |
+| Desktop switch duration | Instant (0 ms); configurable through 400 ms for a switch of any distance |
 | Desktop switch indicator | On |
 | Overlay on main display only | On |
 | Adaptive card sizing | On |
@@ -177,7 +177,7 @@ Setup has five pages and never requires shortcut practice:
    independent enable toggle. Both switchers default on.
 4. Faster desktop switching shows a looping, real-time comparison of macOS default
    switching and Debut Instant. Its master toggle defaults on, with a transition
-   duration slider from Instant to 400 ms per desktop. Changes save immediately;
+   duration slider from Instant to 400 ms for any distance. Changes save immediately;
    disabling the master disables the slider and preserves its value. Gesture and
    shortcut controls remain in Settings.
 5. You’re ready offers Start using Debut, Start tutorial, and Open Settings. Every

@@ -58,17 +58,22 @@ The synthetic DockSwipe technique is credited in `SpaceService` to
 [InstantSpaceSwitcher](https://github.com/jurplel/InstantSpaceSwitcher) for the
 original switching technique and velocity presets, and
 [Space Rabbit](https://github.com/Tahul/space-rabbit) for the gesture-field
-reference and driven-progress pattern. Debut adapts the timed progress to the
-horizontal desktop axis. The macOS 27 serialized IOHID payload work is credited
-to [iss](https://github.com/joshuarli/iss).
+reference and driven-progress pattern, and to
+[FasterSwiper](https://github.com/mgbowen/FasterSwiper) for the
+strip-relative progress scale and boundary-to-boundary chaining of a multi-desktop
+slide. Debut adapts the timed progress to the horizontal desktop axis. The macOS 27
+serialized IOHID payload work is credited to [iss](https://github.com/joshuarli/iss).
 
 When faster desktop transitions are enabled, `DockSwipeAnimation` posts a
 high-velocity instant switch at duration zero, or a Began/Changed/Ended sequence
 over the requested duration. Each gesture crosses one native Space. The topology
 keeps type-0 desktops as Debut stages while retaining fullscreen and tiled Spaces in
-a separate Mission Control order used for navigation. Instant routes
-prepare and post all adjacent gestures as one batch; nonzero and standard-duration
-routes wait for confirmation between adjacent gestures. The macOS 27 recipe
+a separate Mission Control order used for navigation. Every route posts all of its
+adjacent gestures together: Instant prepares them as one batch, and a timed route
+moves at one constant speed across the whole distance in the configured duration,
+ending each gesture on its desktop boundary and beginning the next in the same
+frame. Progress is scaled to the Dock's strip of Spaces, where one desktop is
+`count / (count - 1)` units. The macOS 27 recipe
 includes the augmented IOHID payload. Capability and system-overview gates
 preserve native input when Debut cannot safely own the navigation. Input taps
 decide ownership from cached topology and overview state; they do not query
@@ -82,7 +87,7 @@ left disabled is enabled for the session only around Debut's keystroke; one that
 unbound or has no modifier is never posted, because a keystroke Dock does not claim
 reaches the frontmost app. Separate display stacks, desktops past 16, and a shortcut
 Dock did not act on within 1.5 s fall back to an addressed gesture with a fixed
-standard 400 ms slide per desktop. Dock drops a Switch to Desktop N that arrives
+standard 400 ms slide. Dock drops a Switch to Desktop N that arrives
 while its own transition is running, so a request made during a native route only
 replaces that route's endpoint, and the route requests the endpoint again when the
 active-Space notification confirms the posted desktop. Either route waits for the
