@@ -88,6 +88,28 @@ struct ApplicationShortcutTests {
         #expect(windows.trackedRaisedWindowIDs.contains(202))
     }
 
+    @Test("All windows stays on the current desktop when the app has a window here, even if another was used more recently")
+    func allWindowsPrefersCurrentDesktop() {
+        let (controller, windows, spaces, _) = fixture(windows: [(201, 1), (202, 0), (203, 2)])
+        controller.handleKeyEvent(.toggleApplication(controller.applicationShortcuts[0].id))
+        #expect(spaces.switchRequests.isEmpty)
+        #expect(spaces.moveRequests.isEmpty)
+        #expect(windows.frontedWindows.last == FrontWindowRequest(windowID: 202, ownerPID: Self.pid))
+    }
+
+    @Test("Last used window returns to the most recently used window on another desktop, even with one here")
+    func lastUsedLeavesCurrentDesktop() {
+        let shortcut = ApplicationShortcut(bundleID: Self.bundleID, appName: "Editor", appPath: "",
+                                           windows: .lastUsed)
+        let (controller, windows, spaces, _) = fixture(shortcut, windows: [(201, 1), (202, 0)])
+        controller.handleKeyEvent(.toggleApplication(shortcut.id))
+        #expect(spaces.switchRequests == [1])
+        #expect(windows.frontedWindows.isEmpty)
+        spaces.current = 1
+        controller.desktopDidChange()
+        #expect(windows.frontedWindows.last == FrontWindowRequest(windowID: 201, ownerPID: Self.pid))
+    }
+
     @Test("Last used window relocates only the most recent window")
     func lastUsedMovesOneWindow() {
         let shortcut = ApplicationShortcut(bundleID: Self.bundleID, appName: "Editor", appPath: "",

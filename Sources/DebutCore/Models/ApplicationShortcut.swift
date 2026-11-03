@@ -162,15 +162,18 @@ public enum ApplicationToggle: Sendable, Equatable {
         func finalSpace(of entry: GlobalWindowEntry) -> UUID {
             relocated.contains(entry.window.windowID) ? activeSpaceID : entry.spaceID
         }
-        let destination = finalSpace(of: mostRecent)
+        let focused = shortcut.windows == .all
+            ? windows.first { finalSpace(of: $0) == activeSpaceID } ?? mostRecent
+            : mostRecent
+        let destination = finalSpace(of: focused)
         let raised = shortcut.windows == .all
-            ? windows.dropFirst().filter { finalSpace(of: $0) == destination }
+            ? windows.filter { $0 != focused && finalSpace(of: $0) == destination }
                 .map(\.window.windowID).reversed()
             : []
         return .reveal(ApplicationReveal(
             pid: target.pid,
             unhides: target.isHidden,
-            focusWindowID: mostRecent.window.windowID,
+            focusWindowID: focused.window.windowID,
             destinationSpaceID: destination,
             relocatedWindowIDs: relocated,
             raisedWindowIDs: Array(raised)

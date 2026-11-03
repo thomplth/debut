@@ -98,15 +98,17 @@ Debut never takes over a trackpad gesture while one of those overviews is active
 and the complete gesture stream remains native rather than changing ownership mid-swipe.
 unsupported synthetic switching is passed through rather than swallowed.
 
-An app shortcut launches its app when it is not running and hides it when it is frontmost
-with a window on the current desktop. Otherwise it unhides the app and focuses its most
-recently used window. A window on another desktop is reached with Debut's own desktop switch,
-which is instant while faster desktop transitions are on, and is focused only after the desktop
-arrives. Windows of a hidden app can instead move to the current desktop through the
-window-server bridge (the default), or every window can, before focus lands. All windows raises
-the app's other windows on the destination too; Last used window acts on one. A running app with
-no windows is reopened as a Dock click would, or sent Command-N when chosen. Only hide, Only
-show, and Only if running narrow the behavior. An ignored app is unhidden and activated without
+An app shortcut launches its app when it is not running and hides it when it is frontmost with
+a window on the current desktop. Otherwise it unhides the app and focuses a window: with All
+windows, its most recent window on the current desktop, falling back to its most recent window
+anywhere; with Last used window, its most recent window wherever that is. A window on another
+desktop is reached with Debut's own desktop switch, which is instant while faster desktop
+transitions are on, and is focused only after the desktop arrives. Windows of a hidden app can
+instead move to the current desktop through the window-server bridge (the default), or every
+window can, before focus lands. All windows also raises the app's other windows on that desktop
+and moves every window it relocates; Last used window acts on one. A running app with no
+windows is reopened as a Dock click would, or sent Command-N when chosen. Only hide, Only show,
+and Only if running narrow the behavior. An ignored app is unhidden and activated without
 moving windows or switching desktops. A disabled shortcut passes its key through.
 
 The desktop indicator reports confirmed changes, including native navigation,
