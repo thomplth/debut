@@ -14,15 +14,13 @@ public enum ApplicationShortcutWindows: String, Codable, Sendable, CaseIterable 
 }
 
 public enum ApplicationShortcutPlacement: String, Codable, Sendable, CaseIterable {
-    case moveHiddenToCurrentDesktop
-    case moveAllToCurrentDesktop
     case switchToWindowDesktop
+    case moveAllToCurrentDesktop
 
     public var displayName: String {
         switch self {
-        case .moveHiddenToCurrentDesktop: "Move hidden windows to current desktop"
-        case .moveAllToCurrentDesktop: "Move windows to current desktop"
         case .switchToWindowDesktop: "Switch to the window's desktop"
+        case .moveAllToCurrentDesktop: "Move windows to current desktop"
         }
     }
 }
@@ -53,7 +51,7 @@ public struct ApplicationShortcut: Codable, Sendable, Equatable, Identifiable {
         onlyIfRunning: Bool = false,
         opensNewWindowWhenNoneOpen: Bool = false,
         windows: ApplicationShortcutWindows = .all,
-        placement: ApplicationShortcutPlacement = .moveHiddenToCurrentDesktop
+        placement: ApplicationShortcutPlacement = .switchToWindowDesktop
     ) {
         self.id = id
         self.bundleID = bundleID
@@ -152,16 +150,8 @@ public enum ApplicationToggle: Sendable, Equatable {
         }
 
         let affected = shortcut.windows == .lastUsed ? [mostRecent] : windows
-        let preferred = shortcut.windows == .all
-            ? windows.first { $0.spaceID == activeSpaceID } ?? mostRecent
-            : mostRecent
-        let relocationCandidates: [GlobalWindowEntry] = switch shortcut.placement {
-        case .moveAllToCurrentDesktop: affected
-        case .moveHiddenToCurrentDesktop: target.isHidden ? [preferred] : []
-        case .switchToWindowDesktop: []
-        }
-        let relocated = canMoveWindows
-            ? relocationCandidates.filter { $0.spaceID != activeSpaceID }.map(\.window.windowID) : []
+        let relocated = canMoveWindows && shortcut.placement == .moveAllToCurrentDesktop
+            ? affected.filter { $0.spaceID != activeSpaceID }.map(\.window.windowID) : []
         func finalSpace(of entry: GlobalWindowEntry) -> UUID {
             relocated.contains(entry.window.windowID) ? activeSpaceID : entry.spaceID
         }

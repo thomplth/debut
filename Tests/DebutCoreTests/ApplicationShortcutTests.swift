@@ -71,19 +71,20 @@ struct ApplicationShortcutTests {
         #expect(windows.frontedWindows.last == FrontWindowRequest(windowID: 201, ownerPID: Self.pid))
     }
 
-    @Test("A hidden app with no window here has only its most recent window moved here and focused, without a desktop switch")
-    func movesMostRecentHiddenWindowHere() {
+    @Test("A hidden app is shown with its windows on their own desktops, reaching another desktop by switching there")
+    func showsHiddenAppWhereItsWindowsAre() {
         let (controller, windows, spaces, applications) = fixture(
             windows: [(201, 1), (202, 2)],
             target: ApplicationShortcutTarget(pid: Self.pid, isActive: false, isHidden: true)
         )
         controller.handleKeyEvent(.toggleApplication(controller.applicationShortcuts[0].id))
         #expect(applications.calls == ["unhide \(Self.pid)"])
-        #expect(spaces.moveRequests.map(\.windowID) == [201])
-        #expect(spaces.moveRequests.allSatisfy { $0.desktop == 0 })
-        #expect(spaces.switchRequests.isEmpty)
-        #expect(spaceIndex(of: 201, in: controller) == 0)
+        #expect(spaces.moveRequests.isEmpty)
+        #expect(spaces.switchRequests == [1])
+        #expect(spaceIndex(of: 201, in: controller) == 1)
         #expect(spaceIndex(of: 202, in: controller) == 2)
+        spaces.current = 1
+        controller.desktopDidChange()
         #expect(windows.frontedWindows.last == FrontWindowRequest(windowID: 201, ownerPID: Self.pid))
     }
 
@@ -125,10 +126,10 @@ struct ApplicationShortcutTests {
         #expect(windows.frontedWindows.last == FrontWindowRequest(windowID: 201, ownerPID: Self.pid))
     }
 
-    @Test("Last used window relocates only the most recent window")
+    @Test("Last used window moves only the most recent window when moving windows here")
     func lastUsedMovesOneWindow() {
         let shortcut = ApplicationShortcut(bundleID: Self.bundleID, appName: "Editor", appPath: "",
-                                           windows: .lastUsed)
+                                           windows: .lastUsed, placement: .moveAllToCurrentDesktop)
         let (controller, _, spaces, _) = fixture(
             shortcut,
             windows: [(201, 1), (202, 2)],
@@ -149,29 +150,17 @@ struct ApplicationShortcutTests {
         #expect(spaces.switchRequests.isEmpty)
     }
 
-    @Test("Switching to the window's desktop never relocates a hidden app's windows")
-    func switchPlacementKeepsWindowsInPlace() {
-        let shortcut = ApplicationShortcut(bundleID: Self.bundleID, appName: "Editor", appPath: "",
-                                           placement: .switchToWindowDesktop)
-        let (controller, _, spaces, applications) = fixture(
-            shortcut,
-            windows: [(201, 2)],
-            target: ApplicationShortcutTarget(pid: Self.pid, isActive: false, isHidden: true)
-        )
-        controller.handleKeyEvent(.toggleApplication(shortcut.id))
-        #expect(applications.calls == ["unhide \(Self.pid)"])
-        #expect(spaces.moveRequests.isEmpty)
-        #expect(spaces.switchRequests == [2])
-    }
-
     @Test("A refused move focuses the window on the desktop it stayed on")
     func refusedMoveFallsBackToSwitch() {
+        let shortcut = ApplicationShortcut(bundleID: Self.bundleID, appName: "Editor", appPath: "",
+                                           placement: .moveAllToCurrentDesktop)
         let (controller, _, spaces, _) = fixture(
+            shortcut,
             windows: [(201, 1)],
             target: ApplicationShortcutTarget(pid: Self.pid, isActive: false, isHidden: true)
         )
         spaces.moveSucceeds = false
-        controller.handleKeyEvent(.toggleApplication(controller.applicationShortcuts[0].id))
+        controller.handleKeyEvent(.toggleApplication(shortcut.id))
         #expect(spaceIndex(of: 201, in: controller) == 1)
         #expect(spaces.switchRequests == [1])
     }
@@ -330,6 +319,14 @@ struct ApplicationShortcutTests {
         )
         #expect(decoded.applicationShortcuts == settings.applicationShortcuts)
         #expect(decoded.launchAtLogin == false)
+    }
+
+    @Test("A shortcut saved to move hidden windows here loads as switching to the window's desktop")
+    func hiddenWindowPlacementLoadsAsSwitch() throws {
+        let saved = #"{"bundleID":"com.test.Editor","placement":"moveHiddenToCurrentDesktop"}"#
+        let shortcut = try JSONDecoder().decode(ApplicationShortcut.self, from: Data(saved.utf8))
+        #expect(shortcut.placement == .switchToWindowDesktop)
+        #expect(ApplicationShortcutPlacement.allCases == [.switchToWindowDesktop, .moveAllToCurrentDesktop])
     }
 
     @Test("Recording an app shortcut flags a Debut shortcut, another app, or a bare key")

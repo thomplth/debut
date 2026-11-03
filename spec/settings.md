@@ -103,10 +103,9 @@ a window on the current desktop. Otherwise it unhides the app and focuses a wind
 windows, its most recent window on the current desktop, falling back to its most recent window
 anywhere; with Last used window, its most recent window wherever that is. A window on another
 desktop is reached with Debut's own desktop switch, which is instant while faster desktop
-transitions are on, and is focused only after the desktop arrives. A hidden app can instead
-bring that window to the current desktop through the window-server bridge (the default); its
-other windows stay on their own desktops, so hiding and showing an app with a window here moves
-nothing. Moving every window to the current desktop is a separate choice, made before focus
+transitions are on, and is focused only after the desktop arrives. Showing a hidden app leaves
+its windows on their own desktops, so hiding and showing an app never moves its windows. Every
+window can instead move to the current desktop through the window-server bridge before focus
 lands. All windows also raises the app's other windows on that desktop and, when moving every
 window, moves all of them; Last used window acts on one. A running app with no
 windows is reopened as a Dock click would, or sent Command-N when chosen. Only hide, Only show,
