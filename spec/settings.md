@@ -41,6 +41,7 @@ authoritative; changed defaults do not overwrite existing explicit preferences.
 | Launch at login / show in Dock | On / On |
 | Send crash reports automatically | Off; shown only in nightly and stable releases |
 | Excluded apps | Empty |
+| App shortcuts | None |
 
 The preview switcher and the icon switcher (drawn without previews) keep separate
 Appearance values: Liquid Glass material, rim, edge refraction and tint, title halo,
@@ -97,6 +98,17 @@ Debut never takes over a trackpad gesture while one of those overviews is active
 and the complete gesture stream remains native rather than changing ownership mid-swipe.
 unsupported synthetic switching is passed through rather than swallowed.
 
+An app shortcut launches its app when it is not running and hides it when it is frontmost
+with a window on the current desktop. Otherwise it unhides the app and focuses its most
+recently used window. A window on another desktop is reached with Debut's own desktop switch,
+which is instant while faster desktop transitions are on, and is focused only after the desktop
+arrives. Windows of a hidden app can instead move to the current desktop through the
+window-server bridge (the default), or every window can, before focus lands. All windows raises
+the app's other windows on the destination too; Last used window acts on one. A running app with
+no windows is reopened as a Dock click would, or sent Command-N when chosen. Only hide, Only
+show, and Only if running narrow the behavior. An ignored app is unhidden and activated without
+moving windows or switching desktops. A disabled shortcut passes its key through.
+
 The desktop indicator reports confirmed changes, including native navigation,
 on the affected display. Main-display-only overlay placement does not change
 which display stack the window switcher navigates.
@@ -113,13 +125,15 @@ changes save immediately and update shared onboarding controls and menu checkmar
 | Switcher | Command-Tab desktop isolation, Option-Tab activation, window previews, display placement, preview freshness, overlay hold delay, and held cycling pace. |
 | Appearance | A live preview of the switcher pinned at the top (over a High Contrast, Text or Stripes backdrop), then card layout, adaptive preview sizing, inactive-stage scale, app icon position and growth, Liquid Glass (material, rim, edge refraction, title halo, tint), and the preview and selection highlight. It edits the mode the switchers currently draw: with previews, or as icons when previews are off or Screen Recording is not granted. App icon position, app icon growth, matching previews to windows and the preview corner radius apply only to previews and are shown only in that mode. |
 | Shortcuts | Activation and Space Manager session bindings including H/J/K/L selector movement and Space to lock the overlay open, numbered modifier sets with a Disabled choice, a confirmed restore-defaults action, and reference for fixed move chords. Pressing Delete while recording clears a binding. An open session handles its own keys before global shortcuts, and Debut binding conflicts are checked within each context. |
+| App Shortcuts | Shortcuts that launch, show, or hide one chosen app each, added from an application picker, with a recorder, an enable switch, and per-shortcut options. Conflicts with Debut's global shortcuts, another app shortcut, or a bare key are flagged before saving. |
 | Support | Bug reporting through a public GitHub issue form (requires a GitHub account), diagnostic export, a confirmed window-cache reset that preserves settings, and a confirmed reset of all settings that preserves window assignments. |
 | About | Debut icon and version, update checks, and links to the GitHub repository and creator's Twitter profile. |
 
 Every configurable value has one destination: app-level choices and ignored apps
 are in General; desktop navigation and feedback are in Desktops; overlay behavior,
 content, placement, freshness, and held-key timing are in Switcher; visual layout and selection are
-in Appearance; and all key assignments are in Shortcuts.
+in Appearance; Debut's own key assignments are in Shortcuts; and per-app launch shortcuts are
+in App Shortcuts.
 Support contains actions rather than preferences. Every page with preferences ends with a
 confirmed Restore Defaults action that resets that page only; on Appearance it resets
 only the mode shown.

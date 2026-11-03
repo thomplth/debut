@@ -4,6 +4,7 @@ public enum ConflictType: Sendable {
     case `internal`(existingAction: KeyAction)
     case system(description: String)
     case requirement(description: String)
+    case application(name: String)
 }
 
 public struct ShortcutConflict: Sendable {
@@ -18,6 +19,8 @@ public struct ShortcutConflict: Sendable {
             "Overlaps with system shortcut: \(desc)"
         case .requirement(let desc):
             desc
+        case .application(let name):
+            "Already opens \(name)"
         }
     }
 }
@@ -74,6 +77,33 @@ public struct ConflictDetector: Sendable {
         }
         if let c = checkSystem(combo: combo, forAction: action) {
             conflicts.append(c)
+        }
+        return conflicts
+    }
+
+    public static func detectConflicts(
+        combo: KeyCombo,
+        forApplicationShortcut id: UUID,
+        among shortcuts: [ApplicationShortcut],
+        in bindings: KeyBindings
+    ) -> [ShortcutConflict] {
+        var conflicts: [ShortcutConflict] = []
+        if !combo.command, !combo.control, !combo.shift, !combo.option {
+            conflicts.append(ShortcutConflict(
+                type: .requirement(
+                    description: "A global shortcut without modifiers intercepts ordinary typing"
+                ),
+                combo: combo
+            ))
+        }
+        if let action = bindings.action(for: combo, scope: .global) {
+            conflicts.append(ShortcutConflict(type: .internal(existingAction: action), combo: combo))
+        }
+        if let other = shortcuts.first(where: { $0.id != id && $0.activeCombo == combo }) {
+            conflicts.append(ShortcutConflict(type: .application(name: other.appName), combo: combo))
+        }
+        if let desc = systemAdvisory[combo] {
+            conflicts.append(ShortcutConflict(type: .system(description: desc), combo: combo))
         }
         return conflicts
     }

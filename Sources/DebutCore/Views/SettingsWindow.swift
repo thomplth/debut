@@ -146,6 +146,12 @@ public struct SettingsView: View {
                         Divider()
                         selectorSection
                     case .shortcuts: keyboardShortcutsSection
+                    case .applications:
+                        ApplicationShortcutsSection(
+                            shortcuts: $viewModel.settings.applicationShortcuts,
+                            keyBindings: viewModel.settings.keyBindings,
+                            recordingService: shortcutRecordingService
+                        )
                     case .support: supportSection
                     case .about: aboutSection
                     }
@@ -1157,6 +1163,7 @@ public struct SettingsView: View {
         case .switcher: "macwindow.on.rectangle"
         case .appearance: "paintbrush"
         case .shortcuts: "keyboard"
+        case .applications: "square.grid.2x2"
         case .support: "questionmark.circle"
         case .about: "info.circle"
         }

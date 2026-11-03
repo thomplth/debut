@@ -51,6 +51,7 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
         control: true,
         option: true
     )
+    private var storedApplicationShortcuts: [ApplicationShortcut] = []
     private var shortcutRecordingHandler: (@MainActor @Sendable (KeyCombo?) -> Void)?
     private var shortcutRecordingKeysDown: Set<Int64> = []
     private var storedHeldCycleMinimumInterval: TimeInterval =
@@ -77,6 +78,11 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
     public var quickSwitchSameApplicationModifiers: ShortcutModifiers {
         get { configurationLock.withLock { storedQuickSwitchSameApplicationModifiers } }
         set { configurationLock.withLock { storedQuickSwitchSameApplicationModifiers = newValue } }
+    }
+
+    public var applicationShortcuts: [ApplicationShortcut] {
+        get { configurationLock.withLock { storedApplicationShortcuts } }
+        set { configurationLock.withLock { storedApplicationShortcuts = newValue } }
     }
 
     public var heldCycleMinimumInterval: TimeInterval {
@@ -494,6 +500,16 @@ public final class EventTapKeyboardService: KeyboardService, ShortcutRecordingSe
                         ? .switchToSpaceKeepingCurrentApplication(spacePosition)
                         : .switchToSpace(spacePosition)
                     deliver(keyEvent, asynchronously: deliverAsynchronously)
+                }
+                return nil
+            }
+        }
+
+        if type == .keyDown {
+            let combo = Self.keyCombo(keyCode: keyCode, flags: flags)
+            if let id = applicationShortcuts.first(where: { $0.activeCombo == combo })?.id {
+                if quickSwitchKeysDown.insert(keyCode).inserted {
+                    deliver(.toggleApplication(id), asynchronously: deliverAsynchronously)
                 }
                 return nil
             }

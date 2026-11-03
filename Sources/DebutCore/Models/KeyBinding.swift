@@ -350,6 +350,11 @@ public struct KeyCombo: Codable, Sendable, Equatable, Hashable {
         option = try container.decodeIfPresent(Bool.self, forKey: .option) ?? false
     }
 
+    public var isClearingKey: Bool {
+        (keyCode == kVK_Delete || keyCode == kVK_ForwardDelete)
+            && !command && !control && !shift && !option
+    }
+
     public var displayString: String {
         var parts: [String] = []
         if command { parts.append("Command") }
@@ -560,8 +565,7 @@ public struct KeyBindings: Codable, Sendable, Equatable {
     }
 
     public mutating func record(_ combo: KeyCombo, for action: KeyAction) {
-        if (combo.keyCode == kVK_Delete || combo.keyCode == kVK_ForwardDelete)
-            && !combo.command && !combo.control && !combo.shift && !combo.option {
+        if combo.isClearingKey {
             clear(action)
         } else {
             set(combo, for: action)

@@ -71,6 +71,7 @@ navigation, move and desktop keys are Command-Tab only.
 | Switcher | Command-Tab isolation, Option-Tab, window previews, overlay display, preview freshness, hold delay, held cycling pace |
 | Appearance | Live preview, card layout and size, inactive-space scale, app icon placement, Liquid Glass, selection highlight; separate values with and without previews |
 | Shortcuts | Every binding above, numbered-space modifiers, restore defaults |
+| App Shortcuts | Per-app shortcuts that launch, show, or hide an app, reaching windows on other desktops through Debut's switch |
 | Support | Bug report form, diagnostic export, window-cache reset, settings reset |
 | About | Version, update checks, links |
 

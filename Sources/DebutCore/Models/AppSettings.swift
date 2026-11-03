@@ -188,6 +188,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var keyBindings: KeyBindings
     public var quickSwitchModifiers: ShortcutModifiers
     public var quickSwitchSameApplicationModifiers: ShortcutModifiers
+    public var applicationShortcuts: [ApplicationShortcut]
 
     // Space switching
     public var spaceSwitchDuration: TimeInterval
@@ -220,6 +221,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
             control: true,
             option: true
         )
+        self.applicationShortcuts = []
         self.spaceSwitchDuration = Self.defaultSpaceSwitchDuration
         self.previewRefreshPolicy = .lastActiveOnly
         self.previewCacheTTL = Self.defaultPreviewCacheTTL
@@ -314,6 +316,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
             ShortcutModifiers.self,
             forKey: .quickSwitchSameApplicationModifiers
         ) ?? ShortcutModifiers(control: true, option: true)
+        applicationShortcuts = (try? container.decodeIfPresent(
+            [LossyDecoded<ApplicationShortcut>].self,
+            forKey: .applicationShortcuts
+        ))?.compactMap(\.value) ?? []
         previewRefreshPolicy = try container.decodeIfPresent(
             PreviewRefreshPolicy.self,
             forKey: .previewRefreshPolicy
@@ -322,6 +328,15 @@ public struct AppSettings: Codable, Sendable, Equatable {
             TimeInterval.self,
             forKey: .previewCacheTTL
         ) ?? Self.defaultPreviewCacheTTL
+    }
+}
+
+/// One malformed element is dropped instead of discarding every other setting with it.
+struct LossyDecoded<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: Decoder) throws {
+        value = try? Value(from: decoder)
     }
 }
 

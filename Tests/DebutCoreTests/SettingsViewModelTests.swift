@@ -106,6 +106,7 @@ struct SettingsViewModelTests {
             .switcher,
             .appearance,
             .shortcuts,
+            .applications,
             .support,
             .about,
         ])

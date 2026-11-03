@@ -105,7 +105,7 @@ struct ShortcutRecorderRow: View {
     }
 }
 
-private struct ShortcutKeyBox: View {
+struct ShortcutKeyBox: View {
     let text: String
     let recording: Bool
 

@@ -149,7 +149,7 @@ private struct PreviewCacheEntry {
 }
 
 /// Completes a space commit only after every asynchronous window relocation has answered.
-private final class WindowRelocationBarrier: @unchecked Sendable {
+final class WindowRelocationBarrier: @unchecked Sendable {
     private let lock = NSLock()
     private var remaining: Int
     private var completion: (@Sendable () -> Void)?
@@ -606,8 +606,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// Runtime desktop snapshots must defer to this controller's in-flight move until its
     /// route completes; WindowServer can briefly report the desktop just left during a swipe.
     var controllerOwnedMoveWindowIDs: Set<CGWindowID> {
-        followingWindowMove.map { [$0.windowID] } ?? []
+        applicationRelocationWindowIDs.union(followingWindowMove.map { [$0.windowID] } ?? [])
     }
+    var applicationRelocationWindowIDs: Set<CGWindowID> = []
+    public var applicationShortcuts: [ApplicationShortcut] = []
+    public var applications: any ApplicationControlling = WorkspaceApplicationControl()
 
     private enum FocusCommand: String {
         case commandTab = "command_tab"
@@ -629,7 +632,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private let focusDeliveryProbe: FocusDeliveryProbe?
     private let focusDeliveryVerificationDelay: TimeInterval
     private let windowMoveSettleDelay: TimeInterval
-    private let diag: DiagnosticReporter
+    let diag: DiagnosticReporter
     private let overlayPresentationRecorder: OverlayPresentationRecorder
     private var activeOverlayPresentation: OverlayPresentationContext?
 
@@ -2262,7 +2265,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             case .quitSelectedApp, .closeSelectedWindow, .addDesktop, .removeDesktop,
                  .nextDisplayStack,
                  .switchAdjacentSpace, .switchToSpace, .switchToSpaceKeepingCurrentApplication,
-                 .moveFocusedWindowToAdjacentSpace,
+                 .moveFocusedWindowToAdjacentSpace, .toggleApplication,
                  .moveWindowLeft, .moveWindowRight, .jumpToSpace, .jumpToLastSpace:
                 return
             default: break
@@ -2380,6 +2383,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             }
         case .moveFocusedWindowToAdjacentSpace(let offset):
             moveFocusedWindowToAdjacentSpace(offset: offset)
+        case .toggleApplication(let id):
+            toggleApplication(id: id)
         case .switchToSpace(let position):
             quickSwitchToSpace(index: position - 1, keepingCurrentApplication: false)
         case .switchToSpaceKeepingCurrentApplication(let position):

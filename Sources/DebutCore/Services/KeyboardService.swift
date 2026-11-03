@@ -30,6 +30,7 @@ public enum DebutKeyEvent: Equatable, Sendable {
     case switchToSpaceKeepingCurrentApplication(Int)
     case switchAdjacentSpace(Int)
     case moveFocusedWindowToAdjacentSpace(Int) // Configured global shortcut, following the window
+    case toggleApplication(UUID) // Configured app shortcut — launch, show, or hide that app
 
     case moveWindowUp           // Up Arrow
     case moveWindowDown         // Down Arrow

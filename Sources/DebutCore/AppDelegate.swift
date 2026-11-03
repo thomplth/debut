@@ -338,6 +338,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             DispatchQueue.main.async { self?.completeTutorialSelection(windowID: windowID, practice: practice) }
         }
         controller.excludedBundleIDs = Set(currentSettings.excludedBundleIDs)
+        controller.applicationShortcuts = currentSettings.applicationShortcuts
         controller.spaceSwitcher = spaceService
         controller.fasterDesktopSwitchingEnabled =
             currentSettings.features.fasterDesktopSwitching
@@ -357,6 +358,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         keyboardService.keyBindings = currentSettings.keyBindings
+        keyboardService.applicationShortcuts = currentSettings.applicationShortcuts
         keyboardService.quickSwitchModifiers = currentSettings.quickSwitchModifiers
         keyboardService.quickSwitchSameApplicationModifiers =
             currentSettings.quickSwitchSameApplicationModifiers
@@ -1939,6 +1941,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             self.debouncedSaver?.scheduleSave(spaceManager)
         }
         self.keyboardService?.keyBindings = newSettings.keyBindings
+        self.keyboardService?.applicationShortcuts = newSettings.applicationShortcuts
+        self.spaceController?.applicationShortcuts = newSettings.applicationShortcuts
         self.spaceController?.overlayPresentationDelay = newSettings.overlayPresentationDelay
         self.spaceController?.previewRefreshPolicy = newSettings.previewRefreshPolicy
         self.spaceController?.previewCacheTTL = newSettings.previewCacheTTL

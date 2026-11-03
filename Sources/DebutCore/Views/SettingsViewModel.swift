@@ -6,6 +6,7 @@ public enum SettingsSection: String, CaseIterable, Sendable {
     case switcher = "Switcher"
     case appearance = "Appearance"
     case shortcuts = "Shortcuts"
+    case applications = "App Shortcuts"
     case support = "Support"
     case about = "About"
 
@@ -57,6 +58,8 @@ public enum SettingsSection: String, CaseIterable, Sendable {
                 .quickSwitchModifiers,
                 .quickSwitchSameApplicationModifiers,
             ]
+        case .applications:
+            [.applicationShortcuts]
         case .support, .about:
             []
         }
@@ -99,6 +102,7 @@ enum SettingsOption: String, CaseIterable, Sendable {
     case keyBindings
     case quickSwitchModifiers
     case quickSwitchSameApplicationModifiers
+    case applicationShortcuts
     case overlayPresentationDelay
     case heldCycleMinimumInterval
 
@@ -212,6 +216,7 @@ public struct SettingsViewModel: Sendable {
         case .quickSwitchModifiers: settings.quickSwitchModifiers = defaults.quickSwitchModifiers
         case .quickSwitchSameApplicationModifiers:
             settings.quickSwitchSameApplicationModifiers = defaults.quickSwitchSameApplicationModifiers
+        case .applicationShortcuts: settings.applicationShortcuts = defaults.applicationShortcuts
         case .overlayPresentationDelay: settings.overlayPresentationDelay = defaults.overlayPresentationDelay
         case .heldCycleMinimumInterval: settings.heldCycleMinimumInterval = defaults.heldCycleMinimumInterval
         }
