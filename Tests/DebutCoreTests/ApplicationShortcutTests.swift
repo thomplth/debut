@@ -71,21 +71,36 @@ struct ApplicationShortcutTests {
         #expect(windows.frontedWindows.last == FrontWindowRequest(windowID: 201, ownerPID: Self.pid))
     }
 
-    @Test("A hidden app's windows move to the current desktop and are focused there without a desktop switch")
-    func movesHiddenWindowsHere() {
+    @Test("A hidden app with no window here has only its most recent window moved here and focused, without a desktop switch")
+    func movesMostRecentHiddenWindowHere() {
         let (controller, windows, spaces, applications) = fixture(
             windows: [(201, 1), (202, 2)],
             target: ApplicationShortcutTarget(pid: Self.pid, isActive: false, isHidden: true)
         )
         controller.handleKeyEvent(.toggleApplication(controller.applicationShortcuts[0].id))
         #expect(applications.calls == ["unhide \(Self.pid)"])
-        #expect(spaces.moveRequests.map(\.windowID) == [201, 202])
+        #expect(spaces.moveRequests.map(\.windowID) == [201])
         #expect(spaces.moveRequests.allSatisfy { $0.desktop == 0 })
         #expect(spaces.switchRequests.isEmpty)
         #expect(spaceIndex(of: 201, in: controller) == 0)
-        #expect(spaceIndex(of: 202, in: controller) == 0)
+        #expect(spaceIndex(of: 202, in: controller) == 2)
         #expect(windows.frontedWindows.last == FrontWindowRequest(windowID: 201, ownerPID: Self.pid))
-        #expect(windows.trackedRaisedWindowIDs.contains(202))
+    }
+
+    @Test("A hidden app with a window here is shown in place, leaving its windows on other desktops where they were")
+    func showsHiddenAppInPlace() {
+        let (controller, windows, spaces, applications) = fixture(
+            windows: [(201, 1), (202, 0), (203, 2), (204, 0)],
+            target: ApplicationShortcutTarget(pid: Self.pid, isActive: false, isHidden: true)
+        )
+        controller.handleKeyEvent(.toggleApplication(controller.applicationShortcuts[0].id))
+        #expect(applications.calls == ["unhide \(Self.pid)"])
+        #expect(spaces.moveRequests.isEmpty)
+        #expect(spaces.switchRequests.isEmpty)
+        #expect(spaceIndex(of: 201, in: controller) == 1)
+        #expect(spaceIndex(of: 203, in: controller) == 2)
+        #expect(windows.frontedWindows.last == FrontWindowRequest(windowID: 202, ownerPID: Self.pid))
+        #expect(windows.trackedRaisedWindowIDs.contains(204))
     }
 
     @Test("All windows stays on the current desktop when the app has a window here, even if another was used more recently")

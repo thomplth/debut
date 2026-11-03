@@ -152,13 +152,16 @@ public enum ApplicationToggle: Sendable, Equatable {
         }
 
         let affected = shortcut.windows == .lastUsed ? [mostRecent] : windows
-        let placementRelocates = switch shortcut.placement {
-        case .moveAllToCurrentDesktop: true
-        case .moveHiddenToCurrentDesktop: target.isHidden
-        case .switchToWindowDesktop: false
+        let preferred = shortcut.windows == .all
+            ? windows.first { $0.spaceID == activeSpaceID } ?? mostRecent
+            : mostRecent
+        let relocationCandidates: [GlobalWindowEntry] = switch shortcut.placement {
+        case .moveAllToCurrentDesktop: affected
+        case .moveHiddenToCurrentDesktop: target.isHidden ? [preferred] : []
+        case .switchToWindowDesktop: []
         }
-        let relocated = canMoveWindows && placementRelocates
-            ? affected.filter { $0.spaceID != activeSpaceID }.map(\.window.windowID) : []
+        let relocated = canMoveWindows
+            ? relocationCandidates.filter { $0.spaceID != activeSpaceID }.map(\.window.windowID) : []
         func finalSpace(of entry: GlobalWindowEntry) -> UUID {
             relocated.contains(entry.window.windowID) ? activeSpaceID : entry.spaceID
         }
