@@ -464,13 +464,6 @@ enum StageMotion {
         !TransientWindowIdentity.isTransient(bundleID)
     }
 
-    static func windowSelectorSize(thumbnailSize: CGSize, outset: CGFloat) -> CGSize {
-        CGSize(
-            width: thumbnailSize.width + outset * 2,
-            height: thumbnailSize.height + outset * 2
-        )
-    }
-
     static func sourceWindowOpacity(isDragging: Bool) -> Double {
         isDragging ? 0 : 1
     }
@@ -3060,6 +3053,9 @@ struct WindowPreviewView: View {
         let previewCorner = metrics.previewCornerRadius(userRadius: appearance.previewCornerRadius)
         // The values of the mode this card is drawn in: previews and icons are tuned apart.
         let drawn = appearance.appearance(for: metrics.cardStyle)
+        let previewAspect = metrics.cardStyle == .icons ? nil : window.currentPreview.map {
+            CGFloat($0.width) / CGFloat(max(1, $0.height))
+        }
         return VStack(spacing: metrics.titleSpacing) {
             ZStack(alignment: .topLeading) {
                 Group {
@@ -3147,11 +3143,7 @@ struct WindowPreviewView: View {
                     // Centred at the bottom of the image as drawn, which a window of another
                     // shape letterboxes inside the card.
                     let centre = metrics.badgeCentre(
-                        in: metrics.previewImageRect(
-                            forImageAspect: window.currentPreview.map {
-                                CGFloat($0.width) / CGFloat(max(1, $0.height))
-                            }
-                        ),
+                        in: metrics.previewImageRect(forImageAspect: previewAspect),
                         placement: appearance.badgePlacement
                     )
                     Color.clear
@@ -3171,11 +3163,8 @@ struct WindowPreviewView: View {
             }
             .background {
                 if showsSelector {
-                    let selectorSize = StageMotion.windowSelectorSize(
-                        thumbnailSize: CGSize(
-                            width: metrics.thumbnailWidth,
-                            height: metrics.thumbnailHeight
-                        ),
+                    let selectorFrame = metrics.selectorFrame(
+                        forImageAspect: previewAspect,
                         outset: CGFloat(drawn.selectorOutset) * metrics.scaleFactor
                     )
                     // Blends with the stage's glass, so nothing between the two may form a
@@ -3188,7 +3177,8 @@ struct WindowPreviewView: View {
                         style: .continuous
                     ))
                     .dockGlassStyle(drawn.dockGlassStyle)
-                    .frame(width: selectorSize.width, height: selectorSize.height)
+                    .frame(width: selectorFrame.width, height: selectorFrame.height)
+                    .position(x: selectorFrame.midX, y: selectorFrame.midY)
                     // Native nudges an icon's highlight with the icon itself.
                     .offset(metrics.cardStyle == .icons
                         ? DockGlass.Metrics(iconSize: metrics.thumbnailHeight).iconCanvasOffset

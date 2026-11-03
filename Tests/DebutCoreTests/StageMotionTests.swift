@@ -807,12 +807,40 @@ struct StageMotionTests {
         ))
     }
 
-    @Test("The fill expands behind the preview by the configured outset")
-    func filledSelectorSize() {
-        #expect(StageMotion.windowSelectorSize(
-            thumbnailSize: CGSize(width: 160, height: 100),
-            outset: 6
-        ) == CGSize(width: 172, height: 112))
+    @Test("The fill expands behind a slot-filling preview by the configured outset")
+    func filledSelectorFrame() {
+        let frame = StageMetrics.standard.selectorFrame(forImageAspect: 1.6, outset: 6)
+        #expect(abs(frame.minX - -6) < 1e-9)
+        #expect(abs(frame.minY - -6) < 1e-9)
+        #expect(abs(frame.width - 175.2) < 1e-9)
+        #expect(abs(frame.height - 114) < 1e-9)
+    }
+
+    @Test("The fill hugs a wide window's letterboxed preview instead of the empty slot")
+    func letterboxedSelectorFrame() {
+        let frame = StageMetrics.standard.selectorFrame(forImageAspect: 3, outset: 6)
+        #expect(abs(frame.minX - -6) < 1e-9)
+        #expect(abs(frame.minY - 17.8) < 1e-9)
+        #expect(abs(frame.width - 175.2) < 1e-9)
+        #expect(abs(frame.height - 66.4) < 1e-9)
+    }
+
+    @Test("The fill hugs a tall window's pillarboxed preview instead of the empty slot")
+    func pillarboxedSelectorFrame() {
+        let frame = StageMetrics.standard.selectorFrame(forImageAspect: 0.5, outset: 6)
+        #expect(abs(frame.minX - 50.1) < 1e-9)
+        #expect(abs(frame.minY - -6) < 1e-9)
+        #expect(abs(frame.width - 63) < 1e-9)
+        #expect(abs(frame.height - 114) < 1e-9)
+    }
+
+    @Test("A card with no preview shape keeps the fill around its whole slot")
+    func shapelessSelectorFrame() {
+        let frame = StageMetrics.standard.selectorFrame(forImageAspect: nil, outset: 6)
+        #expect(abs(frame.minX - -6) < 1e-9)
+        #expect(abs(frame.minY - -6) < 1e-9)
+        #expect(abs(frame.width - 175.2) < 1e-9)
+        #expect(abs(frame.height - 114) < 1e-9)
     }
 
     @Test("Window drops allow reordered and cross-space positions")

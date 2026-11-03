@@ -317,6 +317,12 @@ public struct StageMetrics: Equatable, Sendable {
         )
     }
 
+    /// The selection highlight inside the card's thumbnail: around the preview image as drawn,
+    /// so a letterboxed window is not framed by its empty slot.
+    public func selectorFrame(forImageAspect aspect: CGFloat?, outset: CGFloat) -> CGRect {
+        previewImageRect(forImageAspect: aspect).insetBy(dx: -outset, dy: -outset)
+    }
+
     /// The fitted preview's size at scale 1: the same for every zoom of these metrics, so a
     /// card whose drawn size animates keeps one shadow raster.
     public func previewShadowSize(forImageAspect aspect: CGFloat?) -> CGSize {
