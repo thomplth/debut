@@ -96,7 +96,8 @@ extension SpaceController {
         where spaceManager.spaceContainingWindow(windowID: windowID) == destinationID {
             _ = windowService.raiseTrackedWindow(windowID: windowID)
         }
-        switchToSpace(id: destinationID, raiseWindowID: reveal.focusWindowID)
+        switchToSpace(id: destinationID, raiseWindowID: reveal.focusWindowID,
+                      trigger: .applicationShortcut)
     }
 
     private static func diagnosticName(of toggle: ApplicationToggle) -> String {

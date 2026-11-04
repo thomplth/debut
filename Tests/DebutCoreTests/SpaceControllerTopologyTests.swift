@@ -2400,4 +2400,95 @@ struct SpaceControllerSpaceTests {
         let log = try String(contentsOf: directory.appendingPathComponent("diagnostic.jsonl"), encoding: .utf8)
         #expect(log.contains("spaces_reconcile_refused"))
     }
+
+    private final class SteppingClock: @unchecked Sendable {
+        var now = Date(timeIntervalSince1970: 0)
+    }
+
+    private func makeRevertFixture(
+        clock: SteppingClock = SteppingClock()
+    ) -> (SpaceController, MockSpaceSwitcher, MockWindowService, DiagnosticReporter, URL) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let reporter = DiagnosticReporter(directory: directory)
+        let windowService = MockWindowService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: MockKeyboardService(),
+            clock: { clock.now },
+            diagnosticReporter: reporter
+        )
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        controller.spaceSwitcher = spaces
+        controller.reconcileSpacesWithDesktops()
+        return (controller, spaces, windowService, reporter, directory)
+    }
+
+    private func revertEvents(_ reporter: DiagnosticReporter, in directory: URL) throws -> [[String: String]] {
+        reporter.flush()
+        let log = try String(contentsOf: directory.appendingPathComponent("diagnostic.jsonl"), encoding: .utf8)
+        return log.split(separator: "\n").compactMap { line in
+            (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: String]
+        }.filter { $0["event"] == "desktop_switch_reverted" }
+    }
+
+    @Test("A desktop that returns to a switch's origin on its own is reported with the app that took it there")
+    func returnToOriginIsReportedWithFrontmostApp() throws {
+        let (controller, spaces, windowService, reporter, directory) = makeRevertFixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let origin = controller.spaceManager.spaces[0].id
+        let destination = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T1", ownerPID: 4242),
+            toSpaceID: origin
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T2", ownerPID: 4242),
+            toSpaceID: destination
+        )
+        windowService.frontmostPID = 4242
+
+        controller.switchToSpace(id: destination, focusesWindow: false)
+        spaces.current = 0
+        controller.syncActiveSpaceWithCurrentDesktop()
+
+        let events = try revertEvents(reporter, in: directory)
+        #expect(events.count == 1)
+        #expect(events.first?["trigger"] == "request")
+        #expect(events.first?["focusesWindow"] == "false")
+        #expect(events.first?["frontmostPID"] == "4242")
+        #expect(events.first?["frontmostManagedWindows"]?.contains("101@Space 1") == true)
+        #expect(events.first?["frontmostManagedWindows"]?.contains("202@Space 2") == true)
+    }
+
+    @Test("A return to the origin while the switch is still travelling is not a revert")
+    func returnWhileSwitchInFlightIsNotReverted() throws {
+        let (controller, spaces, _, reporter, directory) = makeRevertFixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = controller.spaceManager.spaces[1].id
+
+        controller.switchToSpace(id: destination, focusesWindow: false)
+        spaces.switchingStackIDs = [controller.spaceManager.selectedSpaceStackID]
+        spaces.current = 0
+        controller.syncActiveSpaceWithCurrentDesktop()
+
+        #expect(try revertEvents(reporter, in: directory).isEmpty)
+    }
+
+    @Test("A return to the origin long after the switch is not a revert")
+    func lateReturnIsNotReverted() throws {
+        let clock = SteppingClock()
+        let (controller, spaces, _, reporter, directory) = makeRevertFixture(clock: clock)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = controller.spaceManager.spaces[1].id
+
+        controller.switchToSpace(id: destination, focusesWindow: false)
+        clock.now = clock.now.addingTimeInterval(10)
+        spaces.current = 0
+        controller.syncActiveSpaceWithCurrentDesktop()
+
+        #expect(try revertEvents(reporter, in: directory).isEmpty)
+    }
 }

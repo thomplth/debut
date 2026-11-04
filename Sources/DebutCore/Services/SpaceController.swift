@@ -570,7 +570,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var previewCaptureGeneration: UInt = 0
     private var previewCacheEntries: [CGWindowID: PreviewCacheEntry] = [:]
     private var pendingPreviewCaptureIDs: [CGWindowID] = []
-    private let clock: @Sendable () -> Date
+    let clock: @Sendable () -> Date
     private let pointerButtonIsHeld: @Sendable () -> Bool
     let previewFreshness: PreviewFreshnessRecorder
 
@@ -589,6 +589,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// Tells window-server focus tracking which window an activation Debut causes will name.
     public var onFocusRequested: ((CGWindowID, pid_t) -> Void)?
     private var pendingFront: (windowID: CGWindowID, ownerPID: pid_t)?
+    var lastIssuedSwitch: IssuedSpaceSwitch?
     private var withheldFront: (windowID: CGWindowID, ownerPID: pid_t, spaceID: UUID)?
     private struct FollowingWindowMove {
         let id = UUID()
@@ -1707,6 +1708,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
               let spaceID = spaceManager.spaceID(stackID: stack.id, at: index),
               spaceID != spaceManager.activeSpaceID
         else { return }
+        reportRevertIfReturningToOrigin(arrivedSpaceID: spaceID, stackID: stack.id)
         previousSpaceID = spaceManager.activeSpaceID
         spaceManager.activateSpace(id: spaceID)
         diag.report("active_space_synced", details: [
@@ -1731,12 +1733,14 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     ///   milliseconds of the Space flip, so the two race, and `recordWindowActivation` writes a
     ///   lost race into the space's MRU head — which makes a single loss permanent.
     public func switchToSpace(id targetID: UUID, raiseWindowID: CGWindowID? = nil,
-                              focusesWindow: Bool = true) {
+                              focusesWindow: Bool = true,
+                              trigger: SpaceSwitchTrigger = .request) {
         performSpaceSwitch(
             id: targetID,
             raiseWindowID: raiseWindowID,
             focusesWindow: focusesWindow,
-            command: .general
+            command: .general,
+            trigger: trigger
         )
     }
 
@@ -1745,6 +1749,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         raiseWindowID: CGWindowID? = nil,
         focusesWindow: Bool = true,
         command: FocusCommand,
+        trigger: SpaceSwitchTrigger,
         usesSystemSwitch: Bool = false
     ) {
         let swipes = fasterDesktopSwitchingEnabled && !usesSystemSwitch
@@ -1807,9 +1812,18 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             }
             _ = PerformanceRecorder.shared.end(raiseID)
 
+            lastIssuedSwitch = IssuedSpaceSwitch(
+                originID: previousID,
+                destinationID: targetID,
+                trigger: trigger,
+                focusesWindow: focusWindowID != nil,
+                issuedAt: clock()
+            )
             diag.report("space_switched", details: [
                 "from": fromLabel,
                 "to": toLabel,
+                "trigger": trigger.rawValue,
+                "focusesWindow": "\(focusWindowID != nil)",
                 "windowsInTarget": "\(targetSpace?.windows.count ?? 0)",
             ])
         }
@@ -2712,7 +2726,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private func follow(_ request: FollowingWindowMove, to spaceID: UUID, at location: DesktopLocation?) {
         if request.ignoredSourceID == nil {
             performSpaceSwitch(id: spaceID, raiseWindowID: request.windowID,
-                               command: .moveFocusedWindow)
+                               command: .moveFocusedWindow, trigger: .windowMove)
         } else {
             routeSystemAttention(windowID: request.windowID, ownerPID: request.ownerPID,
                                  location: location)
@@ -2753,7 +2767,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         let windowIsHeld = pointerButtonIsHeld()
         performSpaceSwitch(id: targetSpace.id, raiseWindowID: matchingWindowID,
                            focusesWindow: keepingCurrentApplication && !windowIsHeld,
-                           command: .general, usesSystemSwitch: windowIsHeld)
+                           command: .general, trigger: .quickSwitch,
+                           usesSystemSwitch: windowIsHeld)
         selectedSpaceIndex = index
         selectedWindowIndex = 0
     }
@@ -3608,7 +3623,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         performSpaceSwitch(
             id: targetSpace.id,
             raiseWindowID: raiseWindowID,
-            command: focusCommand
+            command: focusCommand,
+            trigger: .overlay
         )
 
         var committedDetails = [
