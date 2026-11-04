@@ -598,6 +598,93 @@ struct SpaceControllerTests {
         #expect(windowService.activatedBundleID == "com.b")
     }
 
+    @Test("A refused fronting never activates an app that has a window on another desktop")
+    func refusedFrontingWithholdsActivationOfAppSpanningDesktops() {
+        let (controller, windowService, _) = makeController()
+        windowService.frontWindowResult = false
+        let originID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addFixtureDesktop()
+        let destinationID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T1", ownerPID: 4242),
+            toSpaceID: originID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T2", ownerPID: 4242),
+            toSpaceID: destinationID
+        )
+        controller.spaceManager.activateSpace(id: originID)
+
+        controller.switchToSpace(id: destinationID, raiseWindowID: 202)
+
+        #expect(windowService.activatedPID == nil)
+        #expect(windowService.activatedBundleID == nil)
+    }
+
+    @Test("A withheld fronting is retried through the window server")
+    func withheldFrontingIsRetriedThroughWindowServer() {
+        let (controller, windowService, _) = makeController()
+        windowService.frontWindowResult = false
+        let originID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addFixtureDesktop()
+        let destinationID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T1", ownerPID: 4242),
+            toSpaceID: originID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T2", ownerPID: 4242),
+            toSpaceID: destinationID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 303, ownerBundleID: "com.c", ownerName: "C",
+                        windowTitle: "T3", ownerPID: 5353),
+            toSpaceID: destinationID
+        )
+        controller.spaceManager.activateSpace(id: originID)
+        controller.switchToSpace(id: destinationID, raiseWindowID: 202)
+        windowService.frontWindowResult = true
+
+        #expect(controller.retryWithheldFront() == true)
+
+        #expect(windowService.frontedWindows.suffix(1)
+            == [FrontWindowRequest(windowID: 202, ownerPID: 4242)])
+        #expect(windowService.activatedPID == nil)
+        #expect(controller.spaceManager.spaces[1].windows.first?.windowID == 202)
+    }
+
+    @Test("A withheld fronting is dropped once another desktop is showing")
+    func withheldFrontingIsDroppedAfterLeavingItsDesktop() {
+        let (controller, windowService, _) = makeController()
+        windowService.frontWindowResult = false
+        let originID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addFixtureDesktop()
+        let destinationID = controller.spaceManager.spaces[1].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T1", ownerPID: 4242),
+            toSpaceID: originID
+        )
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 202, ownerBundleID: "com.b", ownerName: "B",
+                        windowTitle: "T2", ownerPID: 4242),
+            toSpaceID: destinationID
+        )
+        controller.spaceManager.activateSpace(id: originID)
+        controller.switchToSpace(id: destinationID, raiseWindowID: 202)
+        controller.spaceManager.activateSpace(id: originID)
+        windowService.frontWindowResult = true
+        let frontRequestsBeforeRetry = windowService.frontedWindows.count
+
+        #expect(controller.retryWithheldFront() == false)
+
+        #expect(windowService.frontedWindows.count == frontRequestsBeforeRetry)
+    }
+
     @Test("A window with no owning process is activated by bundle")
     func windowWithoutOwnerProcessActivatesByBundle() {
         let (controller, windowService, _) = makeController()

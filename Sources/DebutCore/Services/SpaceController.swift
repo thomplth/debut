@@ -589,6 +589,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// Tells window-server focus tracking which window an activation Debut causes will name.
     public var onFocusRequested: ((CGWindowID, pid_t) -> Void)?
     private var pendingFront: (windowID: CGWindowID, ownerPID: pid_t)?
+    private var withheldFront: (windowID: CGWindowID, ownerPID: pid_t, spaceID: UUID)?
     private struct FollowingWindowMove {
         let id = UUID()
         let windowID: CGWindowID
@@ -1178,10 +1179,14 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             return
         }
         let sourceWindowID = spaceManager.activeSpace.windows.first?.windowID
-        let activation = activateOwner(of: window, raising: windowID)
+        withheldFront = nil
+        let activation = activateOwner(of: window, raising: windowID, inSpaceID: spaceID)
         let outcome = activation.outcome
         if outcome == .refused { pendingPractice = nil }
-        if outcome != .refused, let ownerPID = window.ownerPID {
+        if outcome == .withheld, let ownerPID = window.ownerPID {
+            scheduleWithheldFrontRetry(windowID: windowID, ownerPID: ownerPID, spaceID: spaceID)
+        }
+        if outcome.frontedOwner, let ownerPID = window.ownerPID {
             // A request is only worth arming while its report is still to come. Raise-before-reveal
             // usually delivers the report before this deferred step runs, and an answered request
             // left armed reads the next report from the same app as a misreport of this window.
@@ -1216,13 +1221,18 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         }
         // The MRU head is a claim that the window took focus. A refused activation produces no
         // report to correct that claim, so it leaves the order alone.
-        if outcome != .refused {
+        if outcome.frontedOwner {
             spaceManager.bringWindowToFront(windowID: windowID, inSpaceID: spaceID)
         }
-        diag.report("window_focused", details: [
+        var focusedDetails = [
             "windowID": "\(windowID)",
             "via": outcome.rawValue,
-        ])
+        ]
+        if !outcome.frontedOwner {
+            focusedDetails["frontRequestStatus"] = activation.windowServerTrace?
+                .frontRequestStatus.map(String.init) ?? "none"
+        }
+        diag.report("window_focused", details: focusedDetails)
     }
 
     /// The front-process call reports only that macOS accepted the request. Its existing
@@ -1479,9 +1489,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             pendingFocusDelivery = nil
             return
         }
-        let activation = activateOwner(of: window, raising: request.windowID)
+        let activation = activateOwner(of: window, raising: request.windowID,
+                                       inSpaceID: request.spaceID)
         let outcome = activation.outcome
-        if outcome != .refused {
+        if outcome.frontedOwner {
             focusRequest = (windowID: request.windowID, ownerPID: request.ownerPID, at: clock())
             scheduleFrontVerification(windowID: request.windowID, ownerPID: request.ownerPID)
         }
@@ -1516,6 +1527,56 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// front. Nothing announces the request being applied, and it is not applied on the calling
     /// thread, so this is the one place a single deferred read stands in for an event.
     private static let frontVerificationDelay: TimeInterval = 0.3
+
+    /// Nothing announces the Dock finishing the slide that refused the first request, so one
+    /// deferred attempt stands in for that event.
+    private static let withheldFrontRetryDelay: TimeInterval = 0.2
+
+    private func scheduleWithheldFrontRetry(windowID: CGWindowID, ownerPID: pid_t, spaceID: UUID) {
+        withheldFront = (windowID: windowID, ownerPID: ownerPID, spaceID: spaceID)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.withheldFrontRetryDelay) {
+            [weak self] in
+            guard let self, self.withheldFront?.windowID == windowID else { return }
+            self.retryWithheldFront()
+        }
+    }
+
+    /// Fronts a window whose first request the window server refused, through the window server
+    /// only, and only while its desktop is still the one showing.
+    @discardableResult
+    func retryWithheldFront() -> Bool {
+        guard let request = withheldFront else { return false }
+        withheldFront = nil
+        guard spaceManager.activeSpaceID == request.spaceID,
+              spaceManager.allSpaces.first(where: { $0.id == request.spaceID })?
+                .windows.contains(where: { $0.windowID == request.windowID }) == true
+        else {
+            diag.report("window_front_retry_dropped", details: [
+                "windowID": "\(request.windowID)",
+            ])
+            return false
+        }
+        let trace = windowService.frontWindowWithTrace(
+            windowID: request.windowID,
+            ownerPID: request.ownerPID
+        )
+        diag.report("window_front_retried", details: [
+            "windowID": "\(request.windowID)",
+            "accepted": "\(trace.accepted)",
+            "frontRequestStatus": trace.frontRequestStatus.map(String.init) ?? "none",
+        ])
+        guard trace.accepted else {
+            pendingPractice = nil
+            return false
+        }
+        if focusedWindowID != request.windowID {
+            focusRequest = (windowID: request.windowID, ownerPID: request.ownerPID, at: clock())
+        }
+        scheduleFrontVerification(windowID: request.windowID, ownerPID: request.ownerPID)
+        spaceManager.bringWindowToFront(windowID: request.windowID, inSpaceID: request.spaceID)
+        delegate?.spaceControllerDidMutateState(self)
+        return true
+    }
 
     private func scheduleFrontVerification(windowID: CGWindowID, ownerPID: pid_t) {
         pendingFront = (windowID: windowID, ownerPID: ownerPID)
@@ -1567,7 +1628,10 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         case windowServer
         case appKitProcess
         case appKitBundle
+        case withheld
         case refused
+
+        var frontedOwner: Bool { self != .withheld && self != .refused }
     }
 
     private struct OwnerActivation: Sendable {
@@ -1589,7 +1653,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// has already forgotten is refused. Both leave a stale-but-running app reachable.
     @discardableResult
     private func activateOwner(of window: SpaceWindow,
-                               raising windowID: CGWindowID? = nil) -> OwnerActivation {
+                               raising windowID: CGWindowID? = nil,
+                               inSpaceID spaceID: UUID? = nil) -> OwnerActivation {
         if let ownerPID = window.ownerPID {
             if let windowID {
                 let trace = windowService.frontWindowWithTrace(
@@ -1598,6 +1663,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 )
                 if trace.accepted {
                     return OwnerActivation(outcome: .windowServer, windowServerTrace: trace)
+                }
+                // AppKit activation fronts the app's own key window, and macOS then shows that
+                // window's desktop: a refusal right after a switch would undo the switch.
+                if let spaceID, ownerHasWindow(ownerPID: ownerPID, outside: spaceID) {
+                    return OwnerActivation(outcome: .withheld, windowServerTrace: trace)
                 }
                 if windowService.activateApp(pid: ownerPID) {
                     return OwnerActivation(outcome: .appKitProcess, windowServerTrace: trace)
@@ -1617,6 +1687,12 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 ? .appKitBundle : .refused,
             windowServerTrace: nil
         )
+    }
+
+    private func ownerHasWindow(ownerPID: pid_t, outside spaceID: UUID) -> Bool {
+        spaceManager.allSpaces.contains { space in
+            space.id != spaceID && space.windows.contains { $0.ownerPID == ownerPID }
+        }
     }
 
     /// Adopts the desktop currently showing as the active space.
