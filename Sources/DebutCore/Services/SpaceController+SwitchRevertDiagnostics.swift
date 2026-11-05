@@ -21,10 +21,10 @@ struct IssuedSpaceSwitch {
 extension SpaceController {
     static let switchRevertWindow: TimeInterval = 3
 
-    func reportRevertIfReturningToOrigin(arrivedSpaceID: UUID, stackID: String) {
+    func reportRevertIfPulledOffDestination(leftSpaceID: UUID, landedSpaceID: UUID) {
         guard let issued = lastIssuedSwitch,
-              arrivedSpaceID == issued.originID,
-              spaceManager.activeSpaceID == issued.destinationID,
+              leftSpaceID == issued.destinationID,
+              let stackID = spaceManager.spaceStackID(containingSpaceID: landedSpaceID),
               spaceSwitcher?.isSwitchInFlight(stackID: stackID) != true
         else { return }
         let elapsed = clock().timeIntervalSince(issued.issuedAt)
@@ -39,6 +39,7 @@ extension SpaceController {
         var details: [String: String] = [
             "from": compactDesktopLabel(forSpaceID: issued.originID),
             "to": compactDesktopLabel(forSpaceID: issued.destinationID),
+            "landedOn": compactDesktopLabel(forSpaceID: landedSpaceID),
             "trigger": issued.trigger.rawValue,
             "focusesWindow": "\(issued.focusesWindow)",
             "elapsedMilliseconds": String(format: "%.0f", elapsed * 1000),

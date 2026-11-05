@@ -112,7 +112,11 @@ switching integration. Adjacent input starts from the WindowServer's showing Spa
 so it continues while a fullscreen app is active and can reach fullscreen Spaces at
 either end of the native order. macOS navigation that Debut does not intercept remains
 native and is observed afterwards. Window focus waits for the destination, rather
-than raising each window before the desktop has changed.
+than raising each window before the desktop has changed. A numbered switch to the
+neighbouring Space leaves focus to macOS, but one that crosses another Space focuses
+the destination's front window: macOS focuses the front window of each Space a route
+crosses, and a report that arrives after the route has moved on pulls the desktop
+back to that window.
 
 Each posted route carries a generation-specific recovery ticket. A bounded
 watchdog re-reads fresh topology if the active-Space notification is lost. It may

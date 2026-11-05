@@ -961,6 +961,8 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             reconcileSpacesWithDesktops()
         }
         if spaceManager.activeSpaceID != previousActiveSpaceID {
+            reportRevertIfPulledOffDestination(leftSpaceID: previousActiveSpaceID,
+                                               landedSpaceID: spaceManager.activeSpaceID)
             previousSpaceID = previousActiveSpaceID
             diag.report("active_space_synced", details: [
                 "to": spaceLabel(forID: spaceManager.activeSpaceID),
@@ -1708,7 +1710,6 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
               let spaceID = spaceManager.spaceID(stackID: stack.id, at: index),
               spaceID != spaceManager.activeSpaceID
         else { return }
-        reportRevertIfReturningToOrigin(arrivedSpaceID: spaceID, stackID: stack.id)
         previousSpaceID = spaceManager.activeSpaceID
         spaceManager.activateSpace(id: spaceID)
         diag.report("active_space_synced", details: [
@@ -2765,12 +2766,28 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // application is otherwise the whole point of that chord, so it still focuses, except
         // during a hold, where focusing another window would pull the drag apart.
         let windowIsHeld = pointerButtonIsHeld()
+        let needsFocus = keepingCurrentApplication || swipeRouteCrossesAnotherSpace(to: targetSpace.id)
         performSpaceSwitch(id: targetSpace.id, raiseWindowID: matchingWindowID,
-                           focusesWindow: keepingCurrentApplication && !windowIsHeld,
+                           focusesWindow: needsFocus && !windowIsHeld,
                            command: .general, trigger: .quickSwitch,
                            usesSystemSwitch: windowIsHeld)
         selectedSpaceIndex = index
         selectedWindowIndex = 0
+    }
+
+    /// macOS focuses the front window of every Space a swipe route crosses. A report that arrives
+    /// after the route has moved on names a window that is no longer showing, and the desktop
+    /// follows it back unless the destination has already been given focus of its own.
+    private func swipeRouteCrossesAnotherSpace(to targetID: UUID) -> Bool {
+        guard fasterDesktopSwitchingEnabled,
+              let stackID = spaceManager.spaceStackID(containingSpaceID: targetID),
+              let targetIndex = spaceManager.spaceIndex(id: targetID),
+              let stack = spaceSwitcher?.spaceTopology().stack(id: stackID),
+              let destination = stack.location(at: targetIndex)?.desktopID,
+              let destinationPosition = stack.orderedSpaceIDs.firstIndex(of: destination),
+              let currentPosition = stack.currentSpaceIndex
+        else { return false }
+        return abs(destinationPosition - currentPosition) > 1
     }
 
     // MARK: - Private

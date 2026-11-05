@@ -44,6 +44,8 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
     /// which is what a test that only cares about the count wants; assigning a permutation is
     /// how a Mission Control reorder is expressed, since that leaves the count untouched.
     var desktopKeys: [Int]?
+    /// Mission Control's complete Space order, for a test with a fullscreen Space among the desktops.
+    var orderedSpaceIDs: [CGSSpaceID]?
 
     init(desktops: Int = 3, current: Int = 0) {
         self.desktops = desktops
@@ -72,6 +74,7 @@ final class MockSpaceSwitcher: SpaceSwitching, @unchecked Sendable {
                 displayName: "All Displays",
                 frame: .zero,
                 desktopIDs: desktopIDs,
+                orderedSpaceIDs: orderedSpaceIDs,
                 desktopUUIDs: keys.map { "DESKTOP-\($0)" },
                 currentDesktopID: desktopIDs.indices.contains(current)
                     ? desktopIDs[current]
@@ -2452,7 +2455,7 @@ struct SpaceControllerSpaceTests {
 
         controller.switchToSpace(id: destination, focusesWindow: false)
         spaces.current = 0
-        controller.syncActiveSpaceWithCurrentDesktop()
+        controller.desktopDidChange()
 
         let events = try revertEvents(reporter, in: directory)
         #expect(events.count == 1)
@@ -2472,7 +2475,7 @@ struct SpaceControllerSpaceTests {
         controller.switchToSpace(id: destination, focusesWindow: false)
         spaces.switchingStackIDs = [controller.spaceManager.selectedSpaceStackID]
         spaces.current = 0
-        controller.syncActiveSpaceWithCurrentDesktop()
+        controller.desktopDidChange()
 
         #expect(try revertEvents(reporter, in: directory).isEmpty)
     }
@@ -2487,8 +2490,125 @@ struct SpaceControllerSpaceTests {
         controller.switchToSpace(id: destination, focusesWindow: false)
         clock.now = clock.now.addingTimeInterval(10)
         spaces.current = 0
-        controller.syncActiveSpaceWithCurrentDesktop()
+        controller.desktopDidChange()
 
         #expect(try revertEvents(reporter, in: directory).isEmpty)
+    }
+
+    @Test("A desktop crossed on the way that takes the screen back after arrival is reported as where it landed")
+    func landingOnCrossedDesktopIsReported() throws {
+        let (controller, spaces, _, reporter, directory) = makeRevertFixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = controller.spaceManager.spaces[2].id
+
+        controller.switchToSpace(id: destination, focusesWindow: false)
+        spaces.current = 1
+        controller.desktopDidChange()
+
+        let events = try revertEvents(reporter, in: directory)
+        #expect(events.count == 1)
+        #expect(events.first?["from"] == "Space 1")
+        #expect(events.first?["to"] == "Space 3")
+        #expect(events.first?["landedOn"] == "Space 2")
+    }
+
+    @Test("A crossed desktop passed while the route is still travelling is not a revert")
+    func crossedDesktopWhileTravellingIsNotReverted() throws {
+        let (controller, spaces, _, reporter, directory) = makeRevertFixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = controller.spaceManager.spaces[2].id
+
+        controller.switchToSpace(id: destination, focusesWindow: false)
+        spaces.switchingStackIDs = [controller.spaceManager.selectedSpaceStackID]
+        spaces.current = 1
+        controller.desktopDidChange()
+        spaces.switchingStackIDs = []
+        spaces.current = 2
+        controller.desktopDidChange()
+
+        #expect(try revertEvents(reporter, in: directory).isEmpty)
+    }
+
+    private func makeQuickSwitchFixture(
+        spaces: MockSpaceSwitcher,
+        pointerButtonIsHeld: Bool = false
+    ) -> (SpaceController, MockWindowService, MockKeyboardService) {
+        let windowService = MockWindowService()
+        let keyboardService = MockKeyboardService()
+        let controller = SpaceController(
+            windowService: windowService,
+            keyboardService: keyboardService,
+            focusedWindowSnapshotProvider: { .unfocused },
+            pointerButtonIsHeld: { pointerButtonIsHeld }
+        )
+        controller.spaceSwitcher = spaces
+        controller.reconcileSpacesWithDesktops()
+        for (index, space) in controller.spaceManager.spaces.enumerated() {
+            let windowID = CGWindowID((index + 1) * 11)
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: windowID, ownerBundleID: "com.app.\(index)",
+                            ownerName: "App \(index)", windowTitle: "W\(index)"),
+                toSpaceID: space.id
+            )
+        }
+        return (controller, windowService, keyboardService)
+    }
+
+    @Test("A numbered switch that crosses another desktop focuses the destination's front window")
+    func farQuickSwitchFocusesDestination() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, windowService, keyboardService) = makeQuickSwitchFixture(spaces: spaces)
+
+        keyboardService.simulateEvent(.switchToSpace(3))
+        controller.desktopDidChange()
+
+        #expect(windowService.raisedWindowIDs.contains(33))
+    }
+
+    @Test("A numbered switch across a fullscreen Space between two desktops focuses the destination's front window")
+    func quickSwitchAcrossFullscreenSpaceFocusesDestination() {
+        let spaces = MockSpaceSwitcher(desktops: 2, current: 0)
+        spaces.orderedSpaceIDs = [100, 900, 101]
+        let (controller, windowService, keyboardService) = makeQuickSwitchFixture(spaces: spaces)
+
+        keyboardService.simulateEvent(.switchToSpace(2))
+        controller.desktopDidChange()
+
+        #expect(windowService.raisedWindowIDs.contains(22))
+    }
+
+    @Test("A numbered switch to the neighbouring desktop leaves focus to macOS")
+    func adjacentQuickSwitchLeavesFocusToMacOS() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, windowService, keyboardService) = makeQuickSwitchFixture(spaces: spaces)
+
+        keyboardService.simulateEvent(.switchToSpace(2))
+        controller.desktopDidChange()
+
+        #expect(windowService.raisedWindowIDs.isEmpty)
+    }
+
+    @Test("A far numbered switch on macOS's own direct transition leaves focus to macOS")
+    func farQuickSwitchWithoutFasterTransitionsLeavesFocusToMacOS() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, windowService, keyboardService) = makeQuickSwitchFixture(spaces: spaces)
+        controller.fasterDesktopSwitchingEnabled = false
+
+        keyboardService.simulateEvent(.switchToSpace(3))
+        controller.desktopDidChange()
+
+        #expect(windowService.raisedWindowIDs.isEmpty)
+    }
+
+    @Test("A far numbered switch focuses nothing while the pointer button is held")
+    func farQuickSwitchWhileButtonHeldFocusesNothing() {
+        let spaces = MockSpaceSwitcher(desktops: 3, current: 0)
+        let (controller, windowService, keyboardService) = makeQuickSwitchFixture(
+            spaces: spaces, pointerButtonIsHeld: true)
+
+        keyboardService.simulateEvent(.switchToSpace(3))
+        controller.desktopDidChange()
+
+        #expect(windowService.raisedWindowIDs.isEmpty)
     }
 }
