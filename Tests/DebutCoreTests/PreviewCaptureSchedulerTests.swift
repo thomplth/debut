@@ -164,4 +164,31 @@ struct CaptureHandleCatalogTests {
         _ = try await catalog.handles(for: [1])
         #expect(enumerations.count == 2)
     }
+
+    @Test("A handle now belonging to another process is never returned")
+    func refusesHandleOwnedByAnotherProcess() async throws {
+        let enumerations = Enumerations([1, 2])
+        let catalog = CaptureHandleCatalog<Int>(identify: { CGWindowID($0) }) { enumerations.list() }
+        let handles = try await catalog.handles(for: [1, 2], accepting: { $0 == 2 })
+        #expect(handles == [2])
+    }
+
+    @Test("A held handle that fails the owner check is fetched again before being refused")
+    func refetchesHandleFailingOwnerCheck() async throws {
+        let enumerations = Enumerations([1])
+        let catalog = CaptureHandleCatalog<Int>(identify: { CGWindowID($0) }) { enumerations.list() }
+        _ = try await catalog.handles(for: [1])
+        #expect(enumerations.count == 1)
+        _ = try await catalog.handles(for: [1], accepting: { _ in false })
+        #expect(enumerations.count == 2)
+    }
+
+    @Test("A held handle that passes the owner check needs no new list")
+    func keepsHandlePassingOwnerCheck() async throws {
+        let enumerations = Enumerations([1])
+        let catalog = CaptureHandleCatalog<Int>(identify: { CGWindowID($0) }) { enumerations.list() }
+        _ = try await catalog.handles(for: [1])
+        #expect(try await catalog.handles(for: [1], accepting: { _ in true }) == [1])
+        #expect(enumerations.count == 1)
+    }
 }

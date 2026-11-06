@@ -839,6 +839,21 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         return Set(infoList.compactMap { $0[kCGWindowNumber] as? CGWindowID })
     }
 
+    public func listAllWindowOwnerPIDs() -> [CGWindowID: pid_t]? {
+        let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
+        guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[CFString: Any]] else {
+            return nil
+        }
+        var owners: [CGWindowID: pid_t] = [:]
+        for info in infoList {
+            guard let windowID = info[kCGWindowNumber] as? CGWindowID,
+                  let ownerPID = info[kCGWindowOwnerPID] as? pid_t
+            else { continue }
+            owners[windowID] = ownerPID
+        }
+        return owners
+    }
+
     static func isTrackableAXWindow(role: String, subrole: String, isModal: Bool) -> Bool {
         role == kAXWindowRole as String &&
             (subrole == kAXStandardWindowSubrole as String ||
@@ -1278,6 +1293,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
         await captureWindowImages(
             windowIDs: windowIDs,
             windowSizes: [:],
+            windowOwnerPIDs: [:],
             budget: budget,
             onEnumerated: onEnumerated,
             onCapture: onCapture
@@ -1289,6 +1305,7 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
     public func captureWindowImages(
         windowIDs: [CGWindowID],
         windowSizes: [CGWindowID: CGSize],
+        windowOwnerPIDs: [CGWindowID: pid_t],
         budget: PreviewCaptureBudget,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
@@ -1297,7 +1314,10 @@ public final class AccessibilityWindowService: WindowService, @unchecked Sendabl
 
         let windows: [SendableCaptureWindow]
         do {
-            windows = try await captureHandles.handles(for: windowIDs)
+            windows = try await captureHandles.handles(for: windowIDs) { captureWindow in
+                guard let expected = windowOwnerPIDs[captureWindow.window.windowID] else { return true }
+                return captureWindow.window.owningApplication?.processID == expected
+            }
         } catch {
             DiagnosticReporter.shared.report("window_preview_enumeration_failed", details: [
                 "error": "\(error)",

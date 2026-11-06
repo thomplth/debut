@@ -24,6 +24,9 @@ public struct RuntimeWindowSnapshot: Sendable {
     /// Every window SkyLight places on a desktop, not just the assigned ones. Nil when the
     /// enumeration gave no answer, which must never be read as an empty screen.
     public let skyLightWindowIDs: Set<CGWindowID>?
+    /// The process Core Graphics names for every window it lists, tracked or not. Nil when the
+    /// enumeration gave no answer.
+    public let windowOwnerPIDs: [CGWindowID: pid_t]?
 
     public init(
         liveWindows: [WindowInfo],
@@ -34,8 +37,10 @@ public struct RuntimeWindowSnapshot: Sendable {
         desktopLocations: [CGWindowID: DesktopLocation] = [:],
         axContradictedWindowIDs: Set<CGWindowID> = [],
         orderedOutWindowIDs: Set<CGWindowID> = [],
-        skyLightWindowIDs: Set<CGWindowID>? = nil
+        skyLightWindowIDs: Set<CGWindowID>? = nil,
+        windowOwnerPIDs: [CGWindowID: pid_t]? = nil
     ) {
+        self.windowOwnerPIDs = windowOwnerPIDs
         self.liveWindows = liveWindows
         self.allWindowIDs = allWindowIDs
         self.focusedWindowID = focusedWindowID
@@ -187,10 +192,21 @@ public struct RuntimeWindowReconciler: Sendable {
             liveWindows.map { ($0.windowID, $0) },
             uniquingKeysWith: { first, _ in first }
         )
+        //
+        // The live list only carries windows of apps Debut tracks, so a system process holding
+        // the ID is invisible to it. Core Graphics names that owner, and it is the same source
+        // an assignment's PID came from, so a difference cannot be a helper-process artefact.
         for assignment in assignments(in: spaceManager) {
-            guard let info = liveWindowsByID[assignment.window.windowID],
-                  info.ownerBundleID != assignment.window.ownerBundleID
-            else { continue }
+            let liveInfo = liveWindowsByID[assignment.window.windowID]
+            let recycledToAnotherBundle = liveInfo.map {
+                $0.ownerBundleID != assignment.window.ownerBundleID
+            } ?? false
+            let recycledToUntrackedProcess = liveInfo == nil
+                && assignment.window.ownerPID != nil
+                && snapshot.windowOwnerPIDs?[assignment.window.windowID].map {
+                    $0 != assignment.window.ownerPID
+                } == true
+            guard recycledToAnotherBundle || recycledToUntrackedProcess else { continue }
             let fromSpace = spaceManager.spaceIndex(id: assignment.spaceID)
             guard spaceManager.makeWindowDormant(windowID: assignment.window.windowID) != nil
             else { continue }

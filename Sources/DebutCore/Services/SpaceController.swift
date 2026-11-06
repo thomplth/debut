@@ -3311,6 +3311,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
         // A capture that started before a light/dark switch shows the old appearance.
         let appearanceGeneration = self.appearanceGeneration
         let windowSizes = self.windowSizes
+        let windowOwnerPIDs = Self.ownerPIDs(of: windowIDs, in: spaceManager)
         let discarded = PreviewCaptureTally()
         let fellBack = PreviewCaptureTally()
         let timing = previewFreshness.batchStarted()
@@ -3320,6 +3321,7 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
             await windowService.captureWindowImages(
                 windowIDs: windowIDs,
                 windowSizes: windowSizes,
+                windowOwnerPIDs: windowOwnerPIDs,
                 budget: captureBudget,
                 onEnumerated: { matchedWindowIDs in
                     metrics.recordEnumeration(matchedWindowIDs: matchedWindowIDs)
@@ -3408,6 +3410,18 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
                 "reason": reason,
             ])
         }
+    }
+
+    private static func ownerPIDs(
+        of windowIDs: [CGWindowID],
+        in spaceManager: SpaceManager
+    ) -> [CGWindowID: pid_t] {
+        let requested = Set(windowIDs)
+        var owners: [CGWindowID: pid_t] = [:]
+        for window in spaceManager.allSpaces.flatMap(\.windows) where requested.contains(window.windowID) {
+            owners[window.windowID] = window.ownerPID
+        }
+        return owners
     }
 
     /// The window in use when the shortcut was pressed is the one card background capture can

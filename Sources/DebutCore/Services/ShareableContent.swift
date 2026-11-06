@@ -83,13 +83,22 @@ actor CaptureHandleCatalog<Handle: Sendable> {
         self.enumerate = enumerate
     }
 
-    /// The handles for `windowIDs` that exist, in the order asked.
-    func handles(for windowIDs: [CGWindowID]) async throws -> [Handle] {
-        if windowIDs.contains(where: { handles[$0] == nil }) {
+    /// The handles for `windowIDs` that exist and `isAcceptable` allows, in the order asked. A
+    /// held handle it refuses may simply be older than the window, so the list is fetched again
+    /// before the refusal stands.
+    func handles(
+        for windowIDs: [CGWindowID],
+        accepting isAcceptable: @Sendable (Handle) -> Bool = { _ in true }
+    ) async throws -> [Handle] {
+        let needsFetch = windowIDs.contains { windowID in
+            guard let handle = handles[windowID] else { return true }
+            return !isAcceptable(handle)
+        }
+        if needsFetch {
             let listed = try await enumerate()
             handles = Dictionary(listed.map { (identify($0), $0) }, uniquingKeysWith: { first, _ in first })
         }
-        return windowIDs.compactMap { handles[$0] }
+        return windowIDs.compactMap { handles[$0] }.filter(isAcceptable)
     }
 
     func evict(_ windowID: CGWindowID) {

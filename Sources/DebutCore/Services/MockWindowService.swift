@@ -121,6 +121,32 @@ public final class MockWindowService: WindowService, @unchecked Sendable {
         return WindowServerVerdicts(parented: parentedWindowIDList, orderedOut: orderedOutWindowIDList)
     }
     public func listAllWindowIDs() -> Set<CGWindowID>? { allWindowIDList }
+    public var allWindowOwnerPIDList: [CGWindowID: pid_t]?
+    public func listAllWindowOwnerPIDs() -> [CGWindowID: pid_t]? { allWindowOwnerPIDList }
+
+    private var recordedCaptureOwnerPIDs: [[CGWindowID: pid_t]] = []
+
+    /// The owners each sized `captureWindowImages` call expected, in call order.
+    public var captureOwnerPIDs: [[CGWindowID: pid_t]] {
+        captureLock.withLock { recordedCaptureOwnerPIDs }
+    }
+
+    public func captureWindowImages(
+        windowIDs: [CGWindowID],
+        windowSizes: [CGWindowID: CGSize],
+        windowOwnerPIDs: [CGWindowID: pid_t],
+        budget: PreviewCaptureBudget,
+        onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
+        onCapture: @escaping @Sendable (WindowImageCapture) -> Void
+    ) async {
+        captureLock.withLock { recordedCaptureOwnerPIDs.append(windowOwnerPIDs) }
+        await captureWindowImages(
+            windowIDs: windowIDs,
+            budget: budget,
+            onEnumerated: onEnumerated,
+            onCapture: onCapture
+        )
+    }
 
     public func captureWindowImages(
         windowIDs: [CGWindowID],

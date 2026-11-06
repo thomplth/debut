@@ -397,6 +397,8 @@ public protocol WindowService: Sendable {
     /// hidden apps have been removed, so every member is refusable on its own.
     func listWindowServerVerdicts() -> WindowServerVerdicts
     func listAllWindowIDs() -> Set<CGWindowID>?
+    /// The owning process of every window Core Graphics lists, including untracked ones.
+    func listAllWindowOwnerPIDs() -> [CGWindowID: pid_t]?
     /// Runs `body` as one pass over a single Accessibility sweep. Every listing inside it that
     /// would classify all apps' AX windows reuses the first classification taken in the pass,
     /// so a caller asking several questions of the same moment pays for one sweep, not one each.
@@ -414,9 +416,12 @@ public protocol WindowService: Sendable {
     ) async
     /// Captures in the order given, sizing each window from `windowSizes` (points) where it is
     /// known. A capture's own idea of the window's frame can be older than the window (KHA-1080).
+    /// A window whose handle belongs to another process than `windowOwnerPIDs` names is skipped:
+    /// the ID has been reissued, so what it would capture is not this window.
     func captureWindowImages(
         windowIDs: [CGWindowID],
         windowSizes: [CGWindowID: CGSize],
+        windowOwnerPIDs: [CGWindowID: pid_t],
         budget: PreviewCaptureBudget,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
@@ -483,6 +488,7 @@ public extension WindowService {
     func captureWindowImages(
         windowIDs: [CGWindowID],
         windowSizes: [CGWindowID: CGSize],
+        windowOwnerPIDs: [CGWindowID: pid_t],
         budget: PreviewCaptureBudget,
         onEnumerated: @escaping @Sendable ([CGWindowID]) -> Void,
         onCapture: @escaping @Sendable (WindowImageCapture) -> Void
@@ -508,6 +514,7 @@ public extension WindowService {
         completion(raiseWindow(windowID: windowID))
     }
 
+    func listAllWindowOwnerPIDs() -> [CGWindowID: pid_t]? { nil }
     func listUntrackableWindowIDs() -> Set<CGWindowID> { [] }
     func listDisqualifiedWindows() -> [CGWindowID: WindowDisqualification] { [:] }
     func listAXContradictedWindowIDs() -> Set<CGWindowID> { [] }

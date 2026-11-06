@@ -1305,6 +1305,21 @@ struct SpaceControllerTests {
         keyboardSvc.simulateEvent(.escape)
     }
 
+    @Test("A preview capture names the process each window is assigned to")
+    func previewCaptureNamesAssignedOwners() {
+        let (controller, windowSvc, _, _) = makeCacheController()
+        let spaceID = controller.spaceManager.spaces[0].id
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 101, ownerBundleID: "com.a", ownerName: "A", windowTitle: "T", ownerPID: 42),
+            toSpaceID: spaceID
+        )
+        windowSvc.capturedImages = [101: makeTestImage()]
+
+        controller.prewarmWindowPreviews()
+
+        #expect(waitUntil { windowSvc.captureOwnerPIDs.first == [101: 42] })
+    }
+
     @Test("An activation with nothing dirty captures nothing at all")
     func fullyCachedActivationIssuesNoCapture() {
         let (controller, windowSvc, keyboardSvc, delegate) = makeCacheController()

@@ -916,6 +916,69 @@ struct RuntimeWindowReconcilerTests {
         #expect(recovery?.reason == .dormantRestored)
     }
 
+    @Test("An ID the window server now gives to an untracked process parks the assignment and recovers its real window")
+    func idRecycledToUntrackedProcessIsParked() {
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(
+            SpaceWindow(windowID: 110, ownerBundleID: "com.linear", ownerName: "Linear", windowTitle: "All issues", ownerPID: 1373),
+            toSpaceID: spaceID
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(
+                liveWindows: [liveWindow(96, bundleID: "com.linear", ownerName: "Linear", ownerPID: 1213, title: "All issues")],
+                allWindowIDs: [96, 110],
+                windowOwnerPIDs: [96: 1213, 110: 1024]
+            ),
+            spaceManager: &manager
+        )
+
+        #expect(manager.spaces.first(where: { $0.id == spaceID })?.windows.map(\.windowID) == [96])
+        #expect(manager.spaceContainingWindow(windowID: 110) == nil)
+        #expect(result.events.first { $0.kind == .madeDormant }?.reason == .idRecycled)
+        #expect(result.events.first { $0.kind == .reassigned }?.reason == .dormantRestored)
+    }
+
+    @Test("A window absent from the live list stays assigned while the window server names the same owner")
+    func sameOwnerAbsentFromLiveListIsUntouched() {
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(
+            SpaceWindow(windowID: 5, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Doc", ownerPID: 10),
+            toSpaceID: spaceID
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(liveWindows: [], allWindowIDs: [5], windowOwnerPIDs: [5: 10]),
+            spaceManager: &manager
+        )
+
+        #expect(result.events.isEmpty)
+        #expect(manager.spaceContainingWindow(windowID: 5) == spaceID)
+    }
+
+    @Test("An assignment with no recorded owner is not judged by the window server's owner")
+    func assignmentWithoutOwnerIsUntouched() {
+        var manager = SpaceManager()
+        let spaceID = manager.activeSpaceID
+        manager.addWindow(
+            SpaceWindow(windowID: 5, ownerBundleID: "com.a", ownerName: "A", windowTitle: "Doc", ownerPID: nil),
+            toSpaceID: spaceID
+        )
+        var reconciler = RuntimeWindowReconciler()
+
+        let result = reconciler.reconcile(
+            RuntimeWindowSnapshot(liveWindows: [], allWindowIDs: [5], windowOwnerPIDs: [5: 10]),
+            spaceManager: &manager
+        )
+
+        #expect(result.events.isEmpty)
+        #expect(manager.spaceContainingWindow(windowID: 5) == spaceID)
+    }
+
     @Test("A window whose ID and bundle still agree is left untouched")
     func matchingIDAndBundleIsUntouched() {
         var manager = SpaceManager()

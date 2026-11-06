@@ -66,6 +66,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
         let windowLocations: [CGWindowID: DesktopLocation]
         let showingDesktopIDs: Set<CGSSpaceID>
         let allWindowIDs: Set<CGWindowID>?
+        let windowOwnerPIDs: [CGWindowID: pid_t]?
         let skyLightWindowIDs: Set<CGWindowID>?
         let activatedAppFrontWindowID: CGWindowID?
         let captureStartedAt: UInt64
@@ -705,7 +706,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 allWindowIDs: windowService.listAllWindowIDs(),
                 desktopIndexes: desktopIndexes(for: admittedWindows),
                 desktopLocations: desktopLocations(for: admittedWindows),
-                skyLightWindowIDs: skyLightWindowIDs()
+                skyLightWindowIDs: skyLightWindowIDs(),
+                windowOwnerPIDs: windowService.listAllWindowOwnerPIDs()
             ),
             spaceManager: &spaceManager
         )
@@ -2318,7 +2320,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             desktopIndexes: desktopIndexes(for: liveWindows),
             desktopLocations: desktopLocations(for: liveWindows),
             axContradictedWindowIDs: windowService.listAXContradictedWindowIDs(),
-            skyLightWindowIDs: skyLightWindowIDs()
+            skyLightWindowIDs: skyLightWindowIDs(),
+            windowOwnerPIDs: windowService.listAllWindowOwnerPIDs()
         ))
     }
 
@@ -2342,6 +2345,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                 listedIDs.contains($0.key)
             } ?? [:]
             let allWindowIDs = windowService.listAllWindowIDs()
+            let windowOwnerPIDs = windowService.listAllWindowOwnerPIDs()
             let axContradictedWindowIDs = windowService.listAXContradictedWindowIDs()
             let skyLightWindowIDs = spaceSwitcher.map { $0.placedWindowIDs() }
             DispatchQueue.main.async(qos: .userInitiated, flags: .enforceQoS) {
@@ -2358,7 +2362,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     desktopIndexes: locations.mapValues(\.index),
                     desktopLocations: locations,
                     axContradictedWindowIDs: axContradictedWindowIDs,
-                    skyLightWindowIDs: skyLightWindowIDs
+                    skyLightWindowIDs: skyLightWindowIDs,
+                    windowOwnerPIDs: windowOwnerPIDs
                 )
                 self.reportWindowsDetectedByLaterScan(liveWindows, trigger: "desktop_changed")
                 for window in liveWindows where
@@ -2478,6 +2483,7 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
                     spaceSwitcher?.spaceTopology().stacks.compactMap(\.currentDesktopID) ?? []
                 ),
                 allWindowIDs: windowService.listAllWindowIDs(),
+                windowOwnerPIDs: windowService.listAllWindowOwnerPIDs(),
                 skyLightWindowIDs: spaceSwitcher.map { $0.placedWindowIDs() },
                 activatedAppFrontWindowID: windowService.frontmostWindowID(ownerPID: app.pid),
                 captureStartedAt: startedAt,
@@ -2595,7 +2601,8 @@ public final class WindowDiscoveryService: NSObject, @unchecked Sendable {
             unarmedWindowIDs: unarmedWindowIDs,
             desktopIndexes: liveDesktopLocations.mapValues(\.index),
             desktopLocations: liveDesktopLocations,
-            skyLightWindowIDs: snapshot.skyLightWindowIDs
+            skyLightWindowIDs: snapshot.skyLightWindowIDs,
+            windowOwnerPIDs: snapshot.windowOwnerPIDs
         ))
         guard let focusedWindowID else { return }
         if let focusDeliveries {

@@ -618,6 +618,24 @@ struct WindowDiscoveryServiceTests {
         isModal: false
     )
 
+    @Test("Every discovery path tells the reconciler who owns each listed window")
+    func discoveryPathsCarryWindowOwners() {
+        let (service, windowService, _) = pendingDiaFixture()
+        windowService.allWindowOwnerPIDList = [110: 1024]
+        var refreshed: [CGWindowID: pid_t]?
+        var activated: [CGWindowID: pid_t]?
+        service.onDesktopsChanged = { refreshed = $0.windowOwnerPIDs }
+        service.onAppActivated = { activated = $0.windowOwnerPIDs }
+
+        service.refreshDesktopAssignments()
+        service.handleAppActivation(
+            AppInfo(bundleID: "company.thebrowser.dia", name: "Dia", pid: 69_928, isHidden: false)
+        )
+
+        #expect(refreshed == [110: 1024])
+        #expect(activated == [110: 1024])
+    }
+
     @Test("Scans during a pending AX-unknown creation probe do not admit the window")
     func scansDuringPendingProbeRefuseWindow() {
         let (service, _, _) = pendingDiaFixture()
