@@ -3459,6 +3459,45 @@ struct SpaceControllerWindowSizeTests {
         #expect(controller.windowSizes[999] == nil)
     }
 
+    @Test("Sizes discovered while the overlay is up are taken once it closes")
+    func sizesHeldDuringOverlayApplyAfterClose() {
+        let (controller, keyboardService) = makeController()
+        for id in [CGWindowID(101), CGWindowID(999)] {
+            controller.spaceManager.addWindow(
+                SpaceWindow(windowID: id, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W\(id)"),
+                toSpaceID: controller.spaceManager.spaces[0].id
+            )
+        }
+        controller.recordWindowSizes([info(101, CGSize(width: 1_600, height: 800))])
+
+        keyboardService.simulateEvent(.cmdTabHold)
+        controller.recordWindowSizes([
+            info(101, CGSize(width: 400, height: 400)),
+            info(999, CGSize(width: 500, height: 1_000)),
+        ])
+        keyboardService.simulateEvent(.escape)
+
+        #expect(!controller.isSpaceManagerVisible)
+        #expect(controller.windowSizes[101] == CGSize(width: 400, height: 400))
+        #expect(controller.windowSizes[999] == CGSize(width: 500, height: 1_000))
+    }
+
+    @Test("A window created as the overlay opens takes its own shape at the next overlay, not the display's")
+    func windowCreatedDuringOverlayGetsItsShape() {
+        let (controller, keyboardService) = makeController()
+        keyboardService.simulateEvent(.cmdTabHold)
+        controller.spaceManager.addWindow(
+            SpaceWindow(windowID: 777, ownerBundleID: "com.a", ownerName: "A", windowTitle: "W777"),
+            toSpaceID: controller.spaceManager.spaces[0].id
+        )
+        controller.recordWindowSizes([info(777, CGSize(width: 600, height: 1_200))])
+        keyboardService.simulateEvent(.escape)
+
+        keyboardService.simulateEvent(.cmdTabHold)
+
+        #expect(controller.windowAspectsBySpace.flatMap { $0 }.contains(0.5))
+    }
+
     @Test("Resizing a window reshapes its card without waiting for an app switch")
     func resizeUpdatesTheRecordedSize() {
         let (controller, _) = makeController()
@@ -3469,7 +3508,7 @@ struct SpaceControllerWindowSizeTests {
         #expect(controller.windowSizes[101] == CGSize(width: 600, height: 1_200))
     }
 
-    @Test("A resize that lands while the overlay is up is dropped")
+    @Test("A resize that lands while the overlay is up waits for it to close")
     func resizeFreezesWhileOverlayIsVisible() {
         let (controller, keyboardService) = makeController()
         controller.spaceManager.addWindow(
@@ -3483,5 +3522,7 @@ struct SpaceControllerWindowSizeTests {
         controller.recordWindowSize(windowID: 101, size: CGSize(width: 400, height: 400))
 
         #expect(controller.windowSizes[101] == CGSize(width: 1_600, height: 800))
+        keyboardService.simulateEvent(.escape)
+        #expect(controller.windowSizes[101] == CGSize(width: 400, height: 400))
     }
 }

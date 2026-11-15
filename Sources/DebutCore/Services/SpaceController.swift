@@ -346,7 +346,11 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     private var isStageStackCommitInFlight = false
     private var pendingOverlayActions: [pid_t: PendingOverlayAction] = [:]
 
-    public private(set) var isSpaceManagerVisible: Bool = false
+    public private(set) var isSpaceManagerVisible: Bool = false {
+        didSet {
+            if oldValue, !isSpaceManagerVisible { applyGeometryHeldDuringOverlay() }
+        }
+    }
     /// The input session continues after the visual overlay yields to confirmation UI. Its
     /// staged transaction is committed, without refocusing the selection, on modifier release.
     public private(set) var isOverlaySessionYielded: Bool = false
@@ -417,11 +421,40 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     public private(set) var windowSizes: [CGWindowID: CGSize] = [:]
     private var windowFrames: [CGWindowID: CGRect] = [:]
 
-    /// Takes the sizes discovery just reported, unless the overlay is up. A window resized behind
-    /// the overlay must not reflow the grid under the cursor, so the shapes an overlay session
-    /// opens with are the shapes it closes with.
+    private enum HeldWindowGeometry {
+        case frame(CGRect)
+        case resize(CGSize)
+    }
+
+    /// Geometry reported while the overlay is up, latest report per window, applied when it
+    /// closes. Discovery reports a window's size only on a few events, so a report dropped here
+    /// left a window created as the overlay opened on the display's shape until the next one.
+    private var geometryHeldDuringOverlay: [CGWindowID: HeldWindowGeometry] = [:]
+
+    private func applyGeometryHeldDuringOverlay() {
+        let held = geometryHeldDuringOverlay
+        geometryHeldDuringOverlay = [:]
+        for (windowID, geometry) in held {
+            switch geometry {
+            case .frame(let frame):
+                windowSizes[windowID] = frame.size
+                windowFrames[windowID] = frame
+            case .resize(let size):
+                recordWindowSize(windowID: windowID, size: size)
+            }
+        }
+    }
+
+    /// Takes the sizes discovery just reported. A window resized behind the overlay must not
+    /// reflow the grid under the cursor, so the shapes an overlay session opens with are the
+    /// shapes it closes with, and anything reported meanwhile is taken once it closes.
     public func recordWindowSizes(_ windows: [WindowInfo]) {
-        guard !isSpaceManagerVisible else { return }
+        guard !isSpaceManagerVisible else {
+            for window in windows {
+                geometryHeldDuringOverlay[window.windowID] = .frame(window.bounds)
+            }
+            return
+        }
         for window in windows {
             windowSizes[window.windowID] = window.bounds.size
             windowFrames[window.windowID] = window.bounds
@@ -432,7 +465,15 @@ public final class SpaceController: KeyboardEventDelegate, @unchecked Sendable {
     /// are found, an app is activated or the desktops change, and a resize is none of those, so
     /// without this a card kept its shape until the user switched apps.
     public func recordWindowSize(windowID: CGWindowID, size: CGSize) {
-        guard !isSpaceManagerVisible else { return }
+        guard !isSpaceManagerVisible else {
+            if case .frame(var frame) = geometryHeldDuringOverlay[windowID] {
+                frame.size = size
+                geometryHeldDuringOverlay[windowID] = .frame(frame)
+            } else {
+                geometryHeldDuringOverlay[windowID] = .resize(size)
+            }
+            return
+        }
         let previous = windowSizes[windowID]
         windowSizes[windowID] = size
         if var frame = windowFrames[windowID] {
