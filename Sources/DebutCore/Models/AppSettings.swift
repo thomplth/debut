@@ -173,6 +173,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var previewCardSpacing: Double { Self.defaultPreviewCardSpacing }
     /// Whether each card takes its own window's shape rather than the display's.
     public var adaptiveCardSizing: Bool
+    /// Whether a crowded Command-Tab stage wraps onto more rows; off keeps one row and shrinks
+    /// every stage to fit it.
+    public var commandTabWrapsRows: Bool
+    /// Whether a crowded Option-Tab plate wraps onto more rows; off keeps one row and shrinks it.
+    public var optionTabWrapsRows: Bool
     /// Keep both overlay modes on the system primary display regardless of window focus.
     public var overlayOnMainDisplayOnly: Bool
     /// Show the confirmed desktop number briefly after macOS finishes moving between Spaces.
@@ -209,6 +214,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.badgeGrowth = Self.defaultBadgeGrowth
         self.badgePlacement = Self.defaultBadgePlacement
         self.adaptiveCardSizing = true
+        self.commandTabWrapsRows = false
+        self.optionTabWrapsRows = true
         self.overlayOnMainDisplayOnly = true
         self.showsDesktopSwitchIndicator = true
         self.previewCornerRadius = Self.defaultPreviewCornerRadius
@@ -281,6 +288,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
         adaptiveCardSizing = try container.decodeIfPresent(
             Bool.self,
             forKey: .adaptiveCardSizing
+        ) ?? true
+        commandTabWrapsRows = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .commandTabWrapsRows
+        ) ?? false
+        optionTabWrapsRows = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .optionTabWrapsRows
         ) ?? true
         overlayOnMainDisplayOnly = try container.decodeIfPresent(
             Bool.self,

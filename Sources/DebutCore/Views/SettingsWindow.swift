@@ -541,6 +541,21 @@ public struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
+                settingsToggle(
+                    "Wrap Command-Tab rows",
+                    isOn: $viewModel.settings.commandTabWrapsRows
+                )
+                settingsToggle(
+                    "Wrap Option-Tab rows",
+                    isOn: $viewModel.settings.optionTabWrapsRows
+                )
+                Text("When a switcher holds more windows than fit across the display, wrap them onto more rows. Off keeps one row and shrinks every card to fit it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Inactive stage scale")
                     Spacer()

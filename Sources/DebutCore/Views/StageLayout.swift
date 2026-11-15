@@ -15,8 +15,8 @@ public enum OverlayCardStyle: String, Sendable, Equatable {
 
 /// The sizes every window card on one display is drawn at.
 ///
-/// Cards never shrink to fit: a space with more windows than fit across the display wraps into
-/// extra rows instead. Keeping the metrics in one value means the grid geometry, the rendered
+/// A space with more windows than fit across the display wraps into extra rows, or with
+/// `wrapsRows` off keeps one row that the overlay shrinks to fit. Keeping the metrics in one value means the grid geometry, the rendered
 /// view, and the drag projection cannot disagree about how big a card is.
 ///
 /// The card takes the shape of the display it is drawn on, since a window nearly always has
@@ -48,6 +48,9 @@ public struct StageMetrics: Equatable, Sendable {
     /// How far the size setting (or automatic fitting) has enlarged the preview or icon relative
     /// to the native slot. Only the slot follows it; everything around it keeps native points.
     public internal(set) var previewScale: CGFloat = 1
+
+    /// Whether a grid built with these metrics may take more than one row.
+    public internal(set) var wrapsRows: Bool = true
 
     /// The native Command-Tab switcher (`DockGlass.Metrics.standard`) with a preview in each
     /// 102-point icon slot. The card is the slot plus the 9-point selection highlight around it
@@ -188,7 +191,8 @@ public struct StageMetrics: Equatable, Sendable {
             minStageWidth: minStageWidth,
             scale: scale,
             cardStyle: cardStyle,
-            previewScale: previewScale
+            previewScale: previewScale,
+            wrapsRows: wrapsRows
         )
     }
 
@@ -211,7 +215,8 @@ public struct StageMetrics: Equatable, Sendable {
             minStageWidth: minStageWidth,
             scale: scale,
             cardStyle: cardStyle,
-            previewScale: previewScale
+            previewScale: previewScale,
+            wrapsRows: wrapsRows
         )
     }
 
@@ -234,8 +239,15 @@ public struct StageMetrics: Equatable, Sendable {
             minStageWidth: minStageWidth,
             scale: scale,
             cardStyle: cardStyle,
-            previewScale: previewScale
+            previewScale: previewScale,
+            wrapsRows: wrapsRows
         )
+    }
+
+    func wrappingRows(_ wraps: Bool) -> StageMetrics {
+        var metrics = self
+        metrics.wrapsRows = wraps
+        return metrics
     }
 
     public var cardWidth: CGFloat {
@@ -376,7 +388,8 @@ public struct StageMetrics: Equatable, Sendable {
             bottomPadding: bottomPadding,
             minStageWidth: minStageWidth,
             scale: scale,
-            cardStyle: cardStyle
+            cardStyle: cardStyle,
+            wrapsRows: wrapsRows
         )
         metrics.previewScale = previewScale * factor
         return metrics
@@ -418,7 +431,8 @@ public struct StageMetrics: Equatable, Sendable {
             minStageWidth: minStageWidth * scale,
             scale: self.scale * scale,
             cardStyle: cardStyle,
-            previewScale: previewScale
+            previewScale: previewScale,
+            wrapsRows: wrapsRows
         )
     }
 }
@@ -458,7 +472,9 @@ public struct StageWindowLayout: Equatable, Sendable {
             cardWidths: thumbnailWidths.map {
                 $0 + metrics.titleWidthAllowance + metrics.cardPadding * 2
             },
-            contentWidth: availableWidth - metrics.padding * 2,
+            contentWidth: metrics.wrapsRows
+                ? availableWidth - metrics.padding * 2
+                : .greatestFiniteMagnitude,
             spacing: metrics.windowSpacing
         )
         self.metrics = metrics

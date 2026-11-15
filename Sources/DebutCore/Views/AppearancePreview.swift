@@ -140,7 +140,8 @@ final class AppearancePreviewSample {
             containerSize: screen,
             cardSpacing: CGFloat(settings.previewCardSpacing),
             cardStyle: cardStyle,
-            badgeGrowth: CGFloat(settings.badgeGrowth)
+            badgeGrowth: CGFloat(settings.badgeGrowth),
+            wrapsRows: settings.commandTabWrapsRows
         )
         return StageWindowLayout(
             contentAspects: aspects,

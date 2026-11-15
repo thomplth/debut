@@ -189,6 +189,19 @@ public struct StageOverlayViewModel: Sendable {
         )
     }
 
+    /// The metrics every stage is drawn at for the given card shapes, one scale for all of them.
+    public func drawnMetrics(contentAspects: [[CGFloat?]], containerSize: CGSize) -> StageMetrics {
+        StageConstants.drawnMetrics(
+            stageScale: CGFloat(switcherAppearance.stageScale),
+            contentAspects: contentAspects,
+            containerSize: containerSize,
+            cardSpacing: CGFloat(appearance.previewCardSpacing),
+            cardStyle: cardStyle,
+            badgeGrowth: CGFloat(appearance.badgeGrowth),
+            wrapsRows: appearance.commandTabWrapsRows
+        )
+    }
+
     public var selectedWindow: StageWindowData? {
         guard spaceManager.spaces.indices.contains(activeSpaceIndex) else { return nil }
         let space = spaceManager.spaces[activeSpaceIndex]

@@ -1006,6 +1006,21 @@ public struct StageConstants {
 
     /// Automatic fitting may go below the user-selectable size to keep crowded stages visible.
     private static let minimumFittedStageScale: CGFloat = 0.5
+    /// One row has no second row to give height back to, so it shrinks its previews further
+    /// before the whole card has to.
+    private static let minimumSingleRowStageScale: CGFloat = 0.25
+
+    private static func fittingMetrics(
+        containerSize: CGSize,
+        cardSpacing: CGFloat?,
+        rowSpacing: CGFloat?,
+        cardStyle: OverlayCardStyle,
+        wrapsRows: Bool
+    ) -> StageMetrics {
+        let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize, cardStyle: cardStyle)
+        let cardMetrics = cardSpacing.map(shapedMetrics.withCardSpacing) ?? shapedMetrics
+        return (rowSpacing.map(cardMetrics.withRowSpacing) ?? cardMetrics).wrappingRows(wrapsRows)
+    }
 
     /// The largest requested scale at which every stage still fits the display.
     ///
@@ -1013,6 +1028,7 @@ public struct StageConstants {
     /// more rows make a taller stage — so the fit is searched for rather than solved. Stage height
     /// only ever grows with scale, so walking the slider's own steps downward finds the largest
     /// scale that fits. The request uses the slider range; fitting can shrink below its minimum.
+    /// Every stage is fitted at the one scale, so a crowded stage shrinks the others with it.
     public static func fittedStageScale(
         requested: CGFloat,
         contentAspects: [[CGFloat?]],
@@ -1020,12 +1036,17 @@ public struct StageConstants {
         cardSpacing: CGFloat? = nil,
         rowSpacing: CGFloat? = nil,
         cardStyle: OverlayCardStyle = .previews,
-        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth),
+        wrapsRows: Bool = true
     ) -> CGFloat {
-        let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize, cardStyle: cardStyle)
-        let cardMetrics = cardSpacing.map(shapedMetrics.withCardSpacing) ?? shapedMetrics
-        let metrics = rowSpacing.map(cardMetrics.withRowSpacing) ?? cardMetrics
-        let floor = minimumFittedStageScale
+        let metrics = fittingMetrics(
+            containerSize: containerSize,
+            cardSpacing: cardSpacing,
+            rowSpacing: rowSpacing,
+            cardStyle: cardStyle,
+            wrapsRows: wrapsRows
+        )
+        let floor = wrapsRows ? minimumFittedStageScale : minimumSingleRowStageScale
         let ceiling = CGFloat(AppSettings.maximumStageScale)
         let step = CGFloat(AppSettings.stageScaleStep)
         let clamped = min(ceiling, max(CGFloat(AppSettings.minimumStageScale), requested))
@@ -1045,6 +1066,25 @@ public struct StageConstants {
             if fits { return candidate }
         }
         return floor
+    }
+
+    /// How many times too large the largest stage is for the display; 1 or less fits. A display
+    /// with no room left inside its margins has nothing to shrink towards and reports a fit.
+    private static func stackOverflow(
+        contentAspects: [[CGFloat?]],
+        containerSize: CGSize,
+        metrics: StageMetrics
+    ) -> CGFloat {
+        let availableWidth = availableStageWidth(screenWidth: containerSize.width)
+        let availableHeight = availableStageHeight(screenHeight: containerSize.height)
+        guard availableWidth > 0, availableHeight > 0 else { return 1 }
+        return stageLayouts(
+            forContentAspects: contentAspects,
+            screenWidth: containerSize.width,
+            metrics: metrics
+        ).map {
+            max($0.stageSize.width / availableWidth, $0.stageSize.height / availableHeight)
+        }.max() ?? 0
     }
 
     public static func fittedStageScale(
@@ -1071,20 +1111,34 @@ public struct StageConstants {
         cardSpacing: CGFloat? = nil,
         rowSpacing: CGFloat? = nil,
         cardStyle: OverlayCardStyle = .previews,
-        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth),
+        wrapsRows: Bool = true
     ) -> StageMetrics {
-        let shapedMetrics = StageMetrics.shaped(forDisplay: containerSize, cardStyle: cardStyle)
-        let cardMetrics = cardSpacing.map(shapedMetrics.withCardSpacing) ?? shapedMetrics
-        let metrics = rowSpacing.map(cardMetrics.withRowSpacing) ?? cardMetrics
-        return metrics.withPreviewScale(fittedStageScale(
+        let previewFitted = fittingMetrics(
+            containerSize: containerSize,
+            cardSpacing: cardSpacing,
+            rowSpacing: rowSpacing,
+            cardStyle: cardStyle,
+            wrapsRows: wrapsRows
+        ).withPreviewScale(fittedStageScale(
             requested: stageScale,
             contentAspects: contentAspects,
             containerSize: containerSize,
             cardSpacing: cardSpacing,
             rowSpacing: rowSpacing,
             cardStyle: cardStyle,
-            badgeGrowth: badgeGrowth
+            badgeGrowth: badgeGrowth,
+            wrapsRows: wrapsRows
         ), badgeGrowth: badgeGrowth)
+        guard !wrapsRows else { return previewFitted }
+        let overflow = stackOverflow(
+            contentAspects: contentAspects,
+            containerSize: containerSize,
+            metrics: previewFitted
+        )
+        guard overflow > 1 else { return previewFitted }
+        // Scaling by exactly 1 / overflow can land a few ulps past the margin it was fitted to.
+        return previewFitted.scaled(by: (1 - 1e-9) / overflow)
     }
 
     public static func drawnMetrics(
@@ -1220,7 +1274,8 @@ public struct StageConstants {
         destinationSpaceIndex: Int,
         offersNewDesktops: Bool = false,
         cardStyle: OverlayCardStyle = .previews,
-        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth),
+        wrapsRows: Bool = true
     ) -> CGPoint? {
         var nextWindowID: CGWindowID = 1
         let fingerprint = StageStructureFingerprint(stages: contentAspects.map { aspects in
@@ -1235,7 +1290,8 @@ public struct StageConstants {
             containerSize: containerSize,
             cardSpacing: cardSpacing,
             cardStyle: cardStyle,
-            badgeGrowth: badgeGrowth
+            badgeGrowth: badgeGrowth,
+            wrapsRows: wrapsRows
         )
         guard let snapshot = CompactDragSnapshot.makeVariants(
             sessionID: UUID(),
@@ -1276,6 +1332,7 @@ public struct StageConstants {
         sourceWindowIndex: Int?,
         cardStyle: OverlayCardStyle,
         badgeGrowth: CGFloat,
+        wrapsRows: Bool = true,
         newDesktopIDs: [NewDesktopPosition: UUID] = [:]
     ) -> CompactDragVariants? {
         var nextWindowID: CGWindowID = 1
@@ -1291,7 +1348,8 @@ public struct StageConstants {
             containerSize: containerSize,
             cardSpacing: cardSpacing,
             cardStyle: cardStyle,
-            badgeGrowth: badgeGrowth
+            badgeGrowth: badgeGrowth,
+            wrapsRows: wrapsRows
         )
         return CompactDragSnapshot.makeVariants(
             sessionID: UUID(),
@@ -1327,13 +1385,14 @@ public struct StageConstants {
         sourceWindowIndex: Int,
         position: NewDesktopPosition,
         cardStyle: OverlayCardStyle = .previews,
-        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth),
+        wrapsRows: Bool = true
     ) -> (button: CGPoint, plate: CGPoint)? {
         guard let variants = dragViewVariants(
             contentAspects: contentAspects, stageScale: stageScale, cardSpacing: cardSpacing,
             containerSize: containerSize, reservesDisplayIndicator: reservesDisplayIndicator,
             sourceSpaceIndex: sourceSpaceIndex, sourceWindowIndex: sourceWindowIndex,
-            cardStyle: cardStyle, badgeGrowth: badgeGrowth,
+            cardStyle: cardStyle, badgeGrowth: badgeGrowth, wrapsRows: wrapsRows,
             newDesktopIDs: [.top: UUID(), .bottom: UUID()]
         ), let button = variants.collapsed.newDesktopTargets.first(where: { $0.position == position }),
            let expanded = variants.expanded[position],
@@ -1361,14 +1420,15 @@ public struct StageConstants {
         destinationSpaceIndex: Int,
         stepsPerLeg: Int = 16,
         cardStyle: OverlayCardStyle = .previews,
-        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth)
+        badgeGrowth: CGFloat = CGFloat(AppSettings.defaultBadgeGrowth),
+        wrapsRows: Bool = true
     ) -> [CGPoint]? {
         guard destinationSpaceIndex != sourceSpaceIndex, stepsPerLeg > 0,
               let variants = dragViewVariants(
                   contentAspects: contentAspects, stageScale: stageScale, cardSpacing: cardSpacing,
                   containerSize: containerSize, reservesDisplayIndicator: reservesDisplayIndicator,
                   sourceSpaceIndex: sourceSpaceIndex, sourceWindowIndex: nil,
-                  cardStyle: cardStyle, badgeGrowth: badgeGrowth
+                  cardStyle: cardStyle, badgeGrowth: badgeGrowth, wrapsRows: wrapsRows
               )
         else { return nil }
 
@@ -1571,14 +1631,7 @@ public struct StageOverlayView: View {
             // Fitted against the resting window shapes, not the displaced ones: a drag that
             // moves a card between spaces must not resize every other card while it is in
             // flight.
-            let metrics = StageConstants.drawnMetrics(
-                stageScale: CGFloat(viewModel.switcherAppearance.stageScale),
-                contentAspects: restingAspects,
-                containerSize: geo.size,
-                cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
-                cardStyle: viewModel.cardStyle,
-                badgeGrowth: CGFloat(viewModel.appearance.badgeGrowth)
-            )
+            let metrics = viewModel.drawnMetrics(contentAspects: restingAspects, containerSize: geo.size)
             // The resting grids. A compact drag freezes their rows at pickup rather than
             // rewrapping them while the pointer moves.
             let displayedLayouts = StageConstants.stageLayouts(
@@ -1917,14 +1970,7 @@ public struct StageOverlayView: View {
             after: afterAspects,
             move: move
         )
-        let sourceMetrics = StageConstants.drawnMetrics(
-            stageScale: CGFloat(viewModel.switcherAppearance.stageScale),
-            contentAspects: beforeAspects,
-            containerSize: containerSize,
-            cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
-            cardStyle: viewModel.cardStyle,
-            badgeGrowth: CGFloat(viewModel.appearance.badgeGrowth)
-        )
+        let sourceMetrics = viewModel.drawnMetrics(contentAspects: beforeAspects, containerSize: containerSize)
         let inactiveScale = CGFloat(viewModel.switcherAppearance.inactiveStageScale)
         guard let source = StageConstants.windowCardCenter(
             spaceIndex: move.fromSpaceIndex,
@@ -2044,14 +2090,7 @@ public struct StageOverlayView: View {
         newDesktopIDs: [NewDesktopPosition: UUID] = [:]
     ) -> CompactDragVariants? {
         let aspects = viewModel.stages.map { $0.windows.map(\.contentAspect) }
-        let metrics = StageConstants.drawnMetrics(
-            stageScale: CGFloat(viewModel.switcherAppearance.stageScale),
-            contentAspects: aspects,
-            containerSize: containerSize,
-            cardSpacing: CGFloat(viewModel.appearance.previewCardSpacing),
-            cardStyle: viewModel.cardStyle,
-            badgeGrowth: CGFloat(viewModel.appearance.badgeGrowth)
-        )
+        let metrics = viewModel.drawnMetrics(contentAspects: aspects, containerSize: containerSize)
         return CompactDragSnapshot.makeVariants(
             sessionID: sessionID,
             generation: generation,

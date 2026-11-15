@@ -47,6 +47,8 @@ public enum SettingsSection: String, CaseIterable, Sendable {
                 .badgePlacement,
                 .badgeGrowth,
                 .adaptiveCardSizing,
+                .commandTabRowWrapping,
+                .optionTabRowWrapping,
                 .inactiveStageScale,
                 .selectionHighlightStrength,
                 .selectorOutset,
@@ -94,6 +96,8 @@ enum SettingsOption: String, CaseIterable, Sendable {
     case stageCornerRadius
     case stageScale
     case adaptiveCardSizing
+    case commandTabRowWrapping
+    case optionTabRowWrapping
     case inactiveStageScale
     case previewRefreshPolicy
     case previewCacheTTL
@@ -207,6 +211,8 @@ public struct SettingsViewModel: Sendable {
         case .stageCornerRadius: appearance.stageCornerRadius = modeDefaults.stageCornerRadius
         case .stageScale: appearance.stageScale = modeDefaults.stageScale
         case .adaptiveCardSizing: settings.adaptiveCardSizing = defaults.adaptiveCardSizing
+        case .commandTabRowWrapping: settings.commandTabWrapsRows = defaults.commandTabWrapsRows
+        case .optionTabRowWrapping: settings.optionTabWrapsRows = defaults.optionTabWrapsRows
         case .inactiveStageScale: appearance.inactiveStageScale = modeDefaults.inactiveStageScale
         case .previewRefreshPolicy: settings.previewRefreshPolicy = defaults.previewRefreshPolicy
         case .previewCacheTTL: settings.previewCacheTTL = defaults.previewCacheTTL

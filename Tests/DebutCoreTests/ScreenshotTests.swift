@@ -731,13 +731,36 @@ struct ScreenshotTests {
         return settings
     }
 
-    @Test("A stage too wide for the display renders its windows in balanced rows")
+    @Test("A crowded Command-Tab stage renders on one row that fits the display at fresh settings")
+    func crowdedStageStaysOnOneRow() throws {
+        let vm = makeSampleViewModel(spaceCount: 2, windowsPerSpace: [16, 2], activeIndex: 0)
+        let size = NSSize(width: 1200, height: 700)
+
+        guard let img = renderSwiftUI(StageOverlayView(viewModel: vm), size: size) else {
+            throw ScreenshotError.renderFailed
+        }
+        try saveImage(img, name: "06_single_row_stage")
+
+        let frames = renderWindowFrames(StageOverlayView(viewModel: vm), size: size)
+        let crowded = (0..<16).map { frames[WindowFrameID(spaceIndex: 0, windowIndex: $0)]! }
+        let sparse = (0..<2).map { frames[WindowFrameID(spaceIndex: 1, windowIndex: $0)]! }
+        let stage = try #require(renderStageSurfaceFrames(StageOverlayView(viewModel: vm), size: size)[0])
+
+        #expect(Set(crowded.map { ($0.midY * 10).rounded() }).count == 1)
+        #expect(stage.width <= StageConstants.availableStageWidth(screenWidth: size.width) + 0.5)
+        #expect(abs(sparse[0].height / crowded[0].height
+            - sparse[1].height / crowded[1].height) < 0.01)
+    }
+
+    @Test("A stage too wide for the display renders its windows in balanced rows when Command-Tab wraps")
     func wideStageWrapsIntoRows() throws {
+        var appearance = unscaledAppearance()
+        appearance.commandTabWrapsRows = true
         let vm = makeSampleViewModel(
             spaceCount: 1,
             windowsPerSpace: [8],
             activeIndex: 0,
-            appearance: unscaledAppearance()
+            appearance: appearance
         )
         let size = NSSize(width: 1200, height: 700)
         // The card takes the container's shape, so the geometry this checks against has to come
@@ -977,6 +1000,7 @@ struct ScreenshotTests {
     func compactDragFitsOverflowingStages(size: NSSize) throws {
         var appearance = AppSettings()
         appearance.previewAppearance.stageScale = AppSettings.maximumStageScale
+        appearance.commandTabWrapsRows = true
         let vm = makeSampleViewModel(
             spaceCount: 4, windowsPerSpace: [6, 3, 0, 5], activeIndex: 0, appearance: appearance
         )

@@ -1152,7 +1152,8 @@ func plateMergePath(
         sourceSpaceIndex: sourceSpaceIndex,
         destinationSpaceIndex: destinationSpaceIndex,
         cardStyle: reportedCardStyle,
-        badgeGrowth: CGFloat(interactionSettings.badgeGrowth)
+        badgeGrowth: CGFloat(interactionSettings.badgeGrowth),
+        wrapsRows: interactionSettings.commandTabWrapsRows
     ).map { [pickup] + $0.map { CGPoint(x: origin.x + $0.x, y: origin.y + $0.y) } }
 }
 
@@ -1202,7 +1203,8 @@ func drawnMetrics(cardAspects: [[CGFloat?]]) -> StageMetrics {
         containerSize: overlayBounds.size,
         cardSpacing: CGFloat(interactionSettings.previewCardSpacing),
         cardStyle: reportedCardStyle,
-        badgeGrowth: CGFloat(interactionSettings.badgeGrowth)
+        badgeGrowth: CGFloat(interactionSettings.badgeGrowth),
+        wrapsRows: interactionSettings.commandTabWrapsRows
     )
 }
 
@@ -1257,7 +1259,8 @@ func dragViewDropPoint(
         destinationSpaceIndex: destinationSpaceIndex,
         offersNewDesktops: SpaceService().canManageDesktops,
         cardStyle: reportedCardStyle,
-        badgeGrowth: CGFloat(interactionSettings.badgeGrowth)
+        badgeGrowth: CGFloat(interactionSettings.badgeGrowth),
+        wrapsRows: interactionSettings.commandTabWrapsRows
     ).map { CGPoint(x: overlayBounds.minX + $0.x, y: overlayBounds.minY + $0.y) }
 }
 

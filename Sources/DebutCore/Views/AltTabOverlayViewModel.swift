@@ -62,7 +62,8 @@ public struct AltTabOverlayViewModel: Sendable {
         )
     }
 
-    /// Rows wrap exactly as a Command-Tab stage's do, so the two switchers cannot drift apart.
+    /// Rows wrap (or shrink into one) exactly as a Command-Tab stage's do, so the two switchers
+    /// cannot drift apart; only which setting decides it differs.
     static func drawnMetrics(
         appearance: AppSettings,
         contentAspects: [CGFloat?],
@@ -75,7 +76,8 @@ public struct AltTabOverlayViewModel: Sendable {
             containerSize: containerSize,
             cardSpacing: CGFloat(appearance.previewCardSpacing),
             cardStyle: cardStyle,
-            badgeGrowth: CGFloat(appearance.badgeGrowth)
+            badgeGrowth: CGFloat(appearance.badgeGrowth),
+            wrapsRows: appearance.optionTabWrapsRows
         )
     }
 

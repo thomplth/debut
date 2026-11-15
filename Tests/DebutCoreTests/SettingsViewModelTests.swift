@@ -142,6 +142,8 @@ struct SettingsViewModelTests {
             .badgePlacement,
             .badgeGrowth,
             .adaptiveCardSizing,
+            .commandTabRowWrapping,
+            .optionTabRowWrapping,
             .inactiveStageScale,
             .selectionHighlightStrength,
             .selectorOutset,

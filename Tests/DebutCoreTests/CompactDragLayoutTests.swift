@@ -29,6 +29,12 @@ struct CompactDragLayoutTests {
         return manager
     }
 
+    static var wrapping: AppSettings {
+        var settings = AppSettings()
+        settings.commandTabWrapsRows = true
+        return settings
+    }
+
     static func viewModel(
         _ counts: [Int],
         active: Int = 0,
@@ -131,7 +137,7 @@ struct CompactDragLayoutTests {
     func shrunkStackUnwrapsRows() throws {
         let counts = [9, 8, 9, 7]
         let size = CGSize(width: 1024, height: 768)
-        let snapshot = try #require(Self.snapshot(counts, size: size))
+        let snapshot = try #require(Self.snapshot(counts, size: size, appearance: Self.wrapping))
         let normal = StageConstants.stageLayouts(
             forContentAspects: counts.map { Array(repeating: nil, count: $0) },
             screenWidth: size.width,
@@ -237,7 +243,9 @@ struct CompactDragLayoutTests {
 
     @Test("The source is removed once and rows are never rebalanced")
     func canonicalRowsRemoveSourceOnce() throws {
-        let snapshot = try #require(Self.snapshot([9], source: (0, 1), size: CGSize(width: 1024, height: 768)))
+        let snapshot = try #require(Self.snapshot(
+            [9], source: (0, 1), size: CGSize(width: 1024, height: 768), appearance: Self.wrapping
+        ))
         let stage = snapshot.stages[0]
         #expect(stage.originalRows.count > 1)
         #expect(stage.canonicalRows.count == stage.originalRows.count)
