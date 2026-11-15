@@ -20,6 +20,20 @@ final class OverlayScrollRelay {
     var latest: OverlayScrollEvent?
 }
 
+/// Where the pointer is over the overlay, in the hosting view's top-left coordinates, or `nil`
+/// once it has left. The sequence number distinguishes two events at the same point.
+struct OverlayPointerEvent: Equatable {
+    let location: CGPoint?
+    let sequence: Int
+}
+
+/// SwiftUI's hover modifiers report nothing inside this panel on macOS 27.2, although the window
+/// receives every enter and move, so the views hit-test the window's own pointer events instead.
+@Observable
+final class OverlayPointerRelay {
+    var latest: OverlayPointerEvent?
+}
+
 /// Which switcher the one overlay window is currently hosting. A `switch` in the body gives each
 /// case its own structural identity, so changing switcher rebuilds the tree while an update
 /// within one preserves it — which is what keeps the card transitions running.
@@ -58,6 +72,8 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     private var renderedWindowIDs: Set<CGWindowID> = []
     private var renderGeneration = 0
     private let scrollRelay = OverlayScrollRelay()
+    let pointerRelay = OverlayPointerRelay()
+    private var pointerSequence = 0
     /// Outlives every root update and tree rebase, so a preview refresh cannot restart a drag.
     let compactDragSession = CompactDragSession()
     private var scrollSequence = 0
@@ -117,6 +133,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
     /// delivered, because a hover or drag handler it reaches may have chosen another cursor.
     public override func sendEvent(_ event: NSEvent) {
         super.sendEvent(event)
+        relayPointer(event)
         switch event.type {
         case .mouseMoved, .mouseEntered, .cursorUpdate, .leftMouseDragged, .leftMouseDown,
              .leftMouseUp:
@@ -124,6 +141,19 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         default:
             break
         }
+    }
+
+    private func relayPointer(_ event: NSEvent) {
+        guard [.mouseMoved, .mouseEntered, .mouseExited].contains(event.type),
+              let contentView
+        else { return }
+        let inWindow = event.locationInWindow
+        let location = CGPoint(x: inWindow.x, y: contentView.bounds.height - inWindow.y)
+        pointerSequence += 1
+        pointerRelay.latest = OverlayPointerEvent(
+            location: contentView.bounds.contains(inWindow) ? location : nil,
+            sequence: pointerSequence
+        )
     }
 
     @discardableResult
@@ -147,6 +177,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
         view.onOverlayTapRouted = onOverlayTapRouted
         view.onOverlayPointerRegionChanged = onOverlayPointerRegionChanged
         view.scrollRelay = scrollRelay
+        view.pointerRelay = pointerRelay
         view.compactDragSession = compactDragSession
         view.onPointerWindowDrop = onPointerWindowDrop
         view.onAddDesktop = onAddDesktop
@@ -173,6 +204,7 @@ public final class OverlayWindow: NSPanel, @unchecked Sendable {
             onPointerSelectionChanged: onAltTabPointerSelectionChanged
         )
         view.scrollRelay = scrollRelay
+        view.pointerRelay = pointerRelay
         view.onWindowScrollStepped = onWindowScrollStepped
         view.onScrollRouted = onSpaceScrollRouted
         return present(

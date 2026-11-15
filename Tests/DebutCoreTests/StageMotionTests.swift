@@ -1289,17 +1289,6 @@ struct StageMotionTests {
         #expect(StageInteraction.spaceScrollDestination(current: 0, steps: 1, spaceCount: 0) == nil)
     }
 
-    @Test("A stale pointer exit cannot clear the newly hovered window")
-    func stalePointerExitDoesNotClearSelection() {
-        let first = PointerSelection(spaceIndex: 0, windowIndex: 0)
-        let second = PointerSelection(spaceIndex: 0, windowIndex: 1)
-
-        #expect(StageInteraction.pointerSelection(current: nil, target: first, isHovering: true) == first)
-        #expect(StageInteraction.pointerSelection(current: first, target: second, isHovering: true) == second)
-        #expect(StageInteraction.pointerSelection(current: second, target: first, isHovering: false) == second)
-        #expect(StageInteraction.pointerSelection(current: second, target: second, isHovering: false) == nil)
-    }
-
     @Test("Only points outside every stage select the desktop")
     func desktopAreaSelection() {
         let stageFrames = [
@@ -1315,6 +1304,19 @@ struct StageMotionTests {
             CGPoint(x: 500, y: 350),
             stageFrames: stageFrames
         ))
+    }
+
+    @Test("The pointer hovers the card whose frame contains it, and nothing in the gaps")
+    func pointerHitsTheCardUnderIt() {
+        let frames = [
+            WindowFrameID(spaceIndex: 0, windowIndex: 0): CGRect(x: 100, y: 100, width: 200, height: 150),
+            WindowFrameID(spaceIndex: 1, windowIndex: 2): CGRect(x: 340, y: 100, width: 200, height: 150),
+        ]
+
+        #expect(OverlayPointerHitTest.target(at: CGPoint(x: 400, y: 160), in: frames)
+            == WindowFrameID(spaceIndex: 1, windowIndex: 2))
+        #expect(OverlayPointerHitTest.target(at: CGPoint(x: 320, y: 160), in: frames) == nil)
+        #expect(OverlayPointerHitTest.target(at: nil, in: frames) == nil)
     }
 
     @Test("A stationary pointer is ignored until it moves after the overlay appears")

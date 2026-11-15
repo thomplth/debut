@@ -57,6 +57,34 @@ struct OverlayWindowTests {
         #expect(!window.hidesOnDeactivate)
     }
 
+    @Test("Pointer movement over the overlay reaches its views in top-left coordinates")
+    func pointerMovementIsRelayed() throws {
+        let window = OverlayWindow()
+        window.setFrame(CGRect(x: 0, y: 0, width: 800, height: 600), display: false)
+        let height = try #require(window.contentView).bounds.height
+
+        window.sendEvent(try #require(pointerEvent(.mouseMoved, at: CGPoint(x: 120, y: 450), in: window)))
+        let moved = try #require(window.pointerRelay.latest)
+
+        window.sendEvent(try #require(pointerEvent(.mouseExited, at: CGPoint(x: 120, y: 650), in: window)))
+        let exited = try #require(window.pointerRelay.latest)
+
+        #expect(moved.location == CGPoint(x: 120, y: height - 450))
+        #expect(exited.location == nil)
+        #expect(exited.sequence > moved.sequence)
+    }
+
+    private func pointerEvent(_ type: NSEvent.EventType, at location: CGPoint, in window: NSWindow) -> NSEvent? {
+        if type == .mouseMoved {
+            return NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                                      windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                      clickCount: 0, pressure: 0)
+        }
+        return NSEvent.enterExitEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                                      windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                      trackingNumber: 0, userData: nil)
+    }
+
     @Test("Updating content synchronizes the screen frame before layout")
     func updateSynchronizesFrame() throws {
         let screen = try #require(NSScreen.main ?? NSScreen.screens.first)

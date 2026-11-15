@@ -46,10 +46,10 @@ struct AddDesktopButtonFramePreferenceKey: PreferenceKey {
 /// glass as the plates, so it reads as part of the stack rather than chrome laid over it.
 struct AddDesktopButton: View {
     let position: NewDesktopPosition
+    let isHovered: Bool
     let scale: CGFloat
     let appearance: SwitcherAppearance
     let action: () -> Void
-    @State private var isHovered = false
 
     var body: some View {
         let diameter = DesktopControlGeometry.addButtonDiameter * scale
@@ -62,12 +62,8 @@ struct AddDesktopButton: View {
                 dockGlassStyle: appearance.dockGlassStyle
             ))
             .scaleEffect(isHovered ? 1.08 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isHovered)
             .contentShape(Circle())
-            .onHover { hovering in
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                    isHovered = hovering
-                }
-            }
             .onTapGesture(perform: action)
             .background {
                 GeometryReader { geometry in

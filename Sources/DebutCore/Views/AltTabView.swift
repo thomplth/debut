@@ -14,8 +14,10 @@ public struct AltTabOverlayView: View {
     var onWindowScrollStepped: ((Int) -> Void)?
     var onScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     var scrollRelay: OverlayScrollRelay?
+    var pointerRelay: OverlayPointerRelay?
 
     @State private var pointerSelectionIndex: Int?
+    @State private var cardFrames: [Int: CGRect] = [:]
     @State private var scrollAccumulator = ScrollStepAccumulator()
     @State private var scrollPacer = ScrollStepPacer()
     @State private var pointerMovementGate: PointerMovementGate
@@ -63,31 +65,16 @@ public struct AltTabOverlayView: View {
                         appearance: viewModel.appearance
                     )
                     .contentShape(Rectangle())
-                    .onContinuousHover { phase in
-                        let nextSelection: Int?
-                        switch phase {
-                        case .active:
-                            guard pointerMovementGate.observe(at: NSEvent.mouseLocation) else {
-                                return
-                            }
-                            nextSelection = AltTabInteraction.pointerSelection(
-                                current: pointerSelectionIndex,
-                                target: index,
-                                isHovering: true
-                            )
-                        case .ended:
-                            nextSelection = AltTabInteraction.pointerSelection(
-                                current: pointerSelectionIndex,
-                                target: index,
-                                isHovering: false
-                            )
-                        }
-                        guard nextSelection != pointerSelectionIndex else { return }
-                        pointerSelectionIndex = nextSelection
-                        onPointerSelectionChanged?(nextSelection)
-                    }
                     .onTapGesture {
                         onWindowSelected?(index)
+                    }
+                    .background {
+                        GeometryReader { card in
+                            Color.clear.preference(
+                                key: AltTabCardFramePreferenceKey.self,
+                                value: [index: card.frame(in: .named(Self.coordinateSpace))]
+                            )
+                        }
                     }
                     .offset(layout.cardOffsetFromCenter(at: index))
                 }
@@ -110,6 +97,11 @@ public struct AltTabOverlayView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+        .coordinateSpace(name: Self.coordinateSpace)
+        .onPreferenceChange(AltTabCardFramePreferenceKey.self) { cardFrames = $0 }
+        .onChange(of: pointerRelay?.latest) { _, event in
+            if let event { pointerMoved(to: event.location) }
+        }
         .onChange(of: scrollRelay?.latest) { _, event in
             if let event { handleScroll(event) }
         }
@@ -119,6 +111,16 @@ public struct AltTabOverlayView: View {
             pointerSelectionIndex = nil
             pointerMovementGate.reset(at: NSEvent.mouseLocation)
         }
+    }
+
+    private static let coordinateSpace = "altTabOverlay"
+
+    private func pointerMoved(to location: CGPoint?) {
+        let target = OverlayPointerHitTest.target(at: location, in: cardFrames)
+        if target != nil && !pointerMovementGate.observe(at: NSEvent.mouseLocation) { return }
+        guard target != pointerSelectionIndex else { return }
+        pointerSelectionIndex = target
+        onPointerSelectionChanged?(target)
     }
 
     /// The list is one row that wraps, so both axes step through it, each in the direction
@@ -146,5 +148,13 @@ public struct AltTabOverlayView: View {
         )
         guard paced != 0 else { return }
         onWindowScrollStepped?(OverlayScrollAxis.windowSteps(fromScrollSteps: paced))
+    }
+}
+
+private struct AltTabCardFramePreferenceKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: [Int: CGRect] = [:]
+
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+        value.merge(nextValue()) { $1 }
     }
 }

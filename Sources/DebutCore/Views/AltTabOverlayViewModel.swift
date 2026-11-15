@@ -87,14 +87,3 @@ public struct AltTabOverlayViewModel: Sendable {
         )
     }
 }
-
-enum AltTabInteraction {
-    static func pointerSelection(
-        current: Int?,
-        target: Int,
-        isHovering: Bool
-    ) -> Int? {
-        if isHovering { return target }
-        return current == target ? nil : current
-    }
-}

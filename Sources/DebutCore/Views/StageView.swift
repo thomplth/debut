@@ -783,15 +783,6 @@ enum StageInteraction {
         return target == current ? nil : target
     }
 
-    static func pointerSelection(
-        current: PointerSelection?,
-        target: PointerSelection,
-        isHovering: Bool
-    ) -> PointerSelection? {
-        if isHovering { return target }
-        return current == target ? nil : current
-    }
-
     static func spaceIndex(
         at location: CGPoint,
         containerWidth: CGFloat,
@@ -963,6 +954,13 @@ struct ScrollStepPacer {
         if let lastAccepted, now >= lastAccepted, now - lastAccepted < interval { return 0 }
         lastAccepted = now
         return steps.signum()
+    }
+}
+
+enum OverlayPointerHitTest {
+    static func target<ID>(at location: CGPoint?, in frames: [ID: CGRect]) -> ID? {
+        guard let location else { return nil }
+        return frames.first { $0.value.contains(location) }?.key
     }
 }
 
@@ -1477,6 +1475,7 @@ public struct StageOverlayView: View {
     var onWindowScrollStepped: ((Int) -> Void)?
     var onSpaceScrollRouted: ((OverlayScrollDiagnostic) -> Void)?
     var scrollRelay: OverlayScrollRelay?
+    var pointerRelay: OverlayPointerRelay?
     var onOverlayPointerRegionChanged: ((OverlayPointerRegionDiagnostic) -> Void)?
     /// Owned by the overlay window in the app; a standalone view falls back to its own.
     var compactDragSession: CompactDragSession?
@@ -1504,6 +1503,7 @@ public struct StageOverlayView: View {
     @State private var pointerSelection: PointerSelection?
     @State private var reportedPointerRegion: String?
     @State private var pointerMovementGate: PointerMovementGate
+    @State private var pointerLocation: CGPoint?
     @State private var stageFrames: [Int: CGRect] = [:]
     @State private var windowFrames: [WindowFrameID: CGRect] = [:]
     @State private var hoveredSpaceIndex: Int?
@@ -1712,8 +1712,8 @@ public struct StageOverlayView: View {
                     dragSession.acknowledgePresented(generation: generation)
                 }
             }
-            .onContinuousHover(coordinateSpace: .local) { phase in
-                stackHoverChanged(phase, in: stack)
+            .onChange(of: pointerRelay?.latest) { _, event in
+                if let event { pointerMoved(to: event.location, in: stack) }
             }
             .onChange(of: viewModel.activeSpaceIndex) { _, _ in
                 hoveredSpaceIndex = nil
@@ -1759,6 +1759,23 @@ public struct StageOverlayView: View {
                 dragSession.cancel(reason: "overlay disappeared")
             }
         }
+    }
+
+    private func pointerMoved(to location: CGPoint?, in stack: PlateStack) {
+        pointerLocation = location
+        stackHoverChanged(location.map(HoverPhase.active) ?? .ended, in: stack)
+        windowHoverChanged(to: OverlayPointerHitTest.target(at: location, in: windowFrames))
+    }
+
+    private func windowHoverChanged(to target: WindowFrameID?) {
+        guard !dragSession.suppressesNavigation else { return }
+        if target != nil && !pointerMovementGate.observe(at: NSEvent.mouseLocation) { return }
+        let nextSelection = target.map {
+            PointerSelection(spaceIndex: $0.spaceIndex, windowIndex: $0.windowIndex)
+        }
+        guard nextSelection != pointerSelection else { return }
+        pointerSelection = nextSelection
+        onPointerSelectionChanged?(nextSelection?.spaceIndex, nextSelection?.windowIndex)
     }
 
     private func stackHoverChanged(_ phase: HoverPhase, in stack: PlateStack) {
@@ -2351,23 +2368,6 @@ public struct StageOverlayView: View {
             stageFrames: $stageFrames,
             windowFrames: $windowFrames,
             spaceIndex: index,
-            onPointerSelectionChanged: { selection, isHovering, location in
-                guard !dragSession.suppressesNavigation else { return }
-                if isHovering && !pointerMovementGate.observe(at: location) {
-                    return
-                }
-                let nextSelection = StageInteraction.pointerSelection(
-                    current: pointerSelection,
-                    target: selection,
-                    isHovering: isHovering
-                )
-                guard nextSelection != pointerSelection else { return }
-                pointerSelection = nextSelection
-                onPointerSelectionChanged?(
-                    nextSelection?.spaceIndex,
-                    nextSelection?.windowIndex
-                )
-            },
             onWindowSelected: onWindowSelected,
             onWindowDragChanged: { window, windowIndex, value in
                 windowDragChanged(
@@ -2489,6 +2489,9 @@ public struct StageOverlayView: View {
             if isShown {
                 AddDesktopButton(
                     position: position,
+                    isHovered: pointerLocation.map {
+                        addButtonFrames[position]?.contains($0) == true
+                    } ?? false,
                     scale: visualScale,
                     appearance: viewModel.switcherAppearance,
                     action: { onAddDesktop?(position) }
@@ -2816,7 +2819,6 @@ struct StageSwiftUIView: View {
     @Binding var stageFrames: [Int: CGRect]
     @Binding var windowFrames: [WindowFrameID: CGRect]
     let spaceIndex: Int
-    var onPointerSelectionChanged: ((PointerSelection, Bool, CGPoint) -> Void)?
     var onWindowSelected: ((Int, Int) -> Void)?
     var onWindowDragChanged: ((StageWindowData, Int, DragGesture.Value) -> Void)?
     var onWindowDragEnded: ((StageWindowData, Int, DragGesture.Value) -> Void)?
@@ -2912,26 +2914,6 @@ struct StageSwiftUIView: View {
                                     )
                             }
                         )
-                        .onContinuousHover { phase in
-                            let selection = PointerSelection(
-                                spaceIndex: spaceIndex,
-                                windowIndex: windowIndex
-                            )
-                            switch phase {
-                            case .active:
-                                onPointerSelectionChanged?(
-                                    selection,
-                                    true,
-                                    NSEvent.mouseLocation
-                                )
-                            case .ended:
-                                onPointerSelectionChanged?(
-                                    selection,
-                                    false,
-                                    NSEvent.mouseLocation
-                                )
-                            }
-                        }
                         .highPriorityGesture(windowDragGesture(
                             window: window,
                             windowIndex: windowIndex
