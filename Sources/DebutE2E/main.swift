@@ -5721,16 +5721,18 @@ func scenario_move_duration_sweep() {
             }
             let reverseLanded = waitFor(timeout: 5) { atEndpoint(0) }
             let reverseElapsed = ProcessInfo.processInfo.systemUptime - reverseStart
-            if !forwardLanded || !reverseLanded {
-                info("  Forward: \(forwardDescription); reverse: \(endpointDescription())")
-                info("  \(focusThiefDescription(since: chainEventsBefore))")
-            }
             // Leave margin for guest scheduling, but catch per-key delays or stalled confirmations.
             // Every hop after the first waits for the Dock to settle on purpose (KHA-1095); left
             // out, those waits ate 0.2s of the margin and a guest stall failed a chain that
             // landed correctly (KHA-1109).
             let settleWaits = 2 * SpaceController.defaultWindowMoveSettleDelay
             let responsivenessBudget = 3 * settings.spaceSwitchDuration + settleWaits + 1.0
+            if !forwardLanded || !reverseLanded
+                || forwardElapsed >= responsivenessBudget || reverseElapsed >= responsivenessBudget {
+                info("  Forward: \(forwardDescription); reverse: \(endpointDescription()); "
+                    + "budget=\(Int(responsivenessBudget * 1_000)) ms")
+                info("  \(focusThiefDescription(since: chainEventsBefore))")
+            }
             test("Command-Option arrows chain 1→4→1 with focus at \(milliseconds) ms") {
                 ready && atFirst && focused && forwardLanded && stillFocused
                     && reverseLanded && forwardElapsed < responsivenessBudget && reverseElapsed < responsivenessBudget
@@ -5902,70 +5904,76 @@ func restoreFixtureWindows() -> Bool {
         info("Base state: DEBUT_E2E_FIXTURE_DIR is unset; left TextEdit as it was")
         return false
     }
-    var fixtures = fixtureWindows()
-    // Keep every fixture from one process when one holds them all. Keeping each document from a
-    // different process terminates neither, and both processes' copies survive.
-    let copiesByPID = Dictionary(grouping: placedFixtureCopies(), by: \.pid)
-    if let keeper = copiesByPID
-        .filter({ Set($0.value.map(\.title)) == fixtureDocumentTitles })
-        .max(by: { first, second in
-            first.value.filter { $0.desktop == 0 }.count < second.value.filter { $0.desktop == 0 }.count
-        }) {
-        fixtures = fixtureDocumentTitles.sorted().compactMap { title in
-            let copies = keeper.value.filter { $0.title == title }
-            return (copies.first { $0.desktop == 0 } ?? copies.first)
-                .map { (windowID: $0.windowID, pid: $0.pid, title: $0.title) }
-        }
-    }
-    let fixturePIDs = Set(fixtures.map(\.pid))
-    for application in NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TextEdit")
-    where !fixturePIDs.contains(application.processIdentifier) {
-        application.forceTerminate()
-    }
-    let missing = fixtureDocumentTitles.subtracting(fixtures.map(\.title))
-    for title in missing.sorted() {
-        let open = Process()
-        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        // A force-quit TextEdit restores its old windows on the next launch unless told not to.
-        open.arguments = [
-            "-na", "TextEdit", URL(fileURLWithPath: fixtureDirectory).appendingPathComponent(title).path,
-            "--args", "-ApplePersistenceIgnoreState", "YES",
-        ]
-        try? open.run()
-        open.waitUntilExit()
-    }
-    if !missing.isEmpty {
-        _ = waitFor(timeout: 10) { Set(fixtureWindows().map(\.title)) == fixtureDocumentTitles }
-        fixtures = fixtureWindows()
-        // A just-launched app's Accessibility server stays silent for up to ~3s, and every group
-        // reads the fixture through it; Debut's own focus probe included.
-        _ = waitFor(timeout: 10) {
-            fixtures.allSatisfy { fixture in
-                var windows: CFTypeRef?
-                let application = AXUIElementCreateApplication(fixture.pid)
-                AXUIElementSetMessagingTimeout(application, 0.5)
-                return AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &windows) == .success
-                    && !((windows as? [AXUIElement]) ?? []).isEmpty
+    func restoreFromSnapshot() -> Bool {
+        var fixtures = fixtureWindows()
+        // Keep every fixture from one process when one holds them all. Keeping each document from a
+        // different process terminates neither, and both processes' copies survive.
+        let copiesByPID = Dictionary(grouping: placedFixtureCopies(), by: \.pid)
+        if let keeper = copiesByPID
+            .filter({ Set($0.value.map(\.title)) == fixtureDocumentTitles })
+            .max(by: { first, second in
+                first.value.filter { $0.desktop == 0 }.count < second.value.filter { $0.desktop == 0 }.count
+            }) {
+            fixtures = fixtureDocumentTitles.sorted().compactMap { title in
+                let copies = keeper.value.filter { $0.title == title }
+                return (copies.first { $0.desktop == 0 } ?? copies.first)
+                    .map { (windowID: $0.windowID, pid: $0.pid, title: $0.title) }
             }
         }
+        let fixturePIDs = Set(fixtures.map(\.pid))
+        for application in NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TextEdit")
+        where !fixturePIDs.contains(application.processIdentifier) {
+            application.forceTerminate()
+        }
+        let missing = fixtureDocumentTitles.subtracting(fixtures.map(\.title))
+        for title in missing.sorted() {
+            let open = Process()
+            open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            // A force-quit TextEdit restores its old windows on the next launch unless told not to.
+            open.arguments = [
+                "-na", "TextEdit", URL(fileURLWithPath: fixtureDirectory).appendingPathComponent(title).path,
+                "--args", "-ApplePersistenceIgnoreState", "YES",
+            ]
+            try? open.run()
+            open.waitUntilExit()
+        }
+        if !missing.isEmpty {
+            _ = waitFor(timeout: 10) { Set(fixtureWindows().map(\.title)) == fixtureDocumentTitles }
+            fixtures = fixtureWindows()
+            // A just-launched app's Accessibility server stays silent for up to ~3s, and every group
+            // reads the fixture through it; Debut's own focus probe included.
+            _ = waitFor(timeout: 10) {
+                fixtures.allSatisfy { fixture in
+                    var windows: CFTypeRef?
+                    let application = AXUIElementCreateApplication(fixture.pid)
+                    AXUIElementSetMessagingTimeout(application, 0.5)
+                    return AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &windows) == .success
+                        && !((windows as? [AXUIElement]) ?? []).isEmpty
+                }
+            }
+        }
+        for fixture in fixtures where spaces.desktopIndex(forWindow: fixture.windowID) != 0 {
+            spaces.moveWindow(windowID: fixture.windowID, toDesktop: 0)
+        }
+        let restored = waitFor {
+            Set(fixtures.map(\.title)) == fixtureDocumentTitles
+                && fixtures.allSatisfy { spaces.desktopIndex(forWindow: $0.windowID) == 0 }
+                && placedFixtureCopies().count == fixtureDocumentTitles.count
+        }
+        if placedFixtureCopies().count != fixtureDocumentTitles.count {
+            info("Base state: placed fixture copies are not one per document: \(describe(placedFixtureCopies()))")
+        }
+        if !restored || !missing.isEmpty {
+            info("Base state: fixtures " + fixtures.map {
+                "\($0.title)=\($0.windowID)@\(spaces.desktopIndex(forWindow: $0.windowID).map(String.init) ?? "none")"
+            }.joined(separator: " ") + " reopened=\(missing.sorted())")
+        }
+        return restored
     }
-    for fixture in fixtures where spaces.desktopIndex(forWindow: fixture.windowID) != 0 {
-        spaces.moveWindow(windowID: fixture.windowID, toDesktop: 0)
-    }
-    let restored = waitFor {
-        Set(fixtures.map(\.title)) == fixtureDocumentTitles
-            && fixtures.allSatisfy { spaces.desktopIndex(forWindow: $0.windowID) == 0 }
-            && placedFixtureCopies().count == fixtureDocumentTitles.count
-    }
-    if placedFixtureCopies().count != fixtureDocumentTitles.count {
-        info("Base state: duplicate fixture copies remain: \(describe(placedFixtureCopies()))")
-    }
-    if !restored || !missing.isEmpty {
-        info("Base state: fixtures " + fixtures.map {
-            "\($0.title)=\($0.windowID)@\(spaces.desktopIndex(forWindow: $0.windowID).map(String.init) ?? "none")"
-        }.joined(separator: " ") + " reopened=\(missing.sorted())")
-    }
-    return restored
+    // A document closed moments before, such as by the selected-window dismissal group, can still
+    // report its desktop in restoreFromSnapshot's first snapshot and lose it while that call waits.
+    // It counted as present, so nothing reopened it; a second snapshot sees it missing.
+    return restoreFromSnapshot() || restoreFromSnapshot()
 }
 
 /// Returns the session to the state every group starts from: no overlay, overview or held
